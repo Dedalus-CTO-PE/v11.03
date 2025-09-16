@@ -1,0 +1,275 @@
+.******************************************************************************
+.* System         : WEB                                                       *
+.*                                                                            *
+.* Include Name   : MRGURRES.INC                                              *
+.*                                                                            *
+.* Function       : Merge a U/R for all CLINICAL RESULT tables:               *
+.*                  rehaXXXX - result header (RESHEAFD/IO)                    *
+.*                  redaXXXX - result details (RESDEAFD/IO)                   *
+.*                  relnXXXX - result linking (RESLNKFD/IO)                   *
+.*                  resluraf - result link by UR (RESLURFD/IO)                *
+.*                  resphraf - PIT format result header (RESPHRFD/IO)         *
+.*                  resclnaf - Result Correspondence Links (RESCLNFD/IO)      *
+.*                                                                            *
+.* Author         : Tonii    24/01/2003                                       *
+.*                                                                            *
+.* Parameters     : OLDURNO            the old urnumber                       *
+.*                  NEWURNO            the new urnumber                       *
+.*                                                                            *
+.* Modifications  :                                                           *
+.* V9.07.01  29/08/2006  Jill Habasque    CAR  117160                         *
+.*           Added date to key for resclnaf                                   *
+.* V9.05.01  21/12/2005  Steve Armstrong   CAR 89329                          *
+.*           Added MOVE   ZERO,OVRCD just before opening relnxxxx files.      *
+.* ---------------------------------------------------------------------------*
+.* V9.03.02  02/07/2004  Jill Habasque                                        *
+.*           Fixed update of relnpid records for non UR link types            *
+.* V9.03.01  12/02/2004 Peter Vela    CAR 38290                               *
+.*           Added functionality for opening yearly RESLNKFD files            *
+.*           (reln1999, reln2000, reln2001, reln2002, etc...)                 *
+.******************************************************************************
+.
+MRGURRES  DISPLAY   *P1:24,*EL,"Fixing Clincal Result Files."
+.
+          PACK      KEY16,OLDURNO,SP30
+          CALL      CRHT0000                * Clinical Results Header Table
+          CALL      CRLT0000                * Clinical Results Linking Table
+          CALL      RESL0000                * Clinical Results Link by UR
+          CALL      RESCLN00                * Result correspondence link
+          CALL      REPH0000                * CR PIT Format Results Header
+          RETURN              
+.
++
+.**********************************************************************
+.*             Clinical Results Header Table (rehaXXXX)  XXXX = year  *
+.**********************************************************************
+CRHT0000  MOVE      "1990",RESULTYR
+.
+CRHT1000  CLOSE     RESHEAA3
+.
+          PACK      RESFNAME,FILRSHEA,RESULTYR
+          REP       " 0",RESFNAME
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      RESHEAA3,RESFNAME
+          TRAPCLR   IO
+          BRANCH    OVRCD,CRHT9000     * redaxxxx doesnt exist, increment year
+.
+CRHT1500  PACK      KEY57,KEY16,SP30,SP30                   
+          CALL      RSREHA3
+CRHT2000  CALL      RKREHA3 
+          BRANCH    OVRCD,CRHT9000
+.
+          MATCH     REHAPID,KEY16
+          GOTO      CRHT9000 IF NOT EQUAL
+.
+          MATCH     "1",REHAFUR
+          IF        @EQUAL
+            PACK      REHAPID,NEWURNO,SP30
+            CALL      UPREHA3
+.
+            CALL      CLIR0000         * valid header record, update details
+            GOTO      CRHT1500
+          ENDIF
+.
+          GOTO      CRHT2000
+.
+CRHT9000  COMPARE   RESULTYR,CURRYEAR
+          GOTO      CRHT9500 IF LESS
+.
+          ADD       ONE,RESULTYR
+          GOTO      CRHT1000
+.
+CRHT9500  CLOSE     RESHEAA3
+CRHT9999  RETURN
++
+.**********************************************************************
+.*             Clinical Results Details (redaXXXX) where  XXXX = year *
+.**********************************************************************
+CLIR0000  CLOSE     RESDEAA1     * close files to be safe
+.
+          PACK      RESFNAME,FILRSDEA,RESULTYR
+          REP       " 0",RESFNAME
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      RESDEAA1,RESFNAME
+          TRAPCLR   IO
+          BRANCH    OVRCD,CLIR9500     * redaxxxx doesnt exist
+.
+          PACK      KEY21,REHARDT,REHARTM,REHARUN,SP30
+          CALL      RSREDA1
+CLIR1500  CALL      RKREDA1
+          BRANCH    OVRCD,CLIR9500
+.
+          MATCH     REHARDT,REDARDT
+          GOTO      CLIR9500 IF NOT EQUAL
+.
+          MATCH     REHARTM,REDARTM
+          GOTO      CLIR9500 IF NOT EQUAL
+.
+          MATCH     REHARUN,REDARUN
+          GOTO      CLIR9500 IF NOT EQUAL
+.
+          MATCH     KEY16,REDAPID
+          GOTO      CLIR1500 IF NOT EQUAL
+.
+          PACK      REDAPID,NEWURNO,SP30
+          CALL      UPREDA1
+          GOTO      CLIR1500
+.
+CLIR9500  CLOSE     RESDEAA1
+.
+CLIR9999  RETURN
++
+.**********************************************************************
+.*             Clinical Results Linking Table (relnxxxx)              *
+.**********************************************************************
+CRLT0000  CLOSE     RESLNKA4                 * close it just in case
+.
+          CALL      IBACLOCK                 * get the current year
+          PACK      DIM4,CCC,CYY
+          REP       " 0",DIM4
+          MOVE      DIM4,FORM4A              * save the current year
+          MOVE      PTCNRSYR,FORM4           * load the start year
+.
+CRLT0100  PACK      RESLNKFL,FILRSLNK,FORM4A
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      RESLNKA4,RESLNKFL        * open the table for the year
+          TRAPCLR   IO
+          BRANCH    OVRCD,CRLT9000           * table not found
+.
+CRLT0500  PACK      KEY45,KEY16,SP30,SP30
+          CALL      RSRELN4                  * position on U/R
+CRLT1000  CALL      RKRELN4                  * read next record
+          BRANCH    OVRCD,CRLT9000           * eof - finished year
+.
+          MATCH     KEY16,RELNPID            * same U/R still ?
+          GOTO      CRLT9000 IF NOT EQUAL    * no - finished year
+.
+          MATCH     "1",RELNFUR              * PID is U/R ?
+          GOTO      CRLT1000 IF NOT EQUAL    * no - ignore record
+.
+.         Update the link key if the link type is "U/R number"
+.
+          PACK      RELNPID,NEWURNO,SP30
+          MATCH     "01",RELNLTY
+          IF        @EQUAL
+            PACK      RELNLKY,NEWURNO,SP30
+          ENDIF
+          CALL      UPRELN4                 * update record
+.
+          GOTO      CRLT0500                * get next record
+.
+.         Fixed all records for a given year, now check if this was the
+.         starting year.  If so, there is no need to check any previous years.
+.
+CRLT9000  COMPARE   FORM4,FORM4A            * just completed start year ?
+          GOTO      CRLT9900 IF EQUAL       * yes - finished
+.
+          SUB       ONE,FORM4A              * no - get previous year
+          GOTO      CRLT0100
+.
+CRLT9900  CLOSE     RESLNKA4
+.
+CRLT9999  RETURN
++
+.**********************************************************************
+.*             Link Results by U/R (resluraf)                         *
+.**********************************************************************
+RESL0000  CLOSE     RESLURA1
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      RESLURA1,"resluraf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,RESL9999
+.
+RESL0500  PACK      KEY25,OLDURNO,SP30
+          CALL      RSRELU1
+RESL1000  CALL      RKRELU1
+          BRANCH    OVRCD OF RESL9999
+.
+          MATCH     OLDURNO,RELUURN
+          GOTO      RESL9999 IF NOT EQUAL
+.
+          MATCH     "1",RELUFUR
+          IF        @EQUAL
+            PACK      RELUPID,NEWURNO,SP30
+          ENDIF
+.
+          MOVE      NEWURNO,RELUURN
+          CALL      UPRELU1
+.
+          GOTO      RESL0500
+.
+RESL9999  CLOSE     RESLURA1
+          RETURN
++
+.**********************************************************************
+.*             Clinical Results PIT Format Results Header             *
+.**********************************************************************
+REPH0000  CLOSE     RESPHRA2
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      RESPHRA2,"resphraf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,REPH9999
+.
+REPH0500  PACK      KEY46,KEY16,SP30,SP20
+          CALL      RSREPH2
+REPH1000  CALL      RKREPH2
+          BRANCH    OVRCD OF REPH9999
+.
+          MATCH     KEY16,REPHPID
+          GOTO      REPH9999 IF NOT EQUAL
+.
+          MATCH     "1",REPHFUR
+          GOTO      REPH1000 IF NOT EQUAL
+.
+          PACK      REPHPID,NEWURNO,SP30
+          CALL      UPREPH1
+.
+          GOTO      REPH0500
+.
+REPH9999  RETURN
++
+.*********************************************************************
+.         Change U/R for RESCLNFD
+.*********************************************************************
+RESCLN00  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      RESCLNA2,"resclnaf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,RESCLN99
+.
+          DISPLAY   *P71:24,*V2LON,"resclnaf"
+.
+RESCLN10  PACK      KEY28,OLDURNO,SP20,SP20
+          CALL      RSRECL2
+          CALL      RKRECL2
+          BRANCH    OVRCD,RESCLN90
+.
+          MATCH     OLDURNO,RECLURN         * Check U/R number
+          GOTO      RESCLN90 IF NOT EQUAL
+.
+          PACK      KEY28,NEWURNO,RECLRDT,RECLRTM,RECLRUN,RECLLNO
+          CALL      RARECL2                   * srf 20251
+          IF        OVRCD=1
+            PACK      KEY28,RECLURN,RECLRDT,RECLRTM,RECLRUN,RECLLNO
+            CALL      DERECL2                 * srf 20251
+.
+            MOVE      NEWURNO,RECLURN         * write new U/R number
+            PACK      KEY28,RECLURN,RECLRDT,RECLRTM,RECLRUN,RECLLNO
+            CALL      WRRECL2
+          ELSE
+            MOVE      NEWURNO,RECLURN         * update new U/R number
+            CALL      UPRECL2
+          ENDIF
+          GOTO      RESCLN10
+.
+RESCLN90  CLOSE     RESCLNA2
+RESCLN99  RETURN

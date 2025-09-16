@@ -1,0 +1,104 @@
+RSFMCT1   RESET     KEY10
+          READ      FMSCTRA1,KEY10;;
+          RETURN
+.
+RAFMCT1   RESET     KEY10
+          MOVE      ZERO,OVRCD
+          READ      FMSCTRA1,KEY10;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMCT1   RESET     KEY10
+          MOVE      ZERO,OVRCD
+          READ      FMSCTRA1,KEY10;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMCT1   MOVE      ZERO,OVRCD
+          READKS    FMSCTRA1;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMCT1   MOVE      ZERO,OVRCD
+          READKP    FMSCTRA1;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMCT1   UPDATE    FMSCTRA1;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          RETURN
+.
+WRFMCT1   RESET     KEY10
+          WRITE     FMSCTRA1,KEY10;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          RETURN
+.
+DEFMCT1   RESET     KEY10
+          DELETE    FMSCTRA1,KEY10
+          RETURN
+.
+RSFMCT2   RESET     KEY32
+          READ      FMSCTRA2,KEY32;;
+          RETURN
+.
+RAFMCT2   RESET     KEY32
+          MOVE      ZERO,OVRCD
+          READ      FMSCTRA2,KEY32;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMCT2   RESET     KEY32
+          MOVE      ZERO,OVRCD
+          READ      FMSCTRA2,KEY32;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMCT2   MOVE      ZERO,OVRCD
+          READKS    FMSCTRA2;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMCT2   MOVE      ZERO,OVRCD
+          READKP    FMSCTRA2;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMCT2   UPDATE    FMSCTRA2;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          RETURN
+.
+WRFMCT2   RESET     KEY32
+          WRITE     FMSCTRA2,KEY32;FMCTBAT,FMCTUNIQ,FMCTLEDG,FMCTACCT:
+                                  FMCTCRED,FMCTPDAT,FMCTTDAT,FMCTTYPE,FMCTDISS:
+                                  FMCTPPER,FMCTDOCR,FMCTAMT,FMCTORD,FMCTRESP:
+                                  FMCTDESC,FMCTSPAR
+          RETURN
+.
+DEFMCT2   RESET     KEY32
+          DELETE    FMSCTRA2,KEY32
+          RETURN
+.

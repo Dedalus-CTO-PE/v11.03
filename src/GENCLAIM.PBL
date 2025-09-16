@@ -1,0 +1,764 @@
+.***************************************************************************
+.* System    :   Patient Management System                                 *
+.* Program   :   GENCLAIM                                                  *
+.* Desc      :   Manually generate electronic claims for testing           *
+.***************************************************************************
+.* Date      :   01/02/2005                                                *
+.* Author    :   Steve Armstrong       CAR 59077                           *
+.* Function  :   This program will allow the user to create patedsaf (for  *
+.*               Hosclaims) or pmsectaf (for Eclipse) records from         *
+.*               existing invoice records.  It is meant to be used for     *
+.*               initial testing at the implementation of Electronic       *
+.*               Health Fund claiming on site by IBA Staff.                *
+.*                                                                         *
+.* Mods      :                                                             *
+.*        V10.00.01 19/10/2010  Steve Armstrong  CAR 232097                *
+.*                  Mods for a new option to allow auto creation of        *
+.*                  Eclipse claims (for use with upgrade from V6 to V9)    *
+.***************************************************************************
+.*        V9.11.01  17/12/2008  Steve Armstrong  CAR 183976                *
+.*                  Mods to generate all DVA claims as "claim code type"   *
+.*                  and NOT as "health fund type".                         *
+.*                  09/12/2008  Steve Armstrong  CAR 183976                *
+.*                  Mods to handle Eclipse transactions using pmsectaf.    *
+.***************************************************************************
+.*        V9.04.01  02/05/2005  Steve Armstrong  CAR 61303                 *
+.*                  Mods to validate visit health fund against selected    *
+.*                  health fund.                                           *
+.***************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       IBACONFD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATDSCFD/INC
+          INC       PATEDSFD/INC
+          INC       PATFN1FD/INC
+          INC       PATFX1FD/INC
+          INC       PATHSPFD/INC
+          INC       PATINVFD/INC
+          INC       PATMA1FD/INC
+          INC       PATMI1FD/INC
+          INC       PMSECTFD/INC
+          INC       PMSVX1FD/INC
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CODE      DIM       2
+COUNTER   FORM      8
+.
+FUNDCODE  DIM       6
+.
+INVNUMBR  FORM      8
+.
+OPTION2   FORM      1
+.
+.
+.
+PRGID     INIT      "GENCLAIM"
+PRGNAM    INIT      "Manually Generate Electronic Claims for Testing"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              MAIN0000                                  *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+          BRANCH    EXIT,MAIN9999          * error - finish
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN2000:      * EDI (HosClaims)
+                            MAIN2000       * Eclipse
+.
+MAIN2000  IF        OPTION2 = 3
+            CALL      CONTQST
+            BRANCH    CEXIT,MAIN3000:      * yes
+                            MAIN0100:      * no
+                            MAIN0100       * cancel
+MAIN3000    CALL      LINV0000             * load invoices
+          ELSE
+            CALL      PROC0000             * process
+          ENDIF
+          GOTO      MAIN0100
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: MAIN0000  *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.*  Returns:   EXIT  0 = Ok to continue                                     *
+.*                   1 = Error so stop                                      *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"patedsaf";
+          OPEN      PATEDSA1,"patedsaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patdschf";
+          OPEN      PATDSCH1,"patdschf"
+.
+          DISPLAY   *P64:24,"patfn1af";
+          OPEN      PATFN1A1,"patfn1af"
+.
+          DISPLAY   *P64:24,"patfx1af";
+          OPEN      PATFX1A1,"patfx1af"
+.
+          DISPLAY   *P64:24,"pathspaf";
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P64:24,"patinvrf";
+          OPEN      PATINVR1,"patinvrf"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"
+.
+          DISPLAY   *P64:24,"pmsectaf";
+          OPEN      PMSECTA1,"pmsectaf"
+          OPEN      PMSECTA2,"pmsectaf"
+.
+          DISPLAY   *P64:24,"pmsvx1af";
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS,*85,IBCNUGST
+          READ      CONTROLF,HUND10;*115,PTCNUEDI
+          READ      CONTROLF,HUND14;*213,PTCNUEDC
+.
+          COMPARE   ZERO,PTCNUEDI                * using EDI ?
+          IF        @EQUAL
+            DISPLAY   *P1:24,*EL,*B,"Electronic Claiming not in use.  ";
+            CALL      HITENTER
+            GOTO      INIT9100
+          ENDIF
+.
+          MOVE      ONE,CNEWDS
+          MOVE      ZERO,EXIT
+          GOTO      INIT9999
+.
+INIT9100  MOVE      ONE,EXIT
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*                                                                           *
+.*    Returns:  EXIT    = FALSE (0)  Input Claims                            *
+.*                        TRUE  (1)  Exit option selected                    *
+.*              COPTION  1 = EDI (HosClaims)                                 *
+.*                       2 = Eclipse                                         *
+.*              OPTION2  1 = Health Fund ( Eclipse only )                    *
+.*                       2 = Claim Code  ( Eclipse only )                    *
+.*                       3 = Outstanding Invoices ( Eclipse only )           *
+.*****************************************************************************
+.
+OPTN0000  HLINE     *G37,2,64,80
+          DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". EDI (HosClaims) Claims":
+                    *P1:6,*V2LON,TWO,*HOFF,". Eclipse Claims"
+.
+OPTN0500  KEYIN     *P1:8,*EL,"Select Option : ":
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9100 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN5000:            * EDI claims
+                            OPTN5000             * Eclipse claims
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN5000  IF        COPTION = 1
+            DISPLAY   *P64:2,*V2LON,"- EDI "
+          ELSE
+            DISPLAY   *P64:2,*V2LON,"- Eclipse "
+          ENDIF
+.
+          MOVE      ZERO,OPTION2
+          IF        COPTION = 2
+            DISPLAY   *P1:11,*V2LON,ZERO,*HOFF,". Exit":
+                      *P1:12,*V2LON,ONE,*HOFF,". Health Fund":
+                      *P1:13,*V2LON,TWO,*HOFF,". Claim Code":
+                      *P1:14,*V2LON,THREE,*HOFF,". Outstanding Invoices"
+.
+OPTN6000    KEYIN     *P1:16,*EL,"Select Option : ":
+                      *P17:16,*V2LON,OPTION2
+.
+            COMPARE   ZERO,OPTION2                 * exit selected ?
+            GOTO      OPTN0000 IF EQUAL            * yes
+.
+            BRANCH    OPTION2,OPTN9000:            * Health Fund
+                              OPTN9000:            * Claim Code
+                              OPTN9000             * Outstanding Invoices
+.
+            BEEP
+            GOTO      OPTN6000
+          ENDIF
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9100  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*                 Select the fund and invoice before writing record         *
+.*****************************************************************************
+.
+PROC0000  IF        COPTION = 2 & OPTION2 = 2
+            CALL      GCLM0000                   * get claim code
+          ELSE
+            CALL      GFND0000                   * get health fund code
+          ENDIF
+          BRANCH    EXIT,PROC9999                * nothing input
+.
+PROC1000  CALL      GINV0000                     * input data fields
+          BRANCH    EXIT,PROC0000                * nothing input
+.
+          CALL      POSTQST                      * Ok to post ?
+          BRANCH    CEXIT,PROC2000:              * yes
+                          PROC1000:              * no
+                          PROC0000               * cancel
+.
+PROC2000  CALL      WRIT0000                     * write new record
+          GOTO      PROC1000
+.
+PROC9999  RETURN
++
+.****************************************************************************
+.*                                  GFND0000           Called by: MAIN0000  *
+.*                     get health fund code                                 *
+.*         Returns: EXIT  0 = OK                                            *
+.*                        1 = nothing or exitchar entered                   *
+.****************************************************************************
+.
+GFND0000  KEYIN     *P1:18,*EF,"Health Fund Code :":
+                    *P23:18,*V2LON,FUNDCODE
+.
+          CALL      CHKF0000                * see what was entered
+          BRANCH    EXIT,GFND1000:          * ? entered
+                         GFND7500:          * valid code
+                         GFND9000:          * nothing entered
+                         GFND9000           * exitchar
+.
+          GOTO      GFND0000                * invalid code
+.
+GFND1000  MOVE      ZERO,HLEF
+          CALL      GETSCR00
+GFND1200  CALL      PATFNDDS                * display codes on file
+.
+GFND1500  KEYIN     *P1:24,*EL,"Health Fund: ":
+                    *P19:24,*V2LON,FUNDCODE
+.
+          CALL      CHKF0000                * see what was entered
+          BRANCH    EXIT,GFND1200:          * ? entered
+                         GFND7000:          * valid code
+                         GFND8000:          * nothing entered
+                         GFND8000           * exitchar
+.
+          GOTO      GFND1500
+.
+GFND7000  CALL      PUTSCR00                * restore screen
+          DISPLAY   *P23:18,*V2LON,FUNDCODE
+GFND7500  DISPLAY   *P33:18,HFNAME
+          MOVE      ZERO,EXIT
+          GOTO      GFND9999
+.
+GFND8000  CALL      FRESCR00
+GFND9000  MOVE      ONE,EXIT
+.
+GFND9999  RETURN
++
+.***************************************************************************
+.*                                  CHKF0000           Called by: GFND0000 *
+.*                      See what was input                                 *
+.*      Returns: EXIT  0 = invalid                                         *
+.*                     1 = "?"                                             *
+.*                     2 = valid                                           *
+.*                     3 = nothing                                         *
+.*                     4 = exitchar                                        *
+.***************************************************************************
+.
+CHKF0000  PACK      FUNDCODE,FUNDCODE,SP6
+.
+          MATCH     SP6,FUNDCODE                 * anything entered ?
+          GOTO      CHKF9000 IF EQUAL            * no
+.
+          MATCH     EXITCHAR,FUNDCODE            * exitchar entered ?
+          GOTO      CHKF7000 IF EQUAL            * yes
+.
+          MATCH     QUEST,FUNDCODE               * ? entered ?
+          GOTO      CHKF8000 IF EQUAL            * yes
+.
+.         Code entered
+.
+          PACK      KEY14,FUNDCODE,ZERO,ZERO,ZERO,ZERO,SP4
+          CALL      RDFUND1                      * fund code on file ?
+          BRANCH    OVRCD,CHKF6000               * no
+.
+CHKF5000  MOVE      TWO,EXIT                     * code entered
+          GOTO      CHKF9999
+.
+CHKF6000  DISPLAY   *P1:24,*EL,*B,"Health Fund not on file. ";
+          CALL      HITENTER
+          MOVE      ZERO,EXIT
+          GOTO      CHKF9999
+.
+CHKF7000  MOVE      FOUR,EXIT
+          GOTO      CHKF9999
+.
+CHKF8000  MOVE      ONE,EXIT
+          GOTO      CHKF9999
+.
+CHKF9000  MOVE      THREE,EXIT
+.
+CHKF9999  RETURN
++
+.*****************************************************************************
+.*                                 GCLM0000        Called by: PROC0000       *
+.*               Get the user to keyin a claim code                          *
+.* Returns: EXIT   0 = Valid Claim Code selected                             *
+.*                 1 = nothing, exitchar or spaces input                     *
+.*****************************************************************************
+.
+GCLM0000  MOVE      TEN8,EVERT
+          MOVE      TWENTY3,ECOL
+          PACK      CODE,ANSC,ANSL
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND
+          MOVE      ZERO,CKYIMODE
+.
+          DISPLAY   *P1:18,*EF,"Claim Code       :";
+          CALL      PATCODKY
+          BRANCH    EXIT,GCLM9100:               * nothing input
+                         GCLM9100:               * exitchar input
+                         GCLM9100                * spaces input
+.
+.         Valid claim code entered, so check that this is a DVA code
+.
+          MOVE      ZERO,FORM1
+          WHILE     FORM1 < 5
+            ADD       ONE,FORM1
+            LOAD      ANS,FORM1,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5
+            MATCH     ANSV,ANS                   * DVA code ?
+            GOTO      GCLM5000 IF EQUAL          * yes
+          DO
+.
+          DISPLAY   *P1:24,*EL,*B,"Claim code not DVA related.  ";
+          CALL      HITENTER
+          GOTO      GCLM0000
+.
+GCLM5000  DISPLAY   *P33:18,TDESC;
+.
+          MOVE      ZERO,EXIT
+          GOTO      GCLM9999
+.
+GCLM9100  MOVE      ONE,EXIT
+.
+GCLM9999  RETURN
++
+.*****************************************************************************
+.*                               GINV0000              Called by: MAIN0000   *
+.*                Get the Invoice Number                                     *
+.*****************************************************************************
+.
+GINV0000  KEYIN     *P1:19,*EF,"Invoice Number   :":
+                    *P23:19,*V2LON,INVNUMBR
+.
+          COMPARE   ZERO,INVNUMBR                * anything input ?
+          GOTO      GINV9100 IF EQUAL            * no - finish
+.
+          MOVE      INVNUMBR,KEY8
+          CALL      RDINV1                       * invoice on file ?
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Invoice not on file.  ";
+            CALL      HITENTER
+            GOTO      GINV0000
+          ENDIF
+.
+.         Get PMI details
+.
+          MOVE      PINVUR,KEY8
+          CALL      RDMAST1
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"U/R number ",*V2LON,PINVUR,*HOFF:
+                      " not on file.  ";
+            CALL      HITENTER
+            GOTO      GINV0000
+          ELSE
+            MOVE      PSNAME,PACSNAME
+            MOVE      PGNAME,PACGNAME
+            MOVE      PTITL,PACTITLE
+            MOVE      ONE,PACFRMT
+            CALL      PACNAME
+            DISPLAY   *P33:19,PACFNAME
+          ENDIF
+.
+.         Get Visit Record (patmi1af) and visit extension (pmsvx1af - only
+.         if using Eclipse)
+.
+          MOVE      PINVADM,KEY8
+          CALL      RDMISS1
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Visit number ",*V2LON,PINVADM,*HOFF:
+                      " not on file.  ";
+            CALL      HITENTER
+            GOTO      GINV0000
+          ELSE
+            IF        COPTION = 2
+              MOVE      PINVADM,KEY8
+              CALL      RDPMVX11                 * visit extension record found?
+              IF        OVRCD = 1
+                DISPLAY   *P1:24,*EL,*B,"Visit extension ",*V2LON,PINVADM,*HOFF:
+                          " not on file.  ";
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          MATCH     SP3,ACLAIM
+          IF        @EQUAL
+            DISPLAY   *P1:24,*EL,*B,"Claim Code is blank.  ";
+            CALL      HITENTER
+            GOTO      GINV0000
+          ENDIF
+.
+.         Check if "by Health Fund" for Eclipse, that the claim is NOT
+.         a DVA claim
+.
+          IF        COPTION = 2 & OPTION2 = 1
+            PACK      KEY5,ANSC,ANSL,ACLAIM
+            CALL      RDCODE1
+            IF        OVRCD = 1
+              DISPLAY   *P1:24,*EL,*B,"Claim Code ",*V2LON,ACLAIM,*HOFF:
+                        " not on file.  ";
+              CALL      HITENTER
+              GOTO      GINV0000
+            ENDIF
+.
+            MOVE      ZERO,FORM1
+            WHILE     FORM1 < 5
+              ADD       ONE,FORM1
+              LOAD      ANS,FORM1,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5
+              MATCH     ANSV,ANS
+              IF        @EQUAL
+                DISPLAY   *P1:24,*EL,*B,"Process DVA claims by claim code.  ";
+                CALL      HITENTER
+                GOTO      GINV0000
+              ENDIF
+            DO
+            GOTO      GINV8000
+          ENDIF
+.
+          IF        COPTION = 2 & OPTION2 = 2
+.
+.           Check if Claim Code is valid
+.
+            MATCH     ACODE,ACLAIM
+            IF        !@EQUAL
+              DISPLAY   *P1:24,*EL,*B,"Claim Code ",*V2LON,ACLAIM,*HOFF:
+                        " doesn't match.  ";
+              CALL      HITENTER
+              GOTO      GINV0000
+            ENDIF
+            GOTO      GINV9000
+          ENDIF
+.
+.         Check if Health Fund is valid
+.
+GINV8000  MATCH     FUNDCODE,AFUNDH
+          IF        !@EQUAL
+            DISPLAY   *P1:24,*EL,*B,"Health Fund ",*V2LON,AFUNDH,*HOFF:
+                      " doesn't match.  ";
+            CALL      HITENTER
+            GOTO      GINV0000
+          ENDIF
+.
+GINV9000  MOVE      ZERO,EXIT
+          GOTO      GINV9999
+.
+GINV9100  MOVE      ONE,EXIT
+.
+GINV9999  RETURN
++
+.*****************************************************************************
+.*                              WRIT0000               Called by: MAIN0000   *
+.*                write a new patedsaf or pmsectaf record                    *
+.*****************************************************************************
+.
+WRIT0000  BRANCH    COPTION,WRIT1000:            * EDI
+                            WRIT2000             * Eclipse
+.
+.         HosClaims
+.
+WRIT1000  MOVE      ZERO,PTESFLAG
+          MOVE      FUNDCODE,PTESHFND
+          MOVE      PINVADM,PTESADMN
+          MOVE      INVNUMBR,PTESINVN
+          MOVE      SP8,PTESBATN
+          MOVE      PINVUR,PTESURNO
+          MOVE      SP8,PTESPBAT
+          MOVE      SP8,PTESNBAT
+          MOVE      SP5,PTESPCSN
+          MOVE      SP5,PTESCSNO
+          MOVE      SP1,PTESCCFL
+          MOVE      SP20,PTESSPAR
+.
+          PACK      KEY32,PTESFLAG,PTESHFND,PTESADMN,PTESINVN,PTESBATN
+          CALL      RAPTEDS1
+          IF        OVRCD = 1
+            CALL      WRPTEDS1
+          ELSE
+            DISPLAY   *P1:24,*EL,*B,"Record already exists on file.  ";
+            CALL      HITENTER
+          ENDIF
+          GOTO      WRIT9999
+.
+.         Eclipse
+.
+WRIT2000  MOVE      ZERO,PMECFLAG
+          MOVE      PINVADM,PMECADMN
+          MOVE      INVNUMBR,PMECINVN
+          MOVE      SP8,PMECBATN
+          MOVE      PINVUR,PMECURNO
+          MOVE      SP8,PMECPBAT
+          MOVE      SP8,PMECNBAT
+          MOVE      SP1,PMECCCFL
+          MOVE      SP30,PMECTRID
+          MOVE      ZERO,PMECAMTC
+          MOVE      ZERO,PMECAMTP
+          MOVE      SP8,PMECPDAT
+          MOVE      SP2,PMECSTAT
+          IF        OPTION2 = 1
+            MOVE      FUNDCODE,PMECHFND          * health fund claim
+            MOVE      ZERO,PMECEETP
+          ELSE
+            PACK      PMECHFND,ACODE,SP6         * claim code claim
+            MOVE      ONE,PMECEETP
+          ENDIF
+          MOVE      SP30,PMECFTID
+          MOVE      PMVXMHOS,PMECHOSP
+          MOVE      SP30,PMECPCTI
+          MOVE      SP30,PMECSPAR
+.
+          PACK      KEY35,PMECHOSP,PMECFLAG,PMECHFND,PMECADMN,PMECINVN,PMECBATN
+          CALL      RAPMECT1
+          IF        OVRCD = 1
+            CALL      WRPMECT1
+          ELSE
+            DISPLAY   *P1:24,*EL,*B,"Record already exists on file.  ";
+            CALL      HITENTER
+          ENDIF
+.
+WRIT9999  RETURN
++
+.*****************************************************************************
+.*                           LINV0000              Called by: MAIN0000       *
+.*         Load all outstanding invoices for Eclipse                         *
+.*****************************************************************************
+.
+LINV0000  DISPLAY   *P1:24,*EL,"Processing:";
+          MOVE      ZERO,COUNTER                 * initialise counter
+.
+          MOVE      SP8,KEY8
+          CALL      RSPTINV1                     * position at start of file
+LINV0500  CALL      RKPTINV1                     * read next record
+          BRANCH    OVRCD,LINV9000               * eof - finished
+.
+          DISPLAY   *P13:24,*EL,*V2LON,PINVNO;
+.
+          MATCH     "0",PTINCRST                 * credited invoice ?
+          GOTO      LINV0500 IF NOT EQUAL        * yes - ignore invoice
+.
+          COMPARE   ZERO,PINVAMT                 * zero invoice ?
+          GOTO      LINV0500 IF EQUAL            * yes - ignore invoice
+.
+.         Make sure that no payments/journals have been made against the invoice
+.
+          COMPARE   ZERO,PINVPATA                * zero patient amount ?
+          GOTO      LINV0500 IF NOT EQUAL        * no - ignore invoice
+.
+          COMPARE   ZERO,PINVHFDA                * zero HF amount ?
+          GOTO      LINV0500 IF NOT EQUAL        * no - ignore invoice
+.
+          COMPARE   ZERO,PINVOTHA                * zero other amount ?
+          GOTO      LINV0500 IF NOT EQUAL        * no - ignore invoice
+.
+          COMPARE   ZERO,PINVJOUR                * zero journal amount ?
+          GOTO      LINV0500 IF NOT EQUAL        * no - ignore invoice
+.
+          IF        IBCNUGST = 2 | IBCNUGST = 3
+            COMPARE   ZERO,PTINGSTJ              * zero GST journal amount ?
+            GOTO      LINV0500 IF NOT EQUAL      * no - ignore invoice
+          ENDIF
+.
+          MOVE      PINVADM,KEY8
+          CALL      RDMISS1                      * admission record found ?
+          BRANCH    OVRCD,LINV0500               * no - ignore invoice
+.
+          MOVE      PINVADM,KEY8
+          CALL      RDPMVX11                     * visit extension record found?
+          BRANCH    OVRCD,LINV0500               * no - ignore invoice
+.
+          MOVE      PINVADM,KEY8
+          CALL      RDDSCH1                      * discharge record found ?
+          BRANCH    OVRCD,LINV0500               * no - ignore invoice
+.
+.         Set defaults for a Health Fund claim in case this is an Eclipse claim
+.
+          MOVE      AFUNDH,PMECHFND              * load health fund
+          MOVE      ZERO,PMECEETP                * set HF claim flag
+.
+.         We need to check if this is a DVA claim in case this is an
+.         Eclipse claim
+.
+          PACK      KEY5,ANSC,ANSL,ACLAIM        * check for DVA indicator
+          CALL      RDCODE1
+          IF        OVRCD = 0
+            MOVE      ZERO,FORM1
+            WHILE     FORM1 < 5
+              ADD       ONE,FORM1
+              LOAD      ANS,FORM1,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5
+              MATCH     ANSV,ANS
+              IF        @EQUAL
+                PACK      PMECHFND,ACLAIM,SP6
+                MOVE      ONE,PMECEETP
+                GOTO      LINV1000
+              ENDIF
+            DO
+          ENDIF
+.
+.         Not a DVA claim, so check if there is a health fund
+.
+          MATCH     SP6,AFUNDH                   * blank health fund ?
+          GOTO      LINV0500 IF EQUAL            * yes - ignore record
+.
+.         We have a valid health fund claim, so get the HF extension record
+.         and check to see if the health fund is participating in electronic
+.         claiming
+.
+          PACK      KEY6,AFUNDH
+          CALL      RDPTFX11                     * HF extension record found ?
+          BRANCH    OVRCD,LINV0500               * no - ignore record
+.
+          COMPARE   THREE,PTFXEXTR               * using Eclipse ?
+          GOTO      LINV2000 IF EQUAL            * yes
+          GOTO      LINV0500                     * no - ignore record
+.
+.         This is a DVA claim, so check if Cat CL is being used for DVA
+.         Eclipse claiming.  Check the hospital based field for multi-hospital
+.         to see if DVA Eclipse claiming is turned on.
+.
+LINV1000  IF        IBCNMHOS = 1
+            MOVE      PMVXMHOS,KEY3
+            CALL      RDPTHSP1                   * hospital record found ?
+            BRANCH    OVRCD,LINV0500             * no - ignore record
+.
+            MATCH     "1",PTHSUDVA               * DVA Eclipse claiming on ?
+            GOTO      LINV2000 IF EQUAL          * yes
+.
+            MATCH     "0",PTHSUDVA               * DVA Eclipse claiming off ?
+            GOTO      LINV0500 IF EQUAL          * yes - ignore record
+          ENDIF
+.
+.         Either this is not a multi-hospital environment, or it is a
+.         multi-hospital environment and the hospital has not set the
+.         DVA Eclipse claiming parameter, so check the parameter to see
+.         if DVA Eclipse claiming is turned on.
+.
+          COMPARE   ONE,PTCNUEDC                 * using DVA Eclipse claiming ?
+          GOTO      LINV0500 IF NOT EQUAL        * no - ignore record
+.
+.         We have a valid Eclipse claim so make sure there isn't a current
+.         claim in pmsectaf
+.
+LINV2000  PACK      KEY16,PINVNO,SP20
+          CALL      RDPMECT2                     * claim waiting already ?
+          BRANCH    OVRCD,LINV2500               * no - get next record
+.
+          GOTO      LINV0500                     * yes - ignore invoice
+.
+LINV2500  CALL      RKPMECT2                     * read next record
+          BRANCH    OVRCD,LINV3000               * eof - create pmsectaf rec.
+.
+          MATCH     PINVNO,PMECINVN              * same invoice still ?
+          GOTO      LINV3000 IF NOT EQUAL        * no - create pmsectaf rec.
+.
+          COMPARE   TEN5,PMECFLAG                * current claim ?
+          GOTO      LINV0500 IF LESS             * yes - ignore invoice
+.
+          GOTO      LINV2500                     * get next record
+.
+.         Load the pmsectaf variables
+.
+LINV3000  MOVE      ZERO,PMECFLAG
+          MOVE      SP20,PMECBATN
+          MOVE      AADMNO,PMECADMN
+          MOVE      AURNO,PMECURNO
+          MOVE      PINVNO,PMECINVN
+          MOVE      SP8,PMECPBAT
+          MOVE      SP8,PMECNBAT
+          MOVE      SP1,PMECCCFL
+          MOVE      SP30,PMECTRID
+          MOVE      ZERO,PMECAMTC
+          MOVE      ZERO,PMECAMTP
+          MOVE      SP8,PMECPDAT
+          MOVE      SP2,PMECSTAT
+          IF        IBCNMHOS = 1
+            MOVE      PMVXMHOS,PMECHOSP
+          ELSE
+            MOVE      SP3,PMECHOSP
+          ENDIF
+          MOVE      SP30,PMECSPAR
+          PACK      KEY32,PMECFLAG,PMECHFND,PMECADMN,PMECINVN,PMECBATN
+          CALL      RAPMECT1
+          IF        OVRCD = 1
+            CALL      WRPMECT1                   * write pmsectaf record
+            ADD       ONE,COUNTER                * increment counter
+          ENDIF
+.
+          GOTO      LINV0500                     * get next record
+.
+LINV9000  DISPLAY   *P1:24,*EL,*V2LON,COUNTER,*HOFF," records created.  ";
+          CALL      HITENTER
+.
+LINV9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       PATCODKY
+          INC       PATFNDDS
+.
+          INC       PATCODIO/INC
+          INC       PATDSCIO/INC
+          INC       PATEDSIO/INC
+          INC       PATFN1IO/INC
+          INC       PATFX1IO/INC
+          INC       PATHSPIO/INC
+          INC       PATINVIO/INC
+          INC       PATMA1IO/INC
+          INC       PATMI1IO/INC
+          INC       PMSECTIO/INC
+          INC       PMSVX1IO/INC

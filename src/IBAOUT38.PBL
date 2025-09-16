@@ -1,0 +1,961 @@
+.**********************************************************************
+.* System   : OUTPATIENT                                              *
+.* Program  : IBAOUT38           (Adapted from IBAOUT39 in 5.01)      *
+.* Desc     : Incomplete Records Report                               *
+.**********************************************************************
+.* Date     :  11/07/90    (Dude's Birthday)                          *
+.* Author   :  D.Di.Paola.        SRF 103981                          *
+.* Comment  :  This program simply loops thru the bokaf file and picks*
+.*          :  up patients who are booked on a certain day within  a  *
+.*          :  certain clinic type. It is usually run at end of the   *
+.*          :  day to show those patients who have not attended.....  *
+.*          :  N.B. - The report will show only those patients who    *
+.*          :         have not been attended. It will not show patients
+.*          :         who have been cancelled or non-attended..       *
+.* Mods     :                                                         *
+.**********************************************************************
+.*        V10.11.01 15/09/2017  Thanh T.         TSK 0821710          *
+.*                  Audit Amission/outpatient visit comments          *
+.**********************************************************************
+.*        V10.05.01 15/07/2014  Ebon Clements    CAR 261630           *
+.*                  Removed port number from temp file name           *
+.*        V5.08.01  29/08/2000  Caleb Sharman                         *
+.*                  Changed Health Fund variables to be 8 chars       *
+.*        V5.08.B02  13/03/2000  Steve Armstrong    5.08 Mods         *
+.*                   Mods for changes to OUTCLIFD (effective date)    *
+.*        V5.08.B01  30/12/1999  Steve Armstrong                      *
+.*                   Fixed global recompile bugs                      *
+.**********************************************************************
+.*            V5.07.B01 30/10/1998 Jim Stathopoulos                   *
+.*                      507 Changes                                   *
+.**********************************************************************
+.*            V5.06.B02 18/01/1999 Nicole Harrington 507 rebound 095  *
+.*                      Mods to use HEAD132                           *
+.**********************************************************************
+.*            V5.01.121 27/11/90 Glen Hobby                           *
+.*                      Recompiled for changes to                     *
+.*                      PATMX1FD                                      *
+.*            V5.01.122 20/02/91 J.Tan          SRF 107892            *
+.*                      Added date range                              *
+.*            V5.01.123 03.03.93 Neeriem "I Hate Support" Dye         *
+.*                      Modify to print full address                  *
+.*                                                                    *
+.**********************************************************************
+.
+          INC       STD001FD
+          INC       IBASEQFD/INC
+          INC       PATCODFD/INC     * codes file
+          INC       PATMA1FD/INC     * master file
+
+          INC       PATDO1FD/INC     * patient doctor file
+          INC       PATPR1FD/INC     * patient pre-admission file
+          INC       OUTBOAFD/INC     * clinic booking file
+          INC       OUTCLIFD/INC     * clinic file
+          INC       OUTCTYFD/INC     * clinic type file
+          INC       OUTSITFD/INC     * site file
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
++
+.**********************************************************************
+.*                         TEMPFILE DEFINITIONS                       *
+.**********************************************************************
+.
+TEMPFILE  IFILE     SQL, FIXED=50, KEY="u1-28"
+.
+.NAME     TYPE    LENGTH         START       DESCRIPTION
+.----     ----    ------         -----       -----------
+.OBACTYP  DIM       6              1         Clinic Type
+.OBACLIN  DIM       6              7         Clinic Id
+.OBADATE  DIM       8              13        Date
+.OBASTRT  DIM       5              21        Clinic Start Time
+.DOBASLOT DIM       3              26        Slot No.
+.OBATIME  DIM       5              29        Slot Time
+.OBAURNO  DIM       8              34        U/R Number
+.DOBAOUTN DIM       8              42        Outpatient Number
+.
+.                  end of record   50    
+.
+.**********************************************************************
+.*                         CONSTANTS                                  *
+.**********************************************************************
+.
+OPTNDES1  INIT      "- Incomplete Records Report"
+.
+.**********************************************************************
+.*                         VARIABLES                                  *
+.**********************************************************************
+.
+CLNDESC   DIM       30
+CMDLINE   DIM       50
+CODEDES1  DIM       6
+CODEDES2  DIM       6
+CLSEDATE  DIM       10
+.
+DESCRPT1  DIM       30
+DESCRPT2  DIM       30
+DIM14     DIM       14       * used by oudscty routine
+DIM13A    DIM       13
+DIM13B    DIM       13
+DIM42     DIM       42
+DOCTNAM   DIM       50       * doctor's formatted name
+.
+ENDTYPE   DIM       6        * end clinic type range
+.
+FNAMEI    DIM       8
+FROMDATE  DIM       8        * fromdate used for key
+FRSTFLG   FORM      1
+.
+GOFLAG    FORM      1
+.
+.
+OPENDATE  DIM       10
+OPTNDESC  DIM       27
+.
+PAGENO    FORM      3        * page counter
+PATADDR   DIM       43
+ADDRESS   DIM       55
+PATNAME   DIM       42
+.
+SAVCLIN   DIM       6        * save variable for clinic id
+SAVSTRT   DIM       5        * save variable for session start time
+SAVTYPE   DIM       6        * outpatient clinic type
+SAVDATE   DIM       8        * outpatient date
+SITE      DIM       6        * site code
+STRTTYPE  DIM       6
+.
+TODATE    DIM       8        * todate used for key
+.
+.
+.-----------------------------------------------------------------------
+PRGID     INIT      "IBAOUT38"
+PRGNAM    INIT      "Incomplete Records Report"
+VERSION   INIT      "V11.03.00"
+.-----------------------------------------------------------------------
++
+.**********************************************************************
+.*                         MAINLINE                                   *
+.**********************************************************************
+.
+ML0000    CALL      INIT0000        * initialisation
+.
+ML1000    CALL      CLR0000         * clear variables
+          CALL      CLR1000         * clear print variables 
+.
+          CALL      SCR0000         * select option
+          BRANCH    EXIT,ML9000
+.
+          BRANCH    OPTION,ML2000
+.
+ML2000    CALL      CREA0000        * create tempfile
+          CALL      DATE0000        * keyin date range
+          BRANCH    EXIT,ML1000     * exit
+          CALL      CLNT0000        * keyin clinic type
+          BRANCH    EXIT,ML1000
+          CALL      CHK0000         * ok to continue
+          BRANCH    CEXIT,ML3000,ML1000,ML9000    * 1=Yes, 2=No, 3=Cancel
+.
+ML3000    CALL      PRC0000         * process data
+          CALL      PRT0000         * print routine
+          CALL      END0000         * end of report
+          GOTO      ML1000
+.
+.----------------------------------------------------------------------
+.                          .. The End                                  
+.----------------------------------------------------------------------
+ML9000    CALL      KILL0000        * delete temp file
+          CHAIN     PGM
++
+.**********************************************************************
+.*                         INIT0000                                   *
+.*                      Initialisation                                *
+.**********************************************************************
+.
+INIT0000  CALL      DISPHEAD
+.
+          DISPLAY   *P56:24,"Opening patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          DISPLAY   *P64:24,"patmx1af";
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patdo1af";
+          OPEN      PATDO1A1,"patdo1af"
+.
+          DISPLAY   *P64:24,"patpramf"
+          OPEN      PATPR1A1,"patpr1af"
+          OPEN      PATPX1A1,"patpx1af"
+.
+          PACK      CFNAME WITH UID,FILBOKA1
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTBOKA2,CFNAME
+.
+          PACK      CFNAME WITH UID,FILCLIA1
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTCLIA1,CFNAME
+.
+          PACK      CFNAME WITH UID,FILCTYA1
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTCTYA1,CFNAME
+.
+          DISPLAY   *P64:24,"outsitaf";
+          OPEN      OUTSITA1,"outsitaf"
+          MOVE      IDDD,SITE
+          MOVE      IDDD,KEY6
+          CALL      RDSITA1
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          CALL      TFILENAM                * Get temp file name
+          MOVE      TFILNAME,FNAMEI
+.
+          RETURN
++
+.***********************************************************************
+.*                             CREA0000                                *
+.*                    create tempfile for details                      *
+.***********************************************************************
+CREA0000
+            DISPLAY   *P40:24,*EL,"Creating Temporary File - ":
+                          *V2LON,*BLINKON,"Please Wait",*HOFF;
+.
+            CALL      KILL0000
+.
+            CLEAR     CMDLINE
+            APPEND    "isbuild ",CMDLINE                 * build tempfile
+            APPEND    FNAMEI,CMDLINE
+            APPEND    " 50 u1-28",CMDLINE
+            RESET     CMDLINE
+.
+            EXECUTE   CMDLINE,TASKID
+            OPEN      TEMPFILE,FNAMEI
+.
+            DISPLAY   *P1:24,*EL;                    * clear message line
+.
+CREA9999    RETURN
++
+.***********************************************************************
+.*                             KILL0000                                *
+.*                    Delete the temp file                             *
+.***********************************************************************
+KILL0000  CLEAR     CMDLINE                        * erase filename
+          CLOSE     TEMPFILE
+          APPEND    "iserase ",CMDLINE             * ie. tempmr
+          APPEND    FNAMEI,CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+KILL9999  RETURN
++
+.**********************************************************************
+.*                         CLR0000                                    *
+.*                     Clear Variables                                *
+.**********************************************************************
+.
+CLR0000   MOVE      ZERO,PAGENO     * page counter
+          MOVE      SP5,SAVSTRT
+          MOVE      "60",CLNO        * line counter
+          MOVE      SP30,CLNDESC
+          MOVE      SP6,STRTTYPE
+          MOVE      SP6,ENDTYPE 
+          MOVE      SP30,DESCRPT1
+          MOVE      SP30,DESCRPT2
+          MOVE      SP30,CODEDES1 
+          MOVE      SP30,CODEDES2 
+          RETURN
+.
+.--------- clear print variables ------
+.
+CLR1000   UNPACK    SP30,DOBASLOT,OBATIME
+          PACK      PATADDR,SP30,SP30
+          PACK      ADDRESS,SP30,SP30
+          PACK      PATNAME,SP30,SP30
+          PACK      PTELEP,SP30,SP30
+          RETURN 
++
+.**********************************************************************
+.*                         SCR0000                                    *
+.*                      Main Option Screen                            *
+.**********************************************************************
+.
+SCR0000   MOVE      FALSE,EXIT
+          HLINE     *G37,2,53,80
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Incomplete Records Report";
+.
+SCR1000   DISPLAY   *P1:7,*EL,"Option : ";
+          KEYIN     *P10:7,*V2LON,OPTION;
+.
+          BRANCH    OPTION,SCR8000
+.
+          COMPARE   ZERO,OPTION
+          GOTO      SCR9000 IF EQUAL
+          BEEP
+          GOTO      SCR1000
+.
+SCR8000   LOAD      OPTNDESC,OPTION,OPTNDES1           * get option to display
+          DISPLAY   *P53:2,*+,OPTNDESC,SP1;
+          GOTO      SCR9999
+.
+SCR9000   MOVE      TRUE,EXIT
+.
+SCR9999   RETURN
++
+.**********************************************************************
+.*                         DISP0000                                   *
+.*                     Redisplay after "?" option                     *
+.**********************************************************************
+.
+DISP0000  
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Incomplete Records Report":
+                    *P1:7,"Please Select : ",*V2LON,OPTION,*HOFF:
+                    *P1:9,"Clinic Date From  : ",*V2LON,OPENDATE,*HOFF:
+                    *P1:10,"Clinic Date To    : ",*V2LON,CLSEDATE,*HOFF:
+                    *P1:12,"Clinic Type From : ",*V2LON,CODEDES1,*HOFF:
+                    *P45:12,DESCRPT1:
+                    *P1:13,"Clinic Type To   : ",*V2LON,CODEDES2,*HOFF:
+                    *P45:13,DESCRPT2;
+DISP9999  RETURN
++
+.**********************************************************************
+.*                         CLNT0000                                   *
+.*                       Keyin Clinic Type                            *
+.**********************************************************************
+.
+CLNT0000  MOVE      FALSE,EXIT
+          DISPLAY   *P1:11,*EF:
+                    *P1:12,"Clinic Type From : ":
+                    *P1:13,"Clinic Type To   : ";
+.
+.-------- keyin first clinic type code range -----
+.
+CLNT0500  MOVE      SP30,DESCRPT1
+          MOVE      SP6,STRTTYPE
+          DISPLAY   *P20:12,UNDLN6;
+          KEYIN     *P20:12,*V2LON,STRTTYPE;
+          DISPLAY   *P20:12,*EL,*V2LON,STRTTYPE;
+.
+          CMATCH    QUEST,STRTTYPE                   * "?" entered display
+          GOTO      CLNT8000 IF EQUAL                * clinic types
+.
+          ENDSET    STRTTYPE
+          APPEND    SP6,STRTTYPE
+          RESET     STRTTYPE
+.
+          MATCH     SP6,STRTTYPE                     * match for spaces
+          GOTO      CLNT0900 IF NOT EQUAL
+.
+          DISPLAY   *P20:12,*V2LON,"Start ";
+          MOVE      "Start ",CODEDES1
+          GOTO      CLNT1000                         * goto 2nd range
+.
+.-------- check to see if exists ----
+.
+CLNT0900  
+          PACK      KEY12,SITE,STRTTYPE
+          CALL      RDCTYA1
+          BRANCH    OVRCD OF CLNT0950
+          MOVE      STRTTYPE,CODEDES1
+          MOVE      OCTDESC,DESCRPT1            * get description
+          DISPLAY   *P45:12,*EL,DESCRPT1;
+          GOTO      CLNT1000
+.
+.------- invalid clinic type entered -----
+.
+CLNT0950  DISPLAY   *P1:24,*EL,*B,"Invalid Clinic Type - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      CLNT0500
+        
+.
+.-------- keyin 2nd clinic type code range -----
+.
+CLNT1000  MOVE      SP30,DESCRPT2
+          DISPLAY   *P20:13,UNDLN6;
+          KEYIN     *P20:13,*V2LON,ENDTYPE;
+          DISPLAY   *P20:13,*EL,*V2LON,ENDTYPE;
+.
+          CMATCH    QUEST,ENDTYPE
+          GOTO      CLNT8500 IF EQUAL            * "?" display clinic types
+.
+          ENDSET    ENDTYPE
+          APPEND    SP6,ENDTYPE
+          RESET     ENDTYPE
+.
+          MATCH     SP6,ENDTYPE
+          GOTO      CLNT9000 IF NOT EQUAL
+.
+          DISPLAY   *P20:13,*V2LON,"Finish";
+          MOVE      "Finish",CODEDES2
+          MOVE      "ZZZZZZ",ENDTYPE
+          GOTO      CLNT9999
+.
+.-------- "?" option entered, display relevant clinic types ------
+.
+CLNT8000  
+          MOVE      SP30,OCTDESC
+          CALL      OUTDSCTY                 * display clinic types 
+          CALL      DISP0000                 * redisplay screen 
+          GOTO      CLNT0500                 * go back to keyin 1st range
+.
+.-------- "?" option entered, display relevant clinic types ------
+.
+CLNT8500  
+          MOVE      SP30,OCTDESC
+          CALL      OUTDSCTY                 * display clinic types 
+          CALL      DISP0000                 * redisplay screen 
+          GOTO      CLNT1000                 * go back to keyin 2nd range
+.
+.-------- validate end clinic type ------
+.
+CLNT9000  
+          PACK      KEY12,SITE,ENDTYPE
+          CALL      RDCTYA1                  * read clinic type file
+          BRANCH    OVRCD OF CLNT9500
+          MOVE      ENDTYPE,CODEDES2
+          MOVE      OCTDESC,DESCRPT2            * get description
+          DISPLAY   *P45:13,*EL,DESCRPT2;
+.
+.-------- check if code range is valid ----
+.
+          MATCH     STRTTYPE,ENDTYPE          
+          GOTO      CLNT9200 IF LESS
+          GOTO      CLNT9999
+.
+.--------- Invalid code range -----
+.
+CLNT9200  
+          DISPLAY   *P1:24,*EL,*B,"2nd Range Must Be Greater Than 1st Range ":
+                            "- Hit <",*V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      CLNT1000
+.
+.-------- invalid clinic type code entered -----
+.
+CLNT9500  DISPLAY   *P1:24,*EL,*B,"Invalid Clinic Type - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      CLNT1000
+.
+CLNT9999  RETURN
++
+.***************************************************************************
+.*                               DATE0000                                  *
+.*                          accept date range                              *
+.***************************************************************************
+.
+.---------- keyin first date range -------
+.
+DATE0000    MOVE       FALSE,EXIT
+            DISPLAY    *P1:9,*EF,"Clinic Date From :":
+                          *P1:10,"Clinic Date To   :";
+.
+            PACK       OPENDATE,SP10                   * move sp date range
+            MOVE       "9",CVERT
+            MOVE       "9",EVERT
+            CALL       SETD0000
+            MATCH      SP2,CDAY
+            GOTO       DATE9000 IF EQUAL
+.
+            PACK       OPENDATE,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR    
+            PACK       FROMDATE,CCENT,CYEAR,CMON,CDAY      * move to form field
+.
+            PACK       CLSEDATE,SP10                   * move sp date range
+            MOVE       "10",CVERT
+            MOVE       "10",EVERT
+            CALL       SETD0000
+            MATCH      SP2,CDAY
+            GOTO       DATE0000 IF EQUAL
+.
+            PACK       CLSEDATE,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR    
+            PACK       TODATE,CCENT,CYEAR,CMON,CDAY      * move to form field
+.
+            MATCH      FROMDATE,TODATE
+            GOTO       DATE9999 IF NOT LESS
+.
+            DISPLAY    *P1:24,*EL,*B,"2nd Range Must Be Greater Than 1st ":
+                       "Range - Hit <",*V2LON,"ENTER",*HOFF,"> To Continue ";
+            KEYIN      ANS;
+            DISPLAY    *P1:24,*EL;
+            GOTO       DATE0000
+.
+DATE9000    MOVE       TRUE,EXIT                    * exit 
+.
+DATE9999    RETURN
++
+.**********************************************************************
+.*                         CHK0000                                    *
+.*                   Check if ok to continue                          *
+.**********************************************************************
+.
+CHK0000   MOVE      FALSE,CEXIT
+          CALL      CONTQST                  
+CHK9999   RETURN         
++
+.**********************************************************************
+.*                           FNAM0000                                 *
+.*                 Routine to format patients name                    *
+.**********************************************************************
+FNAM0000  PACK      DIM42,SP30,SP10
+          MATCH     SP4,PTITL
+          GOTO      FNAM1200 IF EQUAL
+          MOVE      PTITL,DIM42                  * get title
+          ENDSET    DIM42                        * reset pointers
+.
+.-------- get surname ------
+.
+FNAM0500  CMATCH    SP1,DIM42                    * character match for spaces
+          GOTO      FNAM1000 IF NOT EQUAL
+          BUMP      DIM42,-1                     * bump back by 1
+          GOTO      FNAM0500                     * loop 
+.
+FNAM1000  APPEND    " ",DIM42                    * if no more spaces append
+FNAM1200  MATCH     SP30,PSNAME
+          GOTO      FNAM2100 IF EQUAL
+          APPEND    PSNAME,DIM42                 * given name to field
+.
+.-------- get given name -----
+.
+FNAM1500  CMATCH    SP1,DIM42                    * character match for spaces
+          GOTO      FNAM2000 IF NOT EQUAL
+          BUMP      DIM42,-1                     * bump back by 1
+          GOTO      FNAM1500                     * loop 
+.
+FNAM2000  APPEND    ", ",DIM42                   * if no more spaces append
+FNAM2100  MATCH     SP20,PGNAME
+          GOTO      FNAM9000 IF EQUAL
+          APPEND    PGNAME,DIM42                 * given name to field
+FNAM9000  RESET     DIM42     
+          MOVE      DIM42,PATNAME
+.
+FNAM9999  RETURN
++
+.**********************************************************************
+.*                             ADDR0000                               *
+.*                     Pack Patients Address                          *
+.**********************************************************************
+.
+ADDR0000
+          PACK      ADDRESS,SP70
+          CLEAR     ADDRESS
+.
+          MATCH     SP70,PADD1
+          IF        !@EQUAL
+            STRIP     PADD1
+            APPEND    PADD1,ADDRESS
+            APPEND    ",",ADDRESS
+          ENDIF
+.
+          MATCH     SP70,PADD2
+          IF        !@EQUAL
+            STRIP     PADD2
+            APPEND    PADD2,ADDRESS
+            APPEND    ",",ADDRESS
+          ENDIF
+.
+          MATCH     SP70,PSUBRB
+          IF        !@EQUAL
+            STRIP     PSUBRB
+            APPEND    PSUBRB,ADDRESS
+            APPEND    ",",ADDRESS
+          ENDIF
+.
+          MATCH     SP70,PADD4
+          IF        !@EQUAL
+            STRIP     PADD4
+            APPEND    PADD4,ADDRESS
+            APPEND    " ",ADDRESS
+          ENDIF
+.
+          MATCH     SP70,PPOST
+          IF        !@EQUAL
+            SQUEEZE   PPOST
+            APPEND    PPOST,ADDRESS
+          ENDIF
+.
+          RESET     ADDRESS
+          PACK      PATADDR,ADDRESS,SP30,SP20
+.
+          RETURN
++
+.**************************************************************************
+.*                              FDOC0000                                  *
+.*                      Format doctors name                               *
+.**************************************************************************
+FDOC0000  MOVE      DTITL,DOCTNAM             * move doctors title to DOCTNAM
+          ENDSET    DOCTNAM
+.
+.------ Move to the end of doctors title ------
+.
+FDOC1000  CMATCH    SP1,DOCTNAM
+          GOTO      FDOC2000 IF NOT EQUAL
+          BUMP      DOCTNAM,-1
+          GOTO      FDOC9000 IF EOS
+          GOTO      FDOC1000
+.
+.------ Append a space and then the doctors given name to DOCTNAM ------
+.
+FDOC2000  APPEND    SP1,DOCTNAM
+          APPEND    DGNAME,DOCTNAM
+          ENDSET    DOCTNAM
+.
+.------ Move to the end of doctors given name ------
+.
+FDOC2200  CMATCH    SP1,DOCTNAM
+          GOTO      FDOC3000 IF NOT EQUAL
+          BUMP      DOCTNAM,-1
+          GOTO      FDOC2200
+.
+.------ Append a space and then the doctors surname to DOCTNAM ------
+.
+FDOC3000  APPEND    SP1,DOCTNAM
+          APPEND    DSNAME,DOCTNAM
+          ENDSET    DOCTNAM
+.
+.------ Move to the end of doctors surname ------
+.
+FDOC3200  CMATCH    SP1,DOCTNAM
+          GOTO      FDOC9000 IF NOT EQUAL
+          BUMP      DOCTNAM,-1
+          GOTO      FDOC3200
+.
+.------ Reset the formatted doctors name ------
+.
+FDOC9000  RESET     DOCTNAM
+          MOVE      DOCTNAM,CLNDESC
+.
+FDOC9999  RETURN
++
+.**********************************************************************
+.*                         PRC0000                                    *
+.*                      Process Data                                  *
+.**********************************************************************
+.
+PRC0000   DISPLAY    *P1:24,*EL,*P10:24,"U/R Number : ",*P33:24,"Slot : "
+.
+          PACK       KEY12,SITE,SP30
+          CALL       RDSCTYA1
+PRC1000   CALL       RDKCTYA1                * read clinic type file
+          BRANCH     OVRCD,PRC9999
+          MATCH      OCTSITE,SITE
+          GOTO       PRC1000 IF NOT EQUAL
+.
+          MATCH      STRTTYPE,OCTCTYP        * check if within range
+          GOTO       PRC1000 IF LESS
+.
+          MATCH      OCTCTYP,ENDTYPE         * check if within range
+          GOTO       PRC9999 IF LESS
+.
+          PACK       DIM13A,SITE,OCTCTYP,ONE
+          PACK       KEY35,DIM13A,FROMDATE,SP20
+.
+          CALL       RDSBOKA2
+PRC2000   CALL       RDKBOKA2
+          BRANCH     OVRCD,PRC1000           * get next clinic type
+.
+          PACK       DIM13B,OBASITE,OBACTYP,OBASTAT
+          MATCH      DIM13A,DIM13B           * match key attributes
+          GOTO       PRC1000 IF NOT EQUAL    * get next clinic type if not equal
+.
+.-------- Check for a valid date --------
+.
+          MATCH      OBADATE,TODATE          * check if within range
+          GOTO       PRC1000 IF LESS
+.
+.-------- valid record, write to tempfile --------
+.
+          DISPLAY    *P23:24,*V2LON,OBAURNO,*P40:24,DOBASLOT;
+.
+          PACK       KEY28,OBACTYP,OBACLIN,OBADATE,OBASTRT,DOBASLOT
+          CALL       WRTEMP1                 * write to tempfile
+          GOTO       PRC2000                 * get next slot
+.
+PRC9999   RETURN
++
+.**********************************************************************
+.*                         END0000                                    *
+.*                      End of Report                                 *
+.**********************************************************************
+.
+END0000   COMPARE   ZERO,PAGENO
+          GOTO      END2000 IF NOT EQUAL
+.
+.         No data selected
+.
+          DISPLAY   *P1:24,*EL,*V2LON:
+                    "** No Record Selected ** ";
+          CALL      HITENTER
+          CALL      HEAD0000
+          PRINT     *N,*N,"  ***  END OF REPORT  ***"
+          GOTO      END9999
+.
+END2000 
+          CALL      LINE0000
+          PRINT     *N,*N,"  ***  END OF REPORT  ***"
+          DISPLAY   *P1:23,*EL,*P1:24,*EL,*V2LON:
+                    "** Report Generation Completed ** ";
+          CALL      HITENTER
+.
+          GOTO      END9999
+.
+END9999   DISPLAY   *P1:14,*EF
+          RETURN
++
+.**********************************************************************
+.*                         PRT0000                                    *
+.*                        Print Data                                  *
+.**********************************************************************
+.
+PRT0000   MOVE      "80",CLNO
+          MOVE      FALSE,FRSTFLG         * initialise 1st record flag
+          PACK      KEY28,SP20,SP10
+          CALL      RDSTEMP1
+PRT1000   CALL      RDKTEMP1
+          BRANCH    OVRCD,PRT9999
+.
+          BRANCH    FRSTFLG,PRT1500        * first record read
+.
+          MOVE      OBACTYP,SAVTYPE
+          MOVE      OBACLIN,SAVCLIN
+          MOVE      OBADATE,SAVDATE
+          MOVE      OBASTRT,SAVSTRT
+PRT1500
+          MOVE      FALSE,GOFLAG
+          COMPARE   "50",CLNO
+          CALL      HEAD0000 IF NOT LESS
+          BRANCH    GOFLAG,PRT1800
+.
+          MOVE      FALSE,GOFLAG
+          MATCH     SAVTYPE,OBACTYP        * check if clinic type changes
+          CALL      HEAD0000 IF NOT EQUAL  * page break if different
+          BRANCH    GOFLAG,PRT1800
+.
+          MOVE      FALSE,GOFLAG
+          MATCH     SAVCLIN,OBACLIN        * check if clinic id changes
+          CALL      CBRK0000 IF NOT EQUAL  * do control break if different
+          BRANCH    GOFLAG,PRT1800
+.
+          MOVE      FALSE,GOFLAG
+          MATCH     SAVDATE,OBADATE       * check if date changes
+          CALL      CBRK0000 IF NOT EQUAL * do control break if different
+          BRANCH    GOFLAG,PRT1800
+.
+          MOVE      FALSE,GOFLAG
+          MATCH     SAVSTRT,OBASTRT       * check if start time changes
+          CALL      CBRK0000 IF NOT EQUAL  * do control break if different
+.
+.--------- get patient master details -----
+.
+PRT1800
+          MOVE      OBAURNO,KEY8  
+          CALL      RDMAST1                * get patient details
+          BRANCH    OVRCD,PRT2000          * if not on master, read patpram.
+          GOTO      PRT2500
+.
+.------- read patient pre admissions file, if not in patient master -------
+.
+PRT2000   MOVE      OBAOUTNO,KEY8              * read with outpatient no.
+          CALL      RDPRAM1
+          BRANCH    OVRCD,PRT7000
+.
+PRT2500   CALL      FNAM0000               * format patient name routine
+          CALL      ADDR0000               * format patient address routine
+.
+.-------- print detail line -----
+.
+PRT7000   PRINT     *N,*1,"|",*3,DOBASLOT,*7,"|",*9,OBATIME:
+                    *15,"|",*17,OBAURNO,*25,"|",*27,PATNAME:
+                    *70,"|",*72,ADDRESS,*132,"|":
+                    *N,*1,"|",*7,"|",*15,"|",*25,"|":
+                    *70,"|",*75,"Home Phone : ",PTELEP,*132,"|";
+          ADD       TWO,CLNO
+.
+          MOVE      ONE,FRSTFLG           * load 1st time thru flag
+.
+          MOVE      OBACTYP,SAVTYPE       * move to save variables 
+          MOVE      OBACLIN,SAVCLIN
+          MOVE      OBADATE,SAVDATE
+          MOVE      OBASTRT,SAVSTRT
+.
+          CALL      CLR1000               * clear print variables
+          GOTO      PRT1000               * read next record
+.
+PRT9999   RETURN
++
+.**********************************************************************
+.*                         HEAD0000                                   *
+.*                      Print Headings                                *
+.**********************************************************************
+.
+HEAD0000  CLOCK     TIME,CTIMEIS
+          BRANCH    FRSTFLG,HEAD1000
+          GOTO      HEAD1500
+.
+HEAD1000  CALL      LINE0000
+HEAD1500
+          ADD       ONE,PAGENO
+          MOVE      ONE,CNOUNDLN
+          CALL      IBACLOCK
+          CALL      HEAD132
+.
+          PRINT     *N,*40,"Clinic Date From : ",OPENDATE:
+                    *N,*40,"Clinic Date To   : ",CLSEDATE:
+                    *N,*40,"Clinic Type From : ",CODEDES1,*70,DESCRPT1:
+                    *N,*40,"Clinic Type To   : ",CODEDES2,*70,DESCRPT2;
+          MOVE      EIGHT,CLNO 
+          MOVE      TRUE,GOFLAG           * control break flag
+          COMPARE   ZERO,PAGENO
+          GOTO      HEAD9999 IF EQUAL
+          CALL      CBRK1000
+.
+HEAD9999  RETURN
++
+.**********************************************************************
+.*                         CBRK0000                                   *
+.*   control break for change of session time/clinic type & id  & date*
+.**********************************************************************
+CBRK0000  
+          COMPARE   "50",CLNO
+          CALL      HEAD0000 IF NOT LESS
+          CALL      LINE0000
+CBRK1000
+.
+.-------  Get the clinic type description --------
+.
+          MOVE     SP30,OCTDESC
+          PACK     KEY12,SITE,OBACTYP
+          CALL     RDCTYA1
+.
+.-------- get clinic id description ------
+.
+          PACK      KEY20,SITE,OBACLIN,OBADATE
+          CALL      RDCLIA1
+          IF        OVRCD = 1
+            CALL      RDPCLIA1
+            IF        OVRCD = 0
+              MATCH     SITE,OCASITE
+              IF        !@EQUAL
+                MOVE      ONE,OVRCD
+              ELSE
+                MATCH     OBACLIN,OCACLIN
+                IF        !@EQUAL
+                  MOVE      ONE,OVRCD
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+          IF        OVRCD = 1
+            MOVE      "Unknown clinic",OCADESC
+            PACK      OCADESC,OCADESC,SP30
+            GOTO      CBRK2000
+          ENDIF
+.
+          MATCH     SP6,OCADOCT            * check doctor code for spaces
+          GOTO      CBRK2000 IF EQUAL      * if spaces use clinic description
+.
+          PACK      KEY6,OCADOCT
+          CALL      RDDOCT1
+          BRANCH    OVRCD,CBRK2000
+          CALL      FDOC0000               * format doctors name routine
+          GOTO      CBRK2100               * continue 
+.
+CBRK2000  MOVE      OCADESC,CLNDESC        * description
+.
+CBRK2100  UNPACK    OBADATE,CCENT,XYEAR,XMON,XDAY
+          PRINT     *N,*N,*45,"Clinic Type      : ",OBACTYP,*75,OCTDESC:
+                       *N,*45,"Clinic Id        : ",OBACLIN,*75,CLNDESC:
+                       *N,*45,"Date             : ":
+                               XDAY,SLASH,XMON,SLASH,CCENT,XYEAR:
+                       *N,*45,"Start Time       : ",OBASTRT;
+.
+.-------- print header for details -----
+.
+          PRINT     *N;
+          CALL      LINE0000                      * print single line
+          PRINT     *N,*1,"|Slot",*7,"| Time",*15,"| U/R No.":
+                    *25,"| Patients Name",*70,"| Address":
+                    *132,"|";
+.
+          ADD       SEVEN,CLNO                      * increment line count
+          MOVE      TRUE,GOFLAG                     * control break flag
+          CALL      LINE0000                        * print line
+.
+CBRK9999  RETURN
++
+.**********************************************************************
+.*                           LINE0000                                 *
+.*                    Print line  (132)                               *
+.**********************************************************************
+.
+LINE0000  PRINT     *N,"*---------------------------------------":
+                       "----------------------------------------":
+                       "----------------------------------------":
+                       "-----------*";
+          ADD       ONE,CLNO
+          RETURN
+.**********************************************************************
+.*                           SETD0000                                 *
+.*                    Set up the positions for keyin date             *
+.**********************************************************************
+.
+SETD0000  MOVE      "20",CCOL                       * set up keyin date
+          MOVE      CCC,CCENT                      * parameters
+          MOVE      "3",CDEFDTE
+          MOVE      "45",ECOL
+.
+          MOVE      SP2,CDAY                        
+          MOVE      SP2,CMON
+          MOVE      SP2,CYEAR
+.
+          CALL      KEYDATE                        * call keyin date routine
+          RETURN
++
+.**********************************************************************
+.*              I/O SUBROUTINE FOR TEMPFILE                           *
+.**********************************************************************
+.
+RDSTEMP1  MOVE      ZERO,OVRCD
+          RESET     KEY28
+          READ      TEMPFILE,KEY28;;
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDKTEMP1  MOVE      ZERO,OVRCD
+          READKS    TEMPFILE;OBACTYP,OBACLIN,OBADATE,OBASTRT,DOBASLOT,OBATIME:
+                                   OBAURNO,DOBAOUTN
+          GOTO      OVERCOND IF OVER
+          MOVE      DOBAOUTN,OBAOUTNO 
+          RETURN
+.
+WRTEMP1   RESET     KEY28
+          WRITE     TEMPFILE,KEY28;KEY28,OBATIME,OBAURNO,DOBAOUTN
+          RETURN
+.
+.**********************************************************************
+.*              I/O INCLUDES FOR FILES AND GENERAL ROUTINES           *
+.**********************************************************************
+.
+          INCLUDE   OUTDSCTY
+          INC       IBASEQIO/INC
+          INC       PATCODIO/INC
+          INC       PATMA1IO/INC
+          INC       PATDO1IO/INC
+          INC       PATPR1IO/INC
+          INC       OUTBOAIO/INC
+          INC       OUTCLIIO/INC
+          INC       OUTCTYIO/INC
+          INC       OUTSITIO/INC
+          INC       WEBERRIO/INC
+.
+          INCLUDE   STD001IO
+          INC       TFILENAM
+.

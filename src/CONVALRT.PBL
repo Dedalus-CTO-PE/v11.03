@@ -1,0 +1,1798 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   CONVALRT                                                    *
+.* Desc      :   Data Migration Program to upload alert data from a          *
+.*               third party legacy system into the PMI webPAS module.       *
+.*****************************************************************************
+.* Date      :   29/02/2011                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through the convalrt.txt file and    *
+.*               for each valid record found, it will write a new patalrtf   *
+.*               record for the patient.  In addition, if there are any      *
+.*               comments present, then one or more records will be written  *
+.*               to pmsalnaf.                                                *
+.* Mods      :                                                               *
+.*        V11.03.01  13/12/2023  Davin             TSK 0936992               *
+.*                   Added run option 2 - trigger hl7 A31 message after      *
+.*                   successfully writing alert (BPMIUP00)                   *
+.*****************************************************************************
+.*        V10.08.01  08/08/2016  Davin             TSK 0321234               *
+.*                   Added chronic condition alert (pmpxsn11) to SAVEALRT    *
+.*        V10.07.02  04/11/2015  Steve Armstrong   CAR 322969                *
+.*                   Mods for duplicate records to be ignored unless the     *
+.*                   indicator is set to allow duplicates.                   *
+.*        V10.07.01  22/10/2015  Steve Armstrong   CAR 322969                *
+.*                   Moved CALL to CONC0000 to be in SETV0000 so that the    *
+.*                   correct U/R, Category and Code are being used when      *
+.*                   looking for the counter value.                          *
+.*****************************************************************************
+.*        V10.04.02  31/03/2014  Steve Armstrong   CAR 296128                *
+.*                   Fixed validation routine (CVAL0000) to use patalrtf     *
+.*                   variable instead of upload variable.                    *
+.*        V10.04.01  14/03/2014  Steve Armstrong   CAR 296128                *
+.*                   Mods to add temp mapping tables for coded fields.       *
+.*                   Added display of warning message if error records found.*
+.*****************************************************************************
+.*        V10.03.05  23/10/2013  Davin             CAR 288063                *
+.*                   Added ummrflag to check if using med/micro/risk alerts  *
+.*        V10.03.04  01/02/2013 Steve Armstrong    CAR 277231                *
+.*                   Mods to check Indicator 7 of the alert category-code    *
+.*                   to see if duplicate alerts are allowed.                 *
+.*        V10.03.03  30/01/2012 Sandra Barcham     CAR 257332                *
+.*                   Changed prgnam from CONVALAS to CONVALRT                *
+.*        V10.03.02  13/12/2011  Steve Armstrong   CAR 257332                *
+.*                   Added OPEN on PATAUDA2.                                 *
+.*                   Remove setting of ALRTCNTR after calling CONC0000 (as   *
+.*                   CONC0000 already sets ALRTCNTR).                        *
+.*        V10.03.01  30/11/2011  Jill Parkinson    CAR 249362                *
+.*                   Added CONC0000 and changed alert keys                   *
+.*****************************************************************************
+.*        V10.02.01  23/05/2011  Steve Armstrong   CAR 240679                *
+.*                   Mods to write to pmspx2af (sin7-9) based on alert type  *
+.*        V10.02.00  29/02/2011  Steve Armstrong   CAR 240679                *
+.*                   Created program                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+          INC       IBACONFD/INC
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       NHIMASFD/INC
+          INC       PATALRFD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATHSPFD/INC
+          INC       PATICDFD/INC
+          INC       PATMA1FD/INC
+          INC       PATNIDFD/INC
+          INC       PMSALNFD/INC
+          INC       PMSHCPFD/INC
+          INC       PMSPX2FD/INC
+          INC       WEBSECFD/INC
+.
+.         alert upload file layout - convalrt.txt
+.
+ALERTUPL  FILE      HL7, FIXED=4065         * Pipe delimited upload file
+.
+.         Fields must be pipe delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+ALRTURNO  DIM       8     1       * U/R Number                 (ptalurno)
+ALRTCATG  DIM       2     9       * Category (H1-H9)           (ptalcatg)
+ALRTCODE  DIM       3     11      * Category-Code              (ptalcode)
+ALRTDATE  DIM       8     14      * Alert Date (ccyymmdd)      (ptaldate)
+ALRTCDTE  DIM       8     22      * Creation Date (ccyymmdd)   (ptalcdte)
+ALRTLIFE  DIM       1     30      * Life Threatening Alert     (ptallife)
+.                                        (not used by webPAS)
+ALRTREAC  DIM       3     31      * Reaction Code (Cat wn)     (ptalreac)
+ALRTUSID  DIM       10    34      * User Id for creation       (ptalusid)
+ALRTLSEV  DIM       1     44      * Severity Level             (ptallsev)
+.                                        (0-9)
+ALRTRCOM  DIM       20    45      * Reaction Comment           (ptalrcom)
+ALRTRDTE  DIM       8     65      * Review Date (ccyymmdd)     (ptalrdte)
+ALRTICDC  DIM       9     73      * ICD Code                   (ptalicdc)
+ALRTDTIN  DIM       8     82      * Date Inactive (ccyymmdd)   (ptaldtin)
+ALRTRQBY  DIM       10    90      * Requested By (HCP)         (ptalrqby)
+ALRTHOSP  DIM       3     100     * Initiating Hospital        (ptalhosp)
+ALRTEDAT  DIM       8     103     * End Date (ccyymmdd)        (ptaledat)
+ALRTCTIM  DIM       8     111     * Create Time (hh:mm:ss)     (ptalctim)
+ALRTUDAT  DIM       8     119     * Update Date (ccyymmdd)     (ptaludat)
+ALRTUTIM  DIM       8     127     * Update Time (hh:mm:ss)     (ptalutim)
+ALRTUUID  DIM       10    135     * User who Updated           (ptaluuid)
+ALRTCOMM  DIM       3920  145     * Comments (56x70)           (pmancomm)
+.
+.End of Record      4065
+.
+.
+.         Temporary Mapping Files
+.
+.
+.         Category-Codes Alert File - catcodes.dat (Cat H1-H9)
+.
+CATCDFLG  FORM      1                            * Cat-Code mapping flag
+TEMP1     IFILE     SQL, FIXED=11, KEY="U1-2,3-5"
+.
+.Name     Type      Length   Physical   Start   Description
+.----     ----      ------   --------   -----   -----------
+OLDALCAT  DIM       2        2          1       Old category
+OLDALCOD  DIM       3        3          3       Old code
+NEWALCAT  DIM       2        2          6       New category
+NEWALCOD  DIM       3        3          8       New code
+.End of Record                         11
+.
+.         Reaction File - reaction.dat (Cat wn)
+.
+REACTFLG  FORM      1                            * Reaction mapping flag
+TEMP2     IFILE     SQL, FIXED=7, KEY="U1-3"
+.
+.Name     Type      Length   Physical   Start   Description
+.----     ----      ------   --------   -----   -----------
+OLDREACT  DIM       3        3          1       Old reaction code
+NEWREACT  DIM       3        3          4       New reaction code
+.End of Record                          7
+.
+.         HCP Code File - hcpcode.dat (pmshcpaf)
+.
+HCPCDFLG  FORM      1                            * HCP Code mapping flag
+TEMP3     IFILE     SQL, FIXED=21, KEY="U1-10"
+.
+.Name     Type      Length   Physical   Start   Description
+.----     ----      ------   --------   -----   -----------
+OLDHCPCD  DIM       10       10         1       Old HCP code
+NEWHCPCD  DIM       10       10        11       New HCP code
+.End of Record                         21
+.
+.         Hospital File - hospital.dat (pathspaf)
+.
+HOSPLFLG  FORM      1                            * Hospital mapping flag
+TEMP4     IFILE     SQL, FIXED=7, KEY="U1-3"
+.
+.Name     Type      Length   Physical   Start   Description
+.----     ----      ------   --------   -----   -----------
+OLDHOSPL  DIM       3        3          1       Old hospital code
+NEWHOSPL  DIM       3        3          4       New hospital code
+.End of Record                          7
+.
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+ADDCOUNT  FORM      8             * added record count
+ALERTFND  FORM      1             * alert found flag
+.                                    0 = matching current alert found
+.                                    1 = no matching current alert found
+ALRTCNTR  DIM       3
+.
+COMMTLEN  FORM      4
+CODCOUNT  FORM      8             * code error record count
+COMCOUNT  FORM      8             * comment error record count
+CURRCENT  FORM      2             * current century
+CURRDATE  DIM       8             * current date
+.
+DATEFLG1  FORM      1             * Date Type flag
+.                                     0 = full date (ccyymmdd)
+.                                     1 = partial date (ccyymm)
+DATEFLG2  FORM      1             * Dates Allowed flag
+.                                     0 = any date allowed
+.                                     1 = future dates not allowed
+DIM1A     DIM       1
+DIM1B     DIM       1
+DIM2C     DIM       2
+DIM2D     DIM       2
+DIM2H     DIM       2
+DIM2M     DIM       2
+DIM2S     DIM       2
+DIM2Y     DIM       2
+DIM3      DIM       3
+DIM4      DIM       4
+DIM6      DIM       6
+DIM70     DIM       70
+DTECOUNT  FORM      8             * date error record count
+DUPCOUNT  FORM      8             * duplicate record count
+.
+ERORDESC  DIM       70
+ERORFLAG  FORM      1             * Field Validation Error Flag
+.                                     0 = No Errors on Field Validations
+.                                     1 = Errors on Field Validations
+.
+F3A       FORM      3
+FORM10    FORM      10
+.
+LINENUMB  FORM      3
+.
+MANCOUNT  FORM      8             * mandatory field error record count
+.
+NMPNUMB   DIM       20
+NUMCOUNT  FORM      8             * numeric error record count
+.
+RECCOUNT  FORM      8             * record read counter
+.
+SAVEALRT  FORM      1             * saved alert type
+.                                     1 = Medical
+.                                     2 = Micro
+.                                     3 = Risk
+.                                     4 = Chronic
+SAVECATG  DIM       2
+SAVECODE  DIM       3
+SAVEIND7  DIM       1             * saved Indicator 7 value for alert category
+.                                     
+.
+TEMPCATG  DIM       6             * Category (or HF for HF Table validation)
+TEMPCODE  DIM       10            * Coded field (length = max code field length)
+TEMPDATE  DIM       8
+TEMPTIME  DIM       8
+TEMPTYPE  FORM      1             * Type of coded field
+TIMCOUNT  FORM      8             * time error record count
+TMPFIELD  DIM       8             * Field name
+TMPSTRNG  DIM       3             * Temporary string (max field length)
+.
+UNKCOUNT  FORM      8             * unknown U/R counter
+UMMRFLAG  FORM      1             * using medical/micro/risk alerts ?
+.                                     0 = yes
+.                                     1 = no
+.
+VCHKFLAG  FORM      1             * Validation flag
+.                                     0 = writing data to database
+.                                     1 = only validation import data file
+.
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+CATWN     INIT      "wn"
+PIPE      INIT      "|"
+.
+.
+.
+PRGID     INIT      "CONVALRT"
+PRGNAM    INIT      "Upload Patient Alerts"
+VERSION   INIT      "V11.03.01"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000:      * proceed with upload
+                            MAIN1000       * proceed with upload & HL7 trigger
+.
+MAIN1000  CALL      OPEN0000               * open upload file
+          BRANCH    EXIT,MAIN0100          * file not found
+.
+          CALL      DMAP0000               * display mapping files
+          BRANCH    EXIT,MAIN0100:         * no (to continue)
+                         MAIN9999          * cancel (to continue)
+.
+          CALL      ASKQ0000               * validation run only ?
+.
+          CALL      UMMR0000               * WA style med/micro/risk alerts ?
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      UPLD0000               * process upload
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patalrtf";
+          OPEN      PATALRT1,"patalrtf"
+          OPEN      PATAUDA2,"pataudal"
+.
+          DISPLAY   *P64:24,"paticddf";
+          CALL      OPICD1
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"pathspaf";
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P64:24,"pmsalnaf";
+          OPEN      PMSALNA1,"pmsalnaf"
+.
+          DISPLAY   *P64:24,"pmshcpaf";
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          DISPLAY   *P64:24,"pmspx2af";
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          DISPLAY   *P64:24,"websecaf";
+          OPEN      WEBSECA1,"websecaf"
+.
+          DISPLAY   *P64:24,"controlf"
+          OPEN      CONTROLF,"controlf"
+.
+          MOVE      SP8,ICDRDDTE
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run data upload                         *
+.*                        TRUE  (1)  Exit selected                           *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Data Upload":
+                    *P1:6,*V2LON,TWO,*HOFF,". Run Data Upload with HL7 trigger"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000,OPTN9000    * run data upload
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000              Called by: MAIN0000   *
+.*                  Open upload file (convalrt.txt) and mapping files        *
+.*****************************************************************************
+.
+OPEN0000  MOVE      ZERO,OVRCD
+.
+          TRAP      OVERCOND IF IO
+          OPEN      ALERTUPL,"convalrt"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+.         Cat-Codes alert mapping file (Cat H1-H9)
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TEMP1,"catcodes"             * Cat-Code file found ?
+          TRAPCLR   IO
+          IF        OVRCD=1
+            MOVE      ZERO,CATCDFLG              * no
+          ELSE
+            MOVE      ONE,CATCDFLG               * yes
+          ENDIF
+.
+.         Reaction mapping file (Cat wm)
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TEMP2,"reaction"             * reaction file found ?
+          TRAPCLR   IO
+          IF        OVRCD=1
+            MOVE      ZERO,REACTFLG              * no
+          ELSE
+            MOVE      ONE,REACTFLG               * yes
+          ENDIF
+.
+.         HCP Code mapping file (pmshcpaf)
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TEMP3,"hcpcode"              * hcp code file found ?
+          TRAPCLR   IO
+          IF        OVRCD=1
+            MOVE      ZERO,HCPCDFLG              * no
+          ELSE
+            MOVE      ONE,HCPCDFLG               * yes
+          ENDIF
+.
+.         Hospital mapping file (pathspaf)
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TEMP4,"hospital"             * hospital file found ?
+          TRAPCLR   IO
+          IF        OVRCD=1
+            MOVE      ZERO,HOSPLFLG              * no
+          ELSE
+            MOVE      ONE,HOSPLFLG               * yes
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,*B,"Upload file - convalrt.txt - not found.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.******************************************************************************
+.*                                  DMAP0000              Called by: MAIN0000 *
+.*                       Display File Name & Mapping files                    *
+.* Requires: Mapping Flags                                                    *
+.* Returns:  EXIT  0 = Ok to continue                                         *
+.*                 1 = No selected                                            *
+.*                 2 = Cancel selected                                        *
+.******************************************************************************
+.
+DMAP0000  DISPLAY   *P1:4,*EF,*V2LON,SP9,*ULON,"Mapping Tables"
+.
+          MOVE      DNO,DIM3
+          LOAD      DIM3,CATCDFLG,DYES
+.
+          DISPLAY   *P1:6,*EL,"Mapping Cat-Code Alerts (Cat H1-H9)   ":
+                    *V2LON,DIM3
+.
+          MOVE      DNO,DIM3
+          LOAD      DIM3,REACTFLG,DYES
+.
+          DISPLAY   *P1:7,*EL,"Mapping Reaction Code (Cat wn)        ":
+                    *V2LON,DIM3
+.
+          MOVE      DNO,DIM3
+          LOAD      DIM3,HCPCDFLG,DYES
+.
+          DISPLAY   *P1:8,*EL,"Mapping HCP Code (pmshcpaf)           ":
+                    *V2LON,DIM3
+.
+          MOVE      DNO,DIM3
+          LOAD      DIM3,HOSPLFLG,DYES
+.
+          DISPLAY   *P1:9,*EL,"Mapping Hospital Code (pathspaf)      ":
+                    *V2LON,DIM3
+.
+DMAP8000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,DMAP9000:        * yes
+                          DMAP9100:        * no
+                          DMAP9200         * cancel
+.
+DMAP9000  MOVE      ZERO,EXIT
+          GOTO      DMAP9999
+.
+DMAP9100  MOVE      ONE,EXIT
+          GOTO      DMAP9999
+.
+DMAP9200  MOVE      TWO,EXIT
+.
+DMAP9999  RETURN
++
+.*****************************************************************************
+.*                               ASKQ0000              Called by: MAIN0000   *
+.*                  Ask if running validation only                           *
+.*****************************************************************************
+.
+ASKQ0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Data Upload":
+                    *P1:6,*V2LON,TWO,*HOFF,". Run Data Upload with HL7 trigger":
+                    *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+ASKQ1000  MOVE      ANSY,ANS
+          KEYIN     *P1:10,*EL,"Validation only (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+                    *P25:10,*V2LON,*RV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS                     * Y input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DYES,*HOFF:
+                      *P35:10,"(No data will be uploaded)"
+            MOVE      ONE,VCHKFLAG               * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          MATCH     ANSN,ANS                     * N input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DNO,*HOFF:
+                      *P35:10,"(Data will be uploaded)"
+            MOVE      ZERO,VCHKFLAG              * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          GOTO      ASKQ1000                     * invalid input
+.
+ASKQ9999  RETURN
++
+.*****************************************************************************
+.*                               UMMR0000              Called by: MAIN0000   *
+.*               Using WA style medical/micro/risk alerts?                   *
+.*****************************************************************************
+.
+UMMR0000  MOVE      ANSY,ANS
+          KEYIN     *P1:11,*EL,"Using Medical / Micro / Risk Alerts (":
+                    *V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+                    *P45:11,*V2LON,*RV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS
+          IF        @EQUAL
+            MOVE      ZERO,UMMRFLAG              * yes
+            GOTO      UMMR9999
+          ENDIF
+.
+          MATCH     ANSN,ANS
+          IF        @EQUAL
+            MOVE      ONE,UMMRFLAG               * no
+            GOTO      UMMR9999
+          ENDIF
+.
+          GOTO      UMMR0000                     * invalid input
+.
+UMMR9999  RETURN
++
+.******************************************************************************
+.*                                  UPLD0000              Called by: MAIN0000 *
+.*                  Process the alert upload file records                     *
+.******************************************************************************
+.
+UPLD0000  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      CCC,CURRCENT
+.
+          DISPLAY   *P1:13,"Processing ",*V2LON,"convalrt.txt",*HOFF:
+                    *P1:15,"Started    : ",*V2LON,CTIMEIS,*HOFF:
+                    *P1:17,"U/R Number : ":
+                    *P1:18,"Cat/Code   : ":
+                    *P1:19,"Records    : "
+.
+          MOVE      ZERO,RECCOUNT                * initialise records read
+          MOVE      ZERO,ADDCOUNT                * initialise added record count
+          MOVE      ZERO,CODCOUNT                * init. code error record count
+          MOVE      ZERO,COMCOUNT                * init. comm error record count
+          MOVE      ZERO,DUPCOUNT                * initialise dup. record count
+          MOVE      ZERO,DTECOUNT                * init. date error record count
+          MOVE      ZERO,TIMCOUNT                * init. time error record count
+          MOVE      ZERO,MANCOUNT                * init. mand error record count
+          MOVE      ZERO,NUMCOUNT                * init. num error record count
+          MOVE      ZERO,UNKCOUNT                * init. unknown pt record count
+.
+          CALL      HEAD0000                     * Print the report header
+.
+.         Loop through upload file records
+.
+UPLD1000  READ      ALERTUPL,SEQ;ALRTURNO,ALRTCATG,ALRTCODE,ALRTDATE,ALRTCDTE:
+                                 ALRTLIFE,ALRTREAC,ALRTUSID,ALRTLSEV,ALRTRCOM:
+                                 ALRTRDTE,ALRTICDC,ALRTDTIN,ALRTRQBY,ALRTHOSP:
+                                 ALRTEDAT,ALRTCTIM,ALRTUDAT,ALRTUTIM,ALRTUUID:
+                                 ALRTCOMM
+          GOTO      UPLD9000 IF OVER
+.
+          ADD       ONE,RECCOUNT                 * increment records read
+          IF        (RECCOUNT%1000) = 0 | RECCOUNT = 1
+            DISPLAY   *P14:17,*V2LON,ALRTURNO:
+                      *P14:18,ALRTCATG,SLASH,ALRTCODE:
+                      *P14:19,RECCOUNT;
+          ENDIF
+.
+          MOVE      SP1,SAVEIND7                 * initialise saved indicator 4
+          MOVE      ONE,ALERTFND                 * initialise alert found flag
+.
+          CALL      POUT0000                     * pad out fields with spaces
+.
+          CALL      CLPATMAS                     * clear patient master vars.
+.
+          CALL      VURN0000                     * validate U/R
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      MAND0000                     * check for Mandatory fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      DVAL0000                     * date validation
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      TVAL0000                     * time validation
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      VNUM0000                     * validate numeric fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      SETV0000                     * set up file variables
+.
+          CALL      CVAL0000                     * validate coded fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          IF        VCHKFLAG = 1
+            CALL      PCOM0000                   * validate comments
+          ENDIF
+.
+.         Check whether there is is an existing matching alert already
+.         on file for the patient
+.
+          BRANCH    ALERTFND,UPLD8000            * no matching current alert
+.
+.         There is is an existing matching alert already on file
+.         for the patient, so make sure that duplicates are allowed
+.         for this alert code
+.
+          MATCH     ANSD,SAVEIND7                * duplicates allowed ?
+          IF        !@EQUAL
+            MOVE      "Duplicate alert already exists for patient",ERORDESC
+            CALL      PERR0000                   * print error line
+            ADD       ONE,DUPCOUNT               * increment dupl. record count
+            GOTO      UPLD1000
+          ENDIF
+.
+UPLD8000  PACK      KEY16,PTALURNO,PTALCATG,PTALCODE,PTALCNTR
+          CALL      RAPTALR1                     * record on file ?
+          IF        OVRCD = 1
+            BRANCH    VCHKFLAG,UPLD1000          * error checking only
+            CALL      WRPTALR1                   * no - write new record
+            ADD       ONE,ADDCOUNT               * increment added record count
+.
+.           Load alert flags for front-end
+.
+            COMPARE   ZERO,SAVEALRT
+            IF        !@EQUAL
+              STORE     ONE,SAVEALRT,PMPXSIN7,PMPXSIN8,PMPXSIN9,PMPXSN11
+              CALL      UPPMPX21                 * update pmi ext. record
+            ENDIF
+.
+            CALL      PCOM0000                   * process any comments
+.
+            CALL      BPMIUP00                   * send hl7 A31 message
+.
+          ELSE
+            MOVE      "Alert record already exists ",ERORDESC
+            CALL      PERR0000                   * print error line
+            ADD       ONE,DUPCOUNT               * increment dupl. record count
+          ENDIF
+.
+          GOTO      UPLD1000                     * get next record
+.
+.         Upload completed
+.
+UPLD9000  ASSIGN    (CODCOUNT+COMCOUNT+DUPCOUNT+DTECOUNT+TIMCOUNT+MANCOUNT+NUMCOUNT+UNKCOUNT),FORM10
+          IF        FORM10 > 0
+            CALL      LINE0000                   * print bottom line if errors
+          ENDIF
+.
+          COMPARE   CLNO,FIFTY2                  * room for stats ?
+          CALL      HEAD0000 IF LESS             * no - new page req'd.
+.
+          CLOCK     TIME,CTIMEIS
+          DISPLAY   *P14:19,*V2LON,RECCOUNT,*HOFF:
+                    *P1:21,"Finished   : ",*V2LON,CTIMEIS
+.
+.         Warn the user if there were any records with errors
+.
+          IF        FORM10 > 0
+            DISPLAY   *P1:22,*V2LON,*BLINKON,"Warning:  Records found with ":
+                      "errors.  Refer to error report."
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,*B,"Upload complete.  ";
+          CALL      HITENTER
+.
+          PRINT     *N:
+                    *1,"Total records read                    - ",RECCOUNT,*N:
+                    *1,"Records added                         - ",ADDCOUNT,*N:
+                    *1,"Duplicate Records detected            - ",DUPCOUNT,*N:
+                    *1,"Records with invalid codes detected   - ",CODCOUNT,*N:
+                    *1,"Records where comments didn't load    - ",COMCOUNT,*N:
+                    *1,"Records with invalid dates detected   - ",DTECOUNT,*N:
+                    *1,"Records with invalid times detected   - ",TIMCOUNT,*N:
+                    *1,"Records with blank mandatory fields   - ",MANCOUNT,*N:
+                    *1,"Records with unknown U/R numbers      - ",UNKCOUNT,*N:
+                    *1,"Records with invalid numbers detected - ",NUMCOUNT:
+                    *N,*N,*1,"*** End of Report ***"
+.
+UPLD9999  RETURN
++
+.****************************************************************************
+.*                             MAND0000                Called by: UPLD0000  *
+.*                 Check for standard Mandatory fields                      *
+.* Returns: EXIT   0 = all mandatory fields are populated                   *
+.*                 1 = one or more mandatory fields are blank               *
+.*          MANCOUNT - updated count of records with mandatory fields       *
+.*                     missing                                              *
+.****************************************************************************
+.
+MAND0000  MOVE      ZERO,ERORFLAG                * init. mandatory field flag
+.
+          MOVE      ALRTCATG,TMPSTRNG
+          MOVE      "ALRTCATG",TMPFIELD          * alert category
+          CALL      CHKM0000
+.
+          MOVE      ALRTCODE,TMPSTRNG
+          MOVE      "ALRTCODE",TMPFIELD          * alert code
+          CALL      CHKM0000
+.
+MAND9000  BRANCH    ERORFLAG,MAND9100            * errors on mand. fields
+.
+          MOVE      ZERO,EXIT                    * no errors on mand. fields
+          GOTO      MAND9999
+.
+MAND9100  ADD       ONE,MANCOUNT                 * incr. mand error record count
+          MOVE      ONE,EXIT
+.
+MAND9999  RETURN
++
+.*****************************************************************************
+.*                            CHKM0000             Called by: MAND0000       *
+.*                    Check if a mandatory field is blank                    *
+.* Requires: TMPSTRNG - field to be checked                                  *
+.*           TMPFIELD - 8 character field name                               *
+.* Returns:  ERORFLAG = 1   field is blank (error)                           *
+.*****************************************************************************
+.
+CHKM0000  MATCH     TMPSTRNG,SP3                 * blank field ?
+          GOTO      CHKM9999 IF NOT EQUAL        * no - finished
+.
+          MOVE      "Mandatory Field blank ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set error flag
+.
+CHKM9999  RETURN
++
+.******************************************************************************
+.*                                  CLER0000              Called by: UPLD0000 *
+.*                    Clear all the database fields                           *
+.******************************************************************************
+.
+CLER0000   MOVE      SP8,PTALURNO
+           MOVE      SP2,PTALCATG
+           MOVE      SP3,PTALCODE
+           MOVE      SP3,PTALCNTR
+           MOVE      SP8,PTALDATE
+           MOVE      SP8,PTALCDTE
+           MOVE      SP1,PTALLIFE
+           MOVE      SP3,PTALREAC
+           MOVE      SP10,PTALUSID
+           MOVE      SP1,PTALLSEV
+           MOVE      SP20,PTALRCOM
+           MOVE      SP8,PTALRDTE
+           MOVE      SP9,PTALICDC
+           MOVE      SP8,PTALDTIN
+           MOVE      SP10,PTALRQBY
+           MOVE      SP3,PTALHOSP
+           MOVE      SP8,PTALEDAT
+           MOVE      SP8,PTALCTIM
+           MOVE      SP8,PTALUDAT
+           MOVE      SP8,PTALUTIM
+           MOVE      SP10,PTALUUID
+           MOVE      SP30,PTALSPAR
+.
+CLER9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000              Called by: UPLD0000 *
+.*                           Print The Report Header                 PERR0000 *
+.******************************************************************************
+.
+HEAD0000  MOVE      ONE,CNOUNDLN
+          MOVE      "- Error Report",CPHDROPT
+          CALL      HEAD132                 * Print the report header
+.
+          PRINT     *1,"< convalrt.txt >"
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"U/R No.",*12,PIPE,*14,"Alert Category/Code":
+                    *59,PIPE,*61,"Error Description",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      SEVEN,CLNO                   * initialise line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: HEAD0000  *
+.*                      Draw line across page                               *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.******************************************************************************
+.*                                  SETV0000              Called by: UPLD0000 *
+.*                       Load the record variables                            *
+.******************************************************************************
+.
+SETV0000  MOVE      ALRTCATG,SAVECATG
+          MOVE      ALRTCODE,SAVECODE
+          IF        CATCDFLG = 1
+            PACK      KEY5,ALRTCATG,ALRTCODE
+            CALL      RDTEMP1                    * alert code on map file ?
+            IF        OVRCD = 0
+              MOVE      NEWALCAT,SAVECATG        * yes - load mapped category
+              MOVE      NEWALCOD,SAVECODE        * load mapped code
+            ENDIF
+          ENDIF
+.
+.         We need to get the next alert count value after U/R merges
+.         have been resolved, before setting the patalrtf variables,
+.         but after any mapping of the alert category-code
+.
+          CALL      CONC0000                     * generate the counter
+.
+          CALL      CLER0000                     * clear database variables
+.                                                  after CONC0000
+          MOVE      PURNO,PTALURNO
+          MOVE      SAVECATG,PTALCATG
+          MOVE      SAVECODE,PTALCODE
+          MOVE      ALRTCNTR,PTALCNTR
+          MOVE      ALRTDATE,PTALDATE
+          MOVE      ALRTCDTE,PTALCDTE
+          MOVE      ALRTLIFE,PTALLIFE
+.
+          MOVE      ALRTREAC,PTALREAC
+          IF        REACTFLG = 1
+            MOVE      ALRTREAC,KEY3
+            CALL      RDTEMP2                    * reaction code on map file ?
+            IF        OVRCD = 0
+              MOVE      NEWREACT,PTALREAC        * yes - load mapped category
+            ENDIF
+          ENDIF
+.
+          MOVE      ALRTLSEV,PTALLSEV
+          MOVE      ALRTRCOM,PTALRCOM
+          MOVE      ALRTRDTE,PTALRDTE
+          MOVE      ALRTICDC,PTALICDC
+          MOVE      ALRTDTIN,PTALDTIN
+.
+          MOVE      ALRTRQBY,PTALRQBY
+          IF        HCPCDFLG = 1
+            MOVE      ALRTRQBY,KEY10
+            CALL      RDTEMP3                    * HCP code on map file ?
+            IF        OVRCD = 0
+              MOVE      NEWHCPCD,PTALRQBY        * yes - load mapped code
+            ENDIF
+          ENDIF
+.
+          MOVE      ALRTHOSP,PTALHOSP
+          IF        HOSPLFLG = 1
+            MOVE      ALRTHOSP,KEY3
+            CALL      RDTEMP4                    * hospital code on map file ?
+            IF        OVRCD = 0
+              MOVE      NEWHOSPL,PTALHOSP        * yes - load mapped code
+            ENDIF
+          ENDIF
+.
+          MOVE      ALRTEDAT,PTALEDAT
+          MOVE      ALRTCTIM,PTALCTIM
+          MOVE      ALRTUDAT,PTALUDAT
+          MOVE      ALRTUTIM,PTALUTIM
+          MOVE      ALRTUUID,PTALUUID
+.
+.         If there is no user id for creation of the record, then
+.         default to program name and date/time of upload.
+.
+          MATCH     SP10,ALRTUSID
+          IF        @EQUAL
+            MOVE      "CONVALRT  ",PTALUSID
+            MOVE      CURRDATE,PTALCDTE
+            MOVE      CTIMEIS,PTALCTIM
+          ELSE
+            MOVE      ALRTUSID,PTALUSID
+          ENDIF
+.
+SETV9999  RETURN
++
+.*****************************************************************************
+.*                            POUT0000             Called by: UPLD0000       *
+.*            Pad out all the record fields with spaces given that we        *
+.*            are dealing with pipe delimited records                        *
+.*****************************************************************************
+.
+POUT0000  PACK      ALRTURNO,ALRTURNO,SP8
+          RJUSTIFY  ALRTURNO
+          PACK      ALRTCATG,ALRTCATG,SP2
+          PACK      ALRTCODE,ALRTCODE,SP3
+          PACK      ALRTDATE,ALRTDATE,SP8
+          PACK      ALRTCDTE,ALRTCDTE,SP8
+          PACK      ALRTLIFE,ALRTLIFE,SP1
+          PACK      ALRTREAC,ALRTREAC,SP3
+          PACK      ALRTUSID,ALRTUSID,SP10
+          PACK      ALRTLSEV,ALRTLSEV,SP1
+          PACK      ALRTRCOM,ALRTRCOM,SP20
+          PACK      ALRTRDTE,ALRTRDTE,SP8
+          PACK      ALRTICDC,ALRTICDC,SP9
+          PACK      ALRTDTIN,ALRTDTIN,SP8
+          PACK      ALRTRQBY,ALRTRQBY,SP10
+          PACK      ALRTHOSP,ALRTHOSP,SP3
+          PACK      ALRTEDAT,ALRTEDAT,SP8
+          PACK      ALRTCTIM,ALRTCTIM,SP8
+          PACK      ALRTUDAT,ALRTUDAT,SP8
+          PACK      ALRTUTIM,ALRTUTIM,SP8
+          PACK      ALRTUUID,ALRTUUID,SP10
+.
+POUT9999  RETURN
++
+.*****************************************************************************
+.*                              DVAL0000           Called by: UPLD0000       *
+.*                  Validate all date fields                                 *
+.* Returns:  EXIT - 0 = No date validation errors                            *
+.*                  1 = Date validation errors                               *
+.*          DTECOUNT - updated count of records with date field errors       *
+.*****************************************************************************
+.
+DVAL0000  MOVE      ZERO,ERORFLAG                * initialise date error flag
+.
+          MOVE      ALRTDATE,TEMPDATE            * alert date
+          MOVE      ZERO,DATEFLG1                * ccyymmdd
+          MOVE      ONE,DATEFLG2                 * future date not allowed
+          MOVE      "ALRTDATE",TMPFIELD
+          CALL      VDAT0000
+.
+          MOVE      ALRTCDTE,TEMPDATE            * creation date
+          MOVE      ZERO,DATEFLG1                * ccyymmdd
+          MOVE      ONE,DATEFLG2                 * future date not allowed
+          MOVE      "ALRTCDTE",TMPFIELD
+          CALL      VDAT0000
+.
+          MOVE      ALRTRDTE,TEMPDATE            * review date
+          MOVE      ZERO,DATEFLG1                * ccyymmdd
+          MOVE      ZERO,DATEFLG2                * any date allowed
+          MOVE      "ALRTRDTE",TMPFIELD
+          CALL      VDAT0000
+.
+          MOVE      ALRTDTIN,TEMPDATE            * date inactive
+          MOVE      ZERO,DATEFLG1                * ccyymmdd
+          MOVE      ZERO,DATEFLG2                * any date allowed
+          MOVE      "ALRTDTIN",TMPFIELD
+          CALL      VDAT0000
+.
+          MOVE      ALRTEDAT,TEMPDATE            * end date
+          MOVE      ZERO,DATEFLG1                * ccyymmdd
+          MOVE      ZERO,DATEFLG2                * any date allowed
+          MOVE      "ALRTEDAT",TMPFIELD
+          CALL      VDAT0000
+.
+          MOVE      ALRTUDAT,TEMPDATE            * update date
+          MOVE      ZERO,DATEFLG1                * ccyymmdd
+          MOVE      ONE,DATEFLG2                 * any date allowed
+          MOVE      "ALRTUDAT",TMPFIELD
+          CALL      VDAT0000
+.
+          BRANCH    ERORFLAG,DVAL9100            * errors on date validation
+.
+          MOVE      ZERO,EXIT                    * no errors on date validation
+          GOTO      DVAL9999
+.
+DVAL9100  ADD       ONE,DTECOUNT                 * incr. date error record count
+          MOVE      ONE,EXIT
+.
+DVAL9999  RETURN
++
+.*****************************************************************************
+.*                              VDAT0000           Called by: DVAL0000       *
+.*                  Validate a date field                                    *
+.* Requires:  TEMPDATE - Date in format ccyymmdd                             *
+.*            DATEFLG1 - Date Type flag                                      *
+.*                          0 = full date (ccyymmdd)                         *
+.*                          1 = partial date (ccyymm)                        *
+.*            DATEFLG2 - Dates Allowed flag                                  *
+.*                          0 = any date allowed                             *
+.*                          1 = no future dates allowed                      *
+.*            TMPFIELD - Date field name                                     *
+.* Returns:   ERORFLAG = 1 if an error in date validation occurs.            *
+.*****************************************************************************
+.
+VDAT0000  MATCH     SP8,TEMPDATE                 * blank date ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+.         Validate that the date has been fully populated
+.
+          SQUEEZE   TEMPDATE
+          MOVELPTR  TEMPDATE,FORM1
+          IF        DATEFLG1 = 0 & FORM1 <> 8 | DATEFLG1 = 1 & FORM1 <> 6
+            MOVE      "Insufficient digits ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate that the date is numeric
+.
+VDAT0100  TYPE      TEMPDATE
+          IF        !@EQUAL
+            MOVE      "Not numeric ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          UNPACK    TEMPDATE,DIM2C,DIM2Y,DIM2M,DIM2D
+.
+.         Validate the century is >= 18
+.
+          MOVE      DIM2C,FORM2
+          IF        FORM2 < 18 | FORM2 > CURRCENT
+            MOVE      "Century not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate the month
+.
+          MOVE      DIM2M,FORM2
+          IF        FORM2 < 1 | FORM2 > 12
+            MOVE      "Month not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          COMPARE   ONE,DATEFLG1                 * short date (ccyymm) ?
+          GOTO      VDAT9999 IF EQUAL            * yes - finished
+.
+.         Validate the day is:
+.              < 32 for January, March, May, July, August, October & December
+.              < 31 for April, June, September & November
+.              < 29 for February, except in a leap year where it is < 30
+.
+          BRANCH    FORM2,VDAT1000:              * Jan
+                          VDAT3000:              * Feb
+                          VDAT1000:              * Mar
+                          VDAT2000:              * Apr
+                          VDAT1000:              * May
+                          VDAT2000:              * Jun
+                          VDAT1000:              * Jul
+                          VDAT1000:              * Aug
+                          VDAT2000:              * Sep
+                          VDAT1000:              * Oct
+                          VDAT2000:              * Nov
+                          VDAT1000               * Dec
+.
+.         Validate days for month of 31 days
+.
+VDAT1000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 31
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for month of 30 days
+.
+VDAT2000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 30
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for February
+.         A leap year is one where:
+.           1. Every year divisible by 4 is a leap year.
+.           2. But every year divisible by 100 is NOT a leap year
+.           3. Unless the year is also divisible by 400, then it is still a
+.              leap year.
+.
+VDAT3000  MOVE      DIM2D,FORM2
+          PACK      DIM4,DIM2C,DIM2Y
+          MOVE      DIM4,FORM4
+          IF        (FORM4%4) = 0
+            IF        (FORM4%100) = 0
+              IF        (FORM4%400) = 0
+                GOTO      VDAT3200
+              ENDIF
+            ELSE
+              GOTO      VDAT3200
+            ENDIF
+          ENDIF
+.
+.         Check for normal Feb days
+.
+VDAT3100  IF        FORM2 < 1 | FORM2 > 28
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Check for leap year Feb days
+.
+VDAT3200  IF        FORM2 < 1 | FORM2 > 29
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+VDAT3900  MOVE      "Day not valid ",ERORDESC
+          CALL      DERR0000
+          GOTO      VDAT9999
+.
+VDAT4000  COMPARE   ZERO,DATEFLG2                * any date allowed ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+.         Make sure the date is not in the future
+.
+          MATCH     TEMPDATE,CURRDATE
+          IF        @LESS
+            MOVE      "Cannot be in the future ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+VDAT9999  RETURN
++
+.*****************************************************************************
+.*                            DERR0000             Called by: VDAT0000       *
+.*                    Process date error                                     *
+.* Requires: TMPFIELD - field name                                           *
+.*           ERORDESC - error description                                    *
+.* Returns:  ERORFLAG = 1 if an error in date validation occurs.             *
+.*****************************************************************************
+.
+DERR0000  ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set date error flag
+.
+DERR9999  RETURN
++
+.*****************************************************************************
+.*                              TVAL0000           Called by: UPLD0000       *
+.*                  Validate all time fields                                 *
+.* Returns:  EXIT - 0 = No time validation errors                            *
+.*                  1 = Time validation errors                               *
+.*          TIMCOUNT - updated count of records with time field errors       *
+.*****************************************************************************
+.
+TVAL0000  MOVE      ZERO,ERORFLAG                * initialise time error flag
+.
+          MOVE      ALRTCDTE,TEMPDATE
+          MOVE      ALRTCTIM,TEMPTIME            * alert create time
+          MOVE      "ALRTCTIM",TMPFIELD
+          CALL      VTIM0000
+.
+          MOVE      ALRTUDAT,TEMPDATE
+          MOVE      ALRTUTIM,TEMPTIME            * alert update time
+          MOVE      "ALRTUTIM",TMPFIELD
+          CALL      VTIM0000
+.
+          BRANCH    ERORFLAG,TVAL9100            * errors on time validation
+.
+          MOVE      ZERO,EXIT                    * no errors on time validation
+          GOTO      TVAL9999
+.
+TVAL9100  ADD       ONE,TIMCOUNT                 * incr. time error record count
+          MOVE      ONE,EXIT
+.
+TVAL9999  RETURN
++
+.*****************************************************************************
+.*                            VTIM0000             Called by: TVAL0000       *
+.*                    Validate time fields                                   *
+.* Requires:  TEMPTIME - Time in format hh:mm:ss                             *
+.*            TEMPDATE - Date in format ccyymmdd                             *
+.*            TMPFIELD - Time field name                                     *
+.* Returns:   ERORFLAG = 1 if an error in time validation occurs.            *
+.*****************************************************************************
+.
+VTIM0000  MATCH     SP8,TEMPTIME                 * blank time ?
+          GOTO      VTIM9999 IF EQUAL            * yes
+.
+          MATCH     SP8,TEMPDATE                 * blank date ?
+          IF        @EQUAL
+            MOVE      "Time without corresponding date ",ERORDESC
+            CALL      TERR0000
+            GOTO      VTIM9999
+          ENDIF
+.
+          UNPACK    TEMPTIME,DIM2H,DIM1A,DIM2M,DIM1B,DIM2S    * (hh:mm:ss)
+.
+.         Make sure colon's separate the hours, minutes and seconds
+.
+          MATCH     DIM1A,DIM1B
+          GOTO      VTIM1000 IF NOT EQUAL
+.
+          MATCH     COLON,DIM1A
+          GOTO      VTIM1000 IF NOT EQUAL
+.
+          GOTO      VTIM2000
+.
+VTIM1000  MOVE      "Format not valid ",ERORDESC
+          CALL      TERR0000
+          GOTO      VTIM9999
+.
+.         Validate the hour
+.
+VTIM2000  MOVE      DIM2H,FORM2
+          IF        FORM2 < 0 | FORM2 > 23
+            MOVE      "Hour not valid ",ERORDESC
+            CALL      TERR0000
+            GOTO      VTIM9999
+          ENDIF
+.
+.         Validate the minute
+.
+          MOVE      DIM2M,FORM2
+          IF        FORM2 < 0 | FORM2 > 59
+            MOVE      "Minutes not valid ",ERORDESC
+            CALL      TERR0000
+            GOTO      VTIM9999
+          ENDIF
+.
+.         Validate the second
+.
+          MOVE      DIM2S,FORM2
+          IF        FORM2 < 0 | FORM2 > 59
+            MOVE      "Seconds not valid ",ERORDESC
+            CALL      TERR0000
+            GOTO      VTIM9999
+          ENDIF
+.
+          MATCH     SP8,TEMPDATE                 * date blank ?
+          GOTO      VTIM9999 IF EQUAL            * yes
+.
+.         Make sure that the transaction time is not in the future
+.
+          MATCH     TEMPDATE,CURRDATE
+          IF        @EQUAL
+            MATCH     TEMPTIME,CTIMEIS
+            IF        @LESS
+              MOVE      "Time in the future ",ERORDESC
+              CALL      TERR0000
+            ENDIF
+          ENDIF
+.
+VTIM9999  RETURN
++
+.*****************************************************************************
+.*                            TERR0000             Called by: VTIM0000       *
+.*                    Process time error                                     *
+.* Requires: TMPFIELD - field name                                           *
+.*           ERORDESC - error description                                    *
+.* Returns:  ERORFLAG = 1 if an error in time validation occurs.             *
+.*****************************************************************************
+.
+TERR0000  ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set time error flag
+.
+TERR9999  RETURN
++
+.*****************************************************************************
+.*                            VNUM0000             Called by: UPLD0000       *
+.*                    Validate numeric fields                                *
+.* Returns:  EXIT - 0 = No numeric validation errors                         *
+.*                  1 = Numeric validation errors                            *
+.*          NUMCOUNT - updated count of records with numeric field errors    *
+.*****************************************************************************
+.
+VNUM0000  MOVE      ZERO,ERORFLAG                * initialise number error flag
+.
+          REP       " 0",ALRTLSEV
+.
+.         ALRTLSEV numeric field (valid values 0 thru 9)
+.
+          TYPE      ALRTLSEV                     * severity level numeric ?
+          GOTO      VNUM0050 IF NOT EQUAL        * no - error
+.
+          GOTO      VNUM9000                     * yes
+.
+VNUM0050  MOVE      "ALRTLSEV",TMPFIELD
+          CALL      NERR0000
+.
+VNUM9000  BRANCH    ERORFLAG,VNUM9100            * errors on number validation
+.
+          MOVE      ZERO,EXIT                    * no errors on no. validation
+          GOTO      VNUM9999
+.
+VNUM9100  ADD       ONE,NUMCOUNT                 * incr. num. error record count
+          MOVE      ONE,EXIT
+.
+VNUM9999  RETURN
++
+.*****************************************************************************
+.*                            NERR0000             Called by: VNUM0000       *
+.*                    Process number error                                   *
+.* Requires: TMPFIELD - field name                                           *
+.* Returns:  ERORFLAG = 1 if an error in number validation occurs.           *
+.*****************************************************************************
+.
+NERR0000  MOVE      "Invalid numeric field ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set number error flag
+.
+NERR9999  RETURN
++
+.*****************************************************************************
+.*                           CVAL0000              Called by: UPLD0000       *
+.*                 Validate all the relevant coded fields.                   *
+.*        This validation is performed on the database fields just prior     *
+.*        to writing the data and after any mappings have been performed.    *
+.* Returns:  EXIT - 0 = No code validation errors                            *
+.*                  1 = Code validation errors                               *
+.*          CODCOUNT - updated count of records with coded field errors      *
+.*****************************************************************************
+.
+CVAL0000  MOVE      ZERO,ERORFLAG                * initialise code error flag
+          MOVE      ZERO,SAVEALRT                * initialise alert type
+.
+          MATCH     SP2,PTALCATG                 * blank category ?
+          GOTO      CVAL2000 IF EQUAL            * yes - no validation req'd
+.
+.         Make sure the category is H1-H9
+.
+          MATCH     ANSH,PTALCATG                * first character "H" ?
+          GOTO      CVAL0500 IF NOT EQUAL        * no - error
+.
+          UNPACK    PTALCATG,ANS,ANS
+          TYPE      ANS                          * second character numeric ?
+          GOTO      CVAL0500 IF NOT EQUAL        * no - error
+.
+          MATCH     "0",ANS                      * second character zero ?
+          GOTO      CVAL0500 IF EQUAL            * yes - error
+.
+          GOTO      CVAL1000                     * valid alert category
+.
+CVAL0500  MOVE      "Invalid category field ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    ALRTCATG,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error
+.
+          MOVE      ONE,ERORFLAG                 * set code error flag
+          GOTO      CVAL2000
+.
+CVAL1000  MATCH     SP3,PTALCODE                 * blank code ?
+          GOTO      CVAL2000 IF EQUAL            * yes - no validation req'd
+.
+          MOVE      PTALCATG,TEMPCATG
+          PACK      TEMPCODE,PTALCODE,SP10
+          MOVE      "ALRTCODE",TMPFIELD
+          MOVE      ONE,TEMPTYPE                 * patcodes (alert)
+          CALL      VCOD0000
+.
+CVAL2000  MATCH     SP3,PTALREAC                 * blank code ?
+          GOTO      CVAL3000 IF EQUAL            * yes - no validation req'd
+.
+          MOVE      CATWN,TEMPCATG
+          PACK      TEMPCODE,PTALREAC,SP10
+          MOVE      "ALRTREAC",TMPFIELD
+          MOVE      ONE,TEMPTYPE                 * patcodes (reaction code)
+          CALL      VCOD0000
+.
+CVAL3000  MATCH     SP9,PTALICDC                 * blank code ?
+          GOTO      CVAL4000 IF EQUAL            * yes - no validation req'd
+.
+          PACK      TEMPCODE,PTALICDC,SP10
+          MOVE      "ALRTICDC",TMPFIELD
+          MOVE      TWO,TEMPTYPE                 * paticddf (ICD code)
+          CALL      VCOD0000
+.
+CVAL4000  MATCH     SP10,PTALRQBY                * blank code ?
+          GOTO      CVAL5000 IF EQUAL            * yes - no validation req'd
+.
+          MOVE      PTALRQBY,TEMPCODE
+          MOVE      "ALRTRQBY",TMPFIELD
+          MOVE      THREE,TEMPTYPE               * pmshcpaf (HCP code)
+          CALL      VCOD0000
+.
+CVAL5000  MATCH     SP3,PTALHOSP                 * blank code ?
+          GOTO      CVAL9000 IF EQUAL            * yes - no validation req'd
+.
+          MOVE      PTALHOSP,TEMPCODE
+          MOVE      "ALRTHOSP",TMPFIELD
+          MOVE      FOUR,TEMPTYPE                * pathspaf (hospital code)
+          CALL      VCOD0000
+.
+CVAL9000  BRANCH    ERORFLAG,CVAL9100            * errors on code validation
+.
+          MOVE      ZERO,EXIT                    * no errors on code validation
+          GOTO      CVAL9999
+.
+CVAL9100  ADD       ONE,CODCOUNT                 * incr. code error record count
+          MOVE      ONE,EXIT
+.
+CVAL9999  RETURN
++
+.*****************************************************************************
+.*                           VCOD0000              Called by: CVAL0000       *
+.*                   Validate a coded field                                  *
+.* Requires: TEMPCATG - temporary category variable                          *
+.*           TEMPCODE - temporary code variable                              *
+.*           TEMPTYPE - temporary code type                                  *
+.*           TMPFIELD - temporary field name                                 *
+.* Returns:  ERORFLAG = 1 if an error in code validation occurs.             *
+.*****************************************************************************
+.
+VCOD0000  BRANCH    TEMPTYPE,VCOD1000:           * patcodes (category-codes)
+                             VCOD2000:           * paticdaf (ICD codes)
+                             VCOD3000:           * pmshcpaf (HCP codes)
+                             VCOD4000            * pathspaf (hospital codes)
+.
+.         Validate a category-coded field (patcodes)
+.
+VCOD1000  PACK      KEY5,TEMPCATG,TEMPCODE
+          CALL      RDCODE1                      * valid code ?
+          BRANCH    OVRCD,VCOD9100               * no - error
+.
+          MATCH     ANSH,TEMPCATG                * alert code ?
+          GOTO      VCOD9999 IF NOT EQUAL        * no
+.
+          MOVE      TCINDC7,SAVEIND7             * save indicator 4 value
+.
+          BRANCH    UMMRFLAG,VCOD9999            * not using med/micro/risk
+.
+          MATCH     ANSM,TCINDC5                 * yes - medical alert ?
+          IF        @EQUAL
+            MOVE      ONE,SAVEALRT               * yes
+            GOTO      VCOD9999
+          ENDIF
+.
+          MATCH     ANSB,TCINDC5                 * micro alert ?
+          IF        @EQUAL
+            MOVE      TWO,SAVEALRT               * yes
+            GOTO      VCOD9999
+          ENDIF
+.
+          MATCH     ANSR,TCINDC5                 * risk alert ?
+          IF        @EQUAL
+            MOVE      THREE,SAVEALRT             * yes
+            GOTO      VCOD9999
+          ENDIF
+.
+          MATCH     ANSC,TCINDC5                 * chronic alert ?
+          IF        @EQUAL
+            MOVE      FOUR,SAVEALRT              * yes
+            GOTO      VCOD9999
+          ENDIF
+.
+          MOVE      "Invalid alert type ",ERORDESC
+          GOTO      VCOD9150
+.
+.         Validate an ICD code field (paticddf)
+.
+VCOD2000  MOVE      TEMPCODE,KEY9
+          CALL      RDPTICD1                     * valid code ?
+          BRANCH    OVRCD,VCOD9100               * no - error
+          GOTO      VCOD9999                     * yes
+.
+.         Validate a HCP code field (pmshcpaf)
+.
+VCOD3000  MOVE      TEMPCODE,KEY10
+          CALL      RDPMHCP1                     * valid code ?
+          BRANCH    OVRCD,VCOD9100               * no - error
+          GOTO      VCOD9999                     * yes
+.
+.         Validate a hospital code field (pathspaf)
+.
+VCOD4000  MOVE      TEMPCODE,KEY3
+          CALL      RDPTHSP1                     * valid code ?
+          BRANCH    OVRCD,VCOD9100               * no - error
+          GOTO      VCOD9999                     * yes
+.
+VCOD9100  MOVE      "Invalid coded field ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+VCOD9150  CALL      PERR0000                     * print error
+.
+          MOVE      ONE,ERORFLAG                 * set code error flag
+.
+VCOD9999  RETURN
++
+.*****************************************************************************
+.*                              PERR0000           Called by: UPLD0000       *
+.*                   Print an error detail line               CHKM0000       *
+.* Requires: Upload data record read                          DERR0000       *
+.*           ERORDESC - error description                     TERR0000       *
+.*           CLNO - current page line count                   VURN0000       *
+.* Returns:  CLNO - updated page line count                   NERR0000       *
+.*                                                            VCOD0000       *
+.*                                                            CVAL0000       *
+.*                                                            PCOM0000       *
+.*****************************************************************************
+.
+PERR0000  COMPARE   CLNO,SIXTY3                  * page full ?
+          IF        @LESS
+            CALL      LINE0000                   * yes - print bottom line
+            CALL      HEAD0000                   * print header
+          ENDIF
+.
+          MOVE      ALRTCATG,DIM6
+          STRIP     DIM6
+          ENDSET    DIM6
+          APPEND    SLASH,DIM6
+          APPEND    ALRTCODE,DIM6
+          RESET     DIM6
+.
+          PRINT     *1,PIPE,*3,ALRTURNO,*12,PIPE,*14,DIM6,*59,PIPE:
+                    *61,ERORDESC,*132,PIPE
+          ADD       ONE,CLNO                     * increment page line count
+.
+PERR9999  RETURN
++
+.*****************************************************************************
+.*                              VURN0000           Called by: UPLD0000       *
+.*                        Validate U/R Number                                *
+.* Requires: ALRTURNO - U/R number (right justified)                         *
+.* Returns:  Valid read on PMI data                                          *
+.*           EXIT  0 = PMI record found - ok to continue                     *
+.*                 1 = PMI record not found - ignore record                  *
+.*          UNKCOUNT - updated count of unknown U/R numbers                  *
+.*****************************************************************************
+.
+VURN0000  MATCH     SP8,ALRTURNO                 * blank U/R ?
+          IF        @EQUAL
+            MOVE      "U/R missing ",ERORDESC    * yes
+            GOTO      VURN9150
+          ENDIF
+.
+          MOVE      ALRTURNO,KEY8
+          CALL      RDMAST1                      * U/R on file ?
+          BRANCH    OVRCD,VURN9100               * no - error
+.
+          MOVE      ALRTURNO,KEY8
+          CALL      RDPMPX21                     * PMI extension record found ?
+          IF        OVRCD = 1
+            MOVE      "PMI Extension Record not found ",ERORDESC
+            GOTO      VURN9150
+          ENDIF
+.
+          COMPARE   ONE,PSTAT                    * merged U/R ?
+          GOTO      VURN9000 IF NOT EQUAL        * no
+.
+.         We have a merged U/R record, so get the new U/R
+.
+          MATCH     PPSNAME,SP20                 * blank previous name field ?
+          GOTO      VURN9100 IF EQUAL            * yes - error
+.
+          MOVE      PPSNAME,ALRTURNO             * no - load new U/R
+          GOTO      VURN0000                     * get new pmi record
+.
+VURN9000  MOVE      ZERO,EXIT
+          GOTO      VURN9999
+.
+VURN9100  MOVE      "PMI Record not found ",ERORDESC
+VURN9150  CALL      PERR0000                     * print error line
+          ADD       ONE,UNKCOUNT                 * increment unknown U/R count
+          MOVE      ONE,EXIT
+.
+VURN9999  RETURN
++
+.*****************************************************************************
+.*                              PCOM0000           Called by: UPLD0000       *
+.*                Process any alert related comments                         *
+.* Requires: ALRTCOMM - alert comments                                       *
+.*****************************************************************************
+.
+PCOM0000  STRIP     ALRTCOMM                     * remove trailing spaces
+          MOVELPTR  ALRTCOMM,COMMTLEN            * get comment field length
+.
+          COMPARE   ZERO,COMMTLEN                * any comments ?
+          GOTO      PCOM9999 IF EQUAL            * no - finished
+.
+          MOVE      ZERO,LINENUMB                * yes - initialise line number
+.
+PCOM0500  MOVE      ALRTCOMM,DIM70
+          PACK      DIM70,DIM70,SP70             * load comment line
+.
+          MOVE      PTALURNO,PMANURNO            * load record variables
+          MOVE      PTALCATG,PMANACAT
+          MOVE      PTALCODE,PMANACOD
+          MOVE      PTALCNTR,PMANCNTR
+          ADD       ONE,LINENUMB                 * increment line number
+          MOVE      LINENUMB,PMANLNNO
+          MOVE      DIM70,PMANCOMM
+          MOVE      SP70,PMANSPAR
+.
+          PACK      KEY19,PMANURNO,PMANACAT,PMANACOD,PMANCNTR,PMANLNNO
+          CALL      RAPMALN1                     * record on file already ?
+          IF        OVRCD = 1 & VCHKFLAG = 0
+            CALL      WRPMALN1                   * no - write new record
+          ELSE
+            IF        OVRCD = 0
+              MOVE      "Error writing comment records ",ERORDESC
+              CALL      PERR0000                 * print error line
+              ADD       ONE,COMCOUNT             * increment comment error count
+              GOTO      PCOM9999
+            ENDIF
+          ENDIF
+.
+          COMPARE   COMMTLEN,SEVENTY             * any comments remaining ?
+          GOTO      PCOM9999 IF NOT LESS         * no - finished
+.
+.         There is at least one more line of comments to load
+.
+          BUMP      ALRTCOMM,70                  * move forward 70 characters
+          SUB       SEVENTY,COMMTLEN             * reduce string length by 70
+          GOTO      PCOM0500                     * process next line
+.
+PCOM9999  RETURN
++
+.------------------------------------------------------------
+. Calculate the counter number for this U/R and alert type (patalrf)
+. Requires: PURNO - Current patient U/R number
+.           SAVECATG - mapped alert category
+.           SAVECODE - mapped alert code
+.------------------------------------------------------------
+CONC0000  MOVE      ZERO,F3                       * Set alert type counter
+          READ      CONTROLF,TEN;*250,CAUDA1
+.
+          PACK      KEY16,PURNO,SAVECATG,SAVECODE,Z70
+          CALL      RSPTALR1
+          CALL      RPPTALR1
+          BRANCH    OVRCD,CONC2000
+.
+          MATCH     PURNO,PTALURNO
+          GOTO      CONC2000 IF NOT EQUAL
+.
+          MATCH     SAVECATG,PTALCATG
+          GOTO      CONC2000 IF NOT EQUAL
+.
+          MATCH     SAVECODE,PTALCODE
+          GOTO      CONC2000 IF NOT EQUAL
+.
+          MOVE      PTALCNTR,F3
+.
+CONC2000  IF        F3 <> 0
+            MOVE      ZERO,ALERTFND          * set flag for existing alert found
+          ENDIF
+.
+          BRANCH    CAUDA1,CONC9000          * Check if using audit file
+.
+          PACK      KEY27,PURNO,Z70
+          CALL      ASPTALR2
+CONC3000  CALL      APPTALR2
+          BRANCH    OVRCD,CONC9000
+.
+          MATCH     PURNO,PTALURNO
+          GOTO      CONC9000 IF NOT EQUAL
+.
+          MATCH     SAVECATG,PTALCATG
+          GOTO      CONC3000 IF NOT EQUAL
+.
+          MATCH     SAVECODE,PTALCODE
+          GOTO      CONC3000 IF NOT EQUAL
+.
+          MOVE      ZERO,F3A                    * Use audit file counter if
+          MOVE      PTALCNTR,F3A                * higher
+          IF        F3A>F3
+            MOVE      F3A,F3
+          ENDIF
+.
+CONC9000  ADD       ONE,F3
+          MOVE      F3,ALRTCNTR
+.
+CONC9999  RETURN
++
+.*****************************************************************************
+.*        Broadcast hl7 A31 message when an alert record is added            *
+.*****************************************************************************
+BPMIUP00  COMPARE   TWO,COPTION                  * trigger hl7 a31 ?
+          GOTO      BPMIUP99 IF NOT EQUAL        * no
+.
+          PACK      KEY10,PTALUSID,SP70
+          CALL      RDWBSE1
+          IF        OVRCD = 1
+            MOVE      SP70,PASSCODE
+            CALL      CLWEBSEC
+          ELSE
+            MOVE      WBSEPCD,PASSCODE           * get user id for A31
+          ENDIF
+.
+          CALL      PMIGTNID                     * get national id for hl7
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      ONE,HL7TRGID
+          MOVE      SP8,HL7INCLD
+          PROC      DGCLICUP                     * trigger PMI update message
+.
+BPMIUP99  RETURN
++
+.*****************************************************************************
+.*        Temp File I/O Routines                                             *
+.*****************************************************************************
+.
+.         Cat-Codes Alert (Cat H1-H9)
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY5
+          READ      TEMP1,KEY5;OLDALCAT,OLDALCOD,NEWALCAT,NEWALCOD
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.         Reaction (Cat wn)
+.
+RDTEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY3
+          READ      TEMP2,KEY3;OLDREACT,NEWREACT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.         HCP (pmshcpaf)
+.
+RDTEMP3   MOVE      ZERO,OVRCD
+          RESET     KEY10
+          READ      TEMP3,KEY10;OLDHCPCD,NEWHCPCD
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.         Hospital (pathspaf)
+.
+RDTEMP4   MOVE      ZERO,OVRCD
+          RESET     KEY3
+          READ      TEMP4,KEY3;OLDHOSPL,NEWHOSPL
+          GOTO      OVERCOND IF OVER
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       CLPATMAS
+          INC       CLWEBSEC
+          INC       DGCLICUP
+          INC       PMIGTNID
+.
+          INC       NHIMASIO/INC
+          INC       PATALRIO/INC
+          INC       PATCODIO/INC
+          INC       PATHSPIO/INC
+          INC       PATICDIO/INC
+          INC       PATMA1IO/INC
+          INC       PATNIDIO/INC
+          INC       PMSALNIO/INC
+          INC       PMSHCPIO/INC
+          INC       PMSPX2IO/INC
+          INC       WEBSECIO/INC

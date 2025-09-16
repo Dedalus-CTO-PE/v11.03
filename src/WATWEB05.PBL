@@ -1,0 +1,545 @@
+.----------------------------------------------------------------------
+. Program       : WATWEB05
+.
+. Function      : Waiting List RFC Auto Updating Processing
+.                 This program assumes that all current W/L statuses
+.                 are correct and reconcile across tables.
+.                 The program will automatically update the waiting list
+.                 status according to the suspension table entries.  The program
+.                 is designed to execute an update on a daily basis at 0500.
+.
+. Modifications : 
+.----------------------------------------------------------------------
+. V11.03.01 14/08/2023  Ebon Clements    TSK 0930673
+.           Fixed read of previous priority when returing to read for care 
+.           ADDTPR00 (nsw)
+. V11.02.01 10/02/2022  Thanh T          TSK 0889899
+.           Recompiled as WATTR1FD changes
+.----------------------------------------------------------------------
+.         V10.07.01 30/10/2015  Don Nguyen       CAR 320394
+.                   Recompiled for changes to WATTX1FD/IO
+.----------------------------------------------------------------------
+.         V10.03.03 28/10/2013  Patrick Adair    CAR 201234
+.                   Recompiled for changes to WLHISSUB
+.         V10.03.02 19/09/2013  Sandra Barcham   CAR 290096
+.                   Allow pre-admissions as well as scheduled and unscheduled 
+.         V10.03.01 27/08/2013  Ebon Clements    CAR 275205
+.                   Recompiled for WATTX1FD - New fields WTTXPSAH and WTTXPHOS
+.         V9.12.02  09/09/2009 Jill Parkinson CAR 205541
+.                   Mods to loop backwards through watsusaf in ADDTPR00
+.         V9.12.01  01/07/2009 Jill Habasque  CAR 197190
+.                   Mods for NSW to add watcataf and wathisaf records
+.         V9.09.01  21/06/2007  Jill Habasque CAR 143141
+.                   Added pack of WTENWEBC with watweb05
+.         V9.08.01  06/06/2007  Jill Habasque CAR 142257
+.                   Mods to check for IF EQUAL when comparing WTSUTDAT 
+.                   to current date (instead of IF LESS)
+.         V9.05.01  09/03/2006  Ebon Clements CAR 78533
+.                   Mods for PATCODTM - Hospital specific category codes
+.         V9.05.B02 08/02/2006  Steve Armstrong   CAR 94895
+.                   Major re-write of code
+.         V9.05.B01 08/12/2005 Sandra Barcham     87562
+.                   Only run for unscheduled & scheduled
+.----------------------------------------------------------------------
+.         V9.04.05  26/10/2005 Jill Habasque CAR  81648
+.                   Fixed key for watesnaf
+.         V9.04.04  11/10/2005 Jill Habasque CAR  76509
+.                   Mods to run for all patients, not just unscheduled
+.         V9.04.03  14/09/2005  Ebon Clements CAR 76051
+.                   Set manually added record to no before write to watesnaf
+.         V9.04.02  10/02/2005  Jill Habasque CAR 58009
+.                   Fixed update of wtenevdt
+.         V9.04.01  10/12/2004  Jill Habasque CAR 54731
+.                   Added write to watesnaf
+.         V9.03.01  22/04/2004  Guomin Fu   CAR 49111
+.                   Fixed a bug that "Today" is not picking up system date    
+.         V9.03.00  26/03/2004  Guomin Fu   CAR 40756
+.                   Created Program
+.----------------------------------------------------------------------
+.
+          INC       IBAWEBDF    
+.
+          INC       PATCOMM/INC
+          INC       BOKRC1FD/INC
+          INC       PATCONFD/INC
+          INC       PATDRGFD/INC
+          INC       PATGSRFD/INC
+          INC       PATITMFD/INC
+          INC       PATMA1FD/INC
+          INC       PATMI1FD/INC
+          INC       PATVISFD/INC
+          INC       WATCONFD/INC
+          INC       WATESNFD/INC
+          INC       WATPROFD/INC
+          INC       WATSUSFD/INC
+          INC       WATTR1FD/INC
+          INC       WATTX1FD/INC
+          INC       WATCATFD/INC
+          INC       WATHISFD/INC
+.
+. LOCAL VARIABLES
+. ---------------
+ADDWLFLG  FORM      1
+DDATE     DIM       8
+DIM1A     DIM       1
+PROCFLAG  FORM      1
+SAVELIST  DIM       3
+CURRDATE  DIM       8
+PRIORITY  DIM       3
+WATHI002  DIM       8
+WATWEB    INIT      "watweb05"
+.
+.
+PRGID     INIT      "WATWEB05"
+VERSION   INIT      "V11.03.01"
+PRGNAM    INIT      "Waiting List RFC Processing"
++
+.*****************************************************************************
+.*                            MAIN0000                                       *
+.*                         Mainline code                                     *
+.*****************************************************************************
+.
+MAIN0000  CALL      WEBINT00       * Initialise Fifo Etc.
+.
+.
+          CALL      INIT0000       * Open Files
+.
+MAIN0100  COMMIT
+.
+          BEGIN
+          DISPLAY   *W10
+.
+MAIN0200  CALL      UPDRFC00     * check if current patient update should be run
+.
+          COMMIT
+.
+          BEGIN
+.
+          GOTO      MAIN0100
+MAIN9999  MOVE      "SERVER SHUTDOWN COMPLETE",WEBTITLE
+          CALL      WEBERR00
+          STOP
+.*****************************************************************************
+.*                           OPEN0000              Called by: MAIN0000       *
+.*               Open Files and Initialize Variables                         *
+.*****************************************************************************
+.
+INIT0000  OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      BOKRC1A1,"bokrc1af"
+          OPEN      PATMI1A2,"patmi1af"
+          OPEN      PATMI1A3,"patmi1af"
+          OPEN      PATVISA1,"patvisaf"
+          OPEN      PATCODE1,"patcodes"
+          OPEN      WATTR1A1,"wattr1af"
+          OPEN      WATTR1A2,"wattr1af"
+          OPEN      WATSUSA2,"watsusaf"
+          OPEN      WATTX1A1,"wattx1af"   
+          OPEN      WATESNA1,"watesnaf"   
+          OPEN      WATHISA1,"wathisaf"   
+          OPEN      WATCATA1,"watcataf"   
+          OPEN      WATCATA2,"watcataf"   
+          OPEN      WATPROA1,"watproaf"   
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,EIGHTY;*250,PTCNHDPS
+.
+          IF        IBCNMHOS=1
+            OPEN      MLTCODA1,"mltcodaf"
+            OPEN      MLTCODA2,"mltcodaf"
+          ENDIF
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                          UPDRFC00               Called by: MAIN0000       *
+.*              Check if current patient update should be run                *
+.*****************************************************************************
+.
+.         Get the time of day (hh:mm) to run the update
+.
+UPDRFC00  READ      CONTROLF,THIRTY7;*245,WTCNTIMN
+.
+          CALL      IBACLOCK                     * get the current date/time
+          PACK      CURRDATE,CCC,CYY,CMM,CDD     * save current date
+          REP       " 0",CURRDATE
+.
+          MATCH     WTCNTIMN,CTIMEIS             * time to run update ?
+          IF        !@EQUAL
+            MOVE      ZERO,PROCFLAG              * no - exit
+            GOTO      UPDRFC99
+          ENDIF
+.
+          IF        PROCFLAG<>1
+            CALL      NRCDAY00                   * update RFC for WL patient  
+            MOVE      ONE,PROCFLAG
+          ENDIF
+.
+UPDRFC99  RETURN
++
+.*****************************************************************************
+.*                          NRCDAY00               Called by: UPDRFC00       *
+.*      Check if:                                                            *
+.*             - Suspended records are now "Ready for Care".                 *
+.*             - "Ready for Care" records are now suspended.                 *
+.*      Update the status of the wattx1af record (Cat VL) accordingly and    *
+.*      for each update, write a corresponding watensaf record.              *
+.*****************************************************************************
+.
+NRCDAY00  MOVE      CDD,CDAY
+          MOVE      CMM,CMON
+          MOVE      CYY,CYEAR
+          MOVE      CCC,CCENT
+          CALL      PACDATE
+          DISPLAY   "Started ",CPCDATE,SP1,CTIMEIS
+.
+.         Loop through unscheduled,scheduled & pre-admit procedures on wattr1af
+.
+          PACK      KEY20,ONE,SP70
+          CALL      RDSTREA2                     * position in table
+NRCDAY05  CALL      RDKTREA2                     * read next record
+          BRANCH    OVRCD,NRCDAY99               * eof - finished
+.
+          BRANCH    WMSTAT,NRCDAY10:             * unscheduled
+                           NRCDAY10:             * scheduled
+                           NRCDAY10              * pre-admission
+          GOTO      NRCDAY99                     * finished
+.
+.         Valid waiting list record found, so get the W/L extension
+.         record (wattx1af)
+.
+NRCDAY10  PACK      KEY19,WMURNO,WMCODE,WMCNT,SP70
+          CALL      RDWTTX11                     * record found ?
+          BRANCH    OVRCD,NRCDAY05               * no - ignore record
+.
+          PACK      KEY5,ANSV,ANSL,WTTXPLST
+          CALL      RDCODE1                      * VL code on file ?
+          BRANCH    OVRCD,NRCDAY05               * no - ignore record
+.
+          MOVE      TCINDC1,SAVELIST             * save patient list status
+.
+.         Look for a W/L suspension record for the current
+.         patient/procedure/count which begins today
+.
+          PACK      KEY29,WMURNO,WMCODE,WMCNT,CURRDATE,SP70
+          CALL      RSWTSUS2                     * position in table
+          CALL      RKWTSUS2                     * read next record
+          BRANCH    OVRCD,NRCDAY20               * eof - check previous record
+.
+          MATCH     WMURNO,WTSUURNO              * same U/R still ?
+          GOTO      NRCDAY20 IF NOT EQUAL        * no - check previous record
+.
+          MATCH     WMCODE,WTSUCODE              * same procedure code still ?
+          GOTO      NRCDAY20 IF NOT EQUAL        * no - check previous record
+.
+          COMPARE   WMCNT,WTSUCNT                * same procedure count still ?
+          GOTO      NRCDAY20 IF NOT EQUAL        * no - check previous record
+.
+.         A valid suspension record has been found, so check if it
+.         starts today
+.
+          MATCH     CURRDATE,WTSUFDAT            * same day ?
+          GOTO      NRCDAY20 IF NOT EQUAL        * no - check previous record
+.
+.         The suspension starts today, so make sure that the current
+.         treatment status (wattx1af.wttxplst) is "Ready for Care" before
+.         we update it.
+.
+          MATCH     ANSR,SAVELIST                *  status "ready for care" ?
+          GOTO      NRCDAY05 IF NOT EQUAL        *  no - record already changed
+.
+.         Check if we are auto-updating
+.
+          MATCH     "1",WTSUAUTO                 * auto update ?
+          GOTO      NRCDAY05 IF NOT EQUAL        * no - get next wattr1af rec.
+.
+.         Update the current treatment status (wattx1af.wttxplst) to be 
+.         "Not Ready for Care" using the suspension listing status
+.         (watsusaf.wtsulsts) and then write a record to watesnaf.
+.
+          PACK      KEY19,WMURNO,WMCODE,WMCNT,SP70
+          CALL      RLWTTX11                     * record found ?
+          BRANCH    OVRCD,NRCDAY05:              * no - get next wattr1af rec.
+                          NRCDAY05               * locked get next wattr1af rec.
+.
+          MOVE      WTSULSTS,WTTXPLST            * update status
+          CALL      UPWTTX11                     * update record
+          CALL      UUWTTX11                     * unlock record
+.
+          CALL      WESN0000                     * write watesnaf record
+          CALL      ADDTP000                     * nsw only- write watcataf
+.
+          GOTO      NRCDAY05
+.
+.         There was no suspension record beginning today, so get the previous
+.         suspension record and see if it still applies today.
+.
+NRCDAY20  PACK      KEY29,WMURNO,WMCODE,WMCNT,CURRDATE,SP70
+          CALL      RSWTSUS2                     * position in table
+          CALL      RPWTSUS2                     * read next record
+          BRANCH    OVRCD,NRCDAY05               * eof - get next wattr1af rec.
+.
+          MATCH     WMURNO,WTSUURNO              * same U/R still ?
+          GOTO      NRCDAY05 IF NOT EQUAL        * no - get next wattr1af rec.
+.
+          MATCH     WMCODE,WTSUCODE              * same procedure code still ?
+          GOTO      NRCDAY05 IF NOT EQUAL        * no - get next wattr1af rec.
+.
+          COMPARE   WMCNT,WTSUCNT                * same procedure count still ?
+          GOTO      NRCDAY05 IF NOT EQUAL        * no - get next wattr1af rec.
+.
+.         A valid suspension record has been found, so see if the end date
+.         for the suspension is prior to today
+.
+          MATCH     SP8,WTSUTDAT                 * blank (open) end date ?
+          GOTO      NRCDAY05 IF EQUAL            * yes - get next wattr1af rec.
+.
+          MATCH     CURRDATE,WTSUTDAT            * suspension prior to today ?
+          GOTO      NRCDAY25 IF EQUAL            * yes - get next wattr1af rec.
+          GOTO      NRCDAY05 IF NOT LESS         * yes - get next wattr1af rec.
+.
+.         The suspension record has finished, so make sure that the
+.         current treatment status (wattx1af.wttxplst) is "Not Ready for Care"
+.         before we update it.
+.
+NRCDAY25  MATCH     ANSR,SAVELIST                *  status "not ready for care"?
+          GOTO      NRCDAY05 IF EQUAL            *  no - record already changed
+.
+.         Check if we are auto-updating
+.
+          MATCH     "1",WTSUAUTO                 * auto update ?
+          GOTO      NRCDAY05 IF NOT EQUAL        * no - get next wattr1af rec.
+.
+.         Get the first active Cat VL code where indicator 1 is set to "R".
+.         This will be used as the "Ready for Care" code.
+.
+          PACK      KEY5,ANSV,ANSL,SP70
+          CALL      RDSCODE1                     * position on Cat VL
+NRCDAY30  CALL      RDKCODE1                     * read next record
+          BRANCH    OVRCD,NRCDAY05               * eof - get next wattr1af rec.
+.
+          MATCH     "VL",TCODE                   * same category still ?
+          GOTO      NRCDAY05 IF NOT EQUAL        * no - get next wattr1af rec.
+.
+          MATCH     ANSA,PTCOACTV                * active code ?
+          GOTO      NRCDAY30 IF NOT EQUAL        * no - get next wattr1af rec.
+.
+          MATCH     ANSR,TCINDC1                 * Indic. 1 set to "R"
+          GOTO      NRCDAY30 IF NOT EQUAL        * no - get next codes record
+.
+.         A valid code has been found for "Ready for Care", so
+.         update the current treatment status (wattx1af.wttxplst) to be 
+.         "Ready for Care" using the code found and then write a record
+.         to watesnaf.
+.
+          PACK      KEY19,WMURNO,WMCODE,WMCNT,SP70
+          CALL      RLWTTX11                     * record found ?
+          BRANCH    OVRCD,NRCDAY05:              * no - ignore record
+                          NRCDAY05               * locked already
+.
+          MOVE      ACODE,WTTXPLST               * update status
+          CALL      UPWTTX11                     * update record
+          CALL      UUWTTX11                     * unlock record
+.
+          CALL      WESN0000                     * write watesnaf record
+          CALL      ADDTPR00                     * nsw only- write watcataf
+.
+          GOTO      NRCDAY05                     * get next wattr1af record
+.
+NRCDAY99  RETURN
++
+.*****************************************************************************
+.*                          WESN0000               Called by: NRCDAY00       *
+.*                Write a record to watesnaf                                 *
+.*****************************************************************************
+.
+WESN0000  PACK      WTENUNIQ,WTWMECNT,SP70
+          PACK      WTENEDAT,SP70
+          PACK      WTENETYP,ANSR
+          PACK      WTENEVAL,WTTXPLST
+          PACK      WTENEVDT,CURRDATE
+          REP       " 0",WTENEVDT
+          PACK      WTENWEBC,WATWEB,SP70
+          MOVE      CURRDATE,WTENCDAT
+          CLOCK     TIME,WTENCTIM
+          REP       " 0",WTENCTIM
+          PACK      WTENWEBU,SP70
+          PACK      WTENUDAT,SP70
+          PACK      WTENUTIM,SP70
+          PACK      WTENSADI,SP70
+          MOVE      ZERO,WTENMANU
+.
+          PACK      KEY36,WTENUNIQ,WTENETYP,WTENEVDT,WTENEDAT,SP70
+          CALL      RAWTESN1
+          IF        OVRCD=1
+            CALL      WRWTESN1                   * write new watesnaf record
+          ELSE
+            CALL      UPWTESN1                   * update existing record
+          ENDIF
+.
+WESN9999  RETURN
++
+.----------------------------------------------------------------------
+.      Add category TP record for deferred
+.----------------------------------------------------------------------
+ADDTP000  COMPARE   TWO,PTCNHDPS
+          GOTO      ADDTP999 IF NOT EQUAL
+.
+          PACK      KEY5,ANST,ANSP,SP70
+          CALL      RDSCODE1
+ADDTP100  CALL      RDKCODE1
+          BRANCH    OVRCD,ADDTP999
+.
+          MATCH     "TP",TCODE
+          GOTO      ADDTP999 IF NOT EQUAL
+.
+          MATCH     ANSA,PTCOACTV                * active code ?
+          GOTO      ADDTP100 IF NOT EQUAL        * no - get next
+.
+          MATCH     ANSD,TCINDC3
+          GOTO      ADDTP100 IF NOT EQUAL
+.
+          PACK      KEY19,WMURNO,WMCODE,WMCNT,SP70
+          CALL      RDTREA1
+          BRANCH    OVRCD,ADDTP999
+.
+          PACK      PRIORITY,WMPTY
+          MATCH     WMPTY,ACODE           * has priority changed?
+          GOTO      ADDTP999 IF EQUAL
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          MATCH     WTSUFDAT,CURRDATE        * ignore future changes
+          GOTO      ADDTP999 IF LESS
+.
+          PACK      WMPTY,ACODE,SP70
+          CALL      UPTREA1
+.
+          PACK      WATHI002,WTSUFDAT,SP70
+          CALL      UPPRI000
+.
+ADDTP999  RETURN
+.
+.----------------------------------------------------------------------
+.      Add category TP record for rfc - same as previous priority
+.----------------------------------------------------------------------
+ADDTPR00  COMPARE   TWO,PTCNHDPS                * Is NSW?
+          GOTO      ADDTPR99 IF NOT EQUAL
+.
+          PACK      KEY29,WMURNO,WMCODE,WMCNT,ANST,ANSP,Z70
+          PACK      KEY5,ANST,ANSP,SP70
+          CALL      RSWTCAT2
+ADDTPR10  CALL      RPWTCAT2
+          BRANCH    OVRCD,ADDTPR99
+.
+          MATCH     WMURNO,WTCAURNO              * Correct U/R
+          GOTO      ADDTPR99 IF NOT EQUAL
+.
+          MATCH     WMCODE,WTCAPROC              * Correct Procedure Code
+          GOTO      ADDTPR99 IF NOT EQUAL
+.
+          COMPARE   WMCNT,WTCAPCNT               * Correct Procedure Code
+          GOTO      ADDTPR99 IF NOT EQUAL
+.
+          MATCH     KEY5,WTCACATF                * Priority           
+          GOTO      ADDTPR99 IF NOT EQUAL
+.
+          MATCH     SP70,WTCACODF                * Exit No previous priority
+          GOTO      ADDTPR99 IF EQUAL
+.
+          PACK      KEY19,WMURNO,WMCODE,WMCNT,SP70
+          CALL      RDTREA1
+          BRANCH    OVRCD,ADDTPR99
+.
+          PACK      PRIORITY,WMPTY           * Save priority
+.
+          MATCH     WMPTY,WTCACODF           * has priority changed?
+          GOTO      ADDTPR99 IF EQUAL
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          MATCH     WTCAEDAT,CURRDATE        * ignore future changes
+          GOTO      ADDTPR99 IF LESS
+.
+          PACK      WMPTY,WTCACODF,SP70
+          CALL      UPTREA1
+.
+          PACK      WATHI002,WTSUTDAT,SP70
+          CALL      UPPRI000
+.
+ADDTPR99  RETURN
+.
+.------------------------------------------------------------
+. Write record to Category Change file  watcataf
+.------------------------------------------------------------
+UPPRI000  MOVE      PRIORITY,WTCACODF         * set the old priority code
+          MOVE      WMPTY,WTCACODT            * set the new priority code
+          MOVE      WMURNO,WTCAURNO           * set the UR number
+          MOVE      WMCODE,WTCAPROC           * set procedure code
+          MOVE      WMCNT,WTCAPCNT            * set procedure counter
+          MOVE      WBSEUID,WTCAWEBI          * set up web user id
+          CALL      IBACLOCK
+          PACK      WTCAADTE,CCC,CYY,CMM,CDD  * set alteration date
+          REP       " 0",WTCAADTE
+          PACK      WTCAATIM,CTIMEIS          * set alteration time
+.
+.                                             * Date Effective
+.
+          MATCH     Z70,WATHI002
+          IF        !@EQUAL
+            MOVE      WATHI002,WTCAEDAT         * set effective date
+          ELSE
+            PACK      WTCAEDAT,CCC,CYY,CMM,CDD  * set effective date
+          ENDIF
+          REP       " 0",WTCAEDAT
+
+
+.
+          MOVE      "TP",WTCACATF             * set the priority code category
+          PACK      KEY29,WTCAEDAT,WTCACATF,WMURNO,WMCODE,WMCNT
+          CALL      RAWTCAT1                  * Check if a record exists first
+          IF        OVRCD=0
+            CALL      UPWTCAT1                * Update priority file
+          ELSE
+            CALL      WRWTCAT1                * write change priority file
+          ENDIF
+          CALL      WRTHIS00
+          PACK      SAVEPRIO,WMPTY
+          RETURN
+.*****************************************************************************
+.* Dummy routines                                                            *
+.*****************************************************************************
+.
+CLRPAR00
+PROFLD00
+SETPAR00  RETURN
++
+.*****************************************************************************
+.*        I/O Includes                                                       *
+.*****************************************************************************
+.
+          INC       IBAWEBCD
+.
+          INC       PATCOMN3
+          INC       PATITMDS
+          INC       WLHISSUB
+.
+          INC       BOKRC1IO/INC
+          INC       PATDRGIO/INC
+          INC       PATGSRIO/INC
+          INC       PATITMIO/INC
+          INC       PATMA1IO/INC
+          INC       PATMI1IO/INC
+          INC       PATVISIO/INC
+          INC       WATESNIO/INC
+          INC       WATCATIO/INC
+          INC       WATPROIO/INC
+          INC       WATSUSIO/INC
+          INC       WATHISIO/INC
+          INC       WATTR1IO/INC
+          INC       WATTX1IO/INC
+.

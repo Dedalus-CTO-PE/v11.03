@@ -1,0 +1,200 @@
+.************************************************************************
+.*  Procedure: DGCLICON  -  Send an O/P New Appointment                 *
+.*                                                                      *
+.*  Author   : Mike Laming  (09/07/2001)                                *
+.*                                                                      *
+.*  Requires : PATMA1FD (Patient Master & Extension)                    *
+.*             PMSPX2FD (Patient Master Extn.2)                         *
+.*             OUTBOAFD (Outpatients Clinic Session Booking)            *
+.*             OUTBB1FD (Outpatients Clinic Session Booking Table 2)    *
+.*                                                                      *
+.*  Requirement removed (V9.02.01)                                      *
+.*             PATCGPFD (Registered GP/Practice Changes)                *
+.*             PATNIDFD (Patient National ID Number)                    *
+.*             NHIMASFD (NZ Health Interface)                           *
+.*             PMIGTNID.PBL (Get the National ID Number)                *
+.*                                                                      *
+.*  Mods     :                                                          *
+.*                                                                      *
+.*  V11.00.01 05/10/2020  Davin             TSK 0890602                 *
+.*            Allow broadcast of A05 from HL7RECVR when ptcngosm=1      *
+.************************************************************************
+.*  V10.15.01 13/11/2019  Davin             TSK 0861253                 *
+.*            Added OUTTHIFD/CLOUTTHI/outthiaf for telehealth fields    *
+.************************************************************************
+.*  V10.04.01 21/03/2014  Steve Armstrong   CAR 298483                  *
+.*            Mods to not send a CON API message where we are sending   *
+.*            A38/A05 messages instead, based on the PTCNH7RA parameter *
+.************************************************************************
+.*  V10.03.01 17/04/2013  Davin S          CAR 280425                   *
+.*            Changed IBCNUCIS - value 1 or greater will write trigger  *
+.*  V10.02.01 05/06/2011  Steve Armstrong   CAR 240692                  *
+.*            Mods to populate H7CIRTAG & H7CISTAG                      *
+.************************************************************************
+.*  V10.00.01 19/03/2010  Steve Armstrong   CAR 135505                  *
+.*            Added setting of H7CITRID & H7CIINCL                      *
+.************************************************************************
+.*  V9.06.01   05/05/2006  Steve Armstrong     CAR 103759               *
+.*             Added calls to CLOUTCAN & CLOUTRSH                       *
+.*  V9.05.01   09/01/2006  Steve Armstrong     CAR 88829                *
+.*             Added HL7 messages                                       *
+.************************************************************************
+.*  V9.02.03 : 14/02/2002  Davin                                        *
+.*             Save ur number & visit number                            *
+.*  V9.02.02   07/11/2001  Davin & MikeL                                *
+.*             Mods to use message holding file                         *
+.*  V9.02.01 : 03/09/2001  Mike Laming                                  *
+.*             Add Logic to get PATCGPFD as this is not available in    *
+.*             Calling Program. Also add NHIMAS-- and PATNID-- INCs     *
+.*             into this Procedure.                                     *
+.************************************************************************
+          DEFPROC   DGCLICON
+.
+          INC       HL7CISFD/INC
+          INC       HL7INBFD/INC
+          INC       OUTQUEFD/INC
+          INC       OUTTHIFD/INC
+          INC       PMSQPTFD/INC
+.
+CISMFLAG  FORM      1             * CIS message flag
+.                                    0 = don't send HL7 CIS message
+.                                    1 = send HL7 CIS message
+IBAMFLAG  FORM      1             * IBA proprietary message flag
+.                                    0 = don't send IBA proprietary message
+.                                    1 = send IBA proprietary message
+MESSAGID  DIM       20
+.
+DGCLI000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*133,IBCNUCIS
+          READ      CONTROLF,THIRTY2;*102,OTCNDGON
+          READ      CONTROLF,THIRTY2;*110,OTCNA05M
+          READ      CONTROLF,HUND18;*241,PTCNH7RA
+          READ      CONTROLF,HUND28;*207,PTCNGOSM
+.
+          MOVE      ZERO,CISMFLAG                * set default interface flag
+          MATCH     "1",IBCNUCIS                 * using CIS interface ?
+          IF        !@LESS
+            COMPARE   ONE,OTCNA05M               * yes - sending A05 ?
+            IF        @EQUAL
+              MOVE      ONE,CISMFLAG             * yes- set flag for CIS message
+            ENDIF
+          ENDIF
+.
+.         Check if we are sending any messages.
+.
+          IF        OTCNDGON <> 1 & CISMFLAG <> 1
+            GOTO      DGCLI999
+          ENDIF
+.
+          MATCH     "HL7RECVR",PRGID             * trigger from receiver ?
+          GOTO      DGCLI500 IF NOT EQUAL        * no - continue
+.
+          MATCH     "1",PTCNGOSM                 * allow broadcast ?
+          GOTO      DGCLI999 IF NOT EQUAL        * no - finished
+.
+.         We are sending IBA Proprietary and/or CIS HL7 messages, so
+.         first open the relevant holding tables
+.
+DGCLI500  MOVE      ZERO,IBAMFLAG
+          IF        OTCNDGON = 1
+            OPEN      HL7INB01,"hl7inbaf"
+            MOVE      ONE,IBAMFLAG
+          ENDIF
+          IF        CISMFLAG = 1
+            OPEN      HL7CISA1,"hl7cisaf"
+          ENDIF
+          OPEN      PMSQPTA1,"pmsqptaf"
+          OPEN      OUTQUEA1,"outqueaf"
+          OPEN      OUTTHIA1,"outthiaf"
+          CALL      CLOUTCAN
+          CALL      CLOUTRSH
+.
+          CALL      DGMESSID                     * get the unique message id
+.
+.         Write a record to pmsqptaf (holding patient details)
+.
+          MOVE      MESSAGID,PMQPMESI
+          MOVE      SP8,PMQPOURN
+          PACK      PMQPSPAR,SP30,SP30,SP20
+          CALL      WRPMQPT1
+.
+.         Write a record to outqueaf (holding visit details)
+.
+          IF        OBAOUTNO = 0
+            CALL      CLOUTTHI
+          ELSE
+            PACK      KEY8,OBAOUTNO,SP70         * Outpatient Telehealth Info
+            CALL      RDOTTHI1
+            IF        OVRCD=1
+              CALL      CLOUTTHI
+            ENDIF
+          ENDIF
+.
+          MOVE      MESSAGID,OTQUMESG
+          MOVE      SP20,OTQUSPAR
+          CALL      WROTQUE1
+.
+          COMPARE   ONE,CISMFLAG                 * sending CIS HL7 A05 message?
+          IF        @EQUAL
+            MOVE      "A05",H7CIMETP
+            MOVE      HL7TRGID,H7CITRID
+            MOVE      HL7INCLD,H7CIINCL
+            MATCH     "HL7REGEN",PRGID
+            IF        @EQUAL
+              MOVE      HL7RCTAG,H7CIRTAG
+              MOVE      HL7SFTAG,H7CISTAG
+            ELSE
+              MOVE      SP20,H7CIRTAG
+              MOVE      SP3,H7CISTAG
+            ENDIF
+            CALL      WRCIS000                   * yes - write hl7cisaf record
+          ENDIF
+.
+          COMPARE   ONE,OTCNDGON                 * sending proprietary message?
+          GOTO      DGCLI900 IF NOT EQUAL        * no
+.
+          MATCH     "1",PTCNH7RA                 * sending A38/A05 ?
+          GOTO      DGCLI800 IF NOT EQUAL        * no
+.
+          MATCH     "OUTWEB02",PRGID             * OUTWEB02 triggering ?
+          GOTO      DGCLI800 IF NOT EQUAL        * no
+.
+.         Check for specific trigger points for where we are sending
+.         A05 messages instead of an A08
+.
+          IF        HL7TRGID <> 26 & HL7TRGID <> 28 & HL7TRGID <> 30
+            GOTO      DGCLI800
+          ENDIF
+.
+          MATCH     SP8,HL7INCLD
+          GOTO      DGCLI800 IF NOT EQUAL
+.
+.         We are sending an A05 instead of an A08, so no need to send the
+.         Proprietary API message (which will be sent as a COB elsewhere)
+.
+          GOTO      DGCLI999
+.
+DGCLI800  MOVE      "CON",H7INMETP
+          CALL      WRINB000                     * write hl7inbaf record
+.
+DGCLI900  CLOSE     HL7INB01
+          CLOSE     HL7CISA1
+          CLOSE     PMSQPTA1
+          CLOSE     OUTQUEA1
+          CLOSE     OUTTHIA1
+.
+DGCLI999  GOTO      DGCLIEND                     * end procedure
+.
+.         I/O's go in here
+.
+          INC       BRHLCOMN
+          INC       CLOUTTHI
+.
+          INC       HL7CISIO/INC
+          INC       HL7INBIO/INC
+          INC       IBAOVRIO/INC
+          INC       OUTQUEIO/INC
+          INC       OUTTHIIO/INC
+          INC       PMSQPTIO/INC
+.
+DGCLIEND  ENDPROC

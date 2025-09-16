@@ -1,0 +1,98 @@
+.
+. MEHSCRIO    
+. --------
+. Filename     : mehscraf.dat
+.
+RSMHSCR1  RESET     KEY16                                                       
+          READ      MEHSCRA1,KEY16;;                                            
+          RETURN
+.
+RAMHSCR1  RESET     KEY16                                                       
+          MOVE      ZERO,OVRCD
+          READ      MEHSCRA1,KEY16;ANS                                          
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDMHSCR1  RESET     KEY16                                                       
+          MOVE      ZERO,OVRCD
+          READ      MEHSCRA1,KEY16;MHSCURNO,MHSCSDAT,MHSCCOUN,MHSCUC01,MHSCUC02:
+                        MHSCUC03,MHSCUC04,MHSCUC05,MHSCUC06,MHSCUC07,MHSCUC08:  
+                        MHSCUC09,MHSCUC10,MHSCUC11,MHSCUC12,MHSCUC13,MHSCUC14:  
+                        MHSCUC15,MHSCUDT1,MHSCUTM1,MHSCUDT2,MHSCUTM2,MHSCUDT3:  
+                        MHSCUTM3,MHSCUDT4,MHSCUTM4,MHSCUDT5,MHSCUTM5,MHSCUDT6:  
+                        MHSCUTM6,MHSCUDT7,MHSCUTM7,MHSCUDT8,MHSCUTM8,MHSCUDT9:  
+                        MHSCUTM9,MHSCUHC1,MHSCUHC2,MHSCUHC3,MHSCUHC4,MHSCUHC5:  
+                        MHSCUHC6,MHSCUHC7,MHSCUHC8,MHSCUHC9,MHSCUYN1,MHSCUYN2:  
+                        MHSCUYN3,MHSCUYN4,MHSCUYN5,MHSCUYN6,MHSCUYN7,MHSCUYN8:  
+                        MHSCUYN9,MHSCUFF1,MHSCUFF2,MHSCUFF3,MHSCUFF4,MHSCUFF5:  
+                        MHSCCDAT,MHSCCTIM,MHSCCUID,MHSCUDAT,MHSCUTIM,MHSCUUID:  
+                        MHSCSTAT,MHSCSPAR                                       
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKMHSCR1  MOVE      ZERO,OVRCD                                                  
+          READKS    MEHSCRA1;MHSCURNO,MHSCSDAT,MHSCCOUN,MHSCUC01,MHSCUC02:      
+                        MHSCUC03,MHSCUC04,MHSCUC05,MHSCUC06,MHSCUC07,MHSCUC08:  
+                        MHSCUC09,MHSCUC10,MHSCUC11,MHSCUC12,MHSCUC13,MHSCUC14:  
+                        MHSCUC15,MHSCUDT1,MHSCUTM1,MHSCUDT2,MHSCUTM2,MHSCUDT3:  
+                        MHSCUTM3,MHSCUDT4,MHSCUTM4,MHSCUDT5,MHSCUTM5,MHSCUDT6:  
+                        MHSCUTM6,MHSCUDT7,MHSCUTM7,MHSCUDT8,MHSCUTM8,MHSCUDT9:  
+                        MHSCUTM9,MHSCUHC1,MHSCUHC2,MHSCUHC3,MHSCUHC4,MHSCUHC5:  
+                        MHSCUHC6,MHSCUHC7,MHSCUHC8,MHSCUHC9,MHSCUYN1,MHSCUYN2:  
+                        MHSCUYN3,MHSCUYN4,MHSCUYN5,MHSCUYN6,MHSCUYN7,MHSCUYN8:  
+                        MHSCUYN9,MHSCUFF1,MHSCUFF2,MHSCUFF3,MHSCUFF4,MHSCUFF5:  
+                        MHSCCDAT,MHSCCTIM,MHSCCUID,MHSCUDAT,MHSCUTIM,MHSCUUID:  
+                        MHSCSTAT,MHSCSPAR                                       
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPMHSCR1  MOVE      ZERO,OVRCD                                                  
+          READKP    MEHSCRA1;MHSCURNO,MHSCSDAT,MHSCCOUN,MHSCUC01,MHSCUC02:      
+                        MHSCUC03,MHSCUC04,MHSCUC05,MHSCUC06,MHSCUC07,MHSCUC08:  
+                        MHSCUC09,MHSCUC10,MHSCUC11,MHSCUC12,MHSCUC13,MHSCUC14:  
+                        MHSCUC15,MHSCUDT1,MHSCUTM1,MHSCUDT2,MHSCUTM2,MHSCUDT3:  
+                        MHSCUTM3,MHSCUDT4,MHSCUTM4,MHSCUDT5,MHSCUTM5,MHSCUDT6:  
+                        MHSCUTM6,MHSCUDT7,MHSCUTM7,MHSCUDT8,MHSCUTM8,MHSCUDT9:  
+                        MHSCUTM9,MHSCUHC1,MHSCUHC2,MHSCUHC3,MHSCUHC4,MHSCUHC5:  
+                        MHSCUHC6,MHSCUHC7,MHSCUHC8,MHSCUHC9,MHSCUYN1,MHSCUYN2:  
+                        MHSCUYN3,MHSCUYN4,MHSCUYN5,MHSCUYN6,MHSCUYN7,MHSCUYN8:  
+                        MHSCUYN9,MHSCUFF1,MHSCUFF2,MHSCUFF3,MHSCUFF4,MHSCUFF5:  
+                        MHSCCDAT,MHSCCTIM,MHSCCUID,MHSCUDAT,MHSCUTIM,MHSCUUID:  
+                        MHSCSTAT,MHSCSPAR                                       
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPMHSCR1  MOVE      ZERO,OVRCD                                                  
+          UPDATE    MEHSCRA1;MHSCURNO,MHSCSDAT,MHSCCOUN,MHSCUC01,MHSCUC02:      
+                        MHSCUC03,MHSCUC04,MHSCUC05,MHSCUC06,MHSCUC07,MHSCUC08:  
+                        MHSCUC09,MHSCUC10,MHSCUC11,MHSCUC12,MHSCUC13,MHSCUC14:  
+                        MHSCUC15,MHSCUDT1,MHSCUTM1,MHSCUDT2,MHSCUTM2,MHSCUDT3:  
+                        MHSCUTM3,MHSCUDT4,MHSCUTM4,MHSCUDT5,MHSCUTM5,MHSCUDT6:  
+                        MHSCUTM6,MHSCUDT7,MHSCUTM7,MHSCUDT8,MHSCUTM8,MHSCUDT9:  
+                        MHSCUTM9,MHSCUHC1,MHSCUHC2,MHSCUHC3,MHSCUHC4,MHSCUHC5:  
+                        MHSCUHC6,MHSCUHC7,MHSCUHC8,MHSCUHC9,MHSCUYN1,MHSCUYN2:  
+                        MHSCUYN3,MHSCUYN4,MHSCUYN5,MHSCUYN6,MHSCUYN7,MHSCUYN8:  
+                        MHSCUYN9,MHSCUFF1,MHSCUFF2,MHSCUFF3,MHSCUFF4,MHSCUFF5:  
+                        MHSCCDAT,MHSCCTIM,MHSCCUID,MHSCUDAT,MHSCUTIM,MHSCUUID:  
+                        MHSCSTAT,MHSCSPAR                                       
+          RETURN
+.
+WRMHSCR1  RESET     KEY16                                                       
+          WRITE     MEHSCRA1,KEY16;MHSCURNO,MHSCSDAT,MHSCCOUN,MHSCUC01,MHSCUC02:
+                        MHSCUC03,MHSCUC04,MHSCUC05,MHSCUC06,MHSCUC07,MHSCUC08:  
+                        MHSCUC09,MHSCUC10,MHSCUC11,MHSCUC12,MHSCUC13,MHSCUC14:  
+                        MHSCUC15,MHSCUDT1,MHSCUTM1,MHSCUDT2,MHSCUTM2,MHSCUDT3:  
+                        MHSCUTM3,MHSCUDT4,MHSCUTM4,MHSCUDT5,MHSCUTM5,MHSCUDT6:  
+                        MHSCUTM6,MHSCUDT7,MHSCUTM7,MHSCUDT8,MHSCUTM8,MHSCUDT9:  
+                        MHSCUTM9,MHSCUHC1,MHSCUHC2,MHSCUHC3,MHSCUHC4,MHSCUHC5:  
+                        MHSCUHC6,MHSCUHC7,MHSCUHC8,MHSCUHC9,MHSCUYN1,MHSCUYN2:  
+                        MHSCUYN3,MHSCUYN4,MHSCUYN5,MHSCUYN6,MHSCUYN7,MHSCUYN8:  
+                        MHSCUYN9,MHSCUFF1,MHSCUFF2,MHSCUFF3,MHSCUFF4,MHSCUFF5:  
+                        MHSCCDAT,MHSCCTIM,MHSCCUID,MHSCUDAT,MHSCUTIM,MHSCUUID:  
+                        MHSCSTAT,MHSCSPAR                                       
+          RETURN
+.
+DEMHSCR1  RESET     KEY16                                                       
+          DELETE    MEHSCRA1,KEY16                                              
+          RETURN
+.

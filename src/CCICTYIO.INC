@@ -1,0 +1,74 @@
+.
+. CCICTYIO.INC
+. ------------
+. Filenames       : ccictyaf
+. Description     : CCI Clinic Type/Department file
+.
+. ------- first index -------
+.
+RACCCTY1  MOVE        ZERO,OVRCD
+          RESET       KEY12
+          READ        CCICTYA1,KEY12;ANS
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+RSCCCTY1  RESET       KEY12
+          READ        CCICTYA1,KEY12;;
+          RETURN
+.
+RDCCCTY1  MOVE        ZERO,OVRCD
+          RESET       KEY12
+          READ        CCICTYA1,KEY12;CCCTSITE,CCCTTYPE,CCCTDEPT,CCCTSPAR
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+RKCCCTY1  MOVE        ZERO,OVRCD
+          READKS      CCICTYA1;CCCTSITE,CCCTTYPE,CCCTDEPT,CCCTSPAR
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+WRCCCTY1  RESET       KEY12
+          WRITE       CCICTYA1,KEY12;CCCTSITE,CCCTTYPE,CCCTDEPT,CCCTSPAR
+          RETURN
+.
+UPCCCTY1  UPDATE      CCICTYA1;CCCTSITE,CCCTTYPE,CCCTDEPT,CCCTSPAR
+          RETURN
+.
+DECCCTY1  RESET       KEY12
+          DELETE      CCICTYA1,KEY12
+          RETURN
+.
+. ------- second index -------
+.
+RACCCTY2  MOVE        ZERO,OVRCD
+          RESET       KEY15
+          READ        CCICTYA2,KEY15;ANS
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+RSCCCTY2  RESET       KEY15
+          READ        CCICTYA2,KEY15;;
+          RETURN
+.
+RDCCCTY2  MOVE        ZERO,OVRCD
+          RESET       KEY15
+          READ        CCICTYA2,KEY15;CCCTSITE,CCCTTYPE,CCCTDEPT,CCCTSPAR
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+RKCCCTY2  MOVE        ZERO,OVRCD
+          READKS      CCICTYA2;CCCTSITE,CCCTTYPE,CCCTDEPT,CCCTSPAR
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+WRCCCTY2  RESET       KEY15
+          WRITE       CCICTYA2,KEY15;CCCTSITE,CCCTTYPE,CCCTDEPT,CCCTSPAR
+          RETURN
+.
+UPCCCTY2  UPDATE      CCICTYA2;CCCTSITE,CCCTTYPE,CCCTDEPT,CCCTSPAR
+          RETURN
+.
+DECCCTY2  RESET       KEY15
+          DELETE      CCICTYA2,KEY15
+          RETURN
++

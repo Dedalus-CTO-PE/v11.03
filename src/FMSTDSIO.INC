@@ -1,0 +1,42 @@
+.
+. FMSTDSIO    
+. --------
+. Filename     : fmstdsaf.dat
+.
+RSFMTD1   RESET     KEY4
+          READ      FMSTDSA1,KEY4;;
+          RETURN
+.
+RAFMTD1   RESET     KEY4
+          MOVE      ZERO,OVRCD
+          READ      FMSTDSA1,KEY4;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMTD1   RESET     KEY4
+          MOVE      ZERO,OVRCD
+          READ      FMSTDSA1,KEY4;FMTDCODE,FMTDDESC
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMTD1   MOVE      ZERO,OVRCD
+          READKS    FMSTDSA1;FMTDCODE,FMTDDESC
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMTD1   MOVE      ZERO,OVRCD
+          READKP    FMSTDSA1;FMTDCODE,FMTDDESC
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMTD1   UPDATE    FMSTDSA1;FMTDCODE,FMTDDESC
+          RETURN
+.
+WRFMTD1   RESET     KEY4
+          WRITE     FMSTDSA1,KEY4;FMTDCODE,FMTDDESC
+          RETURN
+.
+DEFMTD1   RESET     KEY4
+          DELETE    FMSTDSA1,KEY4
+          RETURN
+.

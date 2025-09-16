@@ -1,0 +1,45 @@
+create table obscomaf
+(
+  obcovisn    varchar2(8) default ' ' not null,
+  obcoltac    varchar2(1) default ' ' not null,
+  obcodiab    varchar2(1) default ' ' not null,
+  obcoccal    varchar2(1) default ' ' not null,
+  obcoasth    varchar2(1) default ' ' not null,
+  obcocihd    varchar2(1) default ' ' not null,
+  obcocccf    varchar2(1) default ' ' not null,
+  obcohypr    varchar2(1) default ' ' not null,
+  obcowoun    varchar2(1) default ' ' not null,
+  obcohaem    varchar2(1) default ' ' not null,
+  obcocmpe    varchar2(1) default ' ' not null,
+  obcocuti    varchar2(1) default ' ' not null,
+  obcochin    varchar2(1) default ' ' not null,
+  obcocdvt    varchar2(1) default ' ' not null,
+  obcoprul    varchar2(1) default ' ' not null,
+  obcoothe    varchar2(1) default ' ' not null,
+  obcodesc    varchar2(80) default ' ' not null,
+  obcofvmo    varchar2(1) default ' ' not null,
+  obcovmon    varchar2(80) default ' ' not null,
+  obcovdat    varchar2(8) default ' ' not null,
+  obcovtim    varchar2(8) default ' ' not null,
+  obcoflmo    varchar2(1) default ' ' not null,
+  obcolmon    varchar2(80) default ' ' not null,
+  obcoldat    varchar2(8) default ' ' not null,
+  obcoltim    varchar2(8) default ' ' not null,
+  obcofoth    varchar2(1) default ' ' not null,
+  obcoothn    varchar2(80) default ' ' not null,
+  obcoodat    varchar2(8) default ' ' not null,
+  obcootim    varchar2(8) default ' ' not null,
+  obcowebc    varchar2(10) default ' ' not null,
+  obcodatc    varchar2(8) default ' ' not null,
+  obcotimc    varchar2(8) default ' ' not null,
+  obcowebu    varchar2(10) default ' ' not null,
+  obcodatu    varchar2(8) default ' ' not null,
+  obcotimu    varchar2(8) default ' ' not null,
+  obcospar    varchar2(80) default ' ' not null,
+  lf          varchar2(1) default ' ' not null,
+constraint obscoma1 primary key( 
+obcovisn)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 

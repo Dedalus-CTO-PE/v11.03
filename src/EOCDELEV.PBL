@@ -1,0 +1,172 @@
+.******************************************************************************
+.* System         : Episode of Care                                           *
+.*                                                                            *
+.* Include Name   : EOCDELEV.PBL                                              *
+.*                                                                            *
+.* Function       : To delete events from the eoclnkaf file when an event     *
+.*                  has been deleted (ie, an A&E event is deleted)            *
+.*                                                                            *
+.* Author         : Steve Armstrong  13/02/1998                               *
+.*                                                                            *
+.* Parameters     :                                                           *
+.*                                                                            *
+.*                                                                            *
+.* Modifications  : 
+.*        V10.08.01 05/05/2016  Steve Armstrong  CAR 0818530                  *
+.*                  Added RESET  PRGID after SCAN                             *
+.******************************************************************************
+.*                  16/02/2000  Katie Nelson                                  *
+.*                              Flag KEYIN to default no for WEB servers      *
+.******************************************************************************
+.
+          DEFPROC   EOCDELEV
+.
+          INC       EOCLNKFD/INC
+          INC       EOCREFFD/INC
+          INC       OUTRF1FD/INC
+.
+. LOCAL VARIABLES
+. ----------------
+SAVKEY13  DIM       13
+SAVREFRL  DIM        8
+.
+EOCDEL00  CALL      EOCDLN00                     * delete the link file event
+          BRANCH    EXIT,EOCDEL99                * no records deleted
+          CALL      EOCDRF00                     * delete eoc ref. record
+          GOTO      EOCDEL99
+.
+.****************************************************************************
+.*                       EOCDLN00                                           *
+.*    Delete an event from the eoclnkaf file                                *
+.****************************************************************************
+.
+EOCDLN00  OPEN      EOCLNKA2,"eoclnkaf"          * open eoc link file
+.
+          PACK      KEY10,CHOSINDX,PVIBILL
+          CALL      RDECLNK2                     * record on file ?
+          BRANCH    OVRCD,EOCDLN95               * no - finished
+.
+          PACK      SAVKEY13,ECLNURNO,ECLNEPNO
+.
+.         The event has been linked to an EOC so delete the event from this
+.         file.
+.
+          PACK      KEY10,ECLNHOSP,ECLNVISI
+          CALL      DEECLNK2                     * delete record
+.
+          MOVE      ZERO,EXIT
+          GOTO      EOCDLN99
+.
+EOCDLN95  MOVE      ONE,EXIT
+.
+EOCDLN99  CLOSE     EOCLNKA2
+          RETURN
++
+.****************************************************************************
+.*                       EOCDRF00                                           *
+.*    Check if there are no more linked events for this eoc, and if not,    *
+.*    see if the user wants to remove the EOC.                              *
+.****************************************************************************
+.
+EOCDRF00  OPEN      EOCREFA1,"eocrefaf"
+          OPEN      EOCLNKA1,"eoclnkaf"
+.
+          MOVE      SAVKEY13,KEY13
+          CALL      RDECREF1                     * eoc referral record found ?
+          BRANCH    OVRCD,EOCDRF90               * no - finished
+.
+          MOVE      ECRFREFN,SAVREFRL            * save referral number
+.
+          PACK      KEY23,SAVKEY13,SP30
+          CALL      RSECLNK1                     * position in file
+EOCDRF10  CALL      RKECLNK1                     * read next record
+          BRANCH    OVRCD,EOCDRF50               * eof - ask user if deleting
+.
+          PACK      KEY13,ECLNURNO,ECLNEPNO
+          MATCH     KEY13,SAVKEY13               * same episode still ?
+          GOTO      EOCDRF50 IF NOT EQUAL        * no - ask user if deleting
+.
+          COMPARE   ECLNVISI,ECRFREFN            * eoc referral record ?
+          GOTO      EOCDRF10 IF EQUAL            * yes - ignore
+.
+.         This is not the last linked event for this eoc, so we have finished
+.
+          GOTO      EOCDRF90
+.
+.         The last event has been deleted from the link file for this episode,
+.         so see if the referral record should also be removed
+.
+EOCDRF50  SCAN      "WEB",PRGID
+          IF        @EQUAL 
+            GOTO      EOCDRF90              * default No - Do not delete EOC 
+          ENDIF
+          RESET     PRGID
+.
+          KEYIN     *P1:24,*EL,"Last EOC event deleted.  Delete EOC (":
+                    *V2LON,*DV,ANSY,*HOFF,*DV,SLASH,*V2LON,*DV,ANSN,*HOFF:
+                    ") :":
+                    *P45:24,*V2LON,ANS:
+                    *P45:24,*DV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS                     
+          GOTO      EOCDRF60 IF EQUAL
+.
+          MATCH     ANSN,ANS
+          GOTO      EOCDRF90 IF EQUAL
+.
+          BEEP                                   * invalid keyin
+          GOTO      EOCDRF50
+.
+.         The EOC is to be deleted, so first delete the referral event record 
+.         from the link file
+.
+EOCDRF60  PACK      KEY23,SAVKEY13,SP30
+          CALL      RSECLNK1                     * position in file
+EOCDRF65  CALL      RKECLNK1                     * read next record
+          BRANCH    OVRCD,EOCDRF70               * eof - delete eocrefaf record
+.
+          PACK      KEY13,ECLNURNO,ECLNEPNO
+          MATCH     KEY13,SAVKEY13               * same episode still ?
+          GOTO      EOCDRF70 IF NOT EQUAL        * no - delete eocrefaf record
+.
+          PACK      KEY23,ECLNURNO,ECLNEPNO,ECLNHOSP,ECLNVISI
+          CALL      DEECLNK1                     * yes - delete last link event
+.
+.         Now delete the eocrefaf record for this EOC
+.
+EOCDRF70  MOVE      SAVKEY13,KEY13
+          CALL      RDECREF1                     * referral record on file ?
+          BRANCH    OVRCD,EOCDRF80               * no - delete outrf1af record
+.
+          MOVE      SAVKEY13,KEY13
+          CALL      DEECREF1                     * delete record
+.
+.         See if there is a record in outrf1af with a referral type of "1" 
+.         (Other).  If found, then delete this record.
+.
+EOCDRF80  OPEN      OUTRF1A1,"outrf1af"
+          MOVE      SAVREFRL,KEY8
+          CALL      RDOTRFL1                     * O/P referral record on file ?
+          BRANCH    OVRCD,EOCDRF90               * no - finished
+.
+          COMPARE   ONE,OTRLTREF                 * "Other" referral type ?
+          GOTO      EOCDRF90 IF NOT EQUAL        * no - finished
+.
+          MOVE      OTRLOUTN,KEY8
+          CALL      DEOTRFL1                     * delete referral record
+.
+EOCDRF90  CLOSE     EOCREFA1
+          CLOSE     EOCLNKA1
+.
+EOCDRF99  RETURN
++
+          INC       IBAOVRIO/INC
+          INC       EOCLNKIO/INC
+          INC       EOCREFIO/INC
+          INC       OUTRF1IO/INC
+.
+EOCDEL99  ENDPROC
++

@@ -1,0 +1,819 @@
+.******************************************************************************
+.* System         : Outpatients                                               *
+.* Program        : IBAOUT75.PBL                                              *
+.* Name           : CANCELLED/CHANGED APPOINTMENTS                            *
+.******************************************************************************
+.* Author         : J.Tan                                                     *
+.* Date Written   : 13/03/93                                                  *
+.* Modifications  :                                                           *
+.*        V10.05.01 17/12/2014  Ebon Clements     CAR 261630                  *
+.*                  Removed port number from temp file name                   *
+.*        V9.02.01  03/05/2002  Dean Cramer                                   *
+.*                  Fix so program works when multi hospital indicator        *
+.*                  (ibcnmhos) is set to No.                                  *
+.*                  Include time value missing in heading                     *
+.*        V5.08.01  29/08/2000  Caleb Sharman                                 *
+.*                  Changed Health Fund variables to be 8 chars               *
+.*        V5.08.B01 15/03/2000  Steve Armstrong   5.08 Mods                   *
+.*                  Mods for changes to OUTCLIFD (effective date)             *
+.******************************************************************************
+.*                  V5.01.02  26/04/93  Steve O'Gorman                        *
+.*                :           Modified LOAD0000 routine to validate date/time *
+.*                :           of records from the resched. file               *
+.*                  V5.01.03  13/05/93  ROD                                   *
+.*                :           Fix bug when printing cancelled bookings        *
+.*        V5.01.04  24/06/1993  Graeme Williams            SRF 123217         *
+.*                  Correct relevant opens to use site prefix, not "out"      *
+.*        V5.01.05  27/05/1994 Ian Rutt                                       *
+.*                  Fixed Global Recompile Bugs                               * 
+.*        V5.01.06  20/07/1994  Rob Leonard                                   *
+.*                  Fixed hospital keyin                                      * 
+.*        V5.02.01  04/05/1995  Bugs Bunny                                    *
+.*                  Fixed Rob's hospital keyin                                * 
+.******************************************************************************
+.
+.         FD's required
+.
+          INC       STD001FD
+          INC       IBASEQFD/INC
+          INC       OUTSITFD/INC      * Site file
+          INC       OUTBOAFD/INC      * Booking file
+          INC       OUTOSFFD/INC      * Open session file
+          INC       OUTRSHFD/INC      * Rescheduled bookings file
+          INC       OUTCANFD/INC      * Cancelled bookings file
+          INC       OUTCLIFD/INC      * Clinic file
+          INC       PATDO1FD/INC      * doctor file
+          INC       PATHSPFD/INC      * Hospital File
+          INC       PATMA1FD/INC      * Patient Master file
+          INC       PATPR1FD/INC      * Pre Admission file
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+APPTMPA1  IFILE     SQL, FIXED=257, KEY="U1-6,7-7,8-15,16-23,24-43"
+XXCLIN    DIM       6        1        * Clinic ID
+XXINDIC   DIM       1        7        * Indicator 0 = Rescheduled
+.                                                 1 = Cancelled
+XXURNO    DIM       8        8        * U/R No
+XXOUTNO   DIM       8       16        * Outpatient No
+XXPSNAM   DIM       20      24        * Patient surname
+XXPGNAM   DIM       25      44        * Patient given name
+XXPADD1   DIM       33      69        * Patient address line 1
+XXPADD2   DIM       33     102        *   "       "     line 2
+XXPSUBRB  DIM       33     135        *   "       "     line 3
+XXPADD4   DIM       33     168        *   "       "     line 4
+XXPPOST   DIM        8     201        * Postcode
+XXOCBDAT  DIM        8     209        * Old/Cancelled booking date
+XXOCTTIM  DIM        5     217        * Old/Cancelled start time
+XXOCSLOT  DIM        3     222        * Old/Cancelled slot no
+XXOCSTIM  DIM        5     225        * Old/Cancelled slot time
+XXNWCLIN  DIM        6     230        * New clinic of booking
+XXNWBDAT  DIM        8     236        * New booking date
+XXNWTTIM  DIM        5     244        * New start time
+XXNWSLOT  DIM        3     249        * New slot no
+XXNWSTIM  DIM        5     252        * New slot time
+.EOR                       257
+.------------------------------------------------------------------------------
+.                   Variables
+.------------------------------------------------------------------------------
+CMDLINE   DIM       50
+.
+DATE      DIM       8       * date keyed in
+DESCID    DIM       30      * clinic ID description
+DIM40     DIM       40      * pack patientname / pack doctorname
+.
+IBCNMHOS  FORM      1
+SAVINDIC  FORM      1
+SAVCLIN   DIM       6
+SITE      DIM       6       * store IDDD
+.
+FNAME     DIM       8
+XCENT1    DIM       2
+XYEAR1    DIM       2
+XMON1     DIM       2
+XDAY1     DIM       2
+.
+PNAME     DIM       22      * patients name
+.
+PRGNAM    INIT      "Cancelled/changed Appointments"
+PRGID     INIT      "IBAOUT75"
+VERSION   INIT      "V11.03.00"
++
+.------------------------------------------------------------------------------
+.                   MAINLINE
+.------------------------------------------------------------------------------
+ML0000    CALL      INIT0000                * initialization
+ML0500    CALL      OPTN0000                * Run?
+          BRANCH    EXIT,ML9999
+.
+ML1000    CALL      HOSP0000                * Get Hospital Code if Required
+          BRANCH    EXIT,ML0500
+.
+          CALL      KDAT0000                * enter date
+          IF        IBCNMHOS = 1
+            BRANCH    EXIT,ML1000             * nothing entered
+          ELSE
+            BRANCH    EXIT,ML0500             * nothing entered
+          ENDIF
+.
+          CALL      CONTQST
+          BRANCH    CEXIT,ML2000,ML1000,ML0500
+.
+ML2000    CALL      CRET0000                * Create a tempfile
+          CALL      LOAD0000                * Load to temp file
+          CALL      PRNT0000                * print report
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM
++
+.*********************************************************************
+.*                  INIT0000                    Called by : ML0000   *
+.*        Initialization and open files                              *
+.*********************************************************************
+INIT0000  CALL      DISPHEAD
+          DISPLAY   *P56:24,"Opening";
+          DISPLAY   *P64:24,"outsitaf";
+          OPEN      OUTSITA1,"outsitaf"
+          MOVE      IDDD,KEY6
+          CALL      RDSITA1
+          MOVE      IDDD,SITE
+.
+          PACK      CFNAME,OSTFILE,FILBOKA1
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTBOKA1,CFNAME
+.
+          PACK      CFNAME,OSTFILE,FILCLIA1
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTCLIA1,CFNAME
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+.
+          DISPLAY   *P64:24,"patmx1af";
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"patpramf";
+          OPEN      PATPR1A1,"patpr1af"
+          OPEN      PATPX1A1,"patpx1af"
+.
+          DISPLAY   *P64:24,"outosfaf";
+          OPEN      OUTOSFA1,"outosfaf"
+.
+          PACK      CFNAME,OSTFILE,FILRSHA2
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTRSHA2,CFNAME
+.
+          PACK      CFNAME,OSTFILE,FILCANA3
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTCANA3,CFNAME
+.
+          DISPLAY   *P64:24,"patpramf";
+          OPEN      PATPR1A1,"patpr1af"
+          OPEN      PATPX1A1,"patpx1af"
+.
+          DISPLAY   *P64:24,"patdo1af";
+          OPEN      PATDO1A1,"patdo1af"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          MOVE      SP20,PTHSHOSP
+.
+          CALL      TFILENAM * Get temp file name in create
+          MOVE      TFILNAME,FNAME
+.
+          MOVE      ZERO,EXIT
+.
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                 OPTN0000               Called by: ML0000   *
+.*                               Choose Option                                *
+.******************************************************************************
+OPTN0000  MOVE      ZERO,OPTION
+          DISPLAY   *P1:4,*EF,*V2LON,"0",*HOFF," = Exit":
+                    *P1:5,*V2LON,"1",*HOFF," = Run Report":
+                    *P1:7,*HOFF,"Select Option : ";
+.
+OPTN1000  KEYIN     *P17:7,*V2LON,OPTION;
+.
+          COMPARE   ZERO,OPTION
+          GOTO      OPTN9500 IF EQUAL
+.
+          BRANCH    OPTION,OPTN9000
+.
+          BEEP
+          GOTO      OPTN1000
+.
+OPTN9000  
+          MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*********************************************************************
+.*        HOSP0000                               Called by ML0000    *
+.*        Get hospital code                                          *
+.*********************************************************************
+HOSP0000  COMPARE   ONE,IBCNMHOS
+          GOTO      HOSP9999 IF NOT EQUAL
+.
+          DISPLAY   *P1:9,*EL,"Hospital   : "
+          MOVE      "09",EVERT
+          MOVE      "14",ECOL
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND
+          OPEN      PATHSPA1,"pathspaf"
+          CALL      PATHSPKY
+          CLOSE     PATHSPA1
+          BRANCH    EXIT,HOSP9500,HOSP9500
+          DISPLAY   *P25:EVERT,PTHSNAME;
+          MOVE      ZERO,EXIT
+          GOTO      HOSP9999
+.
+HOSP9500  MOVE      ONE,EXIT
+.
+HOSP9999  RETURN
++
+.------------------------------------------------------------------------------
+.                   KDAT0000
+.                   Input date 
+.------------------------------------------------------------------------------
+KDAT0000  MOVE      SP8,DATE
+          DISPLAY   *P1:11,"Enter Date : "
+.
+          UNPACK    DATE INTO CCENT,CYEAR,CMON,CDAY
+          MOVE      "14",CCOL
+          MOVE      "11",CVERT
+.
+          MOVE      ZERO,CHIGHLT
+          MOVE      CCC,CCENT
+          CALL      KEYDATE
+          BRANCH    OVRCD,KDAT9100          * nothing entered
+.
+          PACK      DATE WITH CCENT,CYEAR,CMON,CDAY
+          REP       " 0",DATE
+.
+.         set exit flags
+.
+KDAT9000  MOVE      ZERO,EXIT               * continue
+          GOTO      KDAT9999
+.
+KDAT9100  MOVE      ONE,EXIT                * exit
+.
+KDAT9999  RETURN
++
+.------------------------------------------------------------------------------
+.                   LOAD0000
+.         Load to tempfile
+.------------------------------------------------------------------------------
+LOAD0000  DISPLAY   *P1:24,*EL:
+                    *P8:24,"Site      :":
+                    *P27:24,"Clin Id   :";
+.
+.         Read Open session file
+.
+          PACK      KEY34 WITH PTHSHOSP,SITE,SP30
+          CALL      RSOTOSF1
+          COMPARE   ZERO,IBCNMHOS
+          GOTO      LOAD1100 IF EQUAL
+.
+LOAD1000  CALL      RKOTOSF1
+          BRANCH    OVRCD TO LOAD9999
+.
+          MATCH     PTHSHOSP,OTOSHOSP            * Check for Correct Hospital
+          GOTO      LOAD9999 IF NOT EQUAL
+.
+          MATCH     OTOSSITE,SITE
+          GOTO      LOAD9999 IF NOT EQUAL
+.
+          MATCH     OTOSDATE,DATE                * match session date
+          GOTO      LOAD1000 IF NOT EQUAL
+.
+          GOTO      LOAD1900 
+.
+LOAD1100  CALL      RKOTOSF1
+          BRANCH    OVRCD TO LOAD9999
+.
+          MATCH     OTOSSITE,SITE
+          GOTO      LOAD1100 IF NOT EQUAL
+.
+          MATCH     OTOSDATE,DATE                * match session date
+          GOTO      LOAD1100 IF NOT EQUAL
+.
+.         Read rescheduled bookings file
+.
+LOAD1900  PACK      KEY36,OTOSSITE,OTOSCLID,OTOSDATE,OTOSTIME,SP20,SP10
+          CALL      RDSRSHA2
+LOAD2000  CALL      RDKRSHA2
+          BRANCH    OVRCD OF LOAD7000
+.
+          DISPLAY   *P20:24,*V2LON,OTOSSITE:
+                    *P37:24,OTOSCLID;
+.
+          MATCH     OPRSSITE,OTOSSITE     * match booking site to site
+          GOTO      LOAD7000 IF NOT EQUAL
+.
+          MATCH     OPRSCLIN,OTOSCLID      * match clinic id
+          GOTO      LOAD7000 IF NOT EQUAL
+.
+          MATCH     OPRSDATE,OTOSDATE      * match clinic date
+          GOTO      LOAD7000 IF NOT EQUAL
+.
+          MATCH     OPRSSTRT,OTOSTIME      * match clinic start time
+          GOTO      LOAD7000 IF NOT EQUAL
+.
+          PACK      KEY28,OPRSSITE,OPRSNCLI,OPRSNDAT,OPRSNSTR,OPRSNSLO
+          CALL      RDBOKA1
+          BRANCH    OVRCD,LOAD2000
+.
+          COMPARE   OBAOUTNO,OPRSOUTN
+          GOTO      LOAD2000 IF NOT EQUAL   * Make sure correct O/P number
+.
+          MATCH     "       0",OBAURNO
+          GOTO      LOAD5000 IF NOT EQUAL
+.
+.         Read Pre Admission Master File 
+.
+          MOVE      OBAOUTNO,KEY8
+          CALL      RDPRAM1
+          BRANCH    OVRCD OF LOAD2000       * invalid visit number
+          GOTO      LOAD6000
+.
+.         Read Patient Master File 
+.
+LOAD5000  MOVE      OBAURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD OF LOAD2000       * invalid UR number
+.
+LOAD6000  
+.         CALL      FNAM0000           * find patient name
+.
+LOAD6500  MOVE      OTOSCLID,XXCLIN
+          MOVE      ZERO,XXINDIC
+          MOVE      OBAURNO,XXURNO
+          MOVE      OPRSOUTN,XXOUTNO
+          MOVE      PSNAME,XXPSNAM
+          PACK      KEY43,XXCLIN,XXINDIC,XXURNO,XXOUTNO,XXPSNAM
+          CALL      RATEMP1
+          COMPARE   ZERO,OVRCD
+          GOTO      LOAD2000 IF EQUAL
+.
+.         Set up the variables to write to tempfile
+.
+          MOVE      PGNAME,XXPGNAM
+          MOVE      PADD1,XXPADD1
+          MOVE      PADD2,XXPADD2
+          MOVE      PSUBRB,XXPSUBRB
+          MOVE      PADD4,XXPADD4
+          MOVE      PPOST,XXPPOST
+          MOVE      OPRSDATE,XXOCBDAT
+          MOVE      OPRSSTRT,XXOCTTIM
+          MOVE      OPRSSLOT,XXOCSLOT
+          MOVE      OPRSTIME,XXOCSTIM
+.
+          MOVE      OPRSNCLI,XXNWCLIN
+          MOVE      OPRSNDAT,XXNWBDAT
+          MOVE      OPRSNSTR,XXNWTTIM
+          MOVE      OPRSNSLO,XXNWSLOT
+          MOVE      OPRSNTIM,XXNWSTIM
+          CALL      WRTEMP1
+          GOTO      LOAD2000              * get next rescheduled booking record
+.
+.
+.         Read cancelled bookings file
+.
+LOAD7000  PACK      KEY33,OTOSSITE,OTOSCLID,DATE,SP20,SP10
+          CALL      RSOTCAN3
+LOAD7100  CALL      RKOTCAN3
+          BRANCH    OVRCD,LOAD1000
+.
+          MATCH     OPCNSITE,OTOSSITE     * match booking site to site
+          GOTO      LOAD1000 IF NOT EQUAL
+.
+          MATCH     OPCNCLIN,OTOSCLID      * match clinic id
+          GOTO      LOAD1000 IF NOT EQUAL
+.
+          MATCH     OPCNDATE,DATE          * same date?
+          GOTO      LOAD1000 IF NOT EQUAL
+.
+          MATCH     "       0",OPCNURNO
+          GOTO      LOAD7200 IF NOT EQUAL
+.
+          MOVE      OPCNOUTN,KEY8
+          CALL      RDPRAM1
+          BRANCH    OVRCD,LOAD7100
+          GOTO      LOAD7300
+.
+LOAD7200  MOVE      OPCNURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,LOAD7100
+.
+LOAD7300  MOVE      OTOSCLID,XXCLIN
+          MOVE      ONE,XXINDIC            * cancelled
+          MOVE      OPCNURNO,XXURNO
+          MOVE      OPCNOUTN,XXOUTNO
+          MOVE      PSNAME,XXPSNAM
+          PACK      KEY43,XXCLIN,XXINDIC,XXURNO,XXOUTNO,XXPSNAM
+          CALL      RATEMP1
+          COMPARE   ZERO,OVRCD
+          GOTO      LOAD7100 IF EQUAL
+.
+.         Set up the variables to write to tempfile
+.
+          MOVE      PGNAME,XXPGNAM
+          MOVE      PADD1,XXPADD1
+          MOVE      PADD2,XXPADD2
+          MOVE      PSUBRB,XXPSUBRB
+          MOVE      PADD4,XXPADD4
+          MOVE      PPOST,XXPPOST
+          MOVE      OPCNDATE,XXOCBDAT
+          MOVE      OPCNSTRT,XXOCTTIM
+          MOVE      OPCNSLOT,XXOCSLOT
+          MOVE      OPCNTIME,XXOCSTIM
+.
+          MOVE      SP10,XXNWCLIN
+          MOVE      SP10,XXNWBDAT
+          MOVE      SP10,XXNWTTIM
+          MOVE      SP10,XXNWSLOT
+          MOVE      SP10,XXNWSTIM
+          CALL      WRTEMP1
+          GOTO      LOAD7100                * get next cancelled booking record
+.
+LOAD9999  RETURN
++
+.------------------------------------------------------------------------------
+.                   PRNT0000
+.         Print the tempfile
+.------------------------------------------------------------------------------
+.
+PRNT0000  MOVE      ZERO,CPAGENO
+          MOVE      "60",CLNO
+          MOVE      SP10,SAVCLIN
+          MOVE      ZERO,SAVINDIC
+.
+          PACK      KEY43,SP20,SP20
+          CALL      RSTEMP1
+PRNT1000  CALL      RKTEMP1
+          BRANCH    OVRCD,PRNT8000
+.
+          MOVE      XXINDIC,FORM1
+.
+.         Check the clinic id
+.
+          MATCH     SP6,SAVCLIN
+          GOTO      PRNT2100 IF EQUAL
+.
+          MATCH     XXCLIN,SAVCLIN
+          GOTO      PRNT3000 IF EQUAL
+.
+PRNT2100  MOVE      XXCLIN,SAVCLIN
+          MOVE      XXINDIC,SAVINDIC
+          CALL      HEAD0000
+.
+.         Check the indicator 0 = rescheduled, 1 = cancelled
+.
+PRNT3000  COMPARE   FORM1,SAVINDIC
+          GOTO      PRNT4000 IF EQUAL
+.
+          MOVE      XXINDIC,SAVINDIC
+          CALL      HEAD2000             * New box for cancelled booking
+.
+PRNT4000  COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS
+.
+          UNPACK    XXOCBDAT,XCENT,XYEAR,XMON,XDAY
+          UNPACK    XXNWBDAT,XCENT1,XYEAR1,XMON1,XDAY1
+.
+          BRANCH    FORM1,PRNT5000
+          PRINT     *1,"|",XXURNO,*10,"|",XXPSNAM,*35,"|",XXPADD1:
+                    *69,"|",XDAY,SLASH,XMON,SLASH,XCENT,XYEAR:
+                    *80,"|",XXOCTTIM,*86,"|",XXOCSLOT,*91,"|",XXOCSTIM:
+                    *97,"|",XXNWCLIN:
+                    *104,"|",XDAY1,SLASH,XMON1,SLASH,XCENT1,XYEAR1:
+                    *115,"|",XXNWTTIM,*121,"|",XXNWSLOT,*126,"|",XXNWSTIM:
+                    *132,"|":
+                    *N,*1,"|",XXOUTNO,*10,"|",XXPGNAM,*35,"|",XXPADD2:
+                    *69,"|",*80,"|",*86,"|",*91,"|",*97,"|":
+                    *104,"|",*115,"|",*121,"|",*126,"|",*132,"!":
+                    *N,*1,"|",*10,"|",*35,"|",XXPSUBRB:
+                    *69,"|",*80,"|",*86,"|",*91,"|",*97,"|":
+                    *104,"|",*115,"|",*121,"|",*126,"|",*132,"!":
+                    *N,*1,"|",*10,"|",*35,"|",XXPADD4:
+                    *69,"|",*80,"|",*86,"|",*91,"|",*97,"|":
+                    *104,"|",*115,"|",*121,"|",*126,"|",*132,"!":
+                    *N,*1,"|",*10,"|",*35,"|",XXPPOST:
+                    *69,"|",*80,"|",*86,"|",*91,"|",*97,"|":
+                    *104,"|",*115,"|",*121,"|",*126,"|",*132,"!"
+          CALL      LINE0000
+          ADD       FIVE,CLNO
+          GOTO      PRNT1000
+.
+PRNT5000  PRINT     *1,"|",XXURNO,*10,"|",XXPSNAM,*35,"|",XXPADD1:
+                    *69,"|",XDAY,SLASH,XMON,SLASH,XCENT,XYEAR:
+                    *80,"|",XXOCTTIM,*86,"|",XXOCSLOT,*91,"|",XXOCSTIM:
+                    *97,"|":
+                    *N,*1,"|",XXOUTNO,*10,"|",XXPGNAM,*35,"|",XXPADD2:
+                    *69,"|",*80,"|",*86,"|",*91,"|",*97,"|":
+                    *N,*1,"|",*10,"|",*35,"|",XXPSUBRB:
+                    *69,"|",*80,"|",*86,"|",*91,"|",*97,"|":
+                    *N,*1,"|",*10,"|",*35,"|",XXPADD4:
+                    *69,"|",*80,"|",*86,"|",*91,"|",*97,"|":
+                    *N,*1,"|",*10,"|",*35,"|",XXPPOST:
+                    *69,"|",*80,"|",*86,"|",*91,"|",*97,"|"
+          CALL      LINE0000
+          ADD       FIVE,CLNO
+          GOTO      PRNT1000
+.
+.         End of Report
+.
+PRNT8000  COMPARE   ZERO,CPAGENO
+          GOTO      PRNT9000 IF EQUAL       * no data displayed
+.
+          PRINT     *N,*N,"** End of Report **"
+.
+          DISPLAY   *P1:24,*EL,*V2LON,*P20:24:
+                    "** Report Generation Completed **";
+          GOTO      PRNT9999
+.
+.         No Data Found
+.
+PRNT9000  DISPLAY   *P1:24,*EL,*V2LON,*B,*P20:24:
+                    "** No Scheduled date found **",*W2
+.
+PRNT9999  CALL      KILL0000
+          RETURN
++
++
+.------------------------------------------------------------------------------
+.                   HEAD0000
+.         Print report header
+.------------------------------------------------------------------------------
+HEAD0000  COMPARE   "55",CLNO
+          GOTO      HEAD0500 IF LESS
+.
+          CLOCK     TIME,CTIMEIS
+.
+          CALL      HEAD132
+          UNPACK    DATE,XCENT,XYEAR,XMON,XDAY
+          COMPARE   ZERO,IBCNMHOS
+          GOTO      HEAD0400 IF EQUAL
+.
+          PRINT     *40,"Hospital  : ",PTHSHOSP,SP3,PTHSNAME
+.
+HEAD0400  PRINT     *N,*40,"Date      : ",XDAY,SLASH,XMON,SLASH,XCENT,XYEAR
+          ADD       TWO,CLNO
+.
+HEAD0500  MOVE      "Invalid doctor name  ",DESCID
+.
+.         Read clinic file
+.
+          PACK      KEY20,SITE,SAVCLIN,DATE
+          CALL      RDCLIA1
+          IF        OVRCD = 1
+            CALL      RDPCLIA1
+            IF        OVRCD = 0
+              MATCH     SITE,OCASITE
+              IF        !@EQUAL
+                MOVE      ONE,OVRCD
+              ELSE
+                MATCH     SAVCLIN,OCACLIN
+                IF        !@EQUAL
+                  MOVE      ONE,OVRCD
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+          IF        OVRCD = 1
+            MOVE      "Unknown clinic",OCADESC
+            PACK      OCADESC,OCADESC,SP30
+          ENDIF
+          BRANCH    OVRCD,HEAD1000
+.
+          MATCH     SP6,OCADOCT
+          GOTO      HEAD1000 IF EQUAL
+.
+.         Read doctor file
+.
+          MOVE      OCADOCT,KEY6
+          CALL      RDDOCT1
+          BRANCH    OVRCD,HEAD1000
+.
+          MOVE      DGNAME,ANS
+          CALL      CLIN0000        * find clinic name
+          MOVE      DIM40,DESCID    * clinic id description
+          GOTO      HEAD1500
+.
+HEAD1000  MOVE      OCADESC,DESCID
+.
+HEAD1500  PRINT     *N,*1,"Clinic Id  : ",SAVCLIN,SP3,DESCID
+          ADD       TWO,CLNO
+.
+          BRANCH    SAVINDIC,HEAD2000
+          CALL      LINE0000
+          PRINT     *1,"| U/R No.",*10,"| Patient ",*35,"| Patient":
+                    *69,"!         Old Session",*97,"!          New Session":
+                    *132,"!":
+                    *N,"| O/P No.",*10,"| Name ",*35,"| Address":
+                    *69,"| Booking",*80,"|Start",*86,"|Slot":
+                    *91,"|Slot",*97,"| New",*104,"| Booking":
+                    *115,"|Start",*121,"|Slot",*126,"|Slot",*132,"|":
+                    *N,*1,"|",*10,"|",*35,"|":
+                    *69,"|  Date",*80,"|Time",*86,"|No.":
+                    *91,"|Time",*97,"|Clinic",*104,"|  Date":
+                    *115,"|Time",*121,"|No.",*126,"|Time",*132,"|"
+          ADD       THREE,CLNO
+          GOTO      HEAD9999
+.
+HEAD2000  CALL      LINE0000
+          PRINT     *1,"| U/R No.",*10,"| Patient ",*35,"| Patient":
+                    *69,"!    Cancelled Session":
+                    *97,"!":
+                    *N,"| O/P No.",*10,"| Name ",*35,"| Address":
+                    *69,"| Booking",*80,"|Start",*86,"|Slot":
+                    *91,"|Slot",*97,"|":
+                    *N,"| ",*10,"|",*35,"|":
+                    *69,"|  Date",*80,"|Time",*86,"|No.",*91,"|Time",*97,"|"
+          ADD       THREE,CLNO
+.
+HEAD9999  CALL      LINE0000
+          RETURN
++
+.------------------------------------------------------------------------------
+.                   LINE0000
+.         Print page Separator
+.------------------------------------------------------------------------------
+LINE0000  BRANCH    FORM1,LINE1000
+          PRINT     "*------------------------------------------":
+                    "-------------------------------------------":
+                    "---------------------------------------------*"
+          GOTO      LINE9999
+.
+LINE1000  PRINT     "*-----------------------------":
+                    "------------------------------":
+                    "------------------------------":
+                    "------*"
+.
+LINE9999  ADD       ONE,CLNO
+          RETURN
++
+.------------------------------------------------------------------------------
+.                   FNAM0000
+.         Find Patient Name
+.------------------------------------------------------------------------------
+FNAM0000  PACK      DIM40 WITH SP20,SP20
+          MOVE      PSNAME,DIM40
+          ENDSET    DIM40
+          CALL      BNAM0000
+          LENSET    DIM40
+          APPEND    ", ",DIM40
+          APPEND    PGNAME,DIM40
+          CALL      BNAM0000
+          APPEND    ", ",DIM40
+          APPEND    PTITL,DIM40
+          RESET     DIM40
+          CMATCH    DIM40," "
+          GOTO      FNAM9999 IF NOT EQUAL
+          MOVE      SP30,DIM40
+.
+FNAM9999  RETURN
+.
+.------------------------------------------------------------------------------
+.                   BNAM0000
+.         Remove spaces in patients name
+.------------------------------------------------------------------------------
+BNAM0000  CMATCH    SP1,DIM40
+          GOTO      BNAM9999 IF NOT EQUAL
+          BUMP      DIM40 BY -1
+          GOTO      BNAM0000 IF NOT EOS
+.
+BNAM9999  RETURN
++
+.------------------------------------------------------------------------------
+.                   CLIN0000
+.         Find Clinic Name
+.------------------------------------------------------------------------------
+CLIN0000  PACK      DIM40 WITH SP20,SP20
+          MOVE      DTITL,DIM40
+          ENDSET    DIM40
+          CALL      BCLI0000
+          LENSET    DIM40
+          APPEND    SP1,DIM40
+          APPEND    ANS,DIM40
+          CALL      BCLI0000
+          APPEND    ". ",DIM40
+          APPEND    DSNAME,DIM40
+          RESET     DIM40
+          CMATCH    DIM40," "
+          GOTO      CLIN9999 IF NOT EQUAL
+.
+          MOVE      SP30,DIM40
+.
+CLIN9999  RETURN
+.
+.------------------------------------------------------------------------------
+.                   BCLI0000
+.         Remove spaces in clinic description
+.------------------------------------------------------------------------------
+BCLI0000  CMATCH    SP1,DIM40
+          GOTO      BCLI9999 IF NOT EQUAL
+          BUMP      DIM40 BY -1
+          GOTO      BCLI0000 IF NOT EOS
+.
+BCLI9999  RETURN
++
+.------------------------------------------------------------------------------
+.            KILL0000 
+.         erase temp file
+.------------------------------------------------------------------------------
+KILL0000  CLOSE     APPTMPA1
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAME,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          RETURN
+.
+.------------------------------------------------------------------------------
+.            CRET0000 
+.         Create temp file
+.------------------------------------------------------------------------------
+CRET0000  CALL      KILL0000
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAME,CMDLINE
+          APPEND    " 257 U1-6,7-7,8-15,16-23,24-43",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      APPTMPA1,FNAME
+          RETURN
+.
+.------------------------------------------------------------------------------
+.         I/O for temp file
+.------------------------------------------------------------------------------
+RDTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY43
+          READ      APPTMPA1,KEY43;XXCLIN,XXINDIC,XXURNO:
+                                  XXOUTNO,XXPSNAM,XXPGNAM:
+                                  XXPADD1,XXPADD2,XXPSUBRB,XXPADD4,XXPPOST:
+                                  XXOCBDAT,XXOCTTIM,XXOCSLOT,XXOCSTIM:
+                                  XXNWCLIN,XXNWBDAT,XXNWTTIM,XXNWSLOT,XXNWSTIM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    APPTMPA1;XXCLIN,XXINDIC,XXURNO:
+                            XXOUTNO,XXPSNAM,XXPGNAM:
+                            XXPADD1,XXPADD2,XXPSUBRB,XXPADD4,XXPPOST:
+                            XXOCBDAT,XXOCTTIM,XXOCSLOT,XXOCSTIM:
+                            XXNWCLIN,XXNWBDAT,XXNWTTIM,XXNWSLOT,XXNWSTIM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP1   RESET     KEY43
+          READ      APPTMPA1,KEY43;;
+          RETURN
+.
+WRTEMP1   RESET     KEY43
+          WRITE     APPTMPA1,KEY43;KEY43,XXPGNAM:
+                            XXPADD1,XXPADD2,XXPSUBRB,XXPADD4,XXPPOST:
+                            XXOCBDAT,XXOCTTIM,XXOCSLOT,XXOCSTIM:
+                            XXNWCLIN,XXNWBDAT,XXNWTTIM,XXNWSLOT,XXNWSTIM
+          RETURN
+.
+RATEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY43
+          READ      APPTMPA1,KEY43;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPTEMP1   MOVE      ZERO,OVRCD
+          UPDATE    APPTMPA1;XXCLIN,XXINDIC,XXURNO:
+                            XXOUTNO,XXPSNAM,XXPGNAM:
+                            XXPADD1,XXPADD2,XXPSUBRB,XXPADD4,XXPPOST:
+                            XXOCBDAT,XXOCTTIM,XXOCSLOT,XXOCSTIM:
+                            XXNWCLIN,XXNWBDAT,XXNWTTIM,XXNWSLOT,XXNWSTIM
+          RETURN
+.
+.------------------------------------------------------------------------------
+.         I/O Routines
+.------------------------------------------------------------------------------
+.
+          INC       STD001IO
+          INC       IBASEQIO/INC
+          INC       OUTSITIO/INC           * site IO
+          INC       OUTBOAIO/INC      * Booking file
+          INC       OUTOSFIO/INC      * Open session file
+          INC       OUTRSHIO/INC      * Rescheduled bookings file
+          INC       OUTCANIO/INC      * Cancelled bookings file
+          INC       OUTCLIIO/INC      * Clinic file
+          INC       PATDO1IO/INC      * doctor file
+          INC       PATHSPIO/INC      * Hospital File
+          INC       PATMA1IO/INC      * Patient Master file
+          INC       PATPR1IO/INC      * Pre Admission file
+          INC       WEBERRIO/INC
+.
+          INC       PATHSPKY
+          INC       TFILENAM
+.............................................................................

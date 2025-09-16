@@ -1,0 +1,63 @@
+.
+. PRIAURIO.INC
+. ------------
+. Filename     : pridrlaf
+. Description  : Private Practice Deposits Refunded File I/O Subroutines
+.
+RSPRAR1   RESET     KEY13
+          READ      PRIAURA1,KEY13;;
+          RETURN
+.
+RAPRAR1   RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      PRIAURA1,KEY13;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRAR1   RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      PRIAURA1,KEY13;PRARDEBT,DPRARSCA,DPRARUNI,PRARRECT:
+                                   PRARAMOU,PRARRFDT,PRARPORT,PRAROPER,PRARSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRARSCA,PRARSCAN
+          MOVE      DPRARUNI,PRARUNIQ
+          MOVE      PRARAMOU,PRARAMNT
+          RETURN
+.
+RKPRAR1   MOVE      ZERO,OVRCD
+          READKS    PRIAURA1;PRARDEBT,DPRARSCA,DPRARUNI,PRARRECT:
+                             PRARAMOU,PRARRFDT,PRARPORT,PRAROPER,PRARSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRARSCA,PRARSCAN
+          MOVE      DPRARUNI,PRARUNIQ
+          MOVE      PRARAMOU,PRARAMNT
+          RETURN
+.
+RPPRAR1   MOVE      ZERO,OVRCD
+          READKP    PRIAURA1;PRARDEBT,DPRARSCA,DPRARUNI,PRARRECT:
+                             PRARAMOU,PRARRFDT,PRARPORT,PRAROPER,PRARSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRARSCA,PRARSCAN
+          MOVE      DPRARUNI,PRARUNIQ
+          MOVE      PRARAMOU,PRARAMNT
+          RETURN
+.
+UPPRAR1   MOVE      PRARSCAN,DPRARSCA
+          MOVE      PRARUNIQ,DPRARUNI
+          MOVE      PRARAMNT,PRARAMOU
+          UPDATE    PRIAURA1;PRARDEBT,DPRARSCA,DPRARUNI,PRARRECT:
+                             PRARAMOU,PRARRFDT,PRARPORT,PRAROPER,PRARSPAR
+          RETURN
+.
+WRPRAR1   RESET     KEY13
+          MOVE      PRARSCAN,DPRARSCA
+          MOVE      PRARUNIQ,DPRARUNI
+          MOVE      PRARAMNT,PRARAMOU
+          WRITE     PRIAURA1,KEY13;PRARDEBT,DPRARSCA,DPRARUNI,PRARRECT:
+                                   PRARAMOU,PRARRFDT,PRARPORT,PRAROPER,PRARSPAR
+          RETURN
+.
+DEPRAR1   RESET     KEY13
+          DELETE    PRIAURA1,KEY13
+          RETURN
+.............................................................................

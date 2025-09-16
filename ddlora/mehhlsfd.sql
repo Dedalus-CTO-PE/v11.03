@@ -1,0 +1,122 @@
+create table mehaudha
+(
+  mhhlmdat    varchar2(8) default ' ' not null,
+  mhhlmtim    varchar2(8) default ' ' not null,
+  mhhlrtyp    varchar2(1) default ' ' not null,
+  mhhlmuid    varchar2(10) default ' ' not null,
+  mhhlurno    varchar2(8) default ' ' not null,
+  mhhluniq    varchar2(8) default ' ' not null,
+  mhhlsdat    varchar2(8) default ' ' not null,
+  mhhlstim    varchar2(8) default ' ' not null,
+  mhhledat    varchar2(8) default ' ' not null,
+  mhhletim    varchar2(8) default ' ' not null,
+  mhhlstat    varchar2(1) default ' ' not null,
+  mhhlcurr    varchar2(1) default ' ' not null,
+  mhhlsref    varchar2(3) default ' ' not null,
+  mhhlorcd    varchar2(6) default ' ' not null,
+  mhhlhcpc    varchar2(10) default ' ' not null,
+  mhhlrnam    varchar2(20) default ' ' not null,
+  mhhlrad1    varchar2(35) default ' ' not null,
+  mhhlrad2    varchar2(35) default ' ' not null,
+  mhhlrad3    varchar2(35) default ' ' not null,
+  mhhlrad4    varchar2(35) default ' ' not null,
+  mhhlrpos    varchar2(8) default ' ' not null,
+  mhhlrtel    varchar2(20) default ' ' not null,
+  mhhllawy    varchar2(6) default ' ' not null,
+  mhhlpris    varchar2(1) default ' ' not null,
+  mhhlesdt    varchar2(8) default ' ' not null,
+  mhhlcuid    varchar2(10) default ' ' not null,
+  mhhlcdat    varchar2(8) default ' ' not null,
+  mhhlctim    varchar2(8) default ' ' not null,
+  mhhluuid    varchar2(10) default ' ' not null,
+  mhhludat    varchar2(8) default ' ' not null,
+  mhhlutim    varchar2(8) default ' ' not null,
+  mhhlrscl    varchar2(10) default ' ' not null,
+  mhhlcstm    varchar2(10) default ' ' not null,
+  mhhlduao    varchar2(10) default ' ' not null,
+  mhhlkwrk    varchar2(10) default ' ' not null,
+  mhhllawt    varchar2(50) default ' ' not null,
+  mhhludfl    varchar2(1) default ' ' not null,
+  mhhluddt    varchar2(8) default ' ' not null,
+  mhhlcomm    varchar2(100) default ' ' not null,
+  mhhlrodt    varchar2(8) default ' ' not null,
+  mhhlrotm    varchar2(8) default ' ' not null,
+  mhhlamdt    varchar2(8) default ' ' not null,
+  mhhlamtm    varchar2(8) default ' ' not null,
+  mhhloref    varchar2(3) default ' ' not null,
+  mhhlrcli    varchar2(10) default ' ' not null,
+  mhhlrclr    varchar2(3) default ' ' not null,
+  mhhlrdhb    varchar2(3) default ' ' not null,
+  mhhlspar    varchar2(49) default ' ' not null,
+  lf          varchar2(1) default ' ' not null
+)
+tablespace pas_data; 
+create index mehaudha on mehaudha
+(
+mhhlurno,
+mhhlmdat,
+mhhlmtim
+)
+tablespace pas_indx; 
+create table mehhlsaf
+(
+  mhhlurno    varchar2(8) default ' ' not null,
+  mhhluniq    varchar2(8) default ' ' not null,
+  mhhlsdat    varchar2(8) default ' ' not null,
+  mhhlstim    varchar2(8) default ' ' not null,
+  mhhledat    varchar2(8) default ' ' not null,
+  mhhletim    varchar2(8) default ' ' not null,
+  mhhlstat    varchar2(1) default ' ' not null,
+  mhhlcurr    varchar2(1) default ' ' not null,
+  mhhlsref    varchar2(3) default ' ' not null,
+  mhhlorcd    varchar2(6) default ' ' not null,
+  mhhlhcpc    varchar2(10) default ' ' not null,
+  mhhlrnam    varchar2(20) default ' ' not null,
+  mhhlrad1    varchar2(35) default ' ' not null,
+  mhhlrad2    varchar2(35) default ' ' not null,
+  mhhlrad3    varchar2(35) default ' ' not null,
+  mhhlrad4    varchar2(35) default ' ' not null,
+  mhhlrpos    varchar2(8) default ' ' not null,
+  mhhlrtel    varchar2(20) default ' ' not null,
+  mhhllawy    varchar2(6) default ' ' not null,
+  mhhlpris    varchar2(1) default ' ' not null,
+  mhhlesdt    varchar2(8) default ' ' not null,
+  mhhlcuid    varchar2(10) default ' ' not null,
+  mhhlcdat    varchar2(8) default ' ' not null,
+  mhhlctim    varchar2(8) default ' ' not null,
+  mhhluuid    varchar2(10) default ' ' not null,
+  mhhludat    varchar2(8) default ' ' not null,
+  mhhlutim    varchar2(8) default ' ' not null,
+  mhhlrscl    varchar2(10) default ' ' not null,
+  mhhlcstm    varchar2(10) default ' ' not null,
+  mhhlduao    varchar2(10) default ' ' not null,
+  mhhlkwrk    varchar2(10) default ' ' not null,
+  mhhllawt    varchar2(50) default ' ' not null,
+  mhhludfl    varchar2(1) default ' ' not null,
+  mhhluddt    varchar2(8) default ' ' not null,
+  mhhlcomm    varchar2(100) default ' ' not null,
+  mhhlrodt    varchar2(8) default ' ' not null,
+  mhhlrotm    varchar2(8) default ' ' not null,
+  mhhlamdt    varchar2(8) default ' ' not null,
+  mhhlamtm    varchar2(8) default ' ' not null,
+  mhhloref    varchar2(3) default ' ' not null,
+  mhhlrcli    varchar2(10) default ' ' not null,
+  mhhlrclr    varchar2(3) default ' ' not null,
+  mhhlrdhb    varchar2(3) default ' ' not null,
+  mhhlspar    varchar2(49) default ' ' not null,
+  lf          varchar2(1) default ' ' not null,
+constraint mehhlsa1 primary key( 
+mhhlurno,
+mhhluniq)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 
+create unique index mehhlsa2 on mehhlsaf
+(
+mhhlurno,
+mhhlsdat,
+mhhlstim,
+mhhluniq
+)
+  tablespace pas_indx; 

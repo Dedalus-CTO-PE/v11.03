@@ -1,0 +1,241 @@
+.
+. PMSARVIO    
+. --------
+. Filename     : pmsarvaf.dat
+.
+RSPMARV1  RESET     KEY16                                                       
+          READ      PMSARVA1,KEY16;;                                            
+          RETURN
+.
+RAPMARV1  RESET     KEY16                                                       
+          MOVE      ZERO,OVRCD
+          READ      PMSARVA1,KEY16;ANS                                          
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPMARV1  RESET     KEY16                                                       
+          MOVE      ZERO,OVRCD
+          READ      PMSARVA1,KEY16;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPMARV1  MOVE      ZERO,OVRCD                                                  
+          READKS    PMSARVA1;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPMARV1  MOVE      ZERO,OVRCD                                                  
+          READKP    PMSARVA1;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPMARV1  MOVE      ZERO,OVRCD                                                  
+          UPDATE    PMSARVA1;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      UPDFLOCK IF LOCKED
+          RETURN
+.
+WRPMARV1  RESET     KEY16                                                       
+          WRITE     PMSARVA1,KEY16;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          RETURN
+.
+DEPMARV1  RESET     KEY16                                                       
+          DELETE    PMSARVA1,KEY16                                              
+          RETURN
+.
+RLPMARV1  RESET     KEY16                                                       
+          MOVE      ZERO,OVRCD
+          READL     PMSARVA1,KEY16;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+KLPMARV1  MOVE      ZERO,OVRCD                                                  
+          READLKS   PMSARVA1;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+PLPMARV1  MOVE      ZERO,OVRCD                                                  
+          READLKP   PMSARVA1;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+UUPMARV1  RESET     KEY16                                                       
+          UNLOCK    PMSARVA1                                                    
+          RETURN
+.
+RSPMARV2  RESET     KEY32                                                       
+          READ      PMSARVA2,KEY32;;                                            
+          RETURN
+.
+RAPMARV2  RESET     KEY32                                                       
+          MOVE      ZERO,OVRCD
+          READ      PMSARVA2,KEY32;ANS                                          
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPMARV2  RESET     KEY32                                                       
+          MOVE      ZERO,OVRCD
+          READ      PMSARVA2,KEY32;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPMARV2  MOVE      ZERO,OVRCD                                                  
+          READKS    PMSARVA2;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPMARV2  MOVE      ZERO,OVRCD                                                  
+          READKP    PMSARVA2;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPMARV2  MOVE      ZERO,OVRCD                                                  
+          UPDATE    PMSARVA2;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      UPDFLOCK IF LOCKED
+          RETURN
+.
+WRPMARV2  RESET     KEY32                                                       
+          WRITE     PMSARVA2,KEY32;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          RETURN
+.
+DEPMARV2  RESET     KEY32                                                       
+          DELETE    PMSARVA2,KEY32                                              
+          RETURN
+.
+RLPMARV2  RESET     KEY32                                                       
+          MOVE      ZERO,OVRCD
+          READL     PMSARVA2,KEY32;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+KLPMARV2  MOVE      ZERO,OVRCD                                                  
+          READLKS   PMSARVA2;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+PLPMARV2  MOVE      ZERO,OVRCD                                                  
+          READLKP   PMSARVA2;PMAVREQN,PMAVRTYP,PMAVCNTR,PMAVDATR,PMAVTIMR:      
+                        PMAVURNO,PMAVVISN,PMAVRSTA,PMAVBTYP,PMAVPSAH,PMAVHOSP:  
+                        PMAVASAS,PMAVRSED,PMAVDAT1,PMAVDAT2,PMAVDAT3,PMAVDAT4:  
+                        PMAVDAT5,PMAVTIM1,PMAVTIM2,PMAVTIM3,PMAVTIM4,PMAVTIM5:  
+                        PMAVYN01,PMAVYN02,PMAVYN03,PMAVYN04,PMAVYN05,PMAVHCP1:  
+                        PMAVHCP2,PMAVHCP3,PMAVHCP4,PMAVHCP5,PMAVUDC1,PMAVUDC2:  
+                        PMAVUDC3,PMAVUDC4,PMAVUDC5,PMAVCDAT,PMAVCTIM,PMAVCUID:  
+                        PMAVUDAT,PMAVUTIM,PMAVUUID,PMAVSPAR                     
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+UUPMARV2  RESET     KEY32                                                       
+          UNLOCK    PMSARVA2                                                    
+          RETURN
+.

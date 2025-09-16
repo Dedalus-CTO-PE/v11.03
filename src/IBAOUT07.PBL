@@ -1,0 +1,674 @@
+.***************************************************************************
+.* System    :   Outpatients                                               *
+.* Program   :   IBAOUT07                                                  *
+.* Desc      :   Porter Report                                             *
+.***************************************************************************
+.* Date      :   28/09/2009                                                *
+.* Author    :   Ebon Clements                                             *
+.* Function  :   This program will print the porter report                 *
+.* Modifications  :                                                        *
+.***************************************************************************
+.*        V11.02.01 09/02/2022  Thanh T          TSK 0905641               *
+.*                  Recompiled as OUTHEDFD changes                         *
+.*        V10.04.01 23/06/2014   J.Tan        CAR 261630                   *
+.*                  Removed port number from temp file name                *
+.*        V10.01.01 03/02/2011 Jill Parkinson CAR 233088                   *
+.*                  Added pmsvx1af                                         *
+.*        V9.12.03  15/01/2010  Ebon Clements CAR 214121                   *
+.*                  Added current inpatient filter. Changed to select      *
+.*                  patients if OTBBTRAN or OTXSCO01 indicator 1 = P       *
+.*        V9.12.02  10/12/2009  Ebon Clements CAR 210391                   *
+.*                  Changed area to print from OTXSCO02 not OTXSCO01       *
+.*        V9.12.01  12/11/2009  Ebon Clements CAR 202769                   *
+.*                  Removed isadd                                          *
+.*        V9.12.00  28/09/2009  Ebon Clements CAR 202769                   *
+.*                  Created program                                        *
+.***************************************************************************
+.
+          INC       STD001FD
+          INC       IBASEQFD/INC            * Sequential Numbers File
+          INC       TFILEVAR/INC            * Generate Temp File Name
+          INC       WEBERRFD/INC            * Web Server Error Logging
+.
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+.
+          INC       IBACONFD/INC
+          INC       OUTBOAFD/INC
+          INC       OUTBB1FD/INC
+          INC       OUTHEDFD/INC
+          INC       OUTSIPFD/INC
+          INC       OUTSITFD/INC
+          INC       OUTSESFD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       OUTXSCFD/INC
+          INC       PATHSPFD/INC
+          INC       PATMA1FD/INC
+          INC       PATMI1FD/INC
+          INC       PMSVX1FD/INC
+.
+.         Temporary File Definition
+.         -------------------------
+.
+.         Filename : out07axx.dat          (xx = port id)
+.
+REPTEMP1  IFILE SQL, FIXED=39, KEY="U1-8"
+REPTEMP2  IFILE SQL, FIXED=39, KEY="U17-24,25-29,30-32,33-35,1-8"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+TEMPVISN  DIM     8          8            1         Visit Number
+TEMPURNO  DIM     8          8            9         U/R Number
+TEMPDATE  DIM     8          8            17        Visit Date
+TEMPTIME  DIM     5          5            25        Visit Time
+TEMPWARD  DIM     3          3            30        Ward (if current IP)
+TEMPBEDD  DIM     3          3            33        Bed (if current IP)
+TEMPAREA  DIM     3          3            36        Area Code
+
+.End of Record                            39
+.
+.********************************************************************
+.
+.         File Variables
+.
+ERASE     INIT      "iserase "
+ISBUILD   INIT      "isbuild "
+ISADD     INIT      "isadd "
+TEMPFILE  DIM       8
+UKEY1     INIT      " 39 U1-8"                   * Primamy key
+UKEY2     INIT      " U17-24,25-29,30-32,33-35,1-8"  * Index 1
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+CMDLINE   DIM       200
+DSPEDDTE  DIM       10                      * Display end date (dd/mm/ccyy)
+DSPSTDTE  DIM       10                      * Display start date (dd/mm/ccyy)
+ENDDATE   DIM       8                       * End date (ccyymmdd)
+INPTSTAT  DIM       1
+INPTDESC  DIM       3
+PORTERFL  FORM      1
+SITE      DIM       6
+PATFNAME  DIM       22
+STRTDATE  DIM       8                       * Start date (ccyymmdd)
+TOTALPAT  FORM      5
+WARDBEDD  DIM       7
+.
+PRGID     INIT      "IBAOUT07"
+PRGNAM    INIT      "Porter Report"
+VERSION   INIT      "V11.03.00"
+.
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialisation and open files
+.
+ML0100    CALL      OPTN0000               * select options
+          BRANCH    EXIT,ML9999            * EXIT = 1 if 0 chosen in menu
+.
+          BRANCH    COPTION,ML1000         * proceed with clean up
+.
+ML1000    CALL      DATE0000                * Keyin the date range
+          BRANCH    EXIT,ML1000
+.
+          CALL      KCUR0000               * Keyin current IP filter
+          BRANCH    EXIT,ML1000
+.
+          CALL      KHOS0000                * Keyin hospital
+          BRANCH    EXIT,ML1000
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,ML2000:          * yes
+                          ML0100:          * no
+                          ML0100           * cancel
+.
+ML2000    CALL      CREA0000               * create temp file
+.
+          CALL      REPT0000               * process report
+          CALL      PRNT0000               * print report
+.
+          CALL      KILL0000               * remove temp file
+          GOTO      ML0100
+          
+.
+ML9999    CHAIN     PGM                    * chain back to program
+.
+.****************************************************************************
+.*                                INIT0000                                  *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          CALL      IBACLOCK
+.
+          DISPLAY   *P56:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          CALL      TFILENAM                * Get temp file name
+          MOVE      TFILNAME,TEMPFILE
+.
+          DISPLAY   *P64:24,"outsitaf";
+          OPEN      OUTSITA1,"outsitaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"pathspaf";
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A8,"patmi1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          MOVE      IDDD,SITE
+          MOVE      IDDD,KEY6
+          CALL      RDSITA1
+.
+          DISPLAY   *P64:24,"outsipaf";
+          OPEN      OUTSIPA1,"outsipaf"
+.
+          MOVE      IDDD,KEY6
+          CALL      RDOTSIP1
+.
+          PACK      CFNAME WITH UID,FILSESA6
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTSESA6,CFNAME
+.
+          PACK      CFNAME WITH UID,FILBOKA1 
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTBOKA1,CFNAME
+.
+          PACK      CFNAME WITH UID,FILBB1A1 
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTBB1A1,CFNAME
+.
+          PACK      CFNAME WITH UID,FILHEDA1 
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTHEDA1,CFNAME
+.
+          PACK      CFNAME WITH UID,FILXSCA1 
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTXSCA1,CFNAME
+.
+INIT9999  RETURN
+.
+.******** ********************************************************************
+.*                                OPTN0000                                  *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run clean up                           *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Porter Report"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run clean-up
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
+.
+.******************************************************************************
+.*                                  DATE0000                                  *
+.*                            Keyin The Date Range                            *
+.******************************************************************************
+DATE0000  MOVE      ZERO,EXIT
+          MOVE      "18",CCOL
+          DISPLAY   *P1:9,"Starting Date : ",*EF:
+                    *P1:10,"Ending Date   : ";
+.
+          MOVE      ONE,CCANLDTE            * Blank cancel default
+.
+. ----- Keyin start date -----
+.
+DATE1000  MOVE      "9",CVERT
+          MOVE      CCC,CCENT
+          UNPACK    SP6,CYEAR,CMON,CDAY
+          CALL      KEYDATE                 * Keyin date
+          BRANCH    OVRCD,DATE9900          * Nothing entered
+          BRANCH    CQUEST,DATE1000
+.
+          PACK      STRTDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",STRTDATE
+.
+          CALL      PACDATE                 * Format the start date
+          MOVE      CPCDATE,DSPSTDTE
+          DISPLAY   *PCCOL:CVERT,*EL,*V2LON,DSPSTDTE;
+.
+. ----- Keyin end date -----
+.
+DATE2000  MOVE      "10",CVERT
+          UNPACK    SP70,CCENT,CYEAR,CMON,CDAY
+          CALL      KEYDATE                 * Keyin date
+          BRANCH    OVRCD,DATE1000          * Nothing entered
+          BRANCH    CQUEST,DATE2000
+.
+          PACK      ENDDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",ENDDATE
+.
+          CALL      PACDATE                 * Format the end date
+          MOVE      CPCDATE,DSPEDDTE
+          DISPLAY   *PCCOL:CVERT,*EL,*V2LON,DSPEDDTE;
+.
+          MATCH     STRTDATE,ENDDATE
+          IF        @LESS
+            DISPLAY   *P1:24,*B,*EL,"End date must be after the start date. ";
+            CALL      HITENTER
+            GOTO      DATE2000
+          ENDIF
+.
+          GOTO      DATE9999
+.
+DATE9900  MOVE      ONE,EXIT
+DATE9999  RETURN
+.
+.
+.******** ********************************************************************
+.*                                KCUR0000                                  *
+.*                        keyin the current IP filter                       *
+.****************************************************************************
+KCUR0000  MOVE      SP70,INPTSTAT
+          KEYIN     *P1:12,*EL,"Current IP : ",INPTSTAT
+.
+          PACK      INPTSTAT,INPTSTAT,SP70
+.
+          MATCH     SP70,INPTSTAT
+          IF        @EQUAL
+            MOVE      "All",INPTDESC
+            DISPLAY   *P20:12,INPTDESC
+            GOTO      KCUR9000
+          ENDIF
+.
+          MATCH     "1",INPTSTAT
+          IF        @EQUAL
+            MOVE      "No",INPTDESC
+            DISPLAY   *P20:12,INPTDESC
+            GOTO      KCUR9000
+          ENDIF
+.
+          MATCH     "2",INPTSTAT
+          IF        @EQUAL
+            MOVE      "Yes",INPTDESC
+            DISPLAY   *P20:12,INPTDESC
+            GOTO      KCUR9000
+          ENDIF
+.
+          BEEP
+          GOTO      KCUR0000
+.
+KCUR9000  MOVE      ZERO,EXIT
+          GOTO      KCUR9999
+.
+KCUR9500  MOVE      ONE,EXIT
+.
+KCUR9999  RETURN
+.
+.******************************************************************************
+.*                                  KHOS0000                                  *
+.*                      Keyin hospital ID                                     *
+.******************************************************************************
+KHOS0000  MOVE       ZERO,EXIT
+          COMPARE    ONE,IBCNMHOS
+          GOTO       KHOS9999 IF NOT EQUAL
+.
+          MOVE       SP70,PTHSHOSP
+          DISPLAY    *P1:13,*EL,"Hospital Id   : ";
+          MOVE       TEN8,ECOL
+          MOVE       TEN3,EVERT
+          MOVE       SP3,CKYIDEF3
+          MOVE       ONE,CKYIMAND           * Mandatory
+          OPEN       PATHSPA1,"pathspaf"
+.
+          CALL       PATHSPKY
+          BRANCH     EXIT,KHOS9000,KHOS9000
+.
+KHOS3000  DISPLAY   *P22:13,*V2LON,PTHSNAME;
+          MOVE       ZERO,EXIT
+          GOTO       KHOS9999
+.
+KHOS9000  MOVE       ONE,EXIT
+KHOS9999  RETURN
+.
+.**************************************************************************
+.*                               REPT0000                                 *
+.* Select appointments                                                    *
+.**************************************************************************
+REPT0000  PACK      KEY25,SITE,STRTDATE,SP70
+          CALL      RDSSESA6
+REPT0500  CALL      RDKSESA6
+          BRANCH    OVRCD,REPT9999
+.
+          MATCH     SITE,OSESITE
+          GOTO      REPT9999 IF NOT EQUAL
+.
+          MATCH     OSEDATE,ENDDATE
+          GOTO      REPT9999 IF LESS
+.
+          PACK      KEY28,OSESITE,OSECLIN,OSEDAY,OSESTRT,OSESSHNO,OSESSDAT,SP70
+          CALL      RDOTHED1
+          BRANCH    OVRCD,REPT0500
+.
+          IF        IBCNMHOS=1
+            MATCH     SP70,PTHSHOSP
+            IF        !@EQUAL
+              MATCH     PTHSHOSP,OTHEHOSP
+              GOTO      REPT0500 IF NOT EQUAL
+            ENDIF
+          ENDIF
+.
+          PACK      KEY28,OSESITE,OSECLIN,OSEDATE,OSESTRT,SP70
+          CALL      RDSBOKA1
+REPT1000  CALL      RDKBOKA1
+          BRANCH    OVRCD,REPT0500
+.
+          MATCH     OSESITE,OBASITE
+          GOTO      REPT0500 IF NOT EQUAL
+.
+          MATCH     OSECLIN,OBACLIN
+          GOTO      REPT0500 IF NOT EQUAL
+.
+          MATCH     OSEDATE,OBADATE
+          GOTO      REPT0500 IF NOT EQUAL
+.
+          MATCH     OSESTRT,OBASTRT
+          GOTO      REPT0500 IF NOT EQUAL
+.
+.                    Status  Booked   N/Used   Ex.Slot  Attended
+          BRANCH    OBASTAT,REPT2000,REPT1000,REPT1000,REPT2000
+          GOTO      REPT1000
+.
+REPT2000  MOVE      OBAOUTNO,KEY8
+          CALL      RDBOKB1                 * Clinic Session Booking Table B
+          BRANCH    OVRCD,REPT1000
+.
+          MOVE      ZERO,PORTERFL           * Clear porter required flag        
+.
+          MATCH     SP70,OTBBTRAN
+          IF        !@EQUAL
+            PACK      KEY5,ANSO,ANSB,OTBBTRAN,SP70
+            CALL      RDCODE1
+            IF        OVRCD<>1
+              MATCH     ANSP,TCINDC1        * Porter Required
+              IF        @EQUAL
+                MOVE      ONE,PORTERFL
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          PACK      KEY17,OBAURNO,TWO,SP20
+          CALL      RSPTMI18
+          CALL      RKPTMI18
+          BRANCH    OVRCD,REPT2500          * not on file
+.
+          MATCH     OBAURNO,AURNO           * same U/R Number?
+          GOTO      REPT2500 IF NOT EQUAL   * No
+.
+          COMPARE   TWO,ASTAT
+          GOTO      REPT2500 IF NOT EQUAL
+.
+          GOTO      REPT2600
+.
+REPT2500  CALL      CLPATMIS
+.
+REPT2600  MATCH     "1",INPTSTAT            * Exclude current IP
+          IF        @EQUAL
+            COMPARE   TWO,ASTAT
+            GOTO      REPT1000 IF EQUAL
+          ENDIF
+.
+          MATCH     "2",INPTSTAT            * Current IP Only
+          IF        @EQUAL
+            COMPARE   TWO,ASTAT
+            GOTO      REPT1000 IF NOT EQUAL
+          ENDIF
+.
+          MOVE      OBAOUTNO,KEY8
+          CALL      RDOTXSC1                * Extra details
+          IF        OVRCD=1       
+            CALL      CLOUTXSC
+          ENDIF
+.
+          MATCH     SP70,OTXSCO01
+          IF        !@EQUAL
+            PACK      KEY5,OTSPXC01,OTXSCO01,SP70
+            CALL      RDCODE1
+            IF        OVRCD<>1
+              MATCH     ANSP,TCINDC1        * Porter Required
+              IF        @EQUAL
+                MOVE      ONE,PORTERFL
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          COMPARE   "1",PORTERFL            * Only print if porter required
+          GOTO      REPT1000 IF NOT EQUAL
+.
+          PACK      TEMPVISN,OBAOUTNO,SP10
+          PACK      TEMPURNO,OBAURNO,SP10
+          PACK      TEMPDATE,OBADATE,SP10
+          PACK      TEMPTIME,OBATIME,SP10
+          PACK      TEMPWARD,AWARD,SP10
+          PACK      TEMPBEDD,ABED,SP10
+          PACK      TEMPAREA,OTXSCO02
+.
+          PACK      KEY8,TEMPVISN,SP70
+          CALL      RATEMP1                 * write to Temp file
+          IF        OVRCD=1
+            CALL      WRTEMP1
+          ENDIF
+.
+          GOTO      REPT1000
+.
+REPT9999  RETURN
+.
+.**************************************************************************
+.*                               PRNT0000                                 *
+.* Print report in date, time, ward and bed order                         *
+.**************************************************************************
+.
+PRNT0000  MOVE      "99",CLNO
+          MOVE      ZERO,CPAGENO
+          MOVE      ZERO,TOTALPAT
+.
+          PACK      KEY27,SP70
+          CALL      RSTEMP2 
+PRNT1000  CALL      RKTEMP2  
+          BRANCH    OVRCD,PRNT9000
+.
+          COMPARE   "56",CLNO
+          CALL      HEAD0000 IF NOT LESS
+.
+          PACK      KEY8,TEMPURNO
+          CALL      RDMAST1
+          BRANCH    OVRCD,PRNT1000
+.
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      SP4,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,PATFNAME              * shorten name
+.
+          MATCH     SP70,TEMPBEDD
+          IF        @EQUAL
+            PACK      WARDBEDD,TEMPWARD,SP70
+          ELSE
+            PACK      WARDBEDD,TEMPWARD,SLASH,TEMPBEDD,SP70
+          ENDIF
+.
+          UNPACK    TEMPDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          MOVE      SP70,TDESC
+          MATCH     SP70,TEMPAREA
+          IF        !@EQUAL
+            PACK      KEY5,OTSPXC02,TEMPAREA,SP70
+            CALL      RDCODE1
+          ENDIF
+.
+          PRINT     *1,"| ",CPCDATE," @ ",TEMPTIME,*21,"| ",PATFNAME:
+                    *46,"| ",WARDBEDD,*58,"| ",TDESC,*80,"|"
+.
+          ADD       ONE,TOTALPAT
+          ADD       ONE,CLNO
+          CALL      UND80
+.
+          GOTO      PRNT1000     
+.
+PRNT9000  PRINT     *1,"| No. of Patients : ",TOTALPAT,*80,"|"
+          CALL      UND80
+.
+PRNT9999  RETURN
+.
+.*********************************************************************
+.         print a new page
+.*********************************************************************
+HEAD0000  CALL      HEAD80
+.
+          PRINT     *20,"From : ",DSPSTDTE," to ",DSPEDDTE
+          PRINT     *20,"Current IP : ",INPTDESC
+.
+          IF        IBCNMHOS=1
+            PRINT     *20,"Hospital : ",PTHSNAME
+          ENDIF
+.
+          CALL      UND80
+.
+          MOVE      SP70,TDESC
+          MATCH     SP70,OTSPXC02
+          IF        !@EQUAL
+            PACK      KEY5,OTSPXC02,SP70
+            CALL      RDCODE1
+          ENDIF
+.
+          PRINT     *1,"| App Date/Time",*21,"| Patient Name":
+                    *46,"| Ward/Bed ",*58,"| ",TDESC,*80,"|"
+.
+          CALL      UND80
+.
+          IF        IBCNMHOS=1
+            MOVE     SEVEN,CLNO
+          ELSE
+            MOVE     SIX,CLNO
+          ENDIF
+.
+HEAD9999  RETURN
+.
+.**************************************************************************
+.*                              CREA0000               Called by:         *
+.*             create a new temporary file                                *
+.**************************************************************************
+.
+CREA0000  CALL      KILL0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY1,UKEY2
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      REPTEMP1,TEMPFILE            * open temp index file
+          OPEN      REPTEMP2,TEMPFILE            * open temp index file
+.
+CREA9999  RETURN
++
+.****************************************************************************
+.*                              KILL0000               Called by:           *
+.*               close and erase the temporary file                         *
+.****************************************************************************
+.
+KILL0000  CLOSE     REPTEMP1                     * close file
+          CLOSE     REPTEMP2                     * close index 1
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILE       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILL9999 RETURN
++
+.****************************************************************************
+.*        IO ROUTINES FOR TEMPORARY FILE                                    *
+.****************************************************************************
+.
+RSTEMP1   READ      REPTEMP1,KEY8;;
+          RETURN
+.
+RATEMP1   MOVE      ZERO,OVRCD
+          READ      REPTEMP1,KEY8;ANSS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          READ      REPTEMP1,KEY8;TEMPVISN,TEMPURNO,TEMPDATE,TEMPTIME:
+                                  TEMPWARD,TEMPBEDD,TEMPAREA
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    REPTEMP1;TEMPVISN,TEMPURNO,TEMPDATE,TEMPTIME:
+                                  TEMPWARD,TEMPBEDD,TEMPAREA
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     REPTEMP1,KEY8;TEMPVISN,TEMPURNO,TEMPDATE,TEMPTIME:
+                                  TEMPWARD,TEMPBEDD,TEMPAREA
+          RETURN
+.
+RSTEMP2   READ      REPTEMP2,KEY27;;
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          READKS    REPTEMP2;TEMPVISN,TEMPURNO,TEMPDATE,TEMPTIME:
+                                  TEMPWARD,TEMPBEDD,TEMPAREA
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.
+.
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       CLOUTXSC
+          INC       CLPATMIS
+          INC       STD001IO
+          INC       PATHSPKY
+          INC       TFILENAM                * Generate Temp File Name
+          INC       IBASEQIO/INC            * Sequential Numbers File
+          INC       WEBERRIO/INC            * Web Server Error Logging
+.
+          INC       OUTBOAIO/INC
+          INC       OUTBB1IO/INC
+          INC       OUTHEDIO/INC
+          INC       OUTSIPIO/INC
+          INC       OUTSITIO/INC
+          INC       OUTSESIO/INC
+          INC       OUTXSCIO/INC
+          INC       PATCODIO/INC
+          INC       PATHSPIO/INC
+          INC       PATMA1IO/INC
+          INC       PATMI1IO/INC
+          INC       PMSVX1IO/INC

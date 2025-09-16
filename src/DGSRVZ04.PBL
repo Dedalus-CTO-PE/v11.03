@@ -1,0 +1,410 @@
+.**************************************************************************
+.*  DGSRVZ04  :  Wait for & Read an incoming event message & determine    *
+.*               what kind of message it is.      ~~~                     *
+.*                                                                        *
+.*  Author    :  Steve Armstrong    (13/06/1997)                          *
+.*                                                                        *
+.*  Mod's     :                                                           *
+.*        V9.03.01  24/10/2003  Steve Armstrong  CAR 38016                *
+.*                  Recompiled for changes to DGAAEEVN.                   *
+.*                  Mods to write to EMR tables as well as AAE tables for *
+.*                  Z04 messages.                                         *
+.**************************************************************************
+.*        V5.08.01  01/05/2000  Greg Horvat                               *
+.*                  Changed to open patmx1af when opening patma1af        *
+.*        V5.08.B01 28/01/2000  Steve Armstrong                           *
+.*                  Recompiled for DGCOMMFD (Y2K changes)                 *
+.**************************************************************************
+.*               V5.07.01 02/07/1999  Steve Armstrong                     *
+.*                        Recompiled for changes to DGAAEEVN              *
+.*               V5.04.03 29/07/1997  Steve Armstrong                     *
+.*                        Fixed validation of hospital code               *
+.*               V5.04.02 07/07/1997  Steve Armstrong                     *
+.*                        Fixed bug if pmi record not on file             *
+.*               V5.04.01 23/06/1997  Steve Armstrong                     *
+.*                        Mods to open health fund file and recompiled    *
+.*                        for DGAAEEVN.                                   *
+.*                                                                        *
+.**************************************************************************
+.
+          INC       STD002FD       * use this to set up common
+.
+          INC       DGCOMMFD/INC
+          INC       AAEDE1FD/INC
+          INC       AAEDI1FD/INC
+          INC       EMRVISFD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATDO1FD/INC
+          INC       PATFN1FD/INC
+          INC       PATHSPFD/INC
+          INC       PATMA1FD/INC
+          INC       PATVISFD/INC
+          INC       PMSVX1FD/INC
+.
+. ------- Program Variables ----------
+.
+ACCNUMB   DIM       20            * for DGAAEEVN
+CLINNAME  DIM       40            * for DGAAEEVN
+DETLFLAG  FORM      1             * for DGAAEEVN
+.                                    0 = A&E detail record exists
+.                                    1 = A&E detail record doesn't exist
+DISCFLAG   FORM     1             * for DGAAEEVN
+.                                    0 = A&E discharge record exists
+.                                    1 = A&E discharge record doesn't exist
+DISTIME   DIM       8             * for DGAAEEVN
+DGNUMAAE  FORM      5             * no. emergency requests
+EPISODE   DIM       8             * for DGAAEEVN
+EVENTYPE  DIM       3             * for DGAAEEVN
+EVISFLAG  FORM      1             * for DGAAEVN
+.                                    0 = EMR visit record exists
+.                                    1 = EMR visit record doesn't exist
+HOSPCODE  DIM       4             * for DGAAEEVN
+MESSPROC  INIT      "DGSRVZ04 - Message Processed"    * dummy processed message
+RECFLAG   DIM       1             * for DGAAEEVN
+REFLDATE  DIM       8             * for DGAAEEVN
+REFREAS   DIM       40            * for DGAAEEVN
+SHUTDOWN  FORM      1
+VISTIME   DIM       8             * for DGAAEEVN
+.
+. ------- Program Constants ---------
+.
+CATA      INIT      "A "
+CATED     INIT      "ED"
+CATS      INIT      "S "
+ZERO4     INIT      "0000"
+.
+.
+PRGID     INIT      "DGSRVZ04"
+PRGNAM    INIT      "Process Datagate Z04 Message Requests"
+VERSION   INIT      "V11.03.00"
++
+.*************************************************************************
+.*  Start of Program                                                     *
+.*************************************************************************
+.
+DGRED000  CALL      SETX0000                      * set up common
+.
+          CALL      DISPHEAD                      * IBA header
+          CALL      DGINI000                      * initialisation
+          BRANCH    EXIT,DGRED900                 * initialisation failure
+          CALL      DRAW0000                      * draw box & screen layout
+.
+DGRED010  CALL      USTAT000                      * update stats on screen
+.
+. sit & wait for an incoming message from the outbound comms client
+.
+          READ      DGATEOUT;CCENCODE:
+                             DGMISC1,DGMISC2,DGMISC3;  * get message type
+          GOTO      DGRED900 IF OVER              * Shutdown performed?
+          UNPACK    CCENCODE,CCDATE,CCSRC,CCDST,CCNAME,MESSTYPE
+.
+.>>>>>    BEGIN                                   * start of commit/rollback
+.
+          DISPLAY   *P23:10,*V2LON,*HON,"Processing":
+                    *HOFF,SP1,*V2LON,"(",MESSTYPE,")"
+.
+. check type of message
+.
+          MATCH     "Z04",MESSTYPE                * Event upload
+          GOTO      DGRED120 IF EQUAL
+.
+. invalid message type sent
+.     NB.  SP1 at end of reply has been added because the interpreter does
+.     not place a "|" after the last field, and Datagate requires this.  By
+.     putting an extra field on the end (which is blank), a "|" will then
+.     be added after the last field.
+.
+          READ      DGATEOUT;CDGMBUFF            * clear message buffer
+.
+          MOVE      "00010",RPLYCODE
+          MOVE      "Invalid Message type",RPLYDESC
+.
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2,DGMISC3:
+                            SP1
+.
+          WRITE     DGATEOUT;MESSPROC       * tell Dgate that message processed
+          GOTO      DGRED010                * get next message
+.
+. --- see what sort of message we are processing -------
+.
+DGRED120  MOVE      "Z04",RPLYHEAD
+          READ      DGATEOUT;PURNO,EVENTYPE,ADANUMB;
+.
+          CALL      VALID000                * validate U/R number is on file
+          BRANCH    EXIT,DGRED500           * invalid U/R - finished
+.
+.         Check what sort event this is
+.
+          MATCH     "ED",EVENTYPE           * ED event ?
+          IF        @EQUAL
+            CALL      DGAAEEVN              * Load event details
+            ADD       ONE,DGNUMAAE          * # register counter
+            GOTO      DGRED600
+          ENDIF
+. 
+          MOVE      "03403",RPLYCODE        * no - return error
+          MOVE      "Invalid Event Type",RPLYDESC
+.
+.         Send back error message
+.
+DGRED500  READ      DGATEOUT;CDGMBUFF       * clear message buffer
+.
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                          RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                          DGMISC3,PURNO,ADANUMB,SP1
+          ADD       ONE,ERRRPROC
+.
+.
+. if all is ok write/update (COMMIT), else if error along the way (ROLLBACK)
+.
+DGRED600  
+.>>>>>    MATCH     "00000",RPLYCODE              * successful?
+.>>>>>    IF        @EQUAL
+.>>>>>      COMMIT                                * write/update all files
+.>>>>>    ELSE
+.>>>>>      ROLLBACK                              * error. DONT write/update
+.>>>>>    ENDIF
+.
+          WRITE     DGATEOUT;MESSPROC       * tell DGate that message processed
+          GOTO      DGRED010                * get next message
+.
+. finished
+.
+DGRED900  CALL      SHUTM000                      * shutdown message if shutdown
+          TRAPCLR   INT                           * clear traps
+          CLOSE     DGATEIN                       * close inbound datagate file
+          CLOSE     DGATEOUT                      * close outbound datagate file
+.
+DGRED999  STOP
++
+.************************************************************************
+.*  SHUTM000  :  give user shutdown message if server has gone down     *
+.************************************************************************
+SHUTM000  IF        SHUTDOWN=0
+            DISPLAY   *P1:24,*EL,*B,"Server has been shutdown.  ";
+            CALL      HITENTER
+          ENDIF
+.
+SHUTM999  RETURN
++
+.************************************************************************
+.*  DGINI000  :  initialisation                                         *
+.************************************************************************
+.
+DGINI000  DISPLAY   *P1:4,*EF
+.
+          BOX       16,23,10,57,14
+          DISPLAY   *P26:12,"Opening Server... Please Wait"
+.
+          OPEN      CONTROLF,"controlf"
+.
+.         Read in system parameters
+.
+          READ      CONTROLF,EIGHTY8;*3,PTCNDESI,*23,PTCNDESO
+.
+.         Open files for Emergency requests
+.
+          OPEN      AAEDE1A1,"aaede1af"
+          OPEN      AAEDI1A1,"aaedi1af"
+.
+          OPEN      EMRVISA1,"emrvisaf"
+.
+          OPEN      PATFN1A1,"patfn1af"
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      PATVISA1,"patvisaf"
+          OPEN      PMSVX1A1,"pmsvx1af"
+          OPEN      PATDO1A1,"patdo1af"
+          OPEN      PATCODE1,"patcodes"
+          OPEN      PATHSPA1,"pathspaf"
+.
+.         Initialise vars
+.
+          MOVE      ZERO,SUCCPROC
+          MOVE      ZERO,ERRRPROC
+.
+          MOVE      ZERO,DGNUMAAE
+.
+          MOVE      CDATE,APSTDATE                * application start date
+          CLOCK     TIME,APSTTIME                 * application start time
+.
+.         Open the inbound data gate file
+.
+          MOVE      ZERO,OVRCD              * assume open succeeds
+          STRIP     PTCNDESI
+          TRAP      OVERCOND IF IO          * trap if open fails
+          OPEN      DGATEIN,PTCNDESI
+          TRAPCLR   IO
+          BRANCH    OVRCD,DGINI900
+.
+.         Open the outbound data gate file
+.
+          MOVE      ZERO,OVRCD              * assume open succeeds
+          STRIP     PTCNDESO
+          TRAP      OVERCOND IF IO          * trap if open fails
+          OPEN      DGATEOUT,PTCNDESO
+          TRAPCLR   IO
+          BRANCH    OVRCD,DGINI910
+.
+          MOVE      ZERO,SHUTDOWN                 * assume no shutdown
+          TRAP      FINDE000 IF INT
+.
+. trap IO errors (ie. I*C, I*D, I*L etc... & PARITY & SPOOL & CHAIN & etc...)
+.
+          TRAP      ADTER000 NORESET GIVING RPLYDESC IF ALL
+.
+          MOVE      ZERO,EXIT               * initialisation succeeded
+          GOTO      DGINI999
+.
+.         Initialisation failure - datagate inbound service
+.
+DGINI900  DISPLAY   *P1:24,*EL,*B,"Service [",*+,PTCNDESI:
+                    "] not currently available.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+          GOTO      DGINI9999
+.
+.         Initialisation failure - datagate outbound service
+.
+DGINI910  DISPLAY   *P1:24,*EL,*B,"Service [",*+,PTCNDESO:
+                    "] not currently available.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+          GOTO      DGINI9999
+.
+DGINI999  RETURN
++
+.************************************************************************
+.*  DRAW0000  :  draw box                                               *
+.************************************************************************ 
+.
+DRAW0000  DISPLAY   *P1:4,*EF
+          BOX       16,3,6,78,23
+          DISPLAY   *P30:6,*HON,*V2LON," MESSAGE STATISTICS "
+.
+          DISPLAY   *P5:8,"Application Activated on ",*V2LON,APSTDATE,*HOFF:
+                    "  @  ",*V2LON,APSTTIME,*HOFF:
+                    *P5:10,"Current status... ",*V2LON,*HON,"Waiting"
+          HLINE     *G37,11,3,78
+          HLINE     *G33,11,3,3
+          HLINE     *G34,11,78,78
+          DISPLAY   *P5:12,*V2LON,*ULON,"Number of requests       ",*HOFF:
+                    *P41:12,*V2LON,*ULON,"Number of requests       ",*HOFF:
+                    *P5:13,"Emergency         : ",*V2LON,DGNUMAAE,*HOFF
+.
+          MOVE      ZERO,SUCCPERC
+          IF        !(SUCCPROC=0 & ERRRPROC=0)
+            ASSIGN    (SUCCPROC/(SUCCPROC+ERRRPROC)*100.0),SUCCPERC
+          ENDIF
+.
+          DISPLAY   *P5:21,"Successfully Processed   : ",*V2LON,SUCCPROC,*HOFF:
+                    *P5:22,"Unsuccessfully Processed : ",*V2LON,ERRRPROC,*HOFF:
+                    *P45:22,"Successful % = ",*V2LON,SUCCPERC
+.
+DRAW9999  RETURN
++
+.************************************************************************
+.*  FINDE000  :  draw box & display stats                               *
+.************************************************************************ 
+FINDE000  MOVE      ONE,SHUTDOWN                  * shutdown recieved
+.
+FINDE999  RETURN
++
+.************************************************************************
+.*  USTAT000  :  update stats on screen                                 *
+.************************************************************************ 
+.
+USTAT000  DISPLAY   *P23:10,*V2LON,*HON,"Waiting",*HOFF,SP30:
+                    *P25:13,*V2LON,DGNUMAAE
+.
+          MOVE      ZERO,SUCCPERC
+          IF        !(SUCCPROC=0 & ERRRPROC=0)
+            ASSIGN    (SUCCPROC/(SUCCPROC+ERRRPROC)*100.0),SUCCPERC
+          ENDIF
+.
+          DISPLAY   *P34:21,*V2LON,SUCCPROC:
+                    *P34:22,ERRRPROC:
+                    *P60:22,SUCCPERC
+USTAT999  RETURN
++
+.**********************************************************************
+.*  VALID000 : Validate U/R                                           *
+.**********************************************************************
+.
+.         Make sure patient has master file record
+.
+VALID000  MOVE      PURNO,KEY8
+          CALL      RDMAST1                 * patient on file ?
+          IF        OVRCD = 1
+            MOVE      "03101",RPLYCODE      * no - return error
+            MOVE      "Patient Master Details not found",RPLYDESC
+            MOVE      ONE,EXIT
+            GOTO      VALID999
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+.
+VALID999  RETURN
++
+.************************************************************************
+.*  ADTER000  :  send general error reply and shutdown                  *
+.************************************************************************ 
+.
+. this routine will be executed when there is a TBL error, ie. I*C...
+. and send an error reply to datagate and then exit the TBL application
+.
+ADTER000  ROLLBACK
+.
+          ENDSET    RPLYDESC
+          APPEND    SP4,RPLYDESC
+          APPEND    PRGID,RPLYDESC
+          APPEND    SP2,RPLYDESC
+          APPEND    VERSION,RPLYDESC
+          APPEND    "(",RPLYDESC
+          APPEND    MESSTYPE,RPLYDESC
+          APPEND    ")",RPLYDESC
+          RESET     RPLYDESC
+.
+          MOVE      "00100",RPLYCODE             * general error (TBL error)
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC:
+                            DGMISC1,DGMISC2,DGMISC3,SP1
+.
+          RESET     ANS
+          BOXCLR    8,9,72,15
+          BOX       16,10,10,70,14
+          DISPLAY   *P19:11,*V2LON,"FATAL ERROR!   Transaction not processed.":
+                    *P15:12,*ULON,RPLYDESC:
+                    *P17:13,*HOFF,*V2LON,"Please Contact IBA Support.  ":
+                    "<< Hit any key >>";
+          KEYIN     *ESON,*+,ANS
+.
+          CLOSE     DGATEIN                 * close inbound datagate file
+          CLOSE     DGATEOUT                * close outbound datagate file
+.
+ADTER999  STOP
+.
+.
+. End of Program
+.
+          INC       STD002IO
+.
+          INC       AAEDE1IO/INC
+          INC       AAEDI1IO/INC
+          INC       EMRVISIO/INC
+          INC       PATCODIO/INC
+          INC       PATDO1IO/INC
+          INC       PATFN1IO/INC
+          INC       PATHSPIO/INC
+          INC       PATMA1IO/INC
+          INC       PATVISIO/INC
+          INC       PMSVX1IO/INC
+.
+          INC       CLEMRVIS
+          INC       CLPMSVX1
+          INC       DGAAEEVN

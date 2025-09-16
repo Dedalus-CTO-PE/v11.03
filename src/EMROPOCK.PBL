@@ -1,0 +1,283 @@
+.
+EMROPOCK
+.
+.  Routine to loop through all Items/Procedures to work out the 
+.  Out of Pocket amount for each Item.
+.
+.  Modification:
+.        V10.01.01 15/12/2010  Mike Laming   CAR 233046
+.                  Mods for PATMCHFD using H/F Table Type (replacing H/F Table)
+.        V10.00.02 18/08/2010 J.Tan            CAR 222031
+.                  Mods to set PMMIDUPD and PMMITUPD
+.        V10.00.01 30/04/2010  J.Tan     CAR 220887
+.                  Mods checking for Active/Inactive of Misc.charge
+.         V9.12.01 03/07/2009 Peter Vela CAR 199927
+.                  Check if PMMIAMTT = 0 GPRC4000
+.         V9.09.02 03/03/2007 J.Tan     CAR 157583
+.                  Mods to use field of 85% Schedule fee as the rebate amount
+.         V9.09.01 12/11/2007 J.Tan     CAR 151803
+.                  Created a new routine to Calculate amount for Out of Pocket
+.
+          MOVE      ZERO,OPOCFLAG            * flag for out of pocket
+          MOVE      ZERO,TOTAMNT
+.
+          READ      CONTROLF,EIGHTY9;*205,EMCNDPOC,*206,EMCNOPOC
+          MATCH     "1",EMCNDPOC
+          GOTO      EMOP9999 IF NOT EQUAL    * No Display Out of Pocket
+.
+          OPEN      PMSEVTA1,"pmsevtaf"
+          OPEN      EMRVISA1,"emrvisaf"
+          OPEN      PRIITEM1,"priitemf"
+          OPEN      PATINVR3,"patinvrf"
+          OPEN      AAEDTRE1,"aaedtref"
+.
+.         Only applicable to Private Patient where claim code INDIC9=Z
+.
+          MOVE      ADANUMB,DADANUMB
+          MOVE      SP70,KEY3
+          PACK      KEY8,ADANUMB
+          CALL      RDPMEVT1
+          IF        OVRCD=0
+            MOVE       PMEVCCOD,EMVICOMP     * Event claim code
+          ELSE
+            CALL      RDEMVIS1               * check emergency visit
+            BRANCH    OVRCD,EMOP9999
+          ENDIF
+.
+          MATCH     SP70,EMVICOMP
+          GOTO      EMOP9999 IF EQUAL        * No claim code
+          PACK      KEY5,ANSC,ANSL,EMVICOMP,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,EMOP9999
+.
+          CMATCH    "Z",TCINDC9
+          GOTO      EMOP9999 IF NOT EQUAL  * Not a private patient
+.
+.         Check if any invoice already raised for the patient
+.
+          CALL      CPRINV00               
+          BRANCH    EXIT,EMOP9999          * Out of pocket not setup
+.
+          IF        SAVAMNT<0
+            MOVE      ZERO,SAVAMNT
+          ENDIF
+          MOVE      SAVAMNT,EMCNOPOC         * save Out of Pocket amount
+.
+          MOVE      ZERO,SAVAMNT
+          PACK      KEY14,ADANUMB,SP20
+          CALL      RSPMMTI1
+EMOP2000  CALL      RKPMMTI1
+          BRANCH    OVRCD,EMOP9999
+.
+          MOVE      ADANUMB,DADANUMB
+          MATCH     PMMIVISN,DADANUMB
+          GOTO      EMOP9999 IF NOT EQUAL
+.
+          MATCH     SP70,PMMIITEM
+          GOTO      EMOP6000 IF EQUAL       * Facility fee
+.
+.         Only Items and Procedures will be included for checking Out of Pocket
+.         Celing amount
+.
+          MOVE      ZERO,FORM1
+          MOVE      PMMIRTYP,FORM1
+          BRANCH    FORM1,EMOP2000,EMOP2000,EMOP5000,EMOP2000:
+                          EMOP2000,EMOP2000,EMOP2000,EMOP4000
+          GOTO      EMOP2000
+.
+.         Recalculate Procedure codes
+.
+EMOP4000  CALL      GPRC0000               * Get Procedure fee
+          GOTO      EMOP6000
+.
+.         Recalculate Miscellaneous charges
+.
+EMOP5000  CALL      GMITEM00
+          BRANCH    EXIT,EMOP2000
+          MATCH     "Y",PTMCKREB
+          GOTO      EMOP2000 IF EQUAL       * manual change for rebate
+.
+.         All Misc.charges will be a patient portion
+.
+          MOVE      MPATPOR,PMMIAMTP
+          ADD       MHFPOR,PMMIAMTP
+          MOVE      ZERO,PMMIRBAT
+          MOVE      PMMIAMTP,PMMIAMTT
+          GOTO      EMOP8000
+.
+EMOP6000  MOVE      TOTAMNT,SAVAMNT
+          ADD       PMMIAMTP,TOTAMNT
+.
+          MOVE      ZERO,FORM12P2
+          MOVE      EMCNOPOC,FORM12P2         * Out of Pocket Ceiling Amount
+.
+          COMPARE   TOTAMNT,FORM12P2
+          GOTO      EMOP8000 IF NOT LESS      * less and equal to Ceiling amount
+.
+.         Total of Patient amount is greater than Out of Pocket Ceiling amount
+.
+          BRANCH    OPOCFLAG,EMOP7000         * Has reached Ceiling amount
+.
+          SUB       SAVAMNT,FORM12P2
+          MOVE      FORM12P2,PMMIAMTP
+.
+          MOVE      PMMIRBAT,PMMIAMTT
+          ADD       PMMIAMTP,PMMIAMTT
+.
+          MOVE      ONE,OPOCFLAG             * flag for reaching Ceiling amount
+          GOTO      EMOP8000
+.
+EMOP7000  MOVE      ZERO,PMMIAMTP
+          MOVE      PMMIRBAT,PMMIAMTT
+.
+EMOP8000  PACK      PMMIDUPD,CCC,CYY,CMM,CDD
+          REP       " 0",PMMIDUPD
+          CALL      IBACLOCK
+          MOVE      CTIMEIS,PMMITUPD
+          MOVE      WBSEUID,PMMIWUSR
+          CALL      UPPMMTI1
+          GOTO      EMOP2000
+.
+EMOP9999  RETURN
++
+.------------------------------------------------------------
+.         Check if invoice already printed
+.------------------------------------------------------------
+CPRINV00  MOVE      ZERO,SAVAMNT
+          MOVE      EMCNOPOC,SAVAMNT
+          COMPARE   ZERO,SAVAMNT
+          GOTO      CPRINV90 IF EQUAL        * Out of Pocket amount is not set
+.
+          PACK      KEY16,ADANUMB,SP70
+          CALL      RSPTINV3
+CPRINV10  CALL      RKPTINV3
+          BRANCH    OVRCD,CPRINV80
+.
+          COMPARE   ADANUMB,PINVADM
+          GOTO      CPRINV80 IF NOT EQUAL    * Different admission
+.
+          MATCH     "1",PTINCRST
+          GOTO      CPRINV10 IF EQUAL        * Fully credited
+.
+.         Get the patient out of pocket from previous invoice for Procedures 
+.         and Facility fees
+.
+          PACK      KEY22,ADANUMB,PINVNO,SP70
+          CALL      RDSDTRE1
+CPRINV20  CALL      RDKDTRE1
+          BRANCH    OVRCD,CPRINV10
+.
+          COMPARE   ATNUMB,ADANUMB
+          GOTO      CPRINV10 IF NOT EQUAL    * different admission
+          MATCH     ATINVNO,PINVNO
+          GOTO      CPRINV10 IF NOT EQUAL    * different invoice number
+.
+          COMPARE   FIVE,ATRECTYP
+          GOTO      CPRINV40 IF EQUAL        * Procedure record
+.
+          COMPARE   ONE,ATRECTYP
+          GOTO      CPRINV20 IF NOT EQUAL
+.
+          MATCH     SP70,ATITEMNO
+          GOTO      CPRINV20 IF NOT EQUAL    * Not a facility fee
+.
+CPRINV40  SUB       ATPATPOR,SAVAMNT
+          GOTO      CPRINV20
+.
+CPRINV80  MOVE      ZERO,EXIT
+          GOTO      CPRINV99
+.
+CPRINV90  MOVE      ONE,EXIT
+CPRINV99  RETURN
++
+.------------------------------------------------------------
+. Get the appropriate miscellaneous charges record
+.------------------------------------------------------------
+GMITEM00  MOVE      ZERO,EXIT
+.
+          UNPACK    SP20,PTHFBCAT      * change "H/F Table" to "Table Type"
+          PACK      KEY14,PFUNDH,PFNDTB,SP20
+          CALL      RDFUND1            * "Table Type code" now in PTHFBCAT
+.
+.                                      * use default date
+          PACK      KEY29,ADACOMP,PFUNDH,PTHFBCAT,PMMIITEM,SP8,SP10
+          CALL      PATMCHRD                * read Misc.Charges file 
+          COMPARE   ZERO,EXIT
+          GOTO      GMITEM99 IF EQUAL
+.
+.         No record with health fund detials - try a blank health fund
+.
+GETITEM10 PACK      KEY29,ADACOMP,SP6,SP3,PMMIITEM,SP8,SP10
+          CALL      PATMCHRD                * read Misc.Charges file 
+          COMPARE   ZERO,EXIT
+          GOTO      GMITEM99 IF EQUAL
+.
+.         No record with health fund detials - last chance, try default claim
+.
+GMITEM20  IF        IBCNMHOS=1
+            MOVE      PTHSDCLM,MCLMCOD
+          ELSE
+            MOVE      PTCNDCLM,MCLMCOD
+          ENDIF
+          PACK      KEY29,MCLMCOD,SP6,SP3,PMMIITEM,SP8,SP10
+          CALL      PATMCHRD                * read Misc.Charges file 
+.
+.                 * EXIT is set - 0=OK, 1=invalid, inactive, not in date range
+GMITEM99  RETURN
++
+.------------------------------------------------------------------------------
+.* Calculate Procedure fee
+.------------------------------------------------------------------------------
+GPRC0000  PACK      KEY2,SP1,PMMIITYP,SP70
+          PACK      KEY22,KEY2,PMMIITEM,PMMISUBN,PMMITDAT,SP70
+          CALL      RDPRIT1
+          COMPARE   ZERO,OVRCD
+          GOTO      GPRC4000 IF EQUAL
+.
+          CALL      RPPRIT1
+          BRANCH    OVRCD,GPRC9000
+.
+          MATCH     KEY2,DPRITFLG
+          GOTO      GPRC9000 IF NOT EQUAL
+.
+          MATCH     PMMIITEM,PRITITMN
+          GOTO      GPRC9000 IF NOT EQUAL
+.
+          MATCH     PMMISUBN,PRITSUBN
+          GOTO      GPRC9000 IF NOT EQUAL
+.
+GPRC4000  IF        PMMIAMTT=ZERO
+            MOVE      PRITSFEE,PMMIAMTT
+.
+            IF        PMMISCHF=0.50
+              MULT      "0.50",PMMIAMTT
+            ENDIF
+.
+            IF        PMMISCHF=0.25
+              MULT      "0.25",PMMIAMTT
+            ENDIF
+.
+            IF        PMMISCHF=0.85
+              MOVE      PRITSF85,PMMIAMTT
+            ENDIF
+.
+            IF        PMMISCHF=0.75
+              MOVE      PRITSF75,PMMIAMTT
+            ENDIF
+.
+            IF        PMMISCHF=0.00
+              MOVE       PRITSAFE,PMMIAMTT
+            ENDIF
+          ENDIF
+.
+          MOVE      PRITSF85,PMMIRBAT         * 85% Rebate portion
+          MOVE      PMMIAMTT,PMMIAMTP
+          SUB       PMMIRBAT,PMMIAMTP         * 15% Patient portion
+.
+          GOTO      GPRC9999
+.
+GPRC9000  MOVE      ZERO,PMMIAMTP
+          MOVE      ZERO,PMMIRBAT
+          MOVE      ZERO,PMMIAMTT
+GPRC9999  RETURN
++

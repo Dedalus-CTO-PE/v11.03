@@ -1,0 +1,660 @@
++
+.         OUTINVCD.PBL
+.         -----------
+.
+.         This include controls the printing of invoices for outpatients.
+.         All invoice layouts are controlled through this include, the
+.         code that is invoice layout dependent being located in the
+.         include PATINVTn, where "n" is the invoice layout.
+.----------------------------------------------------------------------------
+.        V11.00.01 02/04/2020  J.Tan             TSK 0868813
+.                  Changed PKNAME to DIM80
+.        V10.14.01 22/03/2019  J.Tan            TSK 0857392
+.                  Changed RCP Transaction count from DIM3 to DIM5
+.        V10.12.01 27/04/2018  J.Tan          Task 0845996
+.                  Mod to update CMDEUDAT,CMDEUTIM and CMDEUUID
+.        V10.07.01 21/12/2015  J.Tan       CAR 0303942
+.                  Mods to setup Payment code
+.        V10.04.01 01/05/2014  J.Tan        CAR 261630
+.                  Removed patauc Cash audit file
+.        V10.02.01 04/04/2011  Jill Parkinson CAR 239574
+.                  Removed open of ibaprntf
+.        V10.01.02 13/01/2011  Mike Laming    CAR 233084
+.                  Added new include CLPATINV (Added PTINCNID) in ZEROINV 
+.        V10.00.01 19/04/2010  J.Tan        CAR 219670
+.                  Mods to set date/time updated to rcpdteaf file
+.        V9.12.01  05/10/2009  J.Tan        CAR 191624
+.                  Mods to set the Deposit Applied date to Current date
+.        V9.10.02  23/05/2008 J.Tan      CAR 169149
+.                  Added Date and Time invoice created/updated
+.        V9.10.01  05/05/2008 J.Tan      CAR 162313
+.                  Added Deposit status to comdepaf
+.        V9.08.02  22/02/2007 Mike Laming   CAR 119436
+.                  Add PROC FLAGDEBT (PMSOSDTM) for Outstanding Debt Alert ind.
+.        V9.08.01  14/11/2006 Peter Vela CAR 124547
+.                  Added functionality for PRFA of Deceased Patient
+.        V9.07.01  11/08/2006 J.Tan   CAR 103365 
+.                  Added Invoice discount and rounding amount 
+.        V9.04.03  25.10.2005 Sandra Barcham CAR 81362
+.                  Fixed pack of fincode
+.        V9.04.02  06/10/2004  J.Tan   CAR 53798
+.                  Removed PATMSCDS
+.        V9.04.01  20/08/2004 J.Tan  CAR 52835
+.                  Setup hospital ID for patfinsf
+.        V9.03.04  11/06/2004 J.Tan  CAR 50035
+.                  Mods to set mechanical vent var from pmsmtiaf
+.        V9.03.03  09/01/2004 J.Tan
+.                  Fixed setting invoice number for rcpdteaf file
+.        V9.03.02  11/12/2003  J.Tan 
+.                  Replace patcash with comdepaf file
+.        V9.03.01  24/10/2003 J.Tan  CAR 44172                              
+.                  Mods for pmsmtiaf file  
+.        V9.02.02  29.11.2001  B.G.Ackland                                  
+.                  Remove pi's from Program
+.        V9.00.00  05.06.2001 Bronko Sosic
+.                  Created new include form text system
+.
+.******************************************************************************
+NXTTRAN1  MOVE      OBAOUTNO,TADMNO
+          MOVE      OBAOUTNO,KEY8
+          CALL      TRVISA1
+          MOVE      PVITRAN,OTTRANS
+          RETURN
+.
+GETPNAM   CLEAR     PNAME
+          REP       ", ",PTITL
+          REP       ", ",PGNAME
+          REP       ", ",PSNAME
+          REP       ", ",PTMASNAM
+          RESET     PGNAME
+.
+          PACK      DIM6 WITH PTITL,SP2
+.
+.       Get the first non-blank character of the title
+.
+FRSTCH    CMATCH    SP1,DIM6
+          GOTO      APGNAM IF NOT EQUAL
+          BUMP      DIM6
+          GOTO      FRSTCH IF NOT EOS
+.
+.       No title, name will be Given-names Surname
+.
+          APPEND    PGNAME,PNAME
+          GOTO      APS1
+.
+.       Check for last non-blank in title, and append Given names there
+.
+APGNAM    APPEND    DIM6,PNAME
+APG1      CMATCH    SP1,PNAME
+          GOTO      APG2 IF NOT EQUAL
+          BUMP      PNAME,-1
+          GOTO      APG1 IF NOT EOS
+.
+.       Append given name at this point
+.
+APG2      APPEND    SP1,PNAME
+          APPEND    PGNAME,PNAME
+.
+.       Search for last non-blank in given names to append surname there
+.
+APS1      CMATCH    SP1,PNAME
+          GOTO      APS2 IF NOT EQUAL
+          BUMP      PNAME,-1
+          GOTO      APS1 IF NOT EOS
+.
+.       No given name or title. Name will be just Surname
+.
+          CLEAR     PNAME
+          APPEND    PTMASNAM,PNAME
+          GOTO      APSPS
+.
+.       Append surname at this point
+.
+APS2      APPEND    SP1,PNAME
+          APPEND    PTMASNAM,PNAME
+.
+.       Append spaces to make sure there are no characters leftover from
+.       previous names.
+.
+APSPS     APPEND    SP30,PNAME
+          APPEND    SP30,PNAME
+          RESET     PNAME
+          RETURN
+.
+.        Print the invoice. This is the entry point that is used for the
+.        batches of invoices from IBAOUT20.
+.
+.
+PRNTINV0  MOVE      THREE,PROGFLAG
+          MOVE      ZERO,INVPRTD
+          MOVE      ZERO,GROSSTOT
+          MOVE      ZERO,NETTOT
+          MOVE      ZERO,TOTGST
+.
+          LOAD      IPASS,NUMINVS,ZERO,ONE   * set the pass indicator
+          LOAD      PINVTYP,NUMINVS,ZERO,TWO * 1st invoice will be patient
+.
+.        Get the patients name
+.
+PRNTOSD   CALL      GETPNAM
+.
+.        Get any pending cash receipts
+.
+          CALL      GETCASH
+.
+.        We now check for a special case. If we are printing split invoices
+.        and there is no cash, and no patient portion, then only print the
+.        second invoice.
+.
+          IF        CSAMT = 0.00 & IPASS = 1
+            MOVE      ONE,PROGFLAG           * calculate invoice flag
+            CALL      OUTTBI
+            IF        GROSSTOT = 0.00
+              MOVE      TWO,IPASS            * start with pass 2 (rebate port.)
+              MOVE      ONE,PINVTYP          * insurance invoice
+            ENDIF
+            MOVE      THREE,PROGFLAG         * print invoice flag
+          ENDIF
+.
+          MOVE      OBAOUTNO,KEY8            * Make sure we read the visit file
+          CALL      RDVISA1
+.
+.        Get the next invoice number and write a zero invoice record
+.
+          MOVE      PVISITE,KEY6
+          CALL      RDSITA1
+.
+          MOVE      OSTIRNG,KEY3
+          OPEN      PATIRNG1,"patirnge"
+          CALL      TRIRNG1
+          CLOSE     PATIRNG1
+.
+          MOVE      IRNEXT,CNEXTINV
+.
+          OPEN      PATINVR1,"patinvrf"
+          CALL      ZEROINV
+          CLOSE     PATINVR1
+.
+          CALL      OPNPRINT
+.
+          UNPACK    OBADATE WITH CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPDATE,A8DATE
+          MOVE      CPCDATE,A10DATE
+.
+          MOVE      SP8,D8DATE
+          CALL      SETUPIV       * Set up any special varaibles
+.
+.        Set the claim type indicator if this is a claim
+.
+          MOVE      ZERO,CLAIM
+          PACK      KEY5,ANSC,ANSL,OBACOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD OF ENDSIV
+.
+.        Check the indicators for a W, M, or V (these are the claims)
+.
+          MOVE      ZERO,FORM2
+SETIVLP   ADD       ONE,FORM2
+          COMPARE   SIX,FORM2
+          GOTO      ENDSIV IF NOT LESS
+.
+          LOAD      ANS USING FORM2 OF TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5
+.
+          MATCH     ANSW,ANS
+          GOTO      SVISCLM IF EQUAL
+          MATCH     ANSM,ANS
+          GOTO      SVISCLM IF EQUAL
+          MATCH     ANSV,ANS
+          GOTO      SVISCLM IF EQUAL
+          GOTO      SETIVLP
+.
+.        We have a claim
+.
+SVISCLM   REP       "W1M2V3",ANS
+          MOVE      ANS,CLAIM
+.
+.        Set up the person responsible for the account
+.
+ENDSIV    RESET     PGNAME
+          MOVE      PGNAME,ANS
+          PACK      DIM8 WITH SP1,PTITL,SP1,ANS,DOT
+.
+FRSTCH2   CMATCH    SP1,DIM8
+          GOTO      PCKNAM2 IF NOT EQUAL
+          BUMP      DIM8
+          GOTO      FRSTCH2 IF NOT EOS
+.
+PCKNAM2   PACK      PFNAME WITH DIM8,PTMASNAM
+          REP       ", ",PFNAME
+          MOVE      PFNAME,PKNAME
+          MOVE      PSUBRB,PKSUBR
+          MOVE      PADD1,PKADD1
+          MOVE      PADD2,PKADD2
+          MOVE      PADD4,PKADD4
+          MOVE      PPOST,PKPOST
+          MOVE      SP10,PKRELP
+.
+          MOVE      OBAOUTNO,AADMNO
+          MOVE      AADMNO,KEY8
+.
+          CALL      RDRESP1
+          BRANCH    OVRCD OF PRTIHDR
+.
+.---- P.R.A. Record exists, so use it.
+.
+          MATCH     "1",PTCNDEES             * using deceased PRFA indicator
+          GOTO      GPRESP85 IF NOT EQUAL    * no
+.         
+          CMATCH    "$",PKNAME
+          IF        @EQUAL
+            STRIP     PTCNDDES
+            MOVE      PTCNDDES,PFNAME
+            UNPACK    PKNAME,DIM2,KEY78      * ignore "$ "
+            PACK      PFNAME,PFNAME,SP1,KEY78,SP30
+            GOTO      GPRESP99
+          ENDIF
+.
+GPRESP85  COMPARE   ONE,PTCNPAOF             * using 'parent of'?
+          GOTO      GPRESP90 IF NOT EQUAL    * no
+.
+.---- If first character of PKNAME is "@" then replace with "Parent of"
+.
+          CMATCH    "@",PKNAME
+          IF        @EQUAL 
+            MOVE      "Parent of ",PFNAME
+            UNPACK    PKNAME,DIM2,KEY78      * ignore "@ "
+            PACK      PFNAME,PFNAME,KEY78,SP30
+            GOTO      GPRESP99
+          ENDIF
+.
+GPRESP90  PACK      PFNAME,PKNAME,SP30
+.
+GPRESP99  GOTO      PRTIHDR
+.
+.        Print the invoice heading section
+.
+PRTIHDR   MOVE      OBAOUTNO,PINVADM
+          MOVE      OBAURNO,PINVUR
+          MOVE      TWO,PINVSYS
+          MOVE      OBASITE,PINVSITE
+          MOVE      CNEXTINV,SAVINVNO
+          CALL      HEAD
+.
+.        Generate the body and tail of the invoice
+.
+          CALL      OUTTBI
+.
+.        Update the invoice record with the appropriate details
+.
+          OPEN      PATINVR1,"patinvrf"
+          UNPACK    PINVDTE WITH XCENT,XYEAR,XMON,XDAY    * Save invoice date
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+.
+          COMPARE   ONE,OVRCD
+          CALL      ZEROINV IF EQUAL
+.
+          PACK      PINVDTE WITH XCENT,XYEAR,XMON,XDAY    * Restore invoice date
+          MOVE      OBAOUTNO,PINVADM
+          MOVE      OBAURNO,PINVUR
+          MOVE      PTMASNAM,PINALPHA
+          MOVE      GROSSTOT,PINVAMT
+          ADD       TOTGST,PINVAMT
+          MOVE      TOTGST,PTINGSTA       * GST Amount
+          MOVE      ZERO,PINVREB
+          MOVE      TWO,PINVSYS
+          MOVE      OBASITE,PINVSITE
+.
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT             * date updated
+          CLOCK     TIME,PTINUTIM             * time updated
+          MOVE      USERID,PTINUUID           * web user id
+.
+          MOVE      OBACOMP,PINVCLM
+          CALL      UPINV1
+          PROC      FLAGDEBT                * set outstanding debt indicator
+          CLOSE     PATINVR1
+.
+.       Do Cash updates, and then remove the patient from the list
+.       of patient who will still have invoices pending. Then print invoice.
+.
+          CALL      CASHUPD
+          CALL      DELIPEND
+.
+          CALL      CLSPRINT
+.
+.         If we are generating multiple invoices, check if we need to generate
+.         another invoice.
+.
+          BRANCH    IPASS,DLINE900,DLINE999
+          GOTO      DLINE999
+.
+.         We have generated the first invoice. Now time to generate the second
+.
+DLINE900  MOVE      TWO,IPASS                * second pass
+          MOVE      ONE,PINVTYP              * insurance invoice
+          MOVE      ZERO,GROSSTOT
+          MOVE      ZERO,NETTOT
+          MOVE      ZERO,TOTGST
+.
+.         Check if we need to print a form feed between invoices
+.
+          BRANCH    CINVFF,DLINE910
+          GOTO      PRNTOSD
+.
+DLINE910  PRINT     *F;                      * formfeed between invoices
+          GOTO      PRNTOSD
+.
+DLINE999  RETURN
++
+.***************************************************************************
+.* GETCASH     Subroutine to get the total cash amount currently entered   *
+.***************************************************************************
+GETCASH   OPEN      COMDEPA2,"comdepaf"
+          OPEN      RCPDTEA1,"rcpdteaf"
+          MOVE      ZERO,CSAMT
+          MOVE      ZERO,CASHFLAG
+          MOVE      OBAOUTNO,AADMNO
+          MOVE      AADMNO,DOBAOUTN
+          MOVE      "0",CMDESTAT
+          PACK      KEY26,AADMNO,CMDESTAT,SP70
+          CALL      RSCMDEP2
+CASHLP1   CALL      RKCMDEP2
+          BRANCH    OVRCD,ENDCASH1
+.
+          MATCH     DOBAOUTN,CMDEADMN
+          GOTO      ENDCASH1 IF NOT EQUAL
+.
+          MATCH     "0",CMDESTAT                 * check deposit held status
+          GOTO      ENDCASH1 IF NOT EQUAL
+.
+          PACK      KEY17,CMDERECN,CMDETCNT
+          CALL      RDRCDTE1
+          BRANCH    OVRCD,CASHLP1
+.
+          ADD       RCDTAMNT,CSAMT
+          UNPACK    CMDETDAT,XCENT,XYEAR,XMON,XDAY
+          MOVE      XDAY,CSDAY
+          MOVE      XMON,CSMON
+          MOVE      XYEAR,CSYEAR
+          MOVE      XCENT,CSCENT
+          MOVE      CMDERECN,CSREPNO
+          GOTO      CASHLP1
+.
+ENDCASH1  COMPARE   ZERO,CSAMT
+          RETURN    IF EQUAL
+          MOVE      ONE,CASHFLAG
+          RETURN
++
+.      Invoice was printed, so post any cash receipts to DTRAN and INVR files
+.
+CASHUPD   OPEN      COMDEPA2,"comdepaf"
+          OPEN      RCPDTEA1,"rcpdteaf"
+          MOVE      OBAOUTNO,AADMNO
+          MOVE      OBAOUTNO,DOBAOUTN
+.
+CASHULP   MOVE      "0",CMDESTAT
+          PACK      KEY26,DOBAOUTN,CMDESTAT,SP70
+          CALL      RSCMDEP2
+          CALL      RKCMDEP2
+          BRANCH    OVRCD OF CASHRET
+.
+          MATCH     DOBAOUTN,CMDEADMN
+          GOTO      CASHRET IF NOT EQUAL
+.
+          MATCH     "0",CMDESTAT                 * check for Held deposit status
+          GOTO      CASHRET IF NOT EQUAL
+.
+          MOVE      ZERO,RCDTAMNT
+          PACK      KEY17,CMDERECN,CMDETCNT
+          CALL      RDRCDTE1
+          IF        OVRCD=0
+            PACK      RCDTINVN,SP4,PINVNO
+            PACK      RCDTUDAT,CCC,CYY,CMM,CDD
+            REP       " 0",RCDTUDAT           * date updated
+            CLOCK     TIME,RCDTUTIM           * time updated
+            MOVE      USERID,RCDTUUID         * web user id
+            CALL      UPRCDTE1
+          ENDIF
+.
+          MOVE      RCDTAMNT TO OTPATAMT
+          MOVE      CMDERECN TO OTRECEPT
+.
+          MOVE      PINVADM,OTNUMB
+          MOVE      PINVNO,OTINVNO
+.
+          CALL      NXTTRAN1                * Get the next transaction number
+.
+          MOVE      TWO,OTRECTYP            *** RECORD TYPE CASH
+          MOVE      ONE,OTINVPRT            *** SET AS ALREADY PRINTED
+          MOVE      CMDETDAT,OTDDATE
+          MOVE      "PY",OTTYPE
+          MOVE      SP30,OTITEMNO
+          MOVE      SP3,OTMISGRP
+          MOVE      ZERO,OTDTGSTA           * GST Applicable
+          MOVE      ZERO,OTDTGSTM           * GST Amount
+          MOVE      SP20,OTDTGSTC           * GST Code
+          MOVE      "1",OTPAYTYP       ***** set up Payment TYPE
+.
+          MOVE      SP30,OTDDESC
+          MOVE      "PATIENT",OTDDESC
+          MULT      SEQ,OTPATAMT            **** MAKE IT NEGATIVE
+          MOVE      OTPATAMT,OTPATPOR       * Patient portion
+          MOVE      ZERO,OTREBPOR           * Rebate portion
+          PACK      OTDTEFFD,PINVDTE
+          REP       " 0",OTDTEFFD
+.
+.         Post this cash
+.
+          MOVE      ZERO,OTSERVS
+          MOVE      SP20,OTSPARE
+.
+.         Read the first record of Bank details file to get the payment type
+.         ie. Cash, Cheque
+.
+          MOVE      SP70,OTDTPCOD
+          OPEN      RCPBDTA1,"rcpbdtaf"
+          PACK      KEY15,RCDTRECN,SP70
+          CALL      RSRCBDT1
+          CALL      RKRCBDT1
+          IF        OVRCD=0
+            MATCH     RCDTRECN,RCBDRECN      * Same receipt number?
+            IF        @EQUAL
+              MOVE      RCBDPCOD,OTDTPCOD
+            ENDIF
+          ENDIF
+.
+          PACK      KEY22 WITH OTNUMB,OTINVNO,OTTRANS
+          CALL      WRDTRO1
+.
+          MOVE      "1",CMDESTAT            * set Deposit status to 'Applied'
+          PACK      CMDEAINV,SP4,OTINVNO
+.         PACK      CMDEREFD,PINVDTE
+          PACK      CMDEREFD,CCC,CYY,CMM,CDD,SP70     * Current date
+          REP       " 0",CMDEREFD           * Date deposit applied
+          CALL      IBACLOCK
+          MOVE      CTIMEIS,CMDEREFT        * Time invoice is written to
+.
+          PACK      CMDEUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",CMDEUDAT           * date updated
+          CLOCK     TIME,CMDEUTIM           * time updated
+          MOVE      USERID,CMDEUUID         * web user id
+          CALL      UPCMDEP2
+.
+          OPEN      PATINVR1,"patinvrf"
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+          ADD       OTPATAMT,PINVPATA
+.
+.         Check if the invoice now balances
+.
+          MOVE      PINVAMT,TOTAMT       * Invoice amount +
+          ADD       PINVPATA,TOTAMT      * Patient payments +
+          ADD       PINVHFDA,TOTAMT      * H.F payments +
+          ADD       PINVOTHA,TOTAMT      * Other payments +
+          ADD       PINVJOUR,TOTAMT      * Journals = amount outstanding
+.
+          MOVE      "99999999",PINVBLCD  * Assume it doesn't balance
+.
+          COMPARE   ZERO,TOTAMT          * Does it balance ?
+          GOTO      POST2000 IF NOT EQUAL
+.
+.         Invoice is now balanced. Record the date that this occured
+.
+          PACK      PINVBLCD,CCC,CYY,CMM,CDD
+          REP       " 0",PINVBLCD
+.
+POST2000  PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT             * date updated
+          CLOCK     TIME,PTINUTIM             * time updated
+          MOVE      USERID,PTINUUID           * web user id
+.
+          CALL      UPINV1
+          PROC      FLAGDEBT                * set outstanding debt indicator
+.
+          MOVE      SP70,PMVXMHOS
+          OPEN      PMSVX1A1,"pmsvx1af"
+          PACK      KEY8,OTNUMB
+          CALL      RDPMVX11
+.
+          MOVE      ANSB,FINTYPE
+          PACK      FINCODE WITH ANSA,SP20
+.         PACK      FINDATE,CCC,CYY,CMM,CDD
+          MOVE      PINVDTE,FINDATE
+          REP       " 0",FINDATE
+          MOVE      RCDTAMNT,FINAMT
+          MOVE      TWO,FINSYS
+          MOVE      OBASITE,FINSITE
+          MOVE      PMVXMHOS,FINHOSP
+.
+          MOVE      ZERO,FGSTFLAG
+          CALL      PATCALF
+          GOTO      CASHULP
+.
+CASHRET   RETURN
++
+.         Subroutine to remove an admisssion number from the file of
+.         patients who still have invoices pending.
+.
+DELIPEND  COMPARE   ZERO,PTCNIPEN
+          RETURN    IF NOT EQUAL
+. 
+          OPEN      PATIPEN1,"patipenf"
+          MOVE      OBAOUTNO,IPADMNO
+.
+          MOVE      IPADMNO,KEY8
+          CALL      RDIPEN1
+.
+          COMPARE   ZERO,OVRCD
+          CALL      DEIPEN1 IF EQUAL
+.
+          CLOSE     PATIPEN1
+          RETURN
++
+.         Subroutine to write a zero record to the invoice file
+.
+ZEROINV   CALL      CLPATINV                * clear Invoice variables
+.
+          MOVE      CNEXTINV,KEY8
+          MOVE      CNEXTINV,PINVNO
+.
+          PACK      PINVDTE WITH CCC,CYY,CMM,CDD
+          REP       " 0",PINVDTE
+          MOVE      SP6,PINALPHA
+...       MOVE      ZERO,PINVUR
+          MOVE      TWO,PINVSYS
+.
+          MOVE      OBASITE,PINVSITE
+.
+...       MOVE      "99999999",PINVBLCD
+...       MOVE      "0",PTINCRST
+.
+          CALL      RDINV1
+          COMPARE   ZERO,OVRCD
+          GOTO      ZERORET IF EQUAL
+.
+          PACK      PTINCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINCDAT             * date created
+          CLOCK     TIME,PTINCTIM             * time created
+          MOVE      USERID,PTINCUID           * web user id
+          CALL      WRINV1
+          PROC      FLAGDEBT                * set outstanding debt indicator
+.
+ZERORET   RETURN
++
+.****************************************************************************
+SINVH000  OPEN      IBATMHA1,"ibatmhaf"
+          OPEN      IBATDET1,"ibatmdaf"
+.
+          MOVE      OTLPSTAT,KEY6
+          CALL      RDIBTH1                   * read header detail file
+.
+          PACK      KEY12,OTLPSTAT,SP6        * position on details file
+          CALL      RSIBDET1
+          CALL      RKIBDET1
+.
+          MATCH     OTLPSTAT,IBDTSCOD         * match stationery codes
+          GOTO      SINVH950 IF EQUAL
+.
+SINVH950  MOVE      ZERO,EXIT
+SINVH999  RETURN
++
+.****************************************************************************
+.  SINVT000 - Set up invoice tail for stationery templating
+.****************************************************************************
+SINVT000  OPEN      IBATMHA1,"ibatmhaf"
+          OPEN      IBATDET1,"ibatmdaf"
+.
+          MOVE      OTCNOTIT,KEY6
+          CALL      RDIBTH1                   * read header detail file
+          BRANCH    OVRCD,SINVT900
+.
+          PACK      KEY12,OTCNOTIT,SP6        * position on details file
+          CALL      RSIBDET1
+          CALL      RKIBDET1
+          BRANCH    OVRCD,SINVT900
+.
+          MATCH     OTCNOTIT,IBDTSCOD         * match stationery codes
+          GOTO      SINVT950 IF EQUAL
+.
+.------ stationery code not on file ------
+.
+SINVT900  DISPLAY   *P1:24,*EL,*B:
+                    "User Defined Stationery Code not on File. ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+          GOTO      SINVT999
+.
+SINVT950  MOVE      ZERO,EXIT
+SINVT999  RETURN
++
+. ----- copied out of /src/r5/bill/PATIMISC.PBL -----
+.
+CVERTDTE  RESET     DIM6
+          MOVE      SP10,DIM10
+          MATCH     SP8,DIM8
+          RETURN    IF EQUAL
+.
+          UNPACK    DIM8 WITH XCENT,XYEAR,XMON,XDAY
+          PACK      DIM10 WITH XDAY,SLASH,XMON,SLASH,XCENT,XYEAR
+          RETURN
+.
+.       PNAME IS TOO LONG FOR INPUT RECEIPT DETAILS
+.
+GETPNAMS  REP       ", ",PTITL
+          REP       ", ",PGNAME
+          REP       ", ",PSNAME
+          REP       ", ",PTMASNAM
+.
+          MOVE      PGNAME,ANS
+          CLEAR     PNAME
+          APPEND    ANS,PNAME
+          APPEND    DOT,PNAME
+          APPEND    PTMASNAM,PNAME
+          RESET     PNAME,20
+          APPEND    SP30,PNAME
+          RESET     PNAME
+          RETURN
++
+.............................................................................

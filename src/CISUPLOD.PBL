@@ -1,0 +1,842 @@
+.***************************************************************************
+.* System    :   Patient Administration System                             *
+.* Program   :   CISUPLOD                                                  *
+.* Desc      :   PAS-CIS Upload Program                                    *
+.***************************************************************************
+.* Date      :   08/07/2005                                                *
+.* Author    :   Steve Armstrong     CAR 66823                             *
+.* Function  :   This program provides the user with a number of options   *
+.*               to upload PAS data into CIS.  These options can be used   *
+.*               to upload prior to turning the interface on, or to rectify*
+.*               data after the interface has been turned on.              *
+.* Mods      :                                                             *
+.*       V11.00.01 01/04/2020  J.Tan             TSK 0868813               *
+.*                 Changed PKNAME to DIM80                                 *
+.*       V10.11.01 27/12/2017  Steve Armstrong   TSK 0849511               *
+.*                 Mods to check for standby admission                     *
+.***************************************************************************
+.*       V10.06.01 12/03/2015  Steve Armstrong   CAR 314108                *
+.*                 Removed definition of PTCGDATE as PATCGPFD is no longer *
+.*                 in use                                                  *
+.***************************************************************************
+.*       V10.03.04 20/11/2013  Steve Armstrong  CAR 294264                 *
+.*                 Mods to read pmspx2af record for each U/R.              *
+.*                 Also added calls to PMIGTNID.                           *
+.*                 Also added read on pmsvx1af and patre1af for admission. *
+.*       V10.03.03 10/09/2013  Steve Armstrong  CAR 291089                 *
+.*                 Recompiled for changes to PMSQVIIO.                     *
+.*       V10.03.02 18/05/2013  Steve Armstrong   CAR 268961                *
+.*                 Recompiled for changes to PMSQVIFD                      *
+.*       V10.03.01 01/05/2013  Steve Armstrong   CAR 284376                *
+.*                 Recompiled for changes to BRHLCOMN so that PMI messages *
+.*                 can use H7CIHOSP for Facility Code.                     *
+.***************************************************************************
+.*       V10.02.01 27/10/2011  Steve Armstrong CAR 251323                  *
+.*                 Recompiled for PMSQVIFD changes                         *
+.***************************************************************************
+.*       V10.01.01 13/01/2011 Jill Parkinson   CAR  233088                 *
+.*                 Added PMSVX1FD                                          *
+.***************************************************************************
+.*       V10.00.01 18/03/2010  Steve Armstrong  CAR 135505                 *
+.*                 Added HL7TRGID & HL7INCLD setting for all broadcast     *
+.*                 messages                                                *
+.***************************************************************************
+.*       V9.05.B01 31/01/2006 Peter Vela CAR 54614                         *
+.*                 Recompiled for PMSQVIFD                                 *
+.***************************************************************************
+.*        V6.13.01 Steve Armstrong  CAR 70512                              *
+.*                 Added options to load:                                  *
+.*                     - All U/R numbers (A28)                             *
+.*                     - Single U/R number (A28)                           *
+.*                     - U/R numbers for a discharge date range (A28)      *
+.***************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       BOKRC1FD/INC
+          INC       HL7INBFD/INC
+          INC       IBACONFD/INC
+          INC       MEHLERFD/INC
+          INC       NHIMASFD/INC
+          INC       NZHISIFD/INC
+          INC       OUTPREFD/INC
+          INC       PATALRFD/INC
+          INC       PATCALAG/INC
+          INC       PATCONFD/INC
+          INC       PATCOMM/INC
+          INC       PATDHEAD/INC
+          INC       PATDSCFD/INC
+          INC       PATGSRFD/INC
+          INC       PATMA1FD/INC
+          INC       PATMI1FD/INC
+          INC       PATNIDFD/INC
+          INC       PATONLFD/INC
+          INC       PATPR1FD/INC
+          INC       PATRE1FD/INC
+          INC       PATTRNFD/INC
+          INC       PATWR1FD/INC
+          INC       PMSBRQFD/INC
+          INC       PMSPX2FD/INC
+          INC       PMSQPTFD/INC
+          INC       PMSQVIFD/INC
+          INC       PMSVX1FD/INC
+          INC       WEBSECFD/INC
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+BJDAY     FORM      3
+.
+CJDAY     FORM      3
+COUNT     FORM      2
+CURRDAT   DIM       8
+.
+DIM8      DIM       8
+.
+ENDDATE   DIM       8
+ERORDESC  DIM       60
+ERORFLAG  FORM      1             * error flag
+.                                    0 = no errors occurred
+.                                    1 = errors occurred
+ERRCOUNT  FORM      5             * message error count
+.
+FORM3     FORM      3
+FRSTGNAM  DIM       40
+FULLGNAM  DIM       80
+.
+MSENTCNT  FORM      5             * message sent counter
+.
+NMPNUMB   DIM       20
+.
+RECCOUNT  FORM      5             * records processed counter
+.
+SCNDGNAM  DIM       40
+STRTDATE  DIM       8
+.
+VISNUMBR  DIM       8
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+DEFLDESA  INIT      "A28 Message successfully written to holding tables"
+DEFLDESB  INIT      "A01 Message successfully written to holding tables"
+.
+PIPE      INIT      "|"
+PMIEDESC  INIT      "PMI record not found for U/R "
+PX2EDESC  INIT      "PMI extension record not found for U/R "
+VX1EDESC  INIT      "Visit extension record not found for visit "
+.
+TILDA30   INIT      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+TRANDESC  INIT      "Last transfer record not found"
+.
+.
+PRGID     INIT      "CISUPLOD"
+PRGNAM    INIT      "PAS To CIS Upload"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN7000:      * proceed with full admission upload
+                            MAIN1000:      * proceed with single admiss. upload
+                            MAIN7000:      * proceed with full U/R upload
+                            MAIN2000:      * proceed with single U/R upload
+                            MAIN3000       * proceed with U/R for disch. dates
+.
+.         Get a single admission number for sending
+.
+MAIN1000  CALL      GADM0000               * get admission number
+          BRANCH    EXIT,MAIN0100          * nothing entered
+          GOTO      MAIN7000
+.
+.         Get a single U/R number for sending
+.
+MAIN2000  CALL      GURN0000               * get U/R number
+          BRANCH    EXIT,MAIN0100          * nothing entered
+          GOTO      MAIN7000
+.
+.         Get a discharge date range for sending U/R's
+.
+MAIN3000  CALL      SDAT0000               * get start date
+          BRANCH    EXIT,MAIN0100          * nothing entered
+.
+          CALL      EDAT0000               * get end date
+          BRANCH    EXIT,MAIN3000          * nothing entered
+.
+MAIN7000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN8000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN8000  COMPARE   THREE,COPTION          * Sending U/R's ?
+          GOTO      MAIN9000 IF NOT LESS   * yes
+.
+          CALL      PADM0000               * process admission(s)
+          GOTO      MAIN0100
+.
+MAIN9000  CALL      PURN0000               * process U/R(s)
+          GOTO      MAIN0100
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PATMI1A6,"patmi1af"
+.
+          DISPLAY   *P64:24,"pmsvx1af";
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"patdschf";
+          OPEN      PATDSCH2,"patdschf"
+.
+          DISPLAY   *P64:24,"patre1af";
+          OPEN      PATRE1A1,"patre1af"
+.
+          DISPLAY   *P64:24,"patwr1af";
+          OPEN      PATWR1A4,"patwr1af"
+.
+          DISPLAY   *P64:24,"hl7inbaf";
+          OPEN      HL7INB01,"hl7inbaf"
+.
+          DISPLAY   *P64:24,"pattranf";
+          OPEN      PATTRAN2,"pattranf"
+.
+          DISPLAY   *P64:24,"patgsrnf";
+          OPEN      PATGSRN1,"patgsrnf"
+          OPEN      PATGSRN2,"patgsrnf"
+.
+          DISPLAY   *P64:24,"patpr1af";
+          OPEN      PATPR1A1,"patpr1af"
+.
+          DISPLAY   *P64:24,"pmspx2af";
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          DISPLAY   *P64:24,"pmsqptaf";
+          OPEN      PMSQPTA1,"pmsqptaf"
+.
+          DISPLAY   *P64:24,"pmsqviaf";
+          OPEN      PMSQVIA1,"pmsqviaf"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"          * control file
+.
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run upload                             *
+.*                        TRUE  (1)  Exit option selected                   *
+.*              COPTION   1 = Run All current admissions upload             *
+.*                        2 = Run Single current admission upload           *
+.*                        3 = Run All U/R upload                            *
+.*                        4 = Run Single U/R upload                         *
+.*                        5 = Run U/R's for discharge date range            *
+.****************************************************************************
+.
+OPTN0000  HLINE     *G37,2,49,80
+          DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". All Current Admissions (A01)":
+                    *P1:6,*V2LON,TWO,*HOFF,". Single Current Admission (A01)":
+                    *P1:7,*V2LON,THREE,*HOFF,". All U/R Numbers (A28)":
+                    *P1:8,*V2LON,FOUR,*HOFF,". Single U/R Number (A28)":
+                    *P1:9,*V2LON,FIVE,*HOFF,". U/R Numbers for Discharge ":
+                                            "Date Range (A28)"
+.
+OPTN0500  KEYIN     *P1:11,*EL,"Select Option : ":
+                    *P17:11,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN8100:            * run "all admission"
+                            OPTN8200:            * run "single admission"
+                            OPTN8300:            * run "all U/R"
+                            OPTN8400:            * run "single U/R"
+                            OPTN8500             * run "U/R for disch date"
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN8100  DISPLAY   *P49:2,*V2LON,"- All Current Admissions ";
+          MOVE      "- All Current Admissions",CPHDROPT
+          GOTO      OPTN9000
+.
+OPTN8200  DISPLAY   *P49:2,*V2LON,"- Single Admission ";
+          MOVE      "- Single Admission",CPHDROPT
+          GOTO      OPTN9000
+.
+OPTN8300  DISPLAY   *P49:2,*V2LON,"- All U/R's ";
+          MOVE      "- All U/R's",CPHDROPT
+          GOTO      OPTN9000
+.
+OPTN8400  DISPLAY   *P49:2,*V2LON,"- Single U/R ";
+          MOVE      "- Single U/R",CPHDROPT
+          GOTO      OPTN9000
+.
+OPTN8500  DISPLAY   *P49:2,*V2LON,"- U/R's for Disc. Dates ";
+          MOVE      "- U/R's for Disc. Dates",CPHDROPT
+          GOTO      OPTN9000
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.**************************************************************************
+.*                              GADM0000           Called by: MAIN0000    *
+.*              Get the admission number                                  *
+.* Returns:   EXIT  0 = Ok to proceed.                                    *
+.*                  1 = nothing entered.                                  *
+.*            VISNUMBR = admission number                                 *
+.**************************************************************************
+.
+GADM0000  KEYIN     *P1:13,*EL,"Admission Number:":
+                    *P19:13,*V2LON,*JR,*DE,VISNUMBR
+.
+          PACK      VISNUMBR,VISNUMBR,SP8
+          MATCH     SP8,VISNUMBR                 * anything entered ?
+          GOTO      GADM9100 IF EQUAL            * no - exit
+.
+.         Get the admission details
+.
+          MOVE      VISNUMBR,KEY8
+          CALL      RDMISS1                      * admission on file ?
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Admission not on file.  ";
+            CALL      HITENTER
+            GOTO      GADM0000
+          ENDIF
+.
+.         Make sure that this is a current admission
+.
+          COMPARE   TWO,ASTAT                    * current admission ?
+          IF        !@EQUAL
+            DISPLAY   *P1:24,*EL,*B,"Not a current admission.  ";
+            CALL      HITENTER
+            GOTO      GADM0000
+          ENDIF
+.
+.         Get the patient PMI details
+.
+          MOVE      AURNO,KEY8
+          CALL      RDMAST1                      * patient record found ?
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"PMI record not found.  ";
+            CALL      HITENTER
+            GOTO      GADM0000
+          ENDIF
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME
+          DISPLAY   *P30:13,PACFNAME
+.
+          MOVE      ZERO,EXIT
+          GOTO      GADM9999
+.
+GADM9100  MOVE      ONE,EXIT
+.
+GADM9999  RETURN
++
+.****************************************************************************
+.*                              GURN0000             Called by: MAIN0000    *
+.*                   get the patient U/R                                    *
+.* Returns: EXIT  0 = Valid U/R entered                                     *
+.*                1 = Nothing entered                                       *
+.*          Valid read on patmastf record for selected U/R                  *
+.****************************************************************************
+.
+GURN0000  DISPLAY   *P1:13,*EF,"U/R Number     :"
+          MOVE      TEN8,CCOL
+          MOVE      TEN3,CVERT
+          MOVE      ZERO,SRCHSYS
+          MOVE      THREE,SRCHOPT
+          CALL      KURN                         * get U/R
+          BRANCH    EXIT,GURN9500                * nothing entered
+          BRANCH    OVRCD,GURN9700               * U/R does not exist
+.
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME
+          DISPLAY   *P30:13,PACFNAME
+.
+          MOVE      ZERO,EXIT
+          GOTO      GURN9999
+.
+GURN9500  MOVE      ONE,EXIT
+          GOTO      GURN9999
+.
+GURN9700  DISPLAY   *P1:24,*EL,*B,"U/R number does not exist.  ";
+          CALL      HITENTER
+          GOTO      GURN0000
+.
+GURN9999  RETURN
++
+.**************************************************************************
+.*                               PADM0000          Called by: MAIN0000    *
+.*      Loop through the current admissions and for every record          *
+.*      found, send an A01 message to CIS.                                *
+.*      OR                                                                *
+.*      Send an A01 for a selected admission.                             *
+.**************************************************************************
+.
+PADM0000  MOVE      ZERO,CPAGENO                 * initialise page no.
+          MOVE      ZERO,CNOUNDLN                * set to print header line
+          CALL      IBACLOCK                     * get current time
+          MOVE      ZERO,MSENTCNT                * initialise sent counter
+          MOVE      ZERO,RECCOUNT                * initialise record counter
+          MOVE      ZERO,ERRCOUNT                * initialise error counter
+.
+          CALL      HEAD0000                     * print header
+.
+          COMPARE   TWO,COPTION                  * running single admission ?
+          GOTO      PADM1000 IF EQUAL            * yes
+.
+          DISPLAY   *P1:24,*EL,"Processing:";
+.
+          PACK      KEY20,TWO,SP20
+          CALL      RDSMISS6                     * pos'n on current admissions
+PADM0500  CALL      RDKMISS6                     * read next record
+          BRANCH    OVRCD,PADM9000               * eof - finished
+.
+          COMPARE   TWO,ASTAT                    * still current admission ?
+          GOTO      PADM9000 IF NOT EQUAL        * no - finished
+.
+.         A valid current admission has been found
+.
+PADM1000  IF        COPTION = 1
+            DISPLAY   *P13:24,*EL,*V2LON,AADMNO;
+          ENDIF
+.
+          MOVE      ZERO,ERORFLAG                * set default error flag
+          ADD       ONE,RECCOUNT                 * records processed count
+.
+          PACK      ERORDESC,SP30,SP30           * load default description
+          CLEAR     ERORDESC
+          MOVE      DEFLDESB,ERORDESC
+.
+.         Get the patient PMI details
+.
+          MOVE      AURNO,KEY8
+          CALL      RDMAST1                      * patient record found ?
+          IF        OVRCD = 1
+            MOVE      AURNO,DIM8                 * no - set up for error print
+            SQUEEZE   DIM8
+            PACK      ERORDESC,PMIEDESC,DIM8
+            MOVE      ONE,ERORFLAG               * set error flag
+          ENDIF
+.
+.         Clear data fields and then load pmspx2af data
+.
+          CALL      CLNHIMAS
+          CALL      CLPMSPX2
+          MOVE      AURNO,KEY8
+          CALL      RDPMPX21                     * PMI extension record found ?
+          IF        OVRCD = 1
+            MOVE      AURNO,DIM8                 * no - set up for error print
+            SQUEEZE   DIM8
+            PACK      ERORDESC,PX2EDESC,DIM8
+            MOVE      ONE,ERORFLAG               * set error flag
+          ENDIF
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDPMVX11                     * visit ext. record found ?
+          IF        OVRCD = 1
+            MOVE      AADMNO,DIM8                * no - set up for error print
+            SQUEEZE   DIM8
+            PACK      ERORDESC,VX1EDESC,DIM8
+            MOVE      ONE,ERORFLAG               * set error flag
+          ENDIF
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDPTRES1                     * pra record on file ?
+          IF        OVRCD = 1
+            PACK      PKNAME,SP70,SP10            * no
+            MOVE      SP35,PKADD1
+            MOVE      SP35,PKADD2
+            MOVE      SP35,PKSUBR
+            MOVE      SP35,PKADD4
+            MOVE      SP8,PKPOST
+            MOVE      SP20,PKTELEP
+            MOVE      SP20,PKTELEB
+            MOVE      SP10,PKRELP
+            MOVE      SP20,PTREMOBL
+          ENDIF
+.
+          CALL      CLPATDSC                     * clear discharge fields
+.
+.         Get the patient's last transfer record
+.
+          PACK      KEY30,AADMNO,TILDA30
+          CALL      RDSTRAN2                     * position on admission
+          CALL      RDPTRAN2                     * read previous record
+          IF        OVRCD = 1
+            MOVE      TRANDESC,ERORDESC          * set up for error print
+            MOVE      ONE,ERORFLAG               * set error flag
+          ENDIF
+.
+          COMPARE   TADMN,AADMNO                 * same admission still ?
+          IF        !@EQUAL
+            MOVE      TRANDESC,ERORDESC          * set up for error print
+            MOVE      ONE,ERORFLAG               * set error flag
+          ENDIF
+.
+.         Move the latest transfer details into the admission variables
+.         before writing to the holding file.
+.
+          MOVE      TWARD,AWARD
+          MOVE      TBED,ABED
+.
+.         Check to see if this is a standby patient (TSK: 0849511)
+.
+          PACK      KEY14,AADMNO,SP20
+          CALL      RDSWARD4                     * posn before admission #
+          CALL      RDKWARD4                     * read next record
+          IF        OVRCD = 1
+            MOVE      "       0",WSTBY           * not on standby
+          ENDIF
+.
+.         All the visit details have been loaded, so send the A01 message
+.         as long as no error has occurred
+.
+          IF        ERORFLAG = 0
+            CALL      PMIGTNID                   * get national id
+            MOVE      NMPNUMB,PTNINMPI
+            ADD       ONE,MSENTCNT               * increment sent counter
+            MOVE      ONE,HL7TRGID
+            MOVE      SP8,HL7INCLD
+            PROC      DGCLICAD                   * broadcast pt. admission (A01)
+          ELSE
+            ADD       ONE,ERRCOUNT               * increment error counter
+          ENDIF
+.
+          CALL      DISP0000                     * print admission record
+.
+          BRANCH    COPTION,PADM0500             * "all" upload
+.
+PADM9000  DISPLAY   *P1:24,*EL,"Upload completed.  ";
+          CALL      HITENTER
+.
+          CALL      LINE0000
+          PRINT     *N,*1,"Total Current Admissions Processed: ",RECCOUNT:
+                    *N,*1,"Total Current Admissions Sent     : ",MSENTCNT:
+                    *N,*1,"Total Current Admissions Errors   : ",ERRCOUNT:
+                    *N,*N,*1,"*** End of Report ***"
+.
+PADM9999  RETURN
++
+.**************************************************************************
+.*                               PURN0000          Called by: MAIN0000    *
+.*      Loop through the current U/R records and for every record         *
+.*      found, send an A28 message to CIS.                                *
+.*      OR                                                                *
+.*      Send an A28 for a selected U/R.                                   *
+.**************************************************************************
+.
+PURN0000  MOVE      ZERO,CPAGENO                 * initialise page no.
+          MOVE      ZERO,CNOUNDLN                * set to print header line
+          CALL      IBACLOCK                     * get current time
+          MOVE      ZERO,MSENTCNT                * initialise sent counter
+          MOVE      ZERO,RECCOUNT                * initialise record counter
+          MOVE      ZERO,ERRCOUNT                * initialise error counter
+.
+          CALL      HEAD0000                     * print header
+.
+          COMPARE   FOUR,COPTION                 * running single U/R ?
+          GOTO      PURN1000 IF EQUAL            * yes
+.
+          DISPLAY   *P1:24,*EL,"Processing:";
+.
+          IF        COPTION = 3
+            MOVE      SP8,KEY8
+            CALL      RDSMAST1                   * pos'n at start of file
+          ELSE
+            PACK      KEY16,STRTDATE,SP20
+            CALL      RDSDSCH2                   * pos'n on starting date
+          ENDIF
+.
+PURN0500  IF        COPTION = 3
+            CALL      RDKMAST1                   * read next record
+          ELSE
+            CALL      RDKDSCH2                   * read next record
+          ENDIF
+          BRANCH    OVRCD,PURN9000               * eof - finished
+.
+          IF        COPTION = 5
+            MATCH     DDATE,ENDDATE              * still in date range ?
+            GOTO      PURN9000 IF LESS           * no - finished
+          ENDIF
+.
+PURN1000  IF        COPTION <> 4
+            DISPLAY   *P13:24,*EL,*V2LON,PURNO;
+          ENDIF
+          MOVE      ZERO,ERORFLAG                * set default error flag
+          ADD       ONE,RECCOUNT                 * records processed count
+.
+          PACK      ERORDESC,SP30,SP30           * load default description
+          CLEAR     ERORDESC
+          MOVE      DEFLDESA,ERORDESC
+.
+          IF        COPTION = 5
+            MOVE      DURNO,KEY8
+            CALL      RDMAST1                    * pmi record found ?
+            IF        OVRCD = 1
+              MOVE      DURNO,DIM8               * no - set up for error print
+              SQUEEZE   DIM8
+              PACK      ERORDESC,PMIEDESC,DIM8
+              MOVE      ONE,ERORFLAG             * set error flag
+            ENDIF
+          ENDIF
+.
+.         Clear data fields and then load pmspx2af data
+.
+          CALL      CLNHIMAS
+          CALL      CLPMSPX2
+          MOVE      PURNO,KEY8
+          CALL      RDPMPX21                     * PMI extension record found ?
+          IF        OVRCD = 1
+            MOVE      PURNO,DIM8                 * no - set up for error print
+            SQUEEZE   DIM8
+            PACK      ERORDESC,PX2EDESC,DIM8
+            MOVE      ONE,ERORFLAG               * set error flag
+          ENDIF
+.
+          IF        ERORFLAG = 0
+            ADD       ONE,MSENTCNT               * increment sent counter
+            CALL      PMIGTNID        
+            MOVE      NMPNUMB,PTNINMPI
+            MOVE      TWO,HL7TRGID
+            MOVE      SP8,HL7INCLD
+            PROC      DGCLICRG                   * broadcast pt. register (A28)
+          ELSE
+            ADD       ONE,ERRCOUNT               * increment error counter
+          ENDIF
+.
+          COMPARE   THREE,COPTION                * sending "all u/r's" ?
+          IF        !@EQUAL
+            CALL      DISP0000                   * print U/R record
+          ENDIF
+.
+          COMPARE   FOUR,COPTION                 * sending "single u/r" ?
+          GOTO      PURN0500 IF NOT EQUAL        * no - get next U/R
+.
+PURN9000  DISPLAY   *P1:24,*EL,"Upload completed.  ";
+          CALL      HITENTER
+.
+          CALL      LINE0000
+          PRINT     *N,*1,"Total U/R Numbers Processed : ",RECCOUNT:
+                    *N,*1,"Total U/R Numbers Sent      : ",MSENTCNT;
+.
+          IF        COPTION = 5
+            PRINT     *N,*1,"Total U/R Number Errors     : ",ERRCOUNT;
+          ENDIF
+.
+          PRINT     *N,*N,*1,"*** End of Report ***"
+.
+PURN9999  RETURN
++
+.****************************************************************************
+.*                            DISP0000                 Called by: PADM0000  *
+.*                  valid record so print it                      PURN0000  *
+.****************************************************************************
+.
+DISP0000  COMPARE   FIFTY,CLNO                   * page full ?
+          CALL      HEAD0000 IF NOT LESS         * yes
+.
+          IF        COPTION < 3
+            PRINT     *1,PIPE,*3,AADMNO;
+          ELSE
+            IF        COPTION = 5
+              PRINT     *1,PIPE,*3,DURNO;
+            ELSE
+              PRINT     *1,PIPE,*3,PURNO;
+            ENDIF
+          ENDIF
+          PRINT     *13,PIPE,*15,ERORDESC,*132,PIPE
+.
+          ADD       ONE,CLNO                     * increment line count
+.
+DISP9999  RETURN
++
+.****************************************************************************
+.*                            HEAD0000             Called by: PADM0000      *
+.*                       print page heading                   PURN0000      *
+.****************************************************************************
+.
+HEAD0000  CALL      HEAD132                      * display page header
+.
+          CALL      LINE0000                     * draw line across page
+.
+          IF        COPTION < 3
+            PRINT     *1,PIPE," Admission ";
+          ELSE
+            PRINT     *1,PIPE," UR Number ";
+          ENDIF
+          PRINT     *13,PIPE,*15,"Outcome",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      SIX,CLNO                     * increment line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000             Called by: HEAD0000      *
+.*                      draw line across page                 PADM0000      *
+.*                                                            PURN0000      *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+          ADD       ONE,CLNO
+.
+LINE9999  RETURN
++
+.****************************************************************************
+.*                             SDAT0000                Called by: MAIN0000  *
+.*                       get starting date                                  *
+.* Returns:  STRTDATE - starting date (ccyymmdd)                            *
+.*           EXIT  0 = valid date entered                                   *
+.*                 1 = nothing entered                                      *
+.****************************************************************************
+.
+SDAT0000  DISPLAY   *P1:13,*EF,"From Date :"
+          MOVE      ONE,CCENTRY                  * set date defaults
+          MOVE      ONE,CCANLDTE
+          MOVE      ZERO,CDEFDTE
+          MOVE      ZERO,CHIGHLT
+          MOVE      TEN3,CVERT
+          MOVE      TEN3,CCOL
+.
+          CALL      IBACLOCK                     * default to current date
+.
+          PACK      CURRDAT,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDAT
+          UNPACK    CURRDAT,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,SDAT9100
+          PACK      STRTDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",STRTDATE
+.
+          MATCH     STRTDATE,CURRDAT             * date in future ?
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,*B,"From date cannot be in the future.  ";
+            CALL      HITENTER
+            GOTO      SDAT0000
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      SDAT9999
+.
+SDAT9100  MOVE      ONE,EXIT
+.
+SDAT9999  RETURN
++
+.****************************************************************************
+.*                             EDAT0000                Called by: MAIN0000  *
+.*                          get ending date                                 *
+.* Returns:  ENDDATE - ending date (ccyymmdd)                               *
+.*           EXIT  0 = valid date entered                                   *
+.*                 1 = nothing entered                                      *
+.****************************************************************************
+.
+EDAT0000  DISPLAY   *P1:15,*EL,"To   Date :"
+          MOVE      TEN5,CVERT
+          MOVE      TEN3,CCOL
+.
+          UNPACK    CURRDAT,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,EDAT9100
+          PACK      ENDDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",ENDDATE
+.
+          MATCH     STRTDATE,ENDDATE             * start date > end date ?
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,*B,"Start date greater than end date.  ";
+            CALL      HITENTER
+            GOTO      EDAT9100
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      EDAT9999
+.
+EDAT9100  MOVE      ONE,EXIT
+.
+EDAT9999  RETURN
++
+.
+GETSVAR   RETURN
++
+REDISPS   DISPLAY   *P1:4,*EF,"U/R Number    :"
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+          INC       DGCLICAD
+          INC       DGCLICRG
+.
+          INC       CALCAGE
+          INC       CLNHIMAS
+          INC       CLPATDSC
+          INC       CLPATMAS
+          INC       CLPMSPX2
+          INC       NZHISIIO
+          INC       NZIBSRCH
+          INC       PATCOMN1
+          INC       PATSNDX
+          INC       PATSNX2
+          INC       PMIGTNID
+.
+          INC       BOKRC1IO/INC
+          INC       HL7INBIO/INC
+          INC       NHIMASIO/INC
+          INC       OUTPREIO/INC
+          INC       PATDSCIO/INC
+          INC       PATGSRIO/INC
+          INC       PATMA1IO/INC
+          INC       PATMI1IO/INC
+          INC       PATNIDIO/INC
+          INC       PMSPX2IO/INC
+          INC       PMSVX1IO/INC
+          INC       PATPR1IO/INC
+          INC       PATRE1IO/INC
+          INC       PATTRNIO/INC
+          INC       PATWR1IO/INC
+          INC       PMSQPTIO/INC
+          INC       PMSQVIIO/INC
+          INC       WEBSECIO/INC

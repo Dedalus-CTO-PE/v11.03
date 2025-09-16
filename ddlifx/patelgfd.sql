@@ -1,0 +1,55 @@
+create table patelgaf
+(
+  ptelvisn    char(8) default ' ' not null,
+  ptelfinc    char(1) default ' ' not null,
+  ptelxcss    decimal(14,2) default 0 not null,
+  ptelppri    decimal(14,2) default 0 not null,
+  ptelpsha    decimal(14,2) default 0 not null,
+  ptelpthe    decimal(14,2) default 0 not null,
+  ptelxcls    char(1) default ' ' not null,
+  ptelcmpl    char(1) default ' ' not null,
+  ptelcovr    char(1) default ' ' not null,
+  ptelqexs    char(1) default ' ' not null,
+  ptelqacc    char(1) default ' ' not null,
+  ptelcdon    char(3) default ' ' not null,
+  ptelrdat    char(8) default ' ' not null,
+  ptelspea    char(1) default ' ' not null,
+  ptelhfrn    char(20) default ' ' not null,
+  ptelpthf    char(25) default ' ' not null,
+  ptelxcmn    char(100) default ' ' not null,
+  ptelpput    decimal(7,2) default 0 not null,
+  ptelpsut    decimal(7,2) default 0 not null,
+  ptelptut    decimal(7,2) default 0 not null,
+  ptelecmn    char(200) default ' ' not null,
+  ptelhstm    char(25) default ' ' not null,
+  ptelhfpn    char(80) default ' ' not null,
+  ptelpsdy    decimal(14,2) default 0 not null,
+  ptelpsdu    decimal(7,2) default 0 not null,
+  ptelphsp    decimal(14,2) default 0 not null,
+  ptelphsu    decimal(7,2) default 0 not null,
+  ptelafrm    char(1) default ' ' not null,
+  ptelqlps    char(1) default ' ' not null,
+  ptelmdes    char(70) default ' ' not null,
+  ptelmamt    decimal(14,2) default 0 not null,
+  pteleadm    char(1) default ' ' not null,
+  ptelcpcp    char(1) default ' ' not null,
+  ptelcscp    char(1) default ' ' not null,
+  ptelcdcp    char(1) default ' ' not null,
+  ptelchcp    char(1) default ' ' not null,
+  ptelctcp    char(1) default ' ' not null,
+  pteltoop    decimal(14,2) default 0 not null,
+  ptelxcsd    decimal(14,2) default 0 not null,
+  ptelpccu    decimal(14,2) default 0 not null,
+  ptelcccu    char(1) default ' ' not null,
+  ptelpcut    decimal(7,2) default 0 not null,
+  ptelcmxc    char(9) default ' ' not null,
+  ptelecls    char(3) default ' ' not null,
+  ptelspar    char(88) default ' ' not null,
+  lf          char(1)
+);
+create unique index patelga1 on patelgaf
+(
+ptelvisn
+);
+revoke all on patelgaf from public ; 
+grant select on patelgaf to public ; 

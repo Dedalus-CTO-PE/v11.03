@@ -1,0 +1,70 @@
+.
+RALGSIT1  RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      LEGSITA1,KEY6;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSLGSIT1  RESET     KEY6
+          READ      LEGSITA1,KEY6;;
+          RETURN  
+.
+RDLGSIT1  MOVE      ZERO,OVRCD
+          RESET     KEY6
+          READ      LEGSITA1,KEY6;LOSTSITE,LOSTDESC,LOSTPASS,LOSTFILE:
+                                  LOSTSYST,LOSTIRNG,LOSTCHRG,LOSTCATG:
+                                  DLOSTMAX,LOTSTXBO,LOTSTXAT
+          GOTO      OVERCOND IF OVER
+          MOVE      LOSTDESC,LSOSTDES
+          MOVE      DLOSTMAX,LOSTMAXD
+          RETURN  
+.
+RKLGSIT1  MOVE      ZERO,OVRCD
+          READKS    LEGSITA1;LOSTSITE,LOSTDESC,LOSTPASS,LOSTFILE:
+                             LOSTSYST,LOSTIRNG,LOSTCHRG,LOSTCATG:
+                             DLOSTMAX,LOTSTXBO,LOTSTXAT
+          GOTO      OVERCOND IF OVER
+          MOVE      LOSTDESC,LSOSTDES
+          MOVE      DLOSTMAX,LOSTMAXD
+          RETURN  
+.
+RPLGSIT1  MOVE      ZERO,OVRCD
+          READKP    LEGSITA1;LOSTSITE,LOSTDESC,LOSTPASS,LOSTFILE:
+                             LOSTSYST,LOSTIRNG,LOSTCHRG,LOSTCATG:
+                             DLOSTMAX,LOTSTXBO,LOTSTXAT
+          GOTO      OVERCOND IF OVER
+          MOVE      LOSTDESC,LSOSTDES
+          MOVE      DLOSTMAX,LOSTMAXD
+          RETURN  
+.
+. ------- SECOND KEY -------
+.
+RALGSIT2  RESET     KEY36
+          MOVE      ZERO,OVRCD
+          READ      LEGSITA2,KEY36;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSLGSIT2  RESET     KEY36
+          READ      LEGSITA2,KEY36;;
+          RETURN  
+.
+RKLGSIT2  MOVE      ZERO,OVRCD
+          READKS    LEGSITA2;LOSTSITE,LOSTDESC,LOSTPASS,LOSTFILE:
+                             LOSTSYST,LOSTIRNG,LOSTCHRG,LOSTCATG:
+                             DLOSTMAX,LOTSTXBO,LOTSTXAT
+          GOTO      OVERCOND IF OVER
+          MOVE      LOSTDESC,LSOSTDES
+          MOVE      LOSTSITE,LSOSTSIT
+          MOVE      DLOSTMAX,LOSTMAXD
+          RETURN  
+.
+RDLGSIT2  MOVE      ZERO,OVRCD
+          RESET     KEY36
+          READ      LEGSITA2,KEY36;LOSTSITE,LOSTDESC,LOSTPASS,LOSTFILE:
+                                   LOSTSYST,LOSTIRNG,LOSTCHRG,LOSTCATG:
+                                   DLOSTMAX,LOTSTXBO,LOTSTXAT
+          GOTO      OVERCOND IF OVER
+          MOVE      DLOSTMAX,LOSTMAXD
+          RETURN
+.

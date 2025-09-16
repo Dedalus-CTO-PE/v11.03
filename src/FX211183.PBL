@@ -1,0 +1,412 @@
+.*****************************************************************************
+.* System    :   Allied Health                                               *
+.* Program   :   FX211183                                                    *
+.* Desc      :   Fixit to load contact program stream (HL70069 - VINAH3)     *
+.*               from program (HL70069 - VINAH2)                             *
+.*****************************************************************************
+.* Date      :   27/12/2009                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through allrefaf and for each SACS   *
+.*               Master Referral record to find the first associated         *
+.*               encounter where the program (allencaf.alenuc33 - Cat zG) is *
+.*               not blank, then load the corresponding program stream code  *
+.*               (allrefaf.alreuc32 - Cat lF), for the current SACS Master   *
+.*               Referral record.                                            *
+.*****************************************************************************
+.*        V10.03.01 10/12/2012  Ebon Clements     CAR 261630                 *
+.*                  Removed port number from temp file name                  *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       ALLCONFD/INC
+          INC       ALLENCFD/INC
+          INC       ALLREFFD/INC
+          INC       ALLRLNFD/INC
+          INC       IBASEQFD/INC
+          INC       PATCODFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+.
+.         Temporary File Definition
+.         -------------------------
+.
+.         Filename : CSCXXXXX.dat      
+.
+SACTEMP1  IFILE SQL, FIXED=5, KEY="U1-1"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+HDPEQUIV  DIM       1           1           1       HDP Equivalent (Cat lF)
+CATGCODE  DIM       3           3           2       category-code (Cat lF)
+.
+.End of Record                              5
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CMDLINE   DIM       100
+DIM4      DIM       4
+RECCOUNT  FORM      12
+TEMPFILE  DIM       8
+UPDCOUNT  FORM      12
+VISNUMBR  DIM       8
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+ERASE     INIT      "iserase "
+ISBUILD   INIT      "isbuild "
+UKEY      INIT      " 5 U1-1"
+CATLF     INIT      "lF"
+CATZG     INIT      "zG"
+.
+.
+PRGID     INIT      "FX211183"
+PRGNAM    INIT      "Program Stream Fixit"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+          CALL      CREA0000               * create temp file
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9000          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with clean up
+.
+MAIN1000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      CLER0000               * clear temp file
+          CALL      LODC0000               * load Cat lF codes/HDP Equ.
+          CALL      PROC0000               * process
+.
+MAIN9000  CALL      KILL0000               * erase temp file
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"allrefaf";
+          OPEN      ALLREFA1,"allrefaf"
+.
+          DISPLAY   *P64:24,"allencaf";
+          OPEN      ALLENCA1,"allencaf"
+.
+          DISPLAY   *P64:24,"allrlnaf";
+          OPEN      ALLRLNA1,"allrlnaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run fixit                               *
+.*                        TRUE  (1)  Exit option selected                    *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Fixit"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run fixit
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.* Loop through all the SACS Master Referral records and for each one        *
+.* found, check if the there is a program code for any directly or           *
+.* indirectly related encounters                                             *
+.*****************************************************************************
+.
+PROC0000  DISPLAY   *P1:24,*EL,"Processing referral:";
+.
+          MOVE      ZERO,RECCOUNT                * initialise record counter
+          MOVE      ZERO,UPDCOUNT                * initialise update counter
+.
+          MOVE      SP8,KEY8
+          CALL      RSALREF1                     * position at start of file
+PROC0500  CALL      RKALREF1                     * read next record
+          BRANCH    OVRCD,PROC9000               * eof - finished
+.
+          MATCH     "1",ALREUYN4                 * SACS Master Record ?
+          GOTO      PROC0500 IF NOT EQUAL        * no - ignore
+.
+          DISPLAY   *P22:24,*EL,*V2LON,ALREVISN;
+.
+.         SACS Master Referral record found
+.
+          ADD       ONE,RECCOUNT                 * increment record count
+.
+.         Check encounter records related directly to a SACS Master Referral
+. 
+          MOVE      ALREVISN,VISNUMBR            * load visit number
+          CALL      PENC0000
+          BRANCH    EXIT,PROC2000                * no valid program code found
+          GOTO      PROC0500                     * get next referral
+.
+.         Either, there were no encounters against the SACS Master Referral,
+.         or the program field in those encounters was blank or did not
+.         have a valid HDP Equivalent value, so check if there were any
+.         encounters against related internal referrals.
+.
+PROC2000  PACK      KEY16,ALREVISN,SP20
+          CALL      RSALRLN1                     * position on linked refs
+PROC2050  CALL      RKALRLN1                     * read next record
+          BRANCH    OVRCD,PROC0500               * eof - finished
+.
+          MATCH     ALREVISN,ALRLVISN            * same referral still ?
+          GOTO      PROC0500 IF NOT EQUAL        * no - finished
+.
+.         Check encounter records related directly to a SACS Internal Referral
+. 
+          MOVE      ALRLLNKV,VISNUMBR            * load visit number
+          CALL      PENC0000                     
+          GOTO      PROC0500                     * get next referral
+.
+PROC9000  DISPLAY   *P1:21,*EF,"Total SACS Master Referrals processed: ":
+                    *V2LON,RECCOUNT,*HOFF:
+                    *P1:22,"SACS Master Referrals updated        : ":
+                    *V2LON,UPDCOUNT,*HOFF:
+                    *P1:24,"Fixit Completed.  ";
+          CALL      HITENTER
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                         PENC0000                Called by: PROC0000       *
+.*              Process encounters related to a given Referral               *
+.* Requires: VISNUMBR - allied health visit number                           *
+.* Returns:  EXIT  0 = valid code found                                      *
+.*                 1 = no valid code found                                   *
+.*****************************************************************************
+.
+PENC0000  PACK      KEY16,VISNUMBR,SP20
+          CALL      RSALENC1                     * position on encounters
+PENC0500  CALL      RKALENC1                     * read next record
+          BRANCH    OVRCD,PENC9100               * eof - 
+.
+          MATCH     VISNUMBR,ALENVISN            * same visit still ?
+          GOTO      PENC9100 IF NOT EQUAL        * no
+.
+.         An encounter has been found which is directly related to the
+.         SACS Master Referral, so check if the program field was populated.
+.
+          MATCH     SP3,ALENUC33                 * blank program code ?
+          GOTO      PENC0500 IF EQUAL            * yes - get next encounter
+.
+.         The program field was populated, so validate the code
+.
+          PACK      KEY5,CATZG,ALENUC33
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,PENC0500               * no - get next encounter
+.
+          MOVE      THCSCOD,DIM4
+          SQUEEZE   DIM4
+.
+          MOVELPTR  DIM4,FORM1
+          COMPARE   ONE,FORM1                    * 1 character ?
+          GOTO      PENC0500 IF NOT EQUAL        * no - get next encounter
+.
+          TYPE      DIM4                         * numeric ?
+          GOTO      PENC0500 IF NOT EQUAL        * no - get next encounter
+.
+          MOVE      DIM4,FORM1
+          IF        FORM1 < 1 | FORM1 > 7
+            GOTO      PENC0500                   * invalid code
+          ENDIF
+.
+          MOVE      FORM1,KEY1
+          CALL      RDTEMP1                      * HDP on temp file ?
+          BRANCH    OVRCD,PENC0500               * no - get next encounter
+.
+          MOVE      CATGCODE,ALREUC32            * yes - load new code
+          CALL      UPALREF1
+          ADD       ONE,UPDCOUNT                 * increment update count
+.
+PENC9000  MOVE      ZERO,EXIT                    * valid code found
+          GOTO      PENC9999
+.
+PENC9100  MOVE      ONE,EXIT                     * valid code not found
+.
+PENC9999  RETURN
++
+.*****************************************************************************
+.*                              CREA0000               Called by: MAIN0000   *
+.*             create a new temporary file                                   *
+.*****************************************************************************
+.
+CREA0000  CALL      TFILENAM                     * Get temp file name
+          MOVE      TFILNAME,TEMPFILE
+.
+          CALL      KILL0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      SACTEMP1,TEMPFILE            * open temp index file
+.
+CREA9999  RETURN
++
+.****************************************************************************
+.*                              KILL0000               Called by: CREA0000  *
+.*               close and erase the temporary file               MAIN0000  *
+.****************************************************************************
+.
+KILL0000  CLOSE     SACTEMP1                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILE       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILL9999 RETURN
++
+.****************************************************************************
+.*                              CLER0000               Called by: MAIN0000  *
+.*               clear all records from the temp file                       *
+.****************************************************************************
+.
+CLER0000  MOVE      SP1,KEY1
+          CALL      RSTEMP1                      * position at start of file
+          CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,CLER9999               * eof - finished
+.
+          MOVE      HDPEQUIV,KEY1
+          CALL      DETEMP1                      * delete record
+          GOTO      CLER0000
+.
+CLER9999  RETURN
++
+.****************************************************************************
+.*                              LODC0000               Called by: MAIN0000  *
+.*  Load the category lF codes and their HDP Equivalent values              *
+.****************************************************************************
+.
+LODC0000  DISPLAY   *P1:24,*EL,"Loading current category lF codes...";
+.
+          PACK      KEY5,CATLF,SP5
+          CALL      RDSCODE1                     * position at start of Cat/Code
+LODC0500  CALL      RDKCODE1                     * read next record
+          BRANCH    OVRCD,LODC9999               * eof - finished load
+.
+          MATCH     CATLF,TCODE                  * same category still ?
+          GOTO      LODC9999 IF NOT EQUAL        * no - finished
+.
+          MATCH     SP4,THCSCOD                  * blank HDP Equiv. ?
+          GOTO      LODC0500 IF EQUAL            * yes - ignore record
+.
+          MOVE      THCSCOD,DIM4
+          SQUEEZE   DIM4
+.
+          MOVELPTR  DIM4,FORM1
+          COMPARE   ONE,FORM1                    * 1 character ?
+          GOTO      LODC0500 IF NOT EQUAL        * yes
+.
+          TYPE      DIM4                         * numeric value ?
+          GOTO      LODC0500 IF NOT EQUAL        * no - ignore record
+.
+.         We have a numeric HDP Equivalent field with one digit.
+.
+          MOVE      DIM4,FORM1
+          IF        FORM1 < 1 | FORM1 > 7
+            GOTO      LODC0500                   * invalid value
+          ENDIF
+.
+.         We have a valid program stream code, so write a record to the temp
+.         file
+.
+          MOVE      FORM1,KEY1
+          CALL      RATEMP1
+          IF        OVRCD = 1
+            MOVE      FORM1,HDPEQUIV
+            MOVE      ACODE,CATGCODE
+            CALL      WRTEMP1
+          ENDIF
+.
+          GOTO      LODC0500                     * get next patcodes record
+.
+LODC9999  RETURN
++
+.****************************************************************************
+.*        IO ROUTINES FOR TEMPORARY FILE                                    *
+.****************************************************************************
+.
+RATEMP1   MOVE      ZERO,OVRCD
+          READ      SACTEMP1,KEY1;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP1   READ      SACTEMP1,KEY1;;
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          READ      SACTEMP1,KEY1;HDPEQUIV,CATGCODE
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    SACTEMP1;HDPEQUIV,CATGCODE
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMP1   MOVE      ZERO,OVRCD
+          READKP    SACTEMP1;HDPEQUIV,CATGCODE
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     SACTEMP1,KEY1;HDPEQUIV,CATGCODE
+          RETURN
+.
+UPTEMP1   UPDATE    SACTEMP1;HDPEQUIV,CATGCODE
+          RETURN
+.
+DETEMP1   DELETE    SACTEMP1,KEY1
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+          INC       TFILENAM
+.
+          INC       ALLENCIO/INC
+          INC       ALLREFIO/INC
+          INC       ALLRLNIO/INC
+          INC       IBASEQIO/INC
+          INC       PATCODIO/INC
+          INC       WEBERRIO/INC

@@ -1,0 +1,121 @@
+RSPRPR1   RESET     KEY6
+          READ      PRIPRAC1,KEY6;;
+          RETURN
+.
+RAPRPR1   RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      PRIPRAC1,KEY6;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRPR1   RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      PRIPRAC1,KEY6;PRPRCODE,PRPRDESC,PRPRPDOC,PRPRADD1:
+                                  PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP,PRPRSTAT:
+                                  PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE,PRPRREGI:
+                                  PRPRRDAT,PRPRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPRPR1   MOVE      ZERO,OVRCD
+          READKS    PRIPRAC1;PRPRCODE,PRPRDESC,PRPRPDOC,PRPRADD1:
+                                  PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP,PRPRSTAT:
+                                  PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE,PRPRREGI:
+                                  PRPRRDAT,PRPRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPRPR1   MOVE      ZERO,OVRCD
+          READKP    PRIPRAC1;PRPRCODE,PRPRDESC,PRPRPDOC,PRPRADD1:
+                                  PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP,PRPRSTAT:
+                                  PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE,PRPRREGI:
+                                  PRPRRDAT,PRPRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPRPR1   UPDATE    PRIPRAC1;PRPRCODE,PRPRDESC,PRPRPDOC,PRPRADD1:
+                                  PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP,PRPRSTAT:
+                                  PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE,PRPRREGI:
+                                  PRPRRDAT,PRPRSPAR
+          RETURN
+.
+WRPRPR1   RESET     KEY6
+          WRITE     PRIPRAC1,KEY6;KEY6,PRPRDESC,PRPRPDOC,PRPRADD1:
+                                  PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP,PRPRSTAT:
+                                  PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE,PRPRREGI:
+                                  PRPRRDAT,PRPRSPAR
+          RETURN
+.
+DEPRPR1   RESET     KEY6
+          DELETE    PRIPRAC1,KEY6
+          RETURN
+.
+. Index 2
+.
+RSPRPR2   RESET     KEY36
+          READ      PRIPRAC2,KEY36;;
+          RETURN
+.
+RAPRPR2   RESET     KEY36
+          MOVE      ZERO,OVRCD
+          READ      PRIPRAC2,KEY36;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRPR2   RESET     KEY36
+          MOVE      ZERO,OVRCD
+          READ      PRIPRAC2,KEY36;PRPRCODE,PRPRDESC,PRPRPDOC,PRPRADD1:
+                                  PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP,PRPRSTAT:
+                                  PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE,PRPRREGI:
+                                  PRPRRDAT,PRPRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPRPR2   MOVE      ZERO,OVRCD
+          READKS    PRIPRAC2;PRPRCODE,PRPRDESC,PRPRPDOC,PRPRADD1:
+                                  PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP,PRPRSTAT:
+                                  PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE,PRPRREGI:
+                                  PRPRRDAT,PRPRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPRPR2   MOVE      ZERO,OVRCD
+          READKP    PRIPRAC2;PRPRCODE,PRPRDESC,PRPRPDOC,PRPRADD1:
+                                  PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP,PRPRSTAT:
+                                  PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE,PRPRREGI:
+                                  PRPRRDAT,PRPRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+ASPRPR    RESET     KEY19
+          READ      PRIAUDPR,KEY19;;
+          RETURN
+.
+AKPRPR    MOVE      ZERO,OVRCD
+          READKS    PRIAUDPR;PRPRAUDD,PRPRAUDT,PRPRAUDP,PRPRAUDR:
+                                  PRPRAUDS,PRPRAUDO,PRPRCODE,PRPRDESC,PRPRPDOC:
+                                  PRPRADD1,PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP:
+                                  PRPRSTAT,PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE:
+                                  PRPRREGI,PRPRRDAT,PRPRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+AUPRPR    UPDATE    PRIAUDPR;PRPRAUDD,PRPRAUDT,PRPRAUDP,PRPRAUDR:
+                                  PRPRAUDS,PRPRAUDO,PRPRCODE,PRPRDESC,PRPRPDOC:
+                                  PRPRADD1,PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP:
+                                  PRPRSTAT,PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE:
+                                  PRPRREGI,PRPRRDAT,PRPRSPAR
+          RETURN
+.
+AWPRPR    RESET     KEY19
+          WRITE     PRIAUDPR,KEY19;KEY19:
+                                  PRPRAUDS,PRPRAUDO,PRPRCODE,PRPRDESC,PRPRPDOC:
+                                  PRPRADD1,PRPRADD2,PRPRADD3,PRPRPOST,PRPRTELP:
+                                  PRPRSTAT,PRPRTIME,PRPRRANG,PRPRPMCI,PRPRPYEE:
+                                  PRPRREGI,PRPRRDAT,PRPRSPAR
+          RETURN
+.
+ADPRPR    RESET     KEY19
+          DELETE    PRIAUDPR,KEY19
+          RETURN
+.

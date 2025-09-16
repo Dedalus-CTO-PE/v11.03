@@ -1,0 +1,565 @@
+RSLGDTR1  RESET     KEY22
+          READ      LEGDTRA1,KEY22;;
+          RETURN
+.
+RALGDTR1  RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA1,KEY22;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDLGDTR1  RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA1,KEY22;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LTREF,LSTREF
+          MOVE      LDPDTAPA,LPTTAPAY
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RKLGDTR1  MOVE      ZERO,OVRCD
+          READKS    LEGDTRA1;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LTREF,LSTREF
+          MOVE      LDPDTAPA,LPTTAPAY
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RPLGDTR1  MOVE      ZERO,OVRCD
+          READKP    LEGDTRA1;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LTREF,LSTREF
+          MOVE      LDPDTAPA,LPTTAPAY
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RSLGDTR2  RESET     KEY32
+          READ      LEGDTRA2,KEY32;;
+          RETURN
+.
+RALGDTR2  RESET     KEY32
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA2,KEY32;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDLGDTR2  RESET     KEY32
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA2,KEY32;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RKLGDTR2  MOVE      ZERO,OVRCD
+          READKS    LEGDTRA2;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RPLGDTR2  MOVE      ZERO,OVRCD
+          READKP    LEGDTRA2;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RSLGDTR3  RESET     KEY31
+          READ      LEGDTRA3,KEY31;;
+          RETURN
+.
+RALGDTR3  RESET     KEY31
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA3,KEY31;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDLGDTR3  RESET     KEY31
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA3,KEY31;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RKLGDTR3  MOVE      ZERO,OVRCD
+          READKS    LEGDTRA3;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RPLGDTR3  MOVE      ZERO,OVRCD
+          READKP    LEGDTRA3;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RSLGDTR4  RESET     KEY23
+          READ      LEGDTRA4,KEY23;;
+          RETURN
+.
+RALGDTR4  RESET     KEY23
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA4,KEY23;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDLGDTR4  RESET     KEY23
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA4,KEY23;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RKLGDTR4  MOVE      ZERO,OVRCD
+          READKS    LEGDTRA4;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RPLGDTR4  MOVE      ZERO,OVRCD
+          READKP    LEGDTRA4;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RSLGDTR5  RESET     KEY24
+          READ      LEGDTRA5,KEY24;;
+          RETURN
+.
+RALGDTR5  RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA5,KEY24;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDLGDTR5  RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READ      LEGDTRA5,KEY24;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RKLGDTR5  MOVE      ZERO,OVRCD
+          READKS    LEGDTRA5;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.
+RPLGDTR5  MOVE      ZERO,OVRCD
+          READKP    LEGDTRA5;LDTADMNO,LDTRNSN1,LTTYPDEB,LTDCODE:
+                                  LPDTAMTT,LPDTAMTG,LPDTAMTH,LPDTAMTI,LPDTAMTP:
+                                  LDTFCENT,LDTFYEAR,LDTFMNTH,LDTFDAY,LTTCENT:
+                                  LTTYEAR,LTTMONTH,LTTDAY,LTTYPE,LTITEMNO:
+                                  LTREF,LTPAYTYP,LTRECEPT,LTDDESC,LTINVPRT:
+                                  LDTRCTYP,LTNODAYS,LTCLAIM,LPDTREBT,LTDOCTA:
+                                  LTSERVS,LTDOCTO,LTCHGDTE,LTCHGTIM,LTSESION:
+                                  LTMISGRP,LTDEPTYP,LTDWARD,LTCLMTYP,LTADMTYP:
+                                  LTBATCHN,LTNINVS,LPDTBTYP,LPDTPTLS,LPDTRBLS:
+                                  LPDTDTYP,LPDTDES2,LPDTEPSD,LPTDTCCU,LPDTSURG:
+                                  LDPDTAPA,LPDTDEPS,LPDTEFFD,LPDTGSTA,LPDTGSTC:
+                                  LPDTGSTM,LPDTGSTL,LPDTSSAP,LPDTMVBR,LTSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      LDTADMNO,LQTADMNO
+          MOVE      LQTADMNO,LTADMNO
+          MOVE      LDTRNSN1,LTTRNSN1
+          MOVE      LDTFCENT,LTFCENT
+          MOVE      LDTFYEAR,LTFYEAR
+          MOVE      LDTFMNTH,LTFMONTH
+          MOVE      LDTFDAY,LTFDAY
+          MOVE      LDTRCTYP,LTRCTYPE
+          MOVE      LDPDTAPA,LPTTAPAY
+.
+          MOVE      LPDTAMTT,LTPTAMTT
+          MOVE      LPDTAMTG,LTPTAMTG
+          MOVE      LPDTAMTH,LTPTAMTH
+          MOVE      LPDTAMTI,LTPTAMTI
+          MOVE      LPDTAMTP,LTPTAMTP
+          MOVE      LPDTREBT,LTREBATE
+          MOVE      LPDTPTLS,LPDTLSPT
+          MOVE      LPDTRBLS,LPDTLSRB
+          RETURN
+.

@@ -1,0 +1,235 @@
+.----------------------------------------------------------------------------
+. System    :   Patient Management System                                    
+. Program   :   FB821710                                                     
+. Desc      :   Remove first blank comment data from Visit comment data
+.               vismtxaf                    
+.----------------------------------------------------------------------------
+. Date      :   21/06/2018                                                   
+. Author    :   Thanh T.                                                     
+. Function  :   This program reads all the data in visit comment text table 
+.               vismtxaf. For each admission number with visit comment type
+.               (013), it removes all the first leading blank comment
+.               records until the non-blank comment is found. All blank
+.               records after the non-blank comment is found will not be
+.               deleted.        
+.               If only blank comment is found, the associated visit comment
+.               header vismdtaf record will be removed as well.       
+.----------------------------------------------------------------------------
+. V10.12.02 :   29/06/2018  Steve Armstrong      TSK 0821710                 
+.               Re-wrote RCMT0000 to bypass non-"013" type records to speed
+.               up the process (previously reading every vismtxaf record).
+.               Also fixed RCMT0000 to bypass non-blank comment lines for
+.               the same key - again to speed up the process.
+. V10.12.01 :   21/06/2018  Thanh T.             TSK 0821710                 
+.               Program created.
+.----------------------------------------------------------------------------
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       VISMDTFD/INC
+          INC       VISMTXFD/INC
+          INC       WEBSECFD/INC
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+COMMTYPE  INIT      "013"
+SP100     INIT      "                                                  ":
+                    "                                                  "
+TILDA20   INIT      "~~~~~~~~~~~~~~~~~~~~"
+CUSERID   DIM       10
+OLDKEY17  DIM       17
+SAVKEY17  DIM       17 
+DELFLAG   DIM       1
+NOFVMDTD  FORM      6
+NOFVMTXD  FORM      6
+.
+.---------------------------------------------------------------------
+PRGID     INIT      "FB821710"
+VERSION   INIT      "V11.03.00"
+PRGNAM    INIT      "Remove First Blank Comments"
+.---------------------------------------------------------------------
+. Controlling Logic (Mainline code)                 
+.---------------------------------------------------------------------
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with clean up
+.
+MAIN1000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  IF        COPTION = 1
+            CALL      RCMT0000             * process inpatient
+          ENDIF
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.------------------------------------------------------------------------
+.  The initialisation routine is used to display headings and open files. 
+.------------------------------------------------------------------------
+.
+INIT0000  CALL      DISPHEAD                * display heading
+.
+          OPEN      CONTROLF,"controlf"
+          OPEN      VISMDTA1,"vismdtaf"
+          OPEN      VISMTXA1,"vismtxaf"
+          OPEN      WEBSECA1,"websecaf"
+.
+          MOVE      ZERO,NOFVMDTD
+          MOVE      ZERO,NOFVMTXD
+.
+INIT9999  RETURN
++
+.---------------------------------------------------------------------
+. get user options or exit                        
+. Returns:  EXIT    = FALSE (0)  Run clean up                           
+.                     TRUE  (1)  Exit option selected                  
+.---------------------------------------------------------------------
+.
+OPTN0000  DISPLAY   *P1:3,*EF
+.
+OPTN0100  MOVE      SP70,CUSERID 
+          KEYIN     *P1:4,*EL,*V2LON,"User Id : ",*HOFF:
+                    *P11:4,CUSERID
+          DISPLAY   *P1:24,*EL
+.
+          SQUEEZE   CUSERID
+          GOTO      OPTN8000 IF EOS
+. 
+          PACK      KEY10,CUSERID,SP70
+          CALL      RDWBSE1
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*V2LON,"User Id not on file",*HOFF 
+            GOTO      OPTN0100
+          ENDIF
+. 
+OPTN0200  DISPLAY   *P1:6,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:7,*V2LON,ONE,*HOFF:
+                    ". Remove Blank Comments (vismtxaf)"
+.
+OPTN0300  KEYIN     *P1:9,*EL,"Select Option : ":
+                    *P17:9,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION            * exit selected ?
+          GOTO      OPTN8000 IF EQUAL       * yes
+.
+          BRANCH    COPTION,OPTN1000
+.
+          BEEP
+          GOTO      OPTN0300
+.
+OPTN1000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN8000  MOVE      ONE,EXIT
+          GOTO      OPTN9999
+.
+OPTN9999  RETURN
++
+.---------------------------------------------------------------------
+. Processs removing blank visit comments
+.---------------------------------------------------------------------
+RCMT0000  CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:13,"Started : ",*V2LON,CDATE,SP1,CTIMEIS,*HOFF:
+                    *P1:14,"Processing in progress.  ":
+                    "Please wait until completed."
+.
+          MOVE      SP20,SAVKEY17                * initialise saved key
+          MOVE      ANSN,DELFLAG                 * init. vismdtaf delete flag
+.
+          PACK      KEY20,SP70
+RCMT0500  CALL      RSVSMTX1                     * position at start of file
+RCMT1000  CALL      RKVSMTX1                     * read next record
+          BRANCH    OVRCD,RCMT9200               * eof - finished
+.
+.         Check if the key for visit/comment type/note has changed
+.
+          PACK      KEY17,VSMTVISN,VSMTTYPE,VSMTNOTE
+          MATCH     KEY17,SAVKEY17
+          GOTO      RCMT2000 IF EQUAL
+.
+.         The key has changed, so save the new visit/comment type/note key
+.
+          PACK      SAVKEY17,VSMTVISN,VSMTTYPE,VSMTNOTE
+.
+.         We have a different key, so check if we need to delete
+.         the vismdtaf record for the previous key
+.
+          MATCH     ANSY,DELFLAG                 * delete vismdtaf record ?
+          GOTO      RCMT6000 IF EQUAL            * yes
+.
+.         Check if the new record is comment type "013" and if not, reposition
+.         in the file to see if one exists for the current visit
+.
+RCMT1500  MATCH     COMMTYPE,VSMTTYPE
+          IF        !@EQUAL
+            PACK      KEY20,VSMTVISN,COMMTYPE,SP20
+            GOTO      RCMT0500
+          ENDIF
+.
+.         The record is comment type "013", so check if we have a leading
+.         blank record
+.
+RCMT2000  MATCH     SP100,VSMTCMNT               * blank comment line ?
+          GOTO      RCMT5000 IF EQUAL            * yes - delete
+.
+.         We have data in the comment line, so set the delete flag so
+.         we don't delete the header (vismdtaf) record
+.
+          MOVE      ANSN,DELFLAG
+.
+.         Reposition at the end of this visit/comment type/note so we can
+.         check the next combination
+.
+          PACK      KEY20,VSMTVISN,VSMTTYPE,VSMTNOTE,TILDA20
+          GOTO      RCMT0500
+.
+.         Delete a leading blank comment line
+.
+RCMT5000  PACK      KEY20,VSMTVISN,VSMTTYPE,VSMTNOTE,VSMTUNIQ
+          CALL      DEVSMTX1
+          MOVE      ANSY,DELFLAG
+          MOVE      SAVKEY17,OLDKEY17            * save current key for later
+          ADD       ONE,NOFVMTXD                 * incr. vismtxaf deleted count
+          GOTO      RCMT0500
+.
+.         Delete the corresponding header record from vismdtaf using the
+.         previous key (OLDKEY17)
+.
+RCMT6000  MOVE      OLDKEY17,KEY17
+          CALL      DEVSMDT1
+          MOVE      ANSN,DELFLAG
+          ADD       ONE,NOFVMDTD                 * incr. vismdtaf deleted count
+          GOTO      RCMT1500
+.
+.         Finished fixit so display stats
+.
+RCMT9200  OPEN      CONTROLF,"controlf"
+          CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:17,*V2LON,"Number of vismtxaf deleted : ":
+                    NOFVMTXD,*HOFF
+          DISPLAY   *P1:18,*V2LON,"Number of vismdtaf deleted : ":
+                    NOFVMDTD,*HOFF
+          DISPLAY   *P1:21,"Ended  : ",*V2LON,CDATE,SP1,CTIMEIS,*HOFF:
+                    *P1:24,*EL;
+          CALL      HITENTER
+.
+RCMT9999  RETURN
+.
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       VISMDTIO/INC
+          INC       VISMTXIO/INC
+          INC       WEBSECIO/INC

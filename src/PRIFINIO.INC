@@ -1,0 +1,57 @@
+RSPRFN1   RESET     KEY39
+          READ      PRIFINS1,KEY39;;
+          RETURN
+.
+RAPRFN1   RESET     KEY39
+          MOVE      ZERO,OVRCD
+          READ      PRIFINS1,KEY39;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRFN1   RESET     KEY39
+          MOVE      ZERO,OVRCD
+          READ      PRIFINS1,KEY39;PRFNYEAR,PRFNTYPE,PRFNCODE,PRFNPERA:
+                                  PRFNPR01,PRFNPR02,PRFNPR03,PRFNPR04,PRFNPR05:
+                                  PRFNPR06,PRFNPR07,PRFNPR08,PRFNPR09,PRFNPR10:
+                                  PRFNPR11,PRFNPR12,PRFNPR13,PRFNLAST,PRFNMPRA:
+                                  PRFNSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPRFN1   MOVE      ZERO,OVRCD
+          READKS    PRIFINS1;PRFNYEAR,PRFNTYPE,PRFNCODE,PRFNPERA:
+                                  PRFNPR01,PRFNPR02,PRFNPR03,PRFNPR04,PRFNPR05:
+                                  PRFNPR06,PRFNPR07,PRFNPR08,PRFNPR09,PRFNPR10:
+                                  PRFNPR11,PRFNPR12,PRFNPR13,PRFNLAST,PRFNMPRA:
+                                  PRFNSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPRFN1   MOVE      ZERO,OVRCD
+          READKP    PRIFINS1;PRFNYEAR,PRFNTYPE,PRFNCODE,PRFNPERA:
+                                  PRFNPR01,PRFNPR02,PRFNPR03,PRFNPR04,PRFNPR05:
+                                  PRFNPR06,PRFNPR07,PRFNPR08,PRFNPR09,PRFNPR10:
+                                  PRFNPR11,PRFNPR12,PRFNPR13,PRFNLAST,PRFNMPRA:
+                                  PRFNSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPRFN1   UPDATE    PRIFINS1;PRFNYEAR,PRFNTYPE,PRFNCODE,PRFNPERA:
+                                  PRFNPR01,PRFNPR02,PRFNPR03,PRFNPR04,PRFNPR05:
+                                  PRFNPR06,PRFNPR07,PRFNPR08,PRFNPR09,PRFNPR10:
+                                  PRFNPR11,PRFNPR12,PRFNPR13,PRFNLAST,PRFNMPRA:
+                                  PRFNSPAR
+          RETURN
+.
+WRPRFN1   UNPACK    KEY39,PRFNYEAR,PRFNTYPE,PRFNCODE,PRFNMPRA
+          WRITE     PRIFINS1,KEY39;PRFNYEAR,PRFNTYPE,PRFNCODE,PRFNPERA:
+                                  PRFNPR01,PRFNPR02,PRFNPR03,PRFNPR04,PRFNPR05:
+                                  PRFNPR06,PRFNPR07,PRFNPR08,PRFNPR09,PRFNPR10:
+                                  PRFNPR11,PRFNPR12,PRFNPR13,PRFNLAST,PRFNMPRA:
+                                  PRFNSPAR
+          RETURN
+.
+DEPRFN1   RESET     KEY39
+          DELETE    PRIFINS1,KEY39
+          RETURN
+.

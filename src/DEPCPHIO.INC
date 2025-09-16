@@ -1,0 +1,249 @@
+.
+. DEPCPHIO.INC
+. ------------
+. Filename     : depcphaf
+. Description  : Patient Dependency Patient Care Profile History File IO
+.                Subroutines
+. Variables    : OVRCD    FORM    1
+.                KEY27    DIM     27
+. Modifications: 06/06/1991 Justin Coates Quote 6882 SRF 107875
+.                           Added DPPCAT31-60
+.
+RADPCPH1  MOVE      ZERO,OVRCD
+          RESET     KEY27
+          READ      DEPCPHA1,KEY27;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSDPCPH1  MOVE      ZERO,OVRCD
+          RESET     KEY27
+          READ      DEPCPHA1,KEY27;;
+          RETURN
+.
+RDDPCPH1  MOVE      ZERO,OVRCD
+          RESET     KEY27
+          READ      DEPCPHA1,KEY27;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                                   DPPCCATG:
+                                   DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                                   DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                                   DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                                   DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                                   DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                                   DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                                   DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                                   DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                                   DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                                   DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                                   DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                                   DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                                   DDPPCTOT,DPPCSPRE
+          GOTO      OVERCOND IF OVER
+          MOVE      DDPPCADM,DPPCADM
+          MOVE      DDPPCTOT,DPPCTOTL
+          RETURN
+.
+RPDPCPH1  MOVE      ZERO,OVRCD
+          READKP    DEPCPHA1;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                             DPPCCATG:
+                             DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                             DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                             DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                             DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                             DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                             DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                             DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                             DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                             DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                             DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                             DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                             DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                             DDPPCTOT,DPPCSPRE
+          GOTO      OVERCOND IF OVER
+          MOVE      DDPPCADM,DPPCADM
+          MOVE      DDPPCTOT,DPPCTOTL
+          RETURN
+.
+RKDPCPH1  MOVE      ZERO,OVRCD
+          READKS    DEPCPHA1;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                             DPPCCATG:
+                             DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                             DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                             DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                             DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                             DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                             DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                             DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                             DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                             DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                             DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                             DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                             DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                             DDPPCTOT,DPPCSPRE
+          GOTO      OVERCOND IF OVER
+          MOVE      DDPPCADM,DPPCADM
+          MOVE      DDPPCTOT,DPPCTOTL
+          RETURN
+.
+WRDPCPH1  MOVE      ZERO,OVRCD
+          MOVE      DPPCADM,DDPPCADM
+          MOVE      DPPCTOTL,DDPPCTOT
+          RESET     KEY27
+          WRITE     DEPCPHA1,KEY27;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                                   DPPCCATG:
+                                   DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                                   DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                                   DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                                   DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                                   DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                                   DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                                   DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                                   DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                                   DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                                   DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                                   DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                                   DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                                   DDPPCTOT,DPPCSPRE
+          RETURN
+.
+UPDPCPH1  MOVE      DPPCADM,DDPPCADM
+          MOVE      DPPCTOTL,DDPPCTOT
+          UPDATE    DEPCPHA1;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                             DPPCCATG:
+                             DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                             DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                             DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                             DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                             DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                             DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                             DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                             DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                             DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                             DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                             DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                             DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                             DDPPCTOT,DPPCSPRE
+          RETURN
+.
+DEDPCPH1  RESET     KEY27
+          DELETE    DEPCPHA1,KEY27
+          RETURN
+.
+RADPCPH2  MOVE      ZERO,OVRCD
+          RESET     KEY27
+          READ      DEPCPHA2,KEY27;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSDPCPH2  MOVE      ZERO,OVRCD
+          RESET     KEY27
+          READ      DEPCPHA2,KEY27;;
+          RETURN
+.
+RDDPCPH2  MOVE      ZERO,OVRCD
+          RESET     KEY27
+          READ      DEPCPHA2,KEY27;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                                   DPPCCATG:
+                                   DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                                   DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                                   DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                                   DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                                   DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                                   DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                                   DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                                   DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                                   DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                                   DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                                   DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                                   DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                                   DDPPCTOT,DPPCSPRE
+          GOTO      OVERCOND IF OVER
+          MOVE      DDPPCADM,DPPCADM
+          MOVE      DDPPCTOT,DPPCTOTL
+          RETURN
+.
+RPDPCPH2  MOVE      ZERO,OVRCD
+          READKP    DEPCPHA2;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                             DPPCCATG:
+                             DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                             DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                             DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                             DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                             DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                             DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                             DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                             DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                             DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                             DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                             DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                             DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                             DDPPCTOT,DPPCSPRE
+          GOTO      OVERCOND IF OVER
+          MOVE      DDPPCADM,DPPCADM
+          MOVE      DDPPCTOT,DPPCTOTL
+          RETURN
+.
+RKDPCPH2  MOVE      ZERO,OVRCD
+          READKS    DEPCPHA2;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                             DPPCCATG:
+                             DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                             DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                             DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                             DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                             DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                             DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                             DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                             DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                             DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                             DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                             DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                             DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                             DDPPCTOT,DPPCSPRE
+          GOTO      OVERCOND IF OVER
+          MOVE      DDPPCADM,DPPCADM
+          MOVE      DDPPCTOT,DPPCTOTL
+          RETURN
+.
+WRDPCPH2  MOVE      ZERO,OVRCD
+          MOVE      DPPCADM,DDPPCADM
+          MOVE      DPPCTOTL,DDPPCTOT
+          RESET     KEY27
+          WRITE     DEPCPHA2,KEY27;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                                   DPPCCATG:
+                                   DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                                   DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                                   DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                                   DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                                   DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                                   DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                                   DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                                   DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                                   DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                                   DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                                   DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                                   DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                                   DDPPCTOT,DPPCSPRE
+          RETURN
+.
+UPDPCPH2  MOVE      DPPCADM,DDPPCADM
+          MOVE      DPPCTOTL,DDPPCTOT
+          UPDATE    DEPCPHA2;DPPCDATE,DPPCWARD,DPPCTIME,DPPCSHFT,DDPPCADM:
+                             DPPCCATG:
+                             DPPCAT01,DPPCAT02,DPPCAT03,DPPCAT04,DPPCAT05:
+                             DPPCAT06,DPPCAT07,DPPCAT08,DPPCAT09,DPPCAT10:
+                             DPPCAT11,DPPCAT12,DPPCAT13,DPPCAT14,DPPCAT15:
+                             DPPCAT16,DPPCAT17,DPPCAT18,DPPCAT19,DPPCAT20:
+                             DPPCAT21,DPPCAT22,DPPCAT23,DPPCAT24,DPPCAT25:
+                             DPPCAT26,DPPCAT27,DPPCAT28,DPPCAT29,DPPCAT30:
+                             DPPCAT31,DPPCAT32,DPPCAT33,DPPCAT34,DPPCAT35:
+                             DPPCAT36,DPPCAT37,DPPCAT38,DPPCAT39,DPPCAT40:
+                             DPPCAT41,DPPCAT42,DPPCAT43,DPPCAT44,DPPCAT45:
+                             DPPCAT46,DPPCAT47,DPPCAT48,DPPCAT49,DPPCAT50:
+                             DPPCAT51,DPPCAT52,DPPCAT53,DPPCAT54,DPPCAT55:
+                             DPPCAT56,DPPCAT57,DPPCAT58,DPPCAT59,DPPCAT60:
+                             DDPPCTOT,DPPCSPRE
+          RETURN
+.
+DEDPCPH2  RESET     KEY27
+          DELETE    DEPCPHA2,KEY27
+          RETURN
+.

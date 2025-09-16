@@ -1,0 +1,340 @@
+.*----------------------------------------------------------------------
+.* Include Name  :   PATIPERH.PBL
+.*
+.* Function      :   Check if a visits claim code or health fund
+.*                   invoicing is on hold. 
+.*
+.* Requires      :   PENDFUND - Health Fund                           
+.*               :   PENDCLAM - Claim Code                            
+.*               :   PENDHOSP - Hospital ID
+.*               :   PENDSYST - System indicator
+.*               :   PENDADAT - Admission Date
+.*               :   PENDDDAT - Discharged Date
+.*               :   PENDSDAT - As At Date
+.*
+.* Modifications :
+.* V11.03.03 21/06/2023 J.Tan           TSK 0934004
+.*           Mod checking for Patient Hold invoice
+.* V11.03.02 09/05/2023 J.Tan           TSK 0911166
+.*           Mod to check changes from HF to Claim code hold and vice versa
+.* V11.03.01 17/04/2023 Bella Turco     TSK 0911166
+.*           Mod for Hold Invoice Audit
+.* V11.01.01 05/11/2021  J.Tan             TSK 0880410
+.*           Mod for Health Fund On Hold invoice (patfhiaf) PENDHOSP,PENDSYST
+.* V10.09.01 23/12/2016  J.Tan          TSK 0827950
+.*           Mods checking for Contract with 'As at Effective Date'
+.* V10.03.01 15/05/2012 J.Tan               CAR 255708
+.*           Mods checking for Hold Invoices From Date
+.* V10.01.00 06/12/2010 Ebon Clements       CAR 233927
+.*           Created Include
+.*----------------------------------------------------------------------
+IPRH0000  OPEN      PATONHA1,"patonhaf"
+          MOVE      IPADMNO,KEY8
+          CALL      RDIPEN1
+          IF        OVRCD=1
+            PACK      PTIPRHLD,SP70
+            PACK      PTIPRDES,SP70,SP70
+          ENDIF
+.
+          MATCH     SP70,PTIPRHLD
+          GOTO      IPRH1000 IF EQUAL
+.
+.         Check if invoice is already on Patient hold
+.
+          MOVE      "rh",KEY2
+          PACK      KEY5,KEY2,PTIPRHLD
+          CALL      RDCODE1
+          BRANCH    OVRCD,IPRH1000
+.
+          MATCH     "P",TCINDC2
+          GOTO      IPRH9999 IF EQUAL         * patient hold
+.
+          MATCH     "C",TCINDC4
+          GOTO      IPRH9999 IF EQUAL         * CodeFocus hold invoice
+.
+IPRH1000  UNPACK    SP70,KEY1,D8,KEY9
+          PACK      D3,PTIPRHLD,SP70             * save reason for hold
+          PACK      KEY80,PTIPRDES,SP70
+          PACK      KEY83,PTIPRHLD,PTIPRDES,SP70 * save original reason for hold
+.
+          MOVE      SP70,PTIPRHLD                * Clear reason for hold
+          MOVE      SP70,PTIPRDES                * Clear reason free text
+          PACK      PENDHOSP,PENDHOSP,SP70
+          PACK      PENDSYST,PENDSYST,SP70
+.
+          MATCH     SP70,PENDFUND                * Check claim code if 
+          GOTO      IPRH5000 IF EQUAL            * health fund is blank
+.
+          MOVE      SP70,KEY3
+          PACK      KEY9,KEY3,PENDFUND,SP70      * health fund
+.
+          MOVE      "F",KEY1                     * Add hold for Health fund
+          CALL      CKFN0000
+          BRANCH    EXIT,IPRH8000                * HF Hold invoice
+.
+.         Check Claim code
+.
+IPRH5000  MOVE      SP70,PTCFRHCD
+.
+          MATCH     SP70,PENDCLAM                * Exit if claim code  
+          GOTO      IPRH8000 IF EQUAL            * is blank
+.
+          PACK      KEY5,ANSC,ANSL,PENDCLAM,SP70
+          CALL      RDCODE1                      * Read claim code
+          BRANCH    OVRCD,IPRH8000
+.         
+          PACK      KEY3,ACODE,SP70              
+          CALL      RDPTCFA1                     * Check if claim code is
+          BRANCH    OVRCD,IPRH8000               * on hold
+.
+          MATCH     "3",PTCFCEFR                 * check if not in use
+          GOTO      IPRH8000 IF EQUAL
+.
+          PACK      KEY9,PENDCLAM,SP70           * Claim code
+          MOVE      "C",KEY1                     * Add hold for Claim code
+          MATCH     SP70,PTCFHDAT                * check Hold Inv From date
+          GOTO      IPRH6000 IF EQUAL
+.
+          MOVE      ZERO,F1
+          MOVE      PTCFCEFR,F1                  * Type of Effective from
+          PACK      D8,PTCFHDAT,SP70             * Inv Holding from date
+          CALL      HDAT0000
+          BRANCH    EXIT,IPRH8000                * not holding
+.         
+IPRH6000  MOVE      PTCFRHCD,PTIPRHLD            * Set new reason for hold
+          MOVE      PTCFRHFT,PTIPRDES            * Set new reason free text
+.
+.         Check if we need to write to audit file
+.
+IPRH8000  MATCH     D3,PTIPRHLD              * checking hold invoice code
+          IF        @EQUAL
+            MATCH     KEY80,PTIPRDES         * checking hold invoice desc.
+            GOTO      IPRH9999 IF EQUAL      * both same, no change
+          ENDIF
+.
+          MATCH     SP70,D3                      * check original code
+          IF        @EQUAL
+            MATCH     SP70,PTIPRHLD
+            GOTO      IPRH8200 IF NOT EQUAL      * Add record 
+          ELSE
+            MATCH     SP70,PTIPRHLD
+            IF        @EQUAL
+              MOVE      "D",KEY1
+              MATCH     SP70,KEY83
+              GOTO      IPRH9999 IF EQUAL
+            ELSE
+              MOVE      KEY9,D9
+              CALL      THOL0000            * Check if deletion record required
+              MOVE      D9,KEY9
+              MOVE      "U",KEY1            * Update
+            ENDIF
+          ENDIF
+.
+IPRH8200  CALL      WHAU0000                * write to audit file
+IPRH9999  RETURN
++
+.****************************************************************************
+.         Check if changes from Health fund to Claim code hold or vice versa
+.****************************************************************************
+THOL0000  PACK      KEY24,IPADMNO,Z70  * check if there is record in audit
+          CALL      RSPTONH1
+          CALL      RPPTONH1
+          BRANCH    OVRCD,THOL9999
+.
+          MATCH     DIPADMNO,PTONVISN
+          GOTO      THOL9999 IF NOT EQUAL
+.
+          PACK      KEY9,PTONCLCD,PTONHLFU,SP70
+          MATCH     SP70,KEY9
+          GOTO      THOL9999 IF EQUAL
+.
+          UNPACK    D9,D3,D6           * claim code/health fund
+          MATCH     D3,PTONCLCD
+          GOTO      THOL2000 IF NOT EQUAL
+          MATCH     D6,PTONHLFU
+          GOTO      THOL9999 IF EQUAL
+.
+THOL2000  MOVE      "D",KEY1
+          CALL      WHAU0000             * write to audit file
+.
+THOL9999  RETURN
++
+.****************************************************************************
+.         Write to Audit if reason for hold has changed
+.****************************************************************************
+WHAU0000  MATCH     "D",KEY1
+          GOTO      WHAU4000 IF NOT EQUAL
+.
+.         if this is a deleted hold invoice record and no existing record in
+.         audit file, then blank out Health fund and Claim code
+.
+          UNPACK    SP70,PTONCLCD,PTONHLFU   * Claim code and Health fund
+.
+          PACK      KEY24,IPADMNO,Z70      * check if there is record in audit
+          CALL      RSPTONH1
+          CALL      RPPTONH1
+          BRANCH    OVRCD,WHAU2000
+.
+          MATCH     DIPADMNO,PTONVISN
+          GOTO      WHAU2000 IF NOT EQUAL
+.
+          PACK      KEY9,PTONCLCD,PTONHLFU   * Claim code and Health fund
+          MOVE      PTONHLIN,D8              * hold invoice from date
+          GOTO      WHAU4000
+.
+WHAU2000  MOVE      SP70,KEY9
+          UNPACK    KEY83,PTONREAH,PTONDESC  * restore the original reason 
+          GOTO      WHAU9999
+.
+WHAU4000  CALL      IBACLOCK
+          PACK      PTONTDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTONTDAT
+          MOVE      CTIMEIS,PTONTTIM
+.
+          PACK      KEY24,IPADMNO,PTONTDAT,PTONTTIM,SP70 
+          CALL      RAPTONH1
+          COMPARE   ZERO,OVRCD
+          GOTO      WHAU4000 IF EQUAL
+.
+          MOVE      IPADMNO,PTONVISN         * Admission no
+          MOVE      IPSYSTM,FORM2
+          MOVE      FORM2,PTONVAVL           * System indicator
+          MOVE      SP70,PTONURID            * user id
+.
+          MOVE      KEY1,PTONHACT            * Action
+          MATCH     "D",KEY1                 * Delete-Changed Hold to NOT Hold
+          IF        !@EQUAL
+            MOVE      PTIPRHLD,PTONREAH      * reason for hold code
+            MOVE      PTIPRDES,PTONDESC      * reason for hold free text
+          ENDIF
+.
+          UNPACK    KEY9,PTONCLCD,PTONHLFU   * Claim code and Health fund
+          PACK      PTONHLIN,D8,SP70         * hold invoice from
+          PACK      PTONSPAR,SP70,SP70
+.
+          CALL      WRPTONH1
+.
+WHAU9999  RETURN
++
+.*----------------------------------------------------------------------
+.         Check for Health fund
+.*----------------------------------------------------------------------
+CKFN0000  UNPACK    SP70,PTFHHDAT,PTFHHREA
+          MOVE      SP70,PTFHDESC
+.
+          PACK      KEY14,PENDFUND,ZERO,ZERO,ZERO,ZERO,SP70
+          CALL      RDFUND1                      * Read health fund
+          BRANCH    OVRCD,CKFN8000
+.
+          PACK      KEY6,HCODE,SP70
+          CALL      RDPTFX11                     * Read health fund
+          BRANCH    OVRCD,CKFN8000
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          MOVE      ZERO,OVRCD               * assume file exists
+          TRAP      OVERCOND IF IO           * trap for error openning file
+          OPEN      PATFHIA1,"patfhiaf"      * open HF On Hold Invoice file
+          TRAPCLR   IO
+          BRANCH    OVRCD,CKFN3000
+.
+.         Use the System Health Fund On Hold Invoice file
+.
+          PACK      KEY11,PENDHOSP,PENDFUND,PENDSYST,SP70
+          CALL      RDPTFHI1
+          BRANCH    OVRCD,CKFN8000
+.
+          MATCH     SP70,PTFHHDAT                * Check Hold Inv From date
+          GOTO      CKFN8000 IF EQUAL
+.
+          MOVE      ZERO,F1
+          MOVE      PTFXCEFR,F1                  * Type of Effective from
+          PACK      D8,PTFHHDAT,SP70             * Inv Holding from date
+          CALL      HDAT0000
+          BRANCH    EXIT,CKFN8000                * not holding
+.
+CKFN2000  MOVE      PTFHHREA,PTIPRHLD            * Set new reason for hold
+          MOVE      PTFHDESC,PTIPRDES            * Set new reason free text
+.
+          MATCH     SP70,PTFHHREA                * On hold so exit
+          GOTO      CKFN9000 IF NOT EQUAL
+.
+          GOTO      CKFN8000                     * check claim code
+.
+.         Check Holding invoice from date from health fund file
+.
+CKFN3000  MATCH     SP70,PTFXHDAT                * Check Hold Inv From date
+          GOTO      CKFN4000 IF EQUAL
+.
+          MOVE      ZERO,F1
+          MOVE      PTFXCEFR,F1                  * Type of Effective from
+          PACK      D8,PTFXHDAT,SP70             * Inv Holding from date
+          CALL      HDAT0000
+          BRANCH    EXIT,CKFN8000                * not holding
+.
+CKFN4000  MOVE      PTFXRHCD,PTIPRHLD            * Set new reason for hold
+          MOVE      PTFXRHFT,PTIPRDES            * Set new reason free text
+.
+          MOVE      PTFXRHCD,PTFHHREA
+          MOVE      PTFXRHFT,PTFHDESC
+          MOVE      PTFXHDAT,PTFHHDAT
+.
+          MATCH     SP70,PTIPRHLD                * On hold so exit
+          GOTO      CKFN9000 IF NOT EQUAL
+.
+CKFN8000  MOVE      ZERO,EXIT                    * Check claim code on hold Inv.
+          GOTO      CKFN9999
+.
+CKFN9000  MOVE      ONE,EXIT                     * HF hold invoice
+CKFN9999  RETURN
++
+.*----------------------------------------------------------------------
+.         Check Invoice holding from date
+.*----------------------------------------------------------------------
+HDAT0000  MOVE      ZERO,EXIT
+          PACK      PENDSDAT,PENDSDAT,SP70
+          PACK      PENDADAT,PENDADAT,SP70
+          PACK      PENDDDAT,PENDDDAT,SP70
+.
+          MOVE      PENDSDAT,KEY8
+          LOAD      KEY8,F1,PENDADAT,PENDDDAT
+.
+.         If using 'As at Effective date' use Discharge date for Disc.patient
+.
+          IF        F1=0
+            MATCH     SP70,PENDDDAT
+            IF        !@EQUAL
+              MOVE       PENDDDAT,KEY8         * Use Disc.date
+            ENDIF
+          ENDIF
+.
+.         If using 'Discharged From', Discharged date can be blank
+.
+          IF        F1=2
+            MATCH     SP70,PENDDDAT
+            GOTO      HDAT8000 IF EQUAL        * Not 'Discharge from' - hold
+          ENDIF
+.
+          MATCH     D8,KEY8
+          GOTO      HDAT9000 IF LESS           * not holding
+.
+          MATCH     D8,KEY8
+          GOTO      HDAT8000 IF NOT EQUAL
+.
+.         Date equals to the Holding Date
+.
+          IF        F1=0 | F1=2
+            MATCH     SP70,PENDDDAT            * check for discharged
+            IF        !@EQUAL
+              MATCH     PENDADAT,PENDDDAT
+              GOTO      HDAT9000 IF NOT EQUAL  * overnight - can print inv.
+            ENDIF
+          ENDIF
+.
+HDAT8000  MOVE      ZERO,EXIT                  * hold
+          GOTO      HDAT9999
+.
+HDAT9000  MOVE      ONE,EXIT                   * not hold
+HDAT9999  RETURN
++

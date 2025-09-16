@@ -1,0 +1,45 @@
+.
+. AAEGTLIO.INC
+. ------------
+. Filenames       : aaegtlio
+. Description     : A&E Treatment sub-analysis codes file
+.
+. ******* INDEX ONE *******
+.
+RSAEGTL1  RESET     KEY6
+          READ      AAEGTLA1,KEY6;;
+          RETURN
+.
+RAAEGTL1  RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      AAEGTLA1,KEY6;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDAEGTL1  RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      AAEGTLA1,KEY6;AETLMAIN,AETLCODE,AETLDESC,AETLSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKAEGTL1  MOVE      ZERO,OVRCD
+          READKS    AAEGTLA1;AETLMAIN,AETLCODE,AETLDESC,AETLSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPAEGTL1  MOVE      ZERO,OVRCD
+          READKP    AAEGTLA1;AETLMAIN,AETLCODE,AETLDESC,AETLSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPAEGTL1  UPDATE    AAEGTLA1;AETLMAIN,AETLCODE,AETLDESC,AETLSPAR
+          RETURN
+.
+WRAEGTL1  RESET     KEY6
+          WRITE     AAEGTLA1,KEY6;AETLMAIN,AETLCODE,AETLDESC,AETLSPAR
+          RETURN
+.
+DEAEGTL1  RESET     KEY6
+          DELETE    AAEGTLA1,KEY6
+          RETURN
+.

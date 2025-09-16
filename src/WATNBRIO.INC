@@ -1,0 +1,125 @@
+. *****************************************************************************
+. *  Include Name :  WATNBRIO                                                 *
+. *  Function     :  I/O for watnbraf file                                    *
+. *  File Type    :  SQL                                                      *
+. *  File Name    :  watnbraf.dat                                             *
+. *  Keys         :  KEY36                                                    *
+. *  Modifications:                                                           *
+. *       V5.08.01  15/06/2000  Tonii                                         *
+. *                 Removed fields WTNBDTCG,WTNBDTBM,WTNBDTBT & WTNBATHSi     *
+. *****************************************************************************
+
+RSWTNBR1  RESET     KEY36
+          READ      WATNBRA1,KEY36;;
+          RETURN
+.
+RAWTNBR1  RESET     KEY36
+          MOVE      ZERO,OVRCD
+          READ      WATNBRA1,KEY36;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTNBR1  RESET     KEY36
+          MOVE      ZERO,OVRCD
+          READ      WATNBRA1,KEY36;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM: 
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKWTNBR1  MOVE      ZERO,OVRCD
+          READKS    WATNBRA1;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM: 
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPWTNBR1  MOVE      ZERO,OVRCD
+          READKP    WATNBRA1;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM: 
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPWTNBR1  UPDATE    WATNBRA1;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM: 
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          RETURN
+.
+WRWTNBR1  RESET     KEY36
+          WRITE     WATNBRA1,KEY36;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM: 
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          RETURN
+.
+DEWTNBR1  RESET     KEY36
+          DELETE    WATNBRA1,KEY36
+          RETURN
+.
+RSWTNBR2  RESET     KEY35
+          READ      WATNBRA2,KEY35;;
+          RETURN
+.
+RAWTNBR2  RESET     KEY35
+          MOVE      ZERO,OVRCD
+          READ      WATNBRA2,KEY35;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTNBR2  RESET     KEY35
+          MOVE      ZERO,OVRCD
+          READ      WATNBRA2,KEY35;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM:
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKWTNBR2  MOVE      ZERO,OVRCD
+          READKS    WATNBRA2;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM:
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPWTNBR2  MOVE      ZERO,OVRCD
+          READKP    WATNBRA2;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM:
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPWTNBR2  UPDATE    WATNBRA2;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM:
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          RETURN
+.
+WRWTNBR2  RESET     KEY35
+          WRITE     WATNBRA2,KEY35;WTNBURNO,WTNBCODE,WTNBCNT,WTNBEDAT,WTNBETIM:
+                         WTNBRTYP,WTNBRSFL,WTNBBNUM,WTNBUDF1,WTNBUDF2,WTNBUDF3:
+                         WTNBUDF4,WTNBUDF5,WTNBUDF6,WTNBUDF7,WTNBUDF8,WTNBDRSA:
+                         WTNBDOSA,WTNBPHSP,WTNBTRAG,WTNBPCHS,WTNBBPRO:
+                         WTNBDTEC,WTNBSPFL,WTNBSPAR
+          RETURN
+.
+DEWTNBR2  RESET     KEY35
+          DELETE    WATNBRA2,KEY35
+          RETURN
+.

@@ -1,0 +1,148 @@
+.**************************************************************************
+.*  DGMRTMRM  :  Update Medical Records Movements for a Datagate Request  *
+.*               ~~~~~~~~~~~~~~~~~~~~~                                    *
+.*                                                                        *
+.*  Author    :  Mike Laming (11/07/2001)                                 *
+.*  Mods      :                                                           *
+.*  V10.02.01  11/07/2011  Mike Laming   CAR 240724                       *
+.*             Mods to add Hospital to all Location records - mod Keys    *
+.*  V9.08.01   25/01/2007 Peter Vela CAR 127930                           *
+.*             Added MRMADTCR MRMATMCR before WRTMAS1                     *
+.*  V9.02.00                                                              *
+.*                                                                        *
+.*                                                                        *
+.**************************************************************************
+          DEFPROC   DGMRTMRM
+ IFGE     $$VER,7
+.
+.
+DGMRTMRM  MOVE      "MRM",RPLYHEAD
+          MOVE      PURNO,MRMAURNO
+          READ      DGATEOUT;MRMAHHOS,MRMAHLOC,MRMADOTY,MRMAVOLN;     *I-240724
+.
+          CALL      CHKMR000                      * Check for Med.Record Master
+          BRANCH    EXIT,DGUPD900                 * error
+.
+          CALL      UPDMR000                      * update medical records
+          BRANCH    EXIT,DGUPD900                 * error
+.
+. --- send back a successful response ---
+.     NB.  SP1 at end of reply has been added because the interpreter does
+.     not place a "|" after the last field, and Datagate requires this.  By
+.     putting an extra field on the end (which is blank), a "|" will then
+.     be added after the last field.
+.
+          MOVE      "00000",RPLYCODE
+          MOVE      SP50,RPLYDESC
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                          RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                          DGMISC3,SP1
+          ADD       ONE,SUCCPROC                  * increm # success transactns
+          GOTO      DGUPD999
+.
+. --- send back an Error response ---
+.
+DGUPD900  PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                            DGMISC3,SP1
+          ADD       ONE,ERRRPROC                  * increm # error transactions
+.
+DGUPD999  GOTO      DGUPDEND                      * got end of procedure
++
+.***************************************************************************
+.*  CHKMR000  :  read medical records master and medical records history   *
+.*               (if Master does not exidd both Master and History)        *
+.*               Returns:  EXIT=0 --> Valid Med.Recds  EXIT=1 --> ERROR    *
+.***************************************************************************
+.                                                                     *C-240724
+CHKMR000  PACK      KEY20,MRMAURNO,MRMAHHOS,MRMAHLOC,MRMADOTY,MRMAVOLN,SP70
+          CALL      RDMRMAS1
+          COMPARE   ZERO,OVRCD
+          GOTO      CHKMR999 IF EQUAL
+.
+.                                           * ******* ADD A New Master *******
+CHKMR100  READ      CONTROLF,SIXTY;*95,MRCNUKEY
+          ADD       ONE,MRCNUKEY
+          WRITAB    CONTROLF,SIXTY;*95,MRCNUKEY
+          SUB       ONE,MRCNUKEY
+          MOVE      MRCNUKEY,MRMAKEY
+.
+          PACK      KEY10,MRMAKEY
+          CALL      RAMRMAS2                * Read a master file record
+          COMPARE   ONE,OVRCD
+          GOTO      CHKMR100 IF NOT EQUAL   * Record exists, get next unq key
+.                                                                     *C-240724
+          PACK      KEY20,MRMAURNO,MRMAHHOS,MRMAHLOC,MRMADOTY,MRMAVOLN,SP70
+          CALL      RAMRMAS1                * Read a master file record
+          IF        OVRCD=1
+            CALL      IBACLOCK
+            PACK      MRMADTCR,CCC,CYY,CMM,CDD
+            REP       " 0",MRMADTCR
+            MOVE      CTIMEIS,MRMATMCR
+            MOVE      SP70,MRMACUID
+            MOVE      SP70,MRMADTUP
+            MOVE      SP70,MRMATMUP
+            MOVE      SP70,MRMAUUID
+            CALL      WRTMAS1
+          ENDIF
+.
+.CHKMR850  MOVE      "Medical Records History does not exist",RPLYDESC
+.          MOVE      "05101",RPLYCODE
+.          MOVE      ONE,EXIT
+.          GOTO      CHKMR999
+.
+CHKMR999  RETURN
++
+.***************************************************************************
+.*  UPDMR000  :  update medical records for a patient                      *
+.*               (Medical Records Master & history already read)           *
+.***************************************************************************
+UPDMR000  MOVE      MRMAKEY,MRHIKEY   
+          READ      DGATEOUT;MRHIDATE,MRHITIME,MRHILOC,MRHIRECV,MRHIREAS:
+                             MRHIOPER,MRHIDDUE,MRHISTAT,MRHIREQB,MRHIEXTN:
+                             MRHIPAGE,MRHICOMM,MRHIDHOS               *C-240724
+.
+          PACK      KEY26,MRHIKEY,MRHIDATE,MRHITIME,SP70
+          CALL      RAMRHIS1
+          IF        OVRCD = 1
+            CALL      WRMRHIS1
+          ELSE
+            CALL      UPMRHIS1  
+          ENDIF 
+.
+          PACK      KEY10,MRHIKEY,SP70
+          CALL      RDMRMAS2       * Updates the master file with current loc
+          MOVE      MRHIDHOS,MRMACHOS                                 *I-240724
+          MOVE      MRHILOC,MRMACLOC
+          CALL      IBACLOCK
+          PACK      MRMADTUP,CCC,CYY,CMM,CDD
+          REP       " 0",MRMADTUP
+          MOVE      CTIMEIS,MRMATMUP
+          CALL      UPMRMAS2
+          GOTO      UPDMR999
+.
+. error messages
+.
+.UPDMR800  MOVE      "A spare message              ",RPLYDESC
+.          MOVE      "05102",RPLYCODE
+.          MOVE      ONE,EXIT
+.          GOTO      UPDMR999
+.
+UPDMR999  RETURN
+.
+.
+.
+OVERCOND  MOVE      ONE,OVRCD
+          RETURN
+.
+OVERLOCK  MOVE      TWO,OVRCD
+          RETURN
+.
+.
+. IO's go in here
+.
+.
+ XIF
+DGUPDEND  ENDPROC

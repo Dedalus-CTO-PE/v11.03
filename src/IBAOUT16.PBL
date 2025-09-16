@@ -1,0 +1,1173 @@
+.***************************************************************************
+.* System    :   Outpatients                                               *
+.* Program   :   IBAOUT16                                                  *
+.* Desc      :   Outpatient purge - Delete/Report empty slots              *
+.***************************************************************************
+.* Date      :   26/07/2021                                                *
+.* Author    :   Ebon Clements                                             *
+.* Function  :   This program delete and report counts of empty outpatient *
+.*               slots                                                     *
+.* Modifications  :                                                        *
+.***************************************************************************
+.*        V11.02.03 06/04/2022  Ebon Clements TSK R0918036                 *
+.*                  Fixed delete of exteded slot if parent slot is not     *
+.*                  booked when using the delete unbooked extended option  *
+.*                  DELT0000                                               *
+.*        V11.02.02 17/03/2022  Ebon Clements TSK 0918036                  *
+.*                  Added OBASTAT=3 test to delete unbooked extended       *
+.*                  slots.                                                 *
+.*        V11.02.01 09/02/2022  Thanh T       TSK 0905641                  *
+.*                  Recompiled as OUTMA1FD changes                         *
+.*        V11.01.01 05/08/2021  Ebon Clements TSK 0895281                  *
+.*                  Fixed clinic counts                                    * 
+.*        V11.01.00 26/07/2021  Ebon Clements TSK 0895281                  *
+.*                  Created program                                        *
+.***************************************************************************
+.
+          INC       STD001FD
+
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       IBASEQFD/INC
+          INC       OUTBOAFD/INC
+          INC       OUTBOXFD/INC
+          INC       OUTCTYFD/INC
+          INC       OUTCLIFD/INC
+          INC       OUTHEDFD/INC
+          INC       OUTSESFD/INC
+          INC       OUTSITFD/INC
+          INC       PATCODFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+.         Temporary File Definition
+.         -------------------------
+.
+REPTEMP1  IFILE SQL, FIXED=61, KEY="U1-6,7-12,13-20,21-25"
+.
+.Name     Type      Length Physical Start Description
+.----     ----      ------ -------- ----- -----------
+TEMPSITE  DIM       6      6        1     SITE CODE
+TEMPCLIN  DIM       6      6        7     CLINIC ID - Z70 Grand total
+TEMPDATE  DIM       8      8        13    USAGE DATE (CCYYMMDD) - Z70 Total
+TEMPSTRT  DIM       5      5        21    SESSION START TIME (HH:MM) - Z70 Total
+TEMPUNBK  FORM      8      5        26    Number of slots with status
+.                                         0 (Unbooked) to be deleted
+TEMPEXTN  FORM      8      5        31    Number of slots with status
+.                                         3 (Extended) to be deleted
+TEMPEXTD  FORM      8      5        36    Number of slots with status
+.                                         3 (Extended) will not be deleted
+TEMPUNAV  FORM      8      5        41    Number of slots with status
+.                                         7 (Unavailable) to be deleted
+TEMPUNAD  FORM      8      5        46    Number of slots with status
+.                                         7 (Unavailable) will not be deleted
+TEMPUTIL  FORM      8      5        51    Number of utilised slots
+.                                         slots with a status 1, 4, or 5
+TEMPNOTU  FORM      8      5        56    Number of slots not utilised
+.                                         slots with a status of 0,2,6,7 or 9
+.End of Record                      61  
+.
+. Save count variables used for totals
+.
+SAVEUNBK  FORM      8         * Number of slots with status
+.                               0 (Unbooked) to be deleted
+SAVEEXTN  FORM      8         * Number of slots with status
+.                               3 (Extended) to be deleted
+SAVEEXTD  FORM      8         * Number of slots with status
+.                               3 (Extended) will not be deleted
+SAVEUNAV  FORM      8         * Number of slots with status
+.                               7 (Unavailable) to be deleted
+SAVEUNAD  FORM      8         * Number of slots with status
+.                               7 (Unavailable) will not be deleted
+SAVEUTIL  FORM      8         * Number of utilised slots
+.                               slots with a status 1, 4, or 5
+SAVENOTU  FORM      8         * Number of slots not utilised
+.                               slots with a status of 0,2,6,7 or 9
+.
+.  Temp File Variables
+.
+ERASE     INIT      "iserase "
+ISBUILD   INIT      "isbuild "
+TEMPFILE  DIM       8
+UKEY      INIT      " 61 U1-6,7-12,13-20,21-25"
+
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CHKGRPIN  FORM      1
+CMDLINE   DIM       127       * Command line
+CFILEPRE  DIM       3
+CLINTYFR  DIM       6         * Clinic type from
+CLINTYFD  DIM       30        * Clinic type from description
+CLINTYTO  DIM       6         * Clinic type to
+CLINTYTD  DIM       30        * Clinic type to description
+CURRDATE  DIM       8         * Current date
+DISPTDAT  DIM       10        * Print to date
+DISPFDAT  DIM       10        * Print from date
+DIM11     DIM       11
+DIM25     DIM       25
+HOUR      FORM      2
+MIN       DIM       2
+MINUTES   FORM      6
+PREVSTAT  FORM      1
+PREVSLOT  FORM      3
+SAVKEY25  DIM       25
+SAVKEY28  DIM       28
+SITECODE  DIM       6         * OP site code
+SITEDESC  DIM       30        * OP site code description
+SLOTTDEL  DIM       1         * Slot type to delete
+SLOTDDEL  DIM       40        * Slot type to delete description
+TOTALLIN  FORM      1         * Print total line
+VISFRDAT  DIM       8         * From date
+VISTODAT  DIM       8         * To Date
+VISTCODE  DIM       3         * Visit type code
+VISTDESC  DIM       20        * Visit type description
+REPTONLY  DIM       1         * Report only
+REPONLYD  DIM       3         * Report only description
+VINAHFLG  FORM      1         * VINAH Flag
+.
+PRGID     INIT      "IBAOUT16"
+PRGNAM    INIT      "Outpatient Purge"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialisation and open files
+.
+ML0100    CALL      OPTN0000               * select options
+          BRANCH    COPTION,ML1000,ML1000  * proceed with clean up
+.
+          GOTO      ML9999
+.
+ML1000    CALL      KSIT0000               * Keyin op site range
+          CALL      KCTY0000               * Keyin clinic type
+          CALL      KDAT0000               * Keyin visit date
+          CALL      KSLT0000               * Keyin slot status to delete
+          CALL      KVTY0000               * Keyin visit type - slot type
+          CALL      KREP0000               * Keyin report only
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,ML2000:          * yes
+                          ML0100:          * no
+                          ML0100           * cancel
+.
+ML2000    CALL      PROC0000               * process
+.
+ML9999    CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"outsitaf";
+          OPEN      OUTSITA1,"outsitaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+.
+. Open outpatient file with site prefix
+.
+          MOVE      "out",CFILEPRE       * Save Current File Prefix
+          CALL      OPNOUT00             * Open Outpatient File
+.
+INIT9999  RETURN
++
+.------------------------------------------------------------
+. Open Outpateint Files
+.------------------------------------------------------------
+OPNOUT00  PACK      CFNAME,CFILEPRE,FILCTYA1  * Get the name of the CTYA1 file
+          CLOSE     OUTCTYA1
+          OPEN      OUTCTYA1,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILCLIA1  * Get the name of the CLIA1 file
+          CLOSE     OUTCLIA1
+          OPEN      OUTCLIA1,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILBOKA1  * Get the name of the BOKA1 file
+          CLOSE     OUTBOKA1
+          OPEN      OUTBOKA1,CFNAME           * Open the file
+.
+          PACK      CFNAME,CFILEPRE,FILSESA1  * Get the name of the SESA1 file
+          CLOSE     OUTSESA1
+          OPEN      OUTSESA1,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILSESA6  * Get the name of the SESA6 file
+          CLOSE     OUTSESA6
+          OPEN      OUTSESA6,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILBOXA1  * Get the name of the BOXA1 file
+          CLOSE     OUTBOXA1
+          OPEN      OUTBOXA1,CFNAME
+.
+OPNOUT99  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run clean up                           *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Purge Outpatient Slots"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000,OPTN9000    * run clean-up
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.**********************************************************************
+.* KSIT0000 - Keyin Outpatient site code                              *
+.**********************************************************************
+.
+KSIT0000  DISPLAY   *P1:9,*EF:
+                    *P1:9,"Site Code : ";
+.
+KSIT0500  MOVE      SP70,SITECODE
+          DISPLAY   *P13:9,UNDLN6;
+          KEYIN     *P13:9,*V2LON,SITECODE;
+.
+          PACK      SITECODE,SITECODE,SP70       * Site code
+.
+          PACK      KEY6,SITECODE,SP70
+          CALL      RDSITA1
+          BRANCH    OVRCD,KSIT8000
+.
+          MOVE      OSTDESC,SITEDESC             * Site description
+          DISPLAY   *P20:9,*EL,SITEDESC;
+.
+          GOTO      KSIT9000
+.
+KSIT8000  DISPLAY   *P1:24,*EL,*B,"Invalid site code - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      KSIT0500
+.
+KSIT9000  MATCH     OSTFILE,CFILEPRE
+          IF        !@EQUAL
+            MOVE      OSTFILE,CFILEPRE           * Save Current File Prefix
+            CALL      OPNOUT00                   * Open Outpatient File
+          ENDIF
+
+KSIT9999  RETURN
++
+.**********************************************************************
+.* KCTY0000 - Keyin Outpatient clinic type from and to                *
+.**********************************************************************
+.
+KCTY0000  DISPLAY   *P1:10,*EF:
+                    *P1:10,"Clinic Type From : ";
+.
+KCTY0500  MOVE      SP70,CLINTYFR
+          DISPLAY   *P20:10,UNDLN6;
+          KEYIN     *P20:10,*V2LON,CLINTYFR;
+.
+          PACK      CLINTYFR,CLINTYFR,SP70       * Clinic type from
+.
+          MATCH     SP70,CLINTYFR                * Start
+          IF        @EQUAL
+            MOVE      "Start",CLINTYFD
+            DISPLAY   *P27:10,*EL,CLINTYFD;
+            GOTO      KCTY5000
+          ENDIF
+.
+          PACK      KEY12,SITECODE,CLINTYFR,SP70
+          CALL      RDCTYA1
+          BRANCH    OVRCD,KCTY2000
+.
+          MOVE      OCTDESC,CLINTYFD             * Clinic type from description
+          DISPLAY   *P27:10,*EL,CLINTYFD;
+.
+          GOTO      KCTY5000
+.
+KCTY2000  DISPLAY   *P1:24,*EL,*B,"Invalid clinic type from - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      KCTY0500
+.
+KCTY5000  DISPLAY   *P1:11,*EF:
+                    *P1:11,"Clinic Type To   : ";
+.
+KCTY5500  MOVE      SP70,CLINTYTO
+          DISPLAY   *P20:11,UNDLN6;
+          KEYIN     *P20:11,*V2LON,CLINTYTO;
+.
+          PACK      CLINTYTO,CLINTYTO,SP70       * Clinic type to
+.
+          MATCH     SP70,CLINTYTO                * Finish
+          IF        @EQUAL
+            MOVE      "Finish",CLINTYTD
+            DISPLAY   *P27:11,*EL,CLINTYTD;
+            GOTO      KCTY8000
+          ENDIF
+.
+          PACK      KEY12,SITECODE,CLINTYTO,SP70
+          CALL      RDCTYA1
+          BRANCH    OVRCD,KCTY6000
+.
+          MOVE      OCTDESC,CLINTYTD             * Clinic type to description
+          DISPLAY   *P27:11,*EL,CLINTYTD;
+.
+          GOTO      KCTY8000
+.
+KCTY6000  DISPLAY   *P1:24,*EL,*B,"Invalid clinic type to - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      KCTY5500
+.
+KCTY8000  MATCH     SP70,CLINTYTO                * Check from and to range
+          GOTO      KCTY9999 IF EQUAL
+.
+          MATCH     CLINTYFR,CLINTYTO
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,*B,"Invalid clinic type range - Hit <":
+                                *V2LON,"ENTER",*HOFF,"> To Continue ";
+            KEYIN     ANS;
+            DISPLAY  *P1:24,*EL;
+            GOTO      KCTY5500
+          ENDIF
+.
+KCTY9999  RETURN
++
+.***************************************************************************
+.* KDAT0000 - Keying booking date range                                     *
+.***************************************************************************
+KDAT0000  DISPLAY   *P1:12,*EF,"Date From :";
+.
+          MOVE      "12",CVERT
+          MOVE      "13",CCOL
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      CCC,CCENT
+          MOVE      CYY,CYEAR
+          MOVE      CMM,CMON
+          MOVE      CDD,CDAY
+          CALL      KEYDATE                          * enter the from date
+          PACK      VISFRDAT,CCENT,CYEAR,CMON,CDAY   * move to form field
+          REP       " 0",VISFRDAT                    * from date
+.
+          MATCH      CURRDATE,VISFRDAT
+          IF         !@LESS
+            DISPLAY    *P1:24,*EL,*B,"From date must be in the past ":
+                       "Hit <",*V2LON,"ENTER",*HOFF,"> To Continue ";
+            KEYIN      ANS;
+            DISPLAY    *P1:24,*EL;
+            GOTO       KDAT0000
+          ENDIF
+.
+KDAT5000  DISPLAY   *P1:13,*EF,"Date From :";
+          MOVE      "13",CVERT
+          MOVE      "13",CCOL
+          CALL      KEYDATE                          * enter the from date
+          PACK      VISTODAT,CCENT,CYEAR,CMON,CDAY   * move to form field
+          REP       " 0",VISFRDAT                    * from date
+.
+          MATCH      CURRDATE,VISTODAT
+          IF         !@LESS
+            DISPLAY    *P1:24,*EL,*B,"To date must be in the past ":
+                       "Hit <",*V2LON,"ENTER",*HOFF,"> To Continue ";
+            KEYIN      ANS;
+            DISPLAY    *P1:24,*EL;
+            GOTO       KDAT5000
+          ENDIF
+.
+          MATCH      VISFRDAT,VISTODAT
+          GOTO       KDAT9999 IF NOT LESS
+.
+          DISPLAY    *P1:24,*EL,*B,"2nd Range Must Be Greater Than 1st ":
+                     "Range - Hit <",*V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN      ANS;
+          DISPLAY    *P1:24,*EL;
+          GOTO       KDAT0000
+.
+KDAT9999  RETURN
++
+.**********************************************************************
+.* KSLT0000 - Keyin slot type to delete                               *
+.**********************************************************************
+KSLT0000  DISPLAY   *P1:14,*EF:
+                    *P1:14,"Slot Status to Delete : ";
+.
+.-------- keyin slot type to delete  -----
+.
+KSLT0500  MOVE      SP70,SLOTTDEL
+          DISPLAY   *P25:14,UNDLN1;
+          KEYIN     *P25:14,*V2LON,SLOTTDEL;
+.
+          PACK      SLOTTDEL,SLOTTDEL,SP70
+.
+          MATCH     SP70,SLOTTDEL
+          IF        @EQUAL
+            MOVE      "1",SLOTTDEL * Default to all
+          ENDIF
+.
+          MATCH     "1",SLOTTDEL   * Slot type to delete
+          IF        @EQUAL
+            MOVE      "Empty, Unbooked Extended and Unavailable Slots",SLOTDDEL
+            DISPLAY   *P27:14,*EL,SLOTDDEL;
+            GOTO      KSLT9999
+          ENDIF
+.
+          MATCH     "2",SLOTTDEL   * Slot type to delete
+          IF        @EQUAL
+            MOVE      "Empty Slots",SLOTDDEL
+            DISPLAY   *P27:14,*EL,SLOTDDEL;
+            GOTO      KSLT9999
+          ENDIF
+.
+          MATCH     "3",SLOTTDEL   * Slot type to delete
+          IF        @EQUAL
+            MOVE      "Unbooked Extended Slots",SLOTDDEL
+            DISPLAY   *P27:14,*EL,SLOTDDEL;
+            GOTO      KSLT9999
+          ENDIF
+.
+          MATCH     "4",SLOTTDEL   * Slot type to delete
+          IF        @EQUAL
+            MOVE      "Unavailable Slots",SLOTDDEL
+            DISPLAY   *P27:14,*EL,SLOTDDEL;
+            GOTO      KSLT9999
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,*B,"Invalid Slot Status to Delete - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      KSLT0500
+.
+KSLT9999  RETURN
++
+.**********************************************************************
+.* KVTY0000 - Keyin Outpatient visit type                             *
+.**********************************************************************
+.
+KVTY0000  DISPLAY   *P1:15,*EF:
+                    *P1:15,"Visit Type : ";
+.
+.-------- keyin visit type -----
+.
+KVTY0500  MOVE      SP70,VISTCODE
+          DISPLAY   *P13:15,UNDLN3;
+          KEYIN     *P13:15,*V2LON,VISTCODE;
+.
+          PACK      VISTCODE,VISTCODE,SP70       * Visit type code
+.
+          MATCH     SP70,VISTCODE
+          IF        @EQUAL
+            MOVE      "All",VISTDESC
+            DISPLAY   *P17:15,*EL,VISTDESC;
+            GOTO      KVTY9999
+          ENDIF
+.
+          PACK      KEY5,ANSC,ANSV,VISTCODE,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,KVTY8000
+.
+          MOVE      TDESC,VISTDESC               * Visit type description
+          DISPLAY   *P17:15,*EL,VISTDESC;
+.
+          GOTO      KVTY9999
+.
+KVTY8000  DISPLAY   *P1:24,*EL,*B,"Invalid visit type - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      KVTY0500
+.
+KVTY9999  RETURN
++
+.**********************************************************************
+.* KREP0000 - Keyin report only                                       *
+.**********************************************************************
+KREP0000  DISPLAY   *P1:16,*EF:
+                    *P1:16,"Report Only : ";
+.
+.-------- keyin slot type to delete  -----
+.
+KREP0500  MOVE      SP70,REPTONLY
+          DISPLAY   *P15:16,UNDLN1;
+          KEYIN     *P15:16,*V2LON,REPTONLY;
+.
+          PACK      REPTONLY,REPTONLY,SP70
+.
+          MATCH     SP70,REPTONLY
+          IF        @EQUAL
+            MOVE      "Y",REPTONLY * Default to report only
+          ENDIF
+.
+          MATCH     "N",REPTONLY   * Run and delete
+          IF        @EQUAL
+            MOVE      "No ",REPONLYD
+            DISPLAY   *P17:16,*EL,REPONLYD;
+            GOTO      KREP9999
+          ENDIF
+
+          MATCH     "Y",REPTONLY   * Report only
+          IF        @EQUAL
+            MOVE      "Yes",REPONLYD
+            DISPLAY   *P17:16,*EL,REPONLYD;
+            GOTO      KREP9999
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,*B,"Invalid report only option - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      KREP0500
+.
+KREP9999  RETURN
++
+.**************************************************************************
+.* PROC0000 - Main process                                                 
+.**************************************************************************
+PROC0000  CALL      CREA0000                * Create temp file
+.
+          CALL      LODT0000                * Load temp file of clinics 
+.
+          CALL      SLOT0000                * Count slots to delete
+.
+          CALL      DELT0000                * Delete slots
+.
+          CALL      SESS0000                * Update session slots counts
+.
+          CALL      PRIN0000                * Print report
+.
+          CALL      KILL0000                * Delete temp file
+.
+PROC9999  RETURN
++
+.*********************************************************************
+. LODT000 - Load temp file with clinics to process
+.*********************************************************************
+LODT0000  PACK      KEY25,SITECODE,VISFRDAT,SP70
+          CALL      RDSSESA6
+LODT1000  CALL      RDKSESA6
+          BRANCH    OVRCD,LODT8000
+.
+          MATCH     SITECODE,OSESITE        * Site
+          GOTO      LODT8000 IF NOT EQUAL
+.
+          MATCH     OSEDATE,VISTODAT        * Session date
+          GOTO      LODT8000 IF LESS
+.
+          MATCH     SP70,CLINTYFR           * Clinic type from
+          IF        !@EQUAL
+            MATCH     CLINTYFR,OSESCTYP
+            GOTO      LODT1000 IF LESS
+          ENDIF
+.
+          MATCH     SP70,CLINTYTO           * Clinic type to
+          IF        !@EQUAL
+            MATCH     OSESCTYP,CLINTYTO
+            GOTO      LODT1000 IF LESS
+          ENDIF
+.
+          MOVE      OSESITE,TEMPSITE
+          MOVE      OSECLIN,TEMPCLIN
+          MOVE      OSEDATE,TEMPDATE
+          MOVE      OSESTRT,TEMPSTRT
+.
+          MOVE      ZERO,TEMPUNBK
+          MOVE      ZERO,TEMPEXTN
+          MOVE      ZERO,TEMPEXTD
+          MOVE      ZERO,TEMPUNAV
+          MOVE      ZERO,TEMPUNAD
+          MOVE      ZERO,TEMPUTIL
+          MOVE      ZERO,TEMPNOTU
+.
+          PACK      KEY25,TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT,SP70
+          CALL      RATEMP1
+          IF        OVRCD=1
+            CALL      WRTEMP1               * Clinic record
+          ENDIF
+.
+          MOVE      OSESITE,TEMPSITE
+          MOVE      OSECLIN,TEMPCLIN
+          MOVE      Z70,TEMPDATE            * Clinic total
+          MOVE      Z70,TEMPSTRT            * Clinic total
+.
+          MOVE      ZERO,TEMPUNBK
+          MOVE      ZERO,TEMPEXTN
+          MOVE      ZERO,TEMPEXTD
+          MOVE      ZERO,TEMPUNAV
+          MOVE      ZERO,TEMPUNAD
+          MOVE      ZERO,TEMPUTIL
+          MOVE      ZERO,TEMPNOTU
+.
+          PACK      KEY25,TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT,SP70
+          CALL      RATEMP1
+          IF        OVRCD=1
+            CALL      WRTEMP1               * Clinic total
+          ENDIF
+.
+          GOTO      LODT1000
+.
+LODT8000  MOVE      OSESITE,TEMPSITE
+          MOVE      Z70,TEMPCLIN            * Grand total
+          MOVE      Z70,TEMPDATE            * Grand total
+          MOVE      Z70,TEMPSTRT            * Grand total
+.
+          MOVE      ZERO,TEMPUNBK
+          MOVE      ZERO,TEMPEXTN
+          MOVE      ZERO,TEMPEXTD
+          MOVE      ZERO,TEMPUNAV
+          MOVE      ZERO,TEMPUNAD
+          MOVE      ZERO,TEMPUTIL
+          MOVE      ZERO,TEMPNOTU
+.
+          PACK      KEY25,TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT,SP70
+          CALL      RATEMP1
+          IF        OVRCD=1
+            CALL      WRTEMP1               * Grand total
+          ENDIF
+.
+LODT9999  RETURN
++
+.*********************************************************************
+. SLOT000 - Get slot counts                
+.*********************************************************************
+SLOT0000  PACK      KEY25,SP70
+          CALL      RSTEMP1
+SLOT1000  CALL      RKTEMP1
+          BRANCH    OVRCD,SLOT9999
+.
+          MATCH     Z70,TEMPCLIN            * Skip total record
+          GOTO      SLOT1000 IF EQUAL
+.
+          MATCH     Z70,TEMPDATE            * Skip total record
+          GOTO      SLOT1000 IF EQUAL
+.
+          PACK      SAVKEY25,TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT,SP70
+.
+. Loop all slots and update total counts
+.
+          MOVE      ZERO,PREVSLOT           * Previous slot number
+          MOVE      ZERO,PREVSTAT           * Previous slot status
+.
+          PACK      KEY28,TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT,SP70
+          CALL      RDSBOKA1
+SLOT2000  CALL      RDKBOKA1                * next read on details file
+          BRANCH    OVRCD,SLOT5000          * end of session
+.
+          MATCH     OBASITE,TEMPSITE
+          GOTO      SLOT5000 IF NOT EQUAL
+.
+          MATCH     OBACLIN,TEMPCLIN
+          GOTO      SLOT5000 IF NOT EQUAL
+.
+          MATCH     OBADATE,TEMPDATE
+          GOTO      SLOT5000 IF NOT EQUAL
+.
+          MATCH     OBASTRT,TEMPSTRT
+          GOTO      SLOT5000 IF NOT EQUAL
+. 
+          MATCH     SP70,VISTCODE
+          IF        !@EQUAL
+            MATCH     OBAVISIT,VISTCODE
+            GOTO      SLOT3000 IF NOT EQUAL
+          ENDIF
+.
+          IF        OBASTAT=0
+            ADD       ONE,TEMPUNBK        * Number of slots with status
+.                                         * 0 (Unbooked) to be deleted
+          ENDIF
+.
+          IF        OBASTAT=3
+            IF        PREVSLOT=OBAEXSL & PREVSTAT=0
+              ADD       ONE,TEMPEXTN        * Number of slots with status
+.                                           * 3 (Extended) to be deleted
+              GOTO      SLOT4000
+            ENDIF
+            IF        PREVSLOT<>OBAEXSL
+              ADD       ONE,TEMPEXTN        * Number of slots with status
+.                                           * 3 (Extended) to be deleted
+              GOTO      SLOT4000
+            ENDIF
+            ADD       ONE,TEMPEXTD        * Number of slots with status
+.                                           * 3 (Extended) will not be deleted
+          ENDIF
+.
+          IF        OBASTAT=7
+            ADD       ONE,TEMPUNAV        * Number of slots with status
+.                                         * 7 (Unavailable) to be deleted
+          ENDIF
+.
+          IF        OBASTAT=1 | OBASTAT=4 | OBASTAT=5
+            ADD       ONE,TEMPUTIL        * Number of utilised slots
+.                                         * slots with a status 1, 4, or 5
+          ENDIF
+.
+          IF        OBASTAT=0 | OBASTAT=2 | OBASTAT=6 | OBASTAT=7 | OBASTAT=9
+            ADD       ONE,TEMPNOTU        * Number of slots not utilised
+.                                         * slots with a status of 0,2,6,7 or 9
+          ENDIF
+.
+          GOTO      SLOT4000
+.
+SLOT3000  IF        OBASTAT=3
+            ADD       ONE,TEMPEXTD        * Number of slots with status
+.                                         * 3 (Extended) will not be deleted
+          ENDIF
+.
+          IF        OBASTAT=7
+            ADD       ONE,TEMPUNAD        * Number of slots with status
+.                                         * 7 (Unavailable) will not be deleted
+          ENDIF
+.
+SLOT4000  MOVE      OBASLOT,PREVSLOT      * Previous slot number
+          MOVE      OBASTAT,PREVSTAT      * Previous slot status
+.
+          GOTO      SLOT2000
+.
+SLOT5000  CALL      UPTEMP1
+.
+          MOVE      TEMPUNBK,SAVEUNBK     * Save counts for totals
+          MOVE      TEMPEXTN,SAVEEXTN
+          MOVE      TEMPEXTD,SAVEEXTD
+          MOVE      TEMPUNAV,SAVEUNAV
+          MOVE      TEMPUNAD,SAVEUNAD
+          MOVE      TEMPUTIL,SAVEUTIL
+          MOVE      TEMPNOTU,SAVENOTU
+.
+. Update Clinic total 
+.
+          MOVE      Z70,TEMPDATE            * Clinic total
+          MOVE      Z70,TEMPSTRT            * Clinic total
+.
+          PACK      KEY25,TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT,SP70
+          CALL      RDTEMP1
+          BRANCH    OVRCD,SLOT6000
+.
+          ADD       SAVEUNBK,TEMPUNBK
+          ADD       SAVEEXTN,TEMPEXTN
+          ADD       SAVEEXTD,TEMPEXTD
+          ADD       SAVEUNAV,TEMPUNAV
+          ADD       SAVEUNAD,TEMPUNAD
+          ADD       SAVEUTIL,TEMPUTIL
+          ADD       SAVENOTU,TEMPNOTU
+.
+          CALL      UPTEMP1
+.
+. Update Grand total
+.
+SLOT6000  MOVE      Z70,TEMPCLIN            * Grand total
+          MOVE      Z70,TEMPDATE            * Grand total
+          MOVE      Z70,TEMPSTRT            * Grand total
+.
+          PACK      KEY25,TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT,SP70
+          CALL      RDTEMP1
+          BRANCH    OVRCD,SLOT7000
+.
+          ADD       SAVEUNBK,TEMPUNBK
+          ADD       SAVEEXTN,TEMPEXTN
+          ADD       SAVEEXTD,TEMPEXTD
+          ADD       SAVEUNAV,TEMPUNAV
+          ADD       SAVEUNAD,TEMPUNAD
+          ADD       SAVEUTIL,TEMPUTIL
+          ADD       SAVENOTU,TEMPNOTU
+.
+          CALL      UPTEMP1
+.
+SLOT7000  MOVE      SAVKEY25,KEY25
+          CALL      RDTEMP1
+          BRANCH    OVRCD,SLOT1000
+.
+          GOTO      SLOT1000
+.
+SLOT9999  RETURN
++
+.*********************************************************************
+. DELT000 - Delete slots  and update session slot counts
+.*********************************************************************
+DELT0000  MATCH     "Y",REPTONLY             * Run report only
+          GOTO      DELT9999 IF EQUAL
+.
+          PACK      KEY25,SP70
+          CALL      RDTEMP1
+DELT1000  CALL      RKTEMP1
+          BRANCH    OVRCD,DELT9999
+.
+          MATCH     Z70,TEMPCLIN            * Skip total record
+          GOTO      DELT1000 IF EQUAL
+.
+          MATCH     Z70,TEMPDATE            * Skip total record
+          GOTO      DELT1000 IF EQUAL
+.
+          MOVE      ZERO,PREVSLOT           * Previous slot number
+          MOVE      ZERO,PREVSTAT           * Previous slot statu
+.
+          PACK      KEY28,TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT,SP70
+          CALL      RDSBOKA1
+DELT2000  CALL      RDKBOKA1                * next read on details file
+          BRANCH    OVRCD,DELT1000          * end of session
+.
+          MATCH     OBASITE,TEMPSITE
+          GOTO      DELT1000 IF NOT EQUAL
+.
+          MATCH     OBACLIN,TEMPCLIN
+          GOTO      DELT1000 IF NOT EQUAL
+.
+          MATCH     OBADATE,TEMPDATE
+          GOTO      DELT1000 IF NOT EQUAL
+.
+          MATCH     OBASTRT,TEMPSTRT
+          GOTO      DELT1000 IF NOT EQUAL
+.
+          MATCH     SP70,VISTCODE
+          IF        !@EQUAL
+            MATCH     OBAVISIT,VISTCODE          * Visit type filer
+            GOTO      DELT2000 IF NOT EQUAL
+          ENDIF
+.
+. Empty, Unbooked Extended and Unavailable Slots
+.
+          MATCH     "1",SLOTTDEL   * Slot type to delete
+          IF        @EQUAL
+            IF        OBASTAT=0
+              PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT,SP70
+              CALL      DEBOKA1    * Delete Un Booked
+            ENDIF
+.
+            IF        OBASTAT=3 & PREVSLOT=OBAEXSL & PREVSTAT=0
+              PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT,SP70
+              CALL      DEBOKA1    * Delete Un Booked Extended
+            ENDIF
+.
+            IF        OBASTAT=7
+              PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT,SP70
+              CALL      DEBOKA1    * Delete unavailable
+              CALL      DEOTBOX1   * Delete unavailable comment
+            ENDIF
+          ENDIF
+.
+. Empty Slots
+.
+          MATCH     "2",SLOTTDEL   * Slot type to delete
+          IF        @EQUAL
+            IF        OBASTAT=0
+              PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT,SP70
+              CALL      DEBOKA1    * Delete Un Booked
+            ENDIF
+.
+            IF        OBASTAT=3 & PREVSLOT=OBAEXSL & PREVSTAT=0
+              PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT,SP70
+              CALL      DEBOKA1    * Delete Un Booked Extended
+            ENDIF
+          ENDIF
+.
+. Unbooked Extended Slots
+.
+          MATCH     "3",SLOTTDEL   * Slot type to delete
+          IF        @EQUAL
+            IF       OBASTAT=3 & PREVSLOT=OBAEXSL & PREVSTAT=0
+              PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT,SP70
+              CALL      DEBOKA1    * Delete Un Booked Extended
+            ENDIF
+.
+            IF        OBASTAT=3 & PREVSLOT<>OBAEXSL
+              PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT,SP70
+              CALL      DEBOKA1    * Delete Un Booked Extended
+            ENDIF
+          ENDIF
+.
+. Unavailable Slots
+.
+          MATCH     "4",SLOTTDEL  * Unavailable Slots
+          IF        @EQUAL
+            IF        OBASTAT=7
+              PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT,SP70
+              CALL      DEBOKA1   * Delete unavailable
+              CALL      DEOTBOX1   * Delete unavailable comment
+            ENDIF
+          ENDIF
+.
+DELT8000  MOVE      OBASLOT,PREVSLOT      * Previous slot number
+          MOVE      OBASTAT,PREVSTAT      * Previous slot status
+.
+          GOTO      DELT2000
+.
+DELT9999  RETURN
++
+.*********************************************************************
+. SESS000 - Update session slot counts
+.*********************************************************************
+SESS0000  MATCH     "Y",REPTONLY   * Run report only 
+          GOTO      SESS9999 IF EQUAL
+.
+          PACK      KEY25,SP70
+          CALL      RDTEMP1
+SESS1000  CALL      RKTEMP1
+          BRANCH    OVRCD,SESS9999
+.
+          MATCH     Z70,TEMPCLIN            * Skip total record
+          GOTO      SESS1000 IF EQUAL
+.
+          MATCH     Z70,TEMPDATE            * Skip total record
+          GOTO      SESS1000 IF EQUAL
+.
+          PACK      KEY25,TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT,SP70
+          CALL      RDSESA1
+          BRANCH    OVRCD,SLOT1000
+.
+          MOVE      "00:00",OSETIMEU
+          CALL      SLTCOUNT
+.
+          GOTO      SESS1000
+.
+SESS9999  RETURN
++
+.*********************************************************************
+. PRIN000 - Print the report                              
+.*********************************************************************
+PRIN0000  CALL      HEAD0000                * Print heading
+.
+          PACK      KEY25,SP70
+          CALL      RSTEMP1
+PRIN1000  CALL      RKTEMP1
+          BRANCH    OVRCD,PRIN8000
+.
+          MOVE      ZERO,TOTALLIN           * Not a total line
+.
+          MATCH     Z70,TEMPCLIN
+          IF        @EQUAL
+            MOVE      SP70,TEMPCLIN
+            MOVE      "Grand Total",DIM25
+            MOVE      SP70,DIM11
+            MOVE      SP70,TEMPSTRT
+            MOVE      ONE,TOTALLIN          * Yes a total line
+            GOTO      PRIN5000
+          ENDIF
+.
+          MATCH     Z70,TEMPDATE
+          IF        @EQUAL
+            MOVE      SP70,TEMPCLIN
+            MOVE      "Clinic Total",DIM25
+            MOVE      SP70,DIM11
+            MOVE      SP70,TEMPSTRT
+            MOVE      ONE,TOTALLIN          * Yes a total line
+            GOTO      PRIN5000
+          ENDIF
+.
+          PACK      KEY20,TEMPSITE,TEMPCLIN,TEMPDATE,SP70
+          CALL      RDCLIA1
+          IF        OVRCD<>1
+            MOVE      OCADESC,DIM25
+            GOTO      PRIN2000
+          ENDIF
+.
+          MOVE      OCACLIN,DIM25
+          PACK      KEY20,TEMPSITE,TEMPCLIN,TEMPDATE,Z70
+          CALL      RDSCLIA1
+          CALL      RDPCLIA1                *To get Clinic ID Description
+          BRANCH    OVRCD,PRIN2000
+.
+          MATCH     TEMPSITE,OCASITE
+          GOTO      PRIN2000 IF NOT EQUAL
+.
+          MATCH     TEMPCLIN,OCACLIN
+          GOTO      PRIN2000 IF NOT EQUAL
+.
+          MOVE      OCADESC,DIM25
+.
+PRIN2000  UNPACK    TEMPDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,DIM11
+.
+          COMPARE   "55",CLNO                               * page full ?
+          CALL      HEAD0000 IF NOT LESS                    * yes
+.
+PRIN5000  IF        TOTALLIN=1        
+            CALL      UND132          * Yes a total line
+            PRINT     *1,"| ",DIM25:
+                      *62,"|",TEMPUNBK:
+                      *72,"|",TEMPEXTN:
+                      *82,"|",TEMPEXTD:
+                      *92,"|",TEMPUNAV:
+                      *102,"|",TEMPUNAD:
+                      *112,"|",TEMPUTIL:
+                      *122,"|",TEMPNOTU:
+                      *132,"|"
+            ADD       ONE,CLNO
+            CALL      UND132          * Yes a total line
+            GOTO      PRIN1000
+          ENDIF
+.
+          PRINT     *1,"| ",TEMPCLIN,*10,"| ",DIM25:
+                    *41,"| ",DIM11,*54,"| ",TEMPSTRT:
+                    *62,"|",TEMPUNBK:
+                    *72,"|",TEMPEXTN:
+                    *82,"|",TEMPEXTD:
+                    *92,"|",TEMPUNAV:
+                    *102,"|",TEMPUNAD:
+                    *112,"|",TEMPUTIL:
+                    *122,"|",TEMPNOTU:
+                    *132,"|"
+          ADD       ONE,CLNO
+.
+          GOTO      PRIN1000
+.
+PRIN8000  PRINT     *35,"End of Report"
+.
+PRIN9999  RETURN
++
+.*********************************************************************
+. HEAD0000 - Print heading
+.*********************************************************************
+HEAD0000  CALL      HEAD132
+          UNPACK    VISFRDAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,DISPFDAT
+.
+          UNPACK    VISTODAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,DISPTDAT
+.
+          STRIP     CLINTYFD
+          PRINT     *35,"Site : ",SITEDESC           
+          PRINT     *35,"Clinic Type From : ",*+,CLINTYFD," to ",CLINTYTD  
+          PRINT     *35,"Slot Status : ",SLOTDDEL
+          PRINT     *35,"Visit Type  : ",VISTDESC
+          PRINT     *35,"Report Only : ",REPONLYD
+          PRINT     *35,"Date From : ",DISPFDAT," to ",DISPTDAT
+          ADD       SIX,CLNO
+          CALL      UND132
+.
+          PRINT     *1,"| Clinic ",*10,"| Clinic Description":
+                    *41,"| Date",*54,"| Time":
+                    *62,"| Not":
+                    *72,"| Ext.":
+                    *82,"| Ext. No":
+                    *92,"| Unavail.":
+                    *102,"| Unavail.":
+                    *112,"| Used":
+                    *122,"| Not":
+                    *132,"|"
+          PRINT     *1,"|",*10,"|":
+                    *41,"|",*54,"|":
+                    *62,"| Booked":
+                    *72,"| Delete":
+                    *82,"| Delete":
+                    *92,"| Delete":
+                    *102,"|":
+                    *112,"| ":
+                    *122,"| Used":
+                    *132,"|"
+.
+          ADD       TWO,CLNO
+          CALL      UND132
+.
+HEAD9999  RETURN
+.**************************************************************************
+.* CREA0000 - Create a new temporary file                                 *
+.**************************************************************************
+.
+CREA0000  CALL      KILL0000                     * remove existing file
+.
+          CALL      TFILENAM * Get temp file name in create
+          MOVE      TFILNAME,TEMPFILE
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      REPTEMP1,TEMPFILE            * open temp index file
+.
+CREA9999  RETURN
++
+.****************************************************************************
+.* KILL0000 - Close and erase the temporary file                            *
+.****************************************************************************
+.
+KILL0000  CLOSE     REPTEMP1                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILE       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILL9999 RETURN
++
+.****************************************************************************
+.*        IO ROUTINES FOR TEMPORARY FILE                                    *
+.****************************************************************************
+.
+RSTEMP1   READ      REPTEMP1,KEY25;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    REPTEMP1;TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT:
+                             TEMPUNBK,TEMPEXTN,TEMPEXTD,TEMPUNAV:
+                             TEMPUNAD,TEMPUTIL,TEMPNOTU
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RATEMP1   MOVE      ZERO,OVRCD
+          READ      REPTEMP1,KEY25;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          READ      REPTEMP1,KEY25;TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT:
+                             TEMPUNBK,TEMPEXTN,TEMPEXTD,TEMPUNAV:
+                             TEMPUNAD,TEMPUTIL,TEMPNOTU
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     REPTEMP1,KEY25;TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT:
+                             TEMPUNBK,TEMPEXTN,TEMPEXTD,TEMPUNAV:
+                             TEMPUNAD,TEMPUTIL,TEMPNOTU
+          RETURN
+.
+UPTEMP1   UPDATE    REPTEMP1;TEMPSITE,TEMPCLIN,TEMPDATE,TEMPSTRT:
+                             TEMPUNBK,TEMPEXTN,TEMPEXTD,TEMPUNAV:
+                             TEMPUNAD,TEMPUTIL,TEMPNOTU
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+          INC       TFILENAM
+          INC       SLTCOUNT
+          INC       COUNTSLT
+.
+          INC       IBASEQIO/INC
+          INC       OUTBOAIO/INC
+          INC       OUTBOXIO/INC
+          INC       OUTCTYIO/INC
+          INC       OUTCLIIO/INC
+          INC       OUTHEDIO/INC
+          INC       OUTSESIO/INC
+          INC       OUTSITIO/INC
+          INC       PATCODIO/INC
+          INC       WEBERRIO/INC

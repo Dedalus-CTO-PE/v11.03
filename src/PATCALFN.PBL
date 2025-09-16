@@ -1,0 +1,323 @@
+. PATCALFN.PBL
+. ------------
+.
+.       This include update the Financial Summary Statistics file (PATFINSR)
+.
+.       Information needed by this include are:
+.
+.       FINDATE      : Date of transaction (CCYYMMDD)
+.       FINAMT       : Amount of transaction
+.       FINTYPE      : Financial Type - A=Invoice, B=Payment, C=Journal
+.                                       D=Merchant Card
+.       FINCODE      : Financial Code for record
+.       FINSYS       : Financial System (1=A+E, 2=Outp, 3=Inp, 4=Other)
+.       FINSITE      : Financial Site (Outpatients only)
+.       FGSTFLAG     : Updating GST Financial- patfigaf/nzpfigaf(1) or 
+.                               Rev.Breakdown file - patrnfaf(2) or
+.                               GST Rev.Breakdown file - patrfgaf(3) or
+.                               Fees invoice - patfinsf/nzpfinaf(0)
+.                      
+.
+.       Mods :
+.
+.       V9.08.02  31.05.2007  J.Tan   CAR 141297
+.                 Mods to update patrfgaf (GST for Revenue breakdown)
+.       V9.08.01  29.01.2007  J.Tan  
+.                 Mods for NZ Private (nzpfinaf)
+.       V9.04.02  08.08.2005  J.Tan  CAR 
+.                 Removed closing PATDRGA2
+.       V9.04.01  19.08.2004  J.Tan  CAR 52835
+.                 Mods for Multi hospital
+.       V9.03.01  07.11.2003  J.Tan 
+.                 Mods locking financial summary files
+.       V9.02.01  29.11.2001  B.G.Ackland    
+.                 Remove pi's from Program
+.       V5.08.01  28/06/2000  J.Tan 
+.                 Added patfigaf file
+.
+.                   08/10/1998  Glenn Berry      5.07 changes
+.******************************************************************************
+.         V5.01.01  15/07/92 J.Tan  SRF 115532
+.                   Mods cash from the first day of financial year to go into
+.                   the actual year
+.         V5.01.02  03/06/1992  Graeme Williams   SRF 114865
+.                   Expanded FINCODE from 8 to 13 characters
+.         V5.02.01  02/03/1995  Greg Horvat      SRF 134196  Quote 8277
+.                   Changed fees invoiced to print miscell. charges & journals
+.                   by claim code
+.
+. -----------------------------------------------------------------------------
+.
+.         Find out which financial year and period this is in
+.
+PATCALF   OPEN      PATFIGA1,"patfigaf" * open gst financial summary file
+          OPEN      PATRFGA1,"patrfgaf" * open gst revenue breakdown file
+          IF        CFEETYP=5
+            OPEN      NZPFIGA1,"nzpfigaf"
+          ENDIF
+          OPEN      PATDRGA2,"patdrgaf" * Open the date range file
+          MOVE      ZERO,FOFFSET        * Put into the Prior year variable
+.
+          PACK      KEY14,FINDATE,SP6   * Position to this date
+          CALL      RDSDRGA2            * Go to this date in the file
+          CALL      RDKDRGA2            * Get the first record on or after date
+          BRANCH    OVRCD,PATCALF7      * No records in file.
+.
+          MATCH     DRGFDTE,FINDATE     * Is the date before the from date ?
+          GOTO      PATCALF7 IF LESS    * Yes. Date not found in file.
+.
+.         Period record found
+.
+          MOVE      DRGYR,FINYEAR       * Save financial year
+          MOVE      DRGNUM,FOFFSET      * Save period offset
+.
+.         Check if this is in a prior financial year
+.
+          PACK      FINDATE,CCC,CYY,CMM,CDD
+          REP       " 0",FINDATE        * Zero fill the current date
+.
+PATCALF1  PACK      KEY14,FINDATE,SP6   * Position to this date
+          CALL      RDSDRGA2            * Go to this date in the file
+          CALL      RDKDRGA2            * Get the first record on or after date
+          BRANCH    OVRCD,PATCALF8      * No records in file.
+.
+          MATCH     DRGFDTE,FINDATE     * Is the date before the from date ?
+          GOTO      PATCALF8 IF LESS    * Yes. Date not found in file.
+.
+          MATCH     DRGYR,FINYEAR       * Is this the same as the request date?
+          GOTO      PATCALF3 IF EQUAL   * Yes. Continue Processing
+.
+.         If this the first day of the financial year, then let all invoiced
+.         data go through as normal
+.
+          MATCH     "01",DRGNUM         * Is this the first period of year ?
+          GOTO      PATCALF2 IF NOT EQUAL
+.
+          MATCH     FINDATE,DRGFDTE     * Is this date the start of period ?
+          GOTO      PATCALF2 IF NOT EQUAL
+.
+.         Only allow invoices and cash to go into the actual year.
+.
+          CMATCH    ANSB,FINTYPE
+          GOTO      PATCALF3 IF EQUAL
+.
+          CMATCH    ANSA,FINTYPE
+          GOTO      PATCALF2 IF NOT EQUAL
+.
+.         Invoice on the first day of the financial year. Allow to go into
+.         previous year.
+.
+          GOTO      PATCALF3
+.
+.         Put the figures into the prior year column of report
+.
+PATCALF2  MOVE      TEN4,FOFFSET        * Put into the Prior year variable
+          MOVE      DRGYR,FINYEAR       * Put into the current financial year
+.
+.         Post the data to the Fees Invoices file
+.
+PATCALF3  MOVE      ZERO,FORM2
+          IF        IBCNMHOS<>1
+            MOVE      SP70,FINHOSP
+          ENDIF
+          PACK      KEY28,FINSYS,FINSITE,FINYEAR,FINTYPE,FINCODE,FINHOSP,SP70
+.
+.         If the key does not exist, write a new record
+.
+PATCALF4  IF        FGSTFLAG=1
+            MOVE      "PFG",PRXCODE     * System Lock 
+            CALL      GETSLK00          * Get System Lock 
+            IF        CFEETYP=5
+              CALL      RDNZFIG1        * Read this record
+            ELSE
+              CALL      RDPTFIA1        * Read this record
+            ENDIF
+            BRANCH    OVRCD,PATCALF5    * Does not exist, write a new record
+          ELSE
+            IF        FGSTFLAG=2
+              MOVE      "PRF",PRXCODE   * System Lock 
+              CALL      GETSLK00        * Get System Lock 
+              IF        CFEETYP=5
+                CALL      RDNZRFN1
+              ELSE
+                CALL      RDPTRFN1
+              ENDIF
+              BRANCH    OVRCD,PATCALF5  * Does not exist, write a new record
+            ELSE
+              IF        FGSTFLAG=3
+                IF        CFEETYP<>5
+                  CALL      RDPTRFG1      * GST for Rev.breakdown
+                  BRANCH    OVRCD,PATCALF5  * Does not exist, write a new record
+                ENDIF
+              ELSE
+                MOVE      "FIN",PRXCODE   * System Lock 
+                CALL      GETSLK00        * Get System Lock 
+                IF        CFEETYP=5
+                  CALL      RDNZFIN1      * Read this record
+                ELSE
+                  CALL      RDFINS1       * Read this record
+                ENDIF
+                BRANCH    OVRCD,PATCALF5  * Does not exist, write a new record
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          MOVE      ZERO,FINWRK
+          IF        CFEETYP=5
+            LOAD      FINWRK,FOFFSET,NZFIMTH1,NZFIMTH2,NZFIMTH3:
+                                     NZFIMTH4,NZFIMTH5,NZFIMTH6:
+                                     NZFIMTH7,NZFIMTH8,NZFIMTH9:
+                                     NZFIMT10,NZFIMT11,NZFIMT12:
+                                     NZFIMT13,NZFILSYR
+          ELSE
+            LOAD      FINWRK,FOFFSET,FINMTH1,FINMTH2,FINMTH3:
+                                     FINMTH4,FINMTH5,FINMTH6:
+                                     FINMTH7,FINMTH8,FINMTH9:
+                                     FINMTH10,FINMTH11,FINMTH12:
+                                     FINMTH13,FLSTYR
+          ENDIF
+.
+          ADD       FINAMT,FINWRK       * Update the record with the amount
+.
+          IF        CFEETYP=5
+            STORE     FINWRK,FOFFSET,NZFIMTH1,NZFIMTH2,NZFIMTH3:
+                                     NZFIMTH4,NZFIMTH5,NZFIMTH6:
+                                     NZFIMTH7,NZFIMTH8,NZFIMTH9:
+                                     NZFIMT10,NZFIMT11,NZFIMT12:
+                                     NZFIMT13,NZFILSYR
+            ADD       FINAMT,NZFIPERD     * Update the period figure with amount
+          ELSE
+            STORE     FINWRK,FOFFSET,FINMTH1,FINMTH2,FINMTH3:
+                                     FINMTH4,FINMTH5,FINMTH6:
+                                     FINMTH7,FINMTH8,FINMTH9:
+                                     FINMTH10,FINMTH11,FINMTH12:
+                                     FINMTH13,FLSTYR
+            ADD       FINAMT,FINPER       * Update the period figure with amount
+          ENDIF
+.
+          IF        FGSTFLAG=1
+            IF        CFEETYP=5
+              CALL      UPNZFIG1            * Update the record
+            ELSE
+              CALL      UPPTFIA1            * Update the record
+            ENDIF
+          ELSE
+            IF        FGSTFLAG=2
+              IF        CFEETYP=5
+                CALL      UPNZRFN1            * Update the record
+              ELSE
+                CALL      UPPTRFN1            * Update the record
+              ENDIF
+            ELSE
+              IF        FGSTFLAG=3
+                IF        CFEETYP<>5
+                  CALL      UPPTRFG1            * GST Revenue breakdown
+                ENDIF
+              ELSE
+                IF        CFEETYP=5
+                  CALL      UPNZFIN1            * Update the record
+                ELSE
+                  CALL      UPFINS1             * Update the record
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+          CALL      RELSLK00        * Release System Lock
+          GOTO      PATCALF9            * Finished
+.
+.         Write a new record. Zero amounts, and then go and update the record
+.
+PATCALF5  COMPARE   FIVE,CFEETYP
+          GOTO      PATCAL5A IF EQUAL      * NZ Private
+.
+          MOVE      ZERO,FINPER
+          MOVE      ZERO,FINMTH1
+          MOVE      ZERO,FINMTH2
+          MOVE      ZERO,FINMTH3
+          MOVE      ZERO,FINMTH4
+          MOVE      ZERO,FINMTH5
+          MOVE      ZERO,FINMTH6
+          MOVE      ZERO,FINMTH7
+          MOVE      ZERO,FINMTH8
+          MOVE      ZERO,FINMTH9
+          MOVE      ZERO,FINMTH10
+          MOVE      ZERO,FINMTH11
+          MOVE      ZERO,FINMTH12
+          MOVE      ZERO,FINMTH13
+          MOVE      ZERO,FLSTYR
+          MOVE      SP30,FSPARE
+          UNPACK    KEY28,DFINSYS,FINSITE,FINYEAR,FINTYPE,FINCODE,FINHOSP
+          MOVE      DFINSYS,FINSYS
+          GOTO      PATCALF6
+.
+PATCAL5A  MOVE      ZERO,NZFIPERD
+          MOVE      ZERO,NZFIMTH1
+          MOVE      ZERO,NZFIMTH2
+          MOVE      ZERO,NZFIMTH3
+          MOVE      ZERO,NZFIMTH4
+          MOVE      ZERO,NZFIMTH5
+          MOVE      ZERO,NZFIMTH6
+          MOVE      ZERO,NZFIMTH7
+          MOVE      ZERO,NZFIMTH8
+          MOVE      ZERO,NZFIMTH9
+          MOVE      ZERO,NZFIMT10
+          MOVE      ZERO,NZFIMT11
+          MOVE      ZERO,NZFIMT12
+          MOVE      ZERO,NZFIMT13
+          MOVE      ZERO,NZFILSYR
+          MOVE      SP30,NZFISPAR
+          UNPACK    KEY28,NZFISYST,NZFISITE,NZFIYEAR,NZFITYPE,NZFICODE,NZFIHOSP
+.
+PATCALF6  IF        FGSTFLAG=1
+            IF        CFEETYP=5
+              CALL      WRNZFIG1
+            ELSE
+              CALL      WRPTFIA1
+            ENDIF
+          ELSE
+            IF        FGSTFLAG=2
+              IF        CFEETYP=5
+                CALL      WRNZRFN1            * Update the record
+              ELSE
+                CALL      WRPTRFN1
+              ENDIF
+            ELSE
+              IF        FGSTFLAG=3
+                IF        CFEETYP<>5
+                  CALL      WRPTRFG1            * GST Revenue breakdown
+                ENDIF
+              ELSE
+                IF        CFEETYP=5
+                  CALL      WRNZFIN1
+                ELSE
+                  CALL      WRFINS1
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          GOTO      PATCALF4
+.
+.         The requested date does not exist in the date range file.
+.
+PATCALF7  UNPACK    FINDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          KEYIN     *P1:24,*EL,*V2LON,*B:
+                    "** Date ",*DV,CPCDATE," not found in Period Range":
+                    " file. Hit <ENTER> to retry ",*EOFF,ANS;
+          GOTO      PATCALF
+.
+.         The current date does not exist in the date range file.
+.
+PATCALF8  UNPACK    FINDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          KEYIN     *P1:24,*EL,*V2LON,*B:
+                    "** Date ",*DV,CPCDATE," not found in Period Range":
+                    " file. Hit <ENTER> to retry ",*EOFF,ANS;
+          GOTO      PATCALF1
+.
+.         Finished update of fees invoice file
+.
+PATCALF9  RETURN

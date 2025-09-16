@@ -1,0 +1,122 @@
+create table fmsaudbu
+(
+  fmbuaudd    varchar2(8) default ' ' not null,
+  fmbuaudt    varchar2(8) default ' ' not null,
+  fmbuaudp    varchar2(2) default ' ' not null,
+  fmbuaudr    varchar2(1) default ' ' not null,
+  fmbuauds    number(1,0) default 0 not null,
+  fmbuaudo    varchar2(4) default ' ' not null,
+  fmbuculd    varchar2(2) default ' ' not null,
+  fmbucuac    varchar2(12) default ' ' not null,
+  fmbucupr    varchar2(3) default ' ' not null,
+  fmbuca01    number(14,2) default 0 not null,
+  fmbuca02    number(14,2) default 0 not null,
+  fmbuca03    number(14,2) default 0 not null,
+  fmbuca04    number(14,2) default 0 not null,
+  fmbuca05    number(14,2) default 0 not null,
+  fmbuca06    number(14,2) default 0 not null,
+  fmbuca07    number(14,2) default 0 not null,
+  fmbuca08    number(14,2) default 0 not null,
+  fmbuca09    number(14,2) default 0 not null,
+  fmbuca10    number(14,2) default 0 not null,
+  fmbuca11    number(14,2) default 0 not null,
+  fmbuca12    number(14,2) default 0 not null,
+  fmbuca13    number(14,2) default 0 not null,
+  fmbucb01    number(12,0) default 0 not null,
+  fmbucb02    number(12,0) default 0 not null,
+  fmbucb03    number(12,0) default 0 not null,
+  fmbucb04    number(12,0) default 0 not null,
+  fmbucb05    number(12,0) default 0 not null,
+  fmbucb06    number(12,0) default 0 not null,
+  fmbucb07    number(12,0) default 0 not null,
+  fmbucb08    number(12,0) default 0 not null,
+  fmbucb09    number(12,0) default 0 not null,
+  fmbucb10    number(12,0) default 0 not null,
+  fmbucb11    number(12,0) default 0 not null,
+  fmbucb12    number(12,0) default 0 not null,
+  fmbucb13    number(12,0) default 0 not null,
+  fmbucc01    number(9,0) default 0 not null,
+  fmbucc02    number(9,0) default 0 not null,
+  fmbucc03    number(9,0) default 0 not null,
+  fmbucc04    number(9,0) default 0 not null,
+  fmbucc05    number(9,0) default 0 not null,
+  fmbucc06    number(9,0) default 0 not null,
+  fmbucc07    number(9,0) default 0 not null,
+  fmbucc08    number(9,0) default 0 not null,
+  fmbucc09    number(9,0) default 0 not null,
+  fmbucc10    number(9,0) default 0 not null,
+  fmbucc11    number(9,0) default 0 not null,
+  fmbucc12    number(9,0) default 0 not null,
+  fmbucc13    number(9,0) default 0 not null,
+  fmbucusp    varchar2(20) default ' ' not null,
+  lf          varchar2(1) default ' ' not null
+)
+tablespace pas_data; 
+create index fmsaudbu on fmsaudbu
+(
+fmbuaudd,
+fmbuaudt,
+fmbuaudp,
+fmbuaudr
+)
+tablespace pas_indx; 
+create table fmsbxxxx
+(
+  fmbuculd    varchar2(2) default ' ' not null,
+  fmbucuac    varchar2(12) default ' ' not null,
+  fmbucupr    varchar2(3) default ' ' not null,
+  fmbuca01    number(14,2) default 0 not null,
+  fmbuca02    number(14,2) default 0 not null,
+  fmbuca03    number(14,2) default 0 not null,
+  fmbuca04    number(14,2) default 0 not null,
+  fmbuca05    number(14,2) default 0 not null,
+  fmbuca06    number(14,2) default 0 not null,
+  fmbuca07    number(14,2) default 0 not null,
+  fmbuca08    number(14,2) default 0 not null,
+  fmbuca09    number(14,2) default 0 not null,
+  fmbuca10    number(14,2) default 0 not null,
+  fmbuca11    number(14,2) default 0 not null,
+  fmbuca12    number(14,2) default 0 not null,
+  fmbuca13    number(14,2) default 0 not null,
+  fmbucb01    number(12,0) default 0 not null,
+  fmbucb02    number(12,0) default 0 not null,
+  fmbucb03    number(12,0) default 0 not null,
+  fmbucb04    number(12,0) default 0 not null,
+  fmbucb05    number(12,0) default 0 not null,
+  fmbucb06    number(12,0) default 0 not null,
+  fmbucb07    number(12,0) default 0 not null,
+  fmbucb08    number(12,0) default 0 not null,
+  fmbucb09    number(12,0) default 0 not null,
+  fmbucb10    number(12,0) default 0 not null,
+  fmbucb11    number(12,0) default 0 not null,
+  fmbucb12    number(12,0) default 0 not null,
+  fmbucb13    number(12,0) default 0 not null,
+  fmbucc01    number(9,0) default 0 not null,
+  fmbucc02    number(9,0) default 0 not null,
+  fmbucc03    number(9,0) default 0 not null,
+  fmbucc04    number(9,0) default 0 not null,
+  fmbucc05    number(9,0) default 0 not null,
+  fmbucc06    number(9,0) default 0 not null,
+  fmbucc07    number(9,0) default 0 not null,
+  fmbucc08    number(9,0) default 0 not null,
+  fmbucc09    number(9,0) default 0 not null,
+  fmbucc10    number(9,0) default 0 not null,
+  fmbucc11    number(9,0) default 0 not null,
+  fmbucc12    number(9,0) default 0 not null,
+  fmbucc13    number(9,0) default 0 not null,
+  fmbucusp    varchar2(20) default ' ' not null,
+  lf          varchar2(1) default ' ' not null,
+constraint fmsbuda1 primary key( 
+fmbuculd,
+fmbucuac)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 
+create unique index fmsbuda2 on fmsbxxxx
+(
+fmbucupr,
+fmbuculd,
+fmbucuac
+)
+  tablespace pas_indx; 

@@ -1,0 +1,8 @@
+.
+.         INCLUDE NAME : IBAPRNIO.PBL
+.
+        INCLUDE    IBASPOIO/INC
+        INC        IBAPASIO/INC
+        INCLUDE    IBAPDDIO/INC
+        INCLUDE    IBAPRTIO/INC
+        INCLUDE    IBASEQIO/INC

@@ -1,0 +1,198 @@
+.************************************************************************
+.*  Include  : DGCLICCD  -  Send Cancel Patient Discharge Details       *
+.*                                                                      *
+.*  Note     : This should be called before the transfer record is      *
+.*             deleted.                                                 *
+.*                                                                      *
+.*  Author   : Steve Armstrong  (17/04/1997)                            *
+.*                                                                      *
+.*  Mods     :                                                          *
+.*                                                                      *
+.*  V10.03.02 06/06/2013  Steve Armstrong   CAR 268961                  *
+.*            Mods to populate H7CIRTAG & H7CISTAG                      *
+.*  V10.03.01 17/04/2013  Davin S          CAR 280425                   *
+.*            Changed IBCNUCIS - value 1 or greater will write trigger  *
+.************************************************************************
+.*  V10.00.01 19/03/2010  Steve Armstrong   CAR 135505                  *
+.*            Added setting of H7CITRID & H7CIINCL                      *
+.************************************************************************
+.*  V9.04.01  07/07/2005  Davin            CAR 64087                    *
+.*            Mods to handle CIS interface.                             *
+.*            Separated out CCD routine from dgclidsc routine.          *
+.*            Mods to write directly to holding tables instead of       *
+.*            hl7bmtaf.                                                 *
+.************************************************************************
+.*  V9.02.02  05/11/2001  Davin & MikeL                                 *
+.*            Mods to use message holding file                          *
+.*            Rename DGCLICND to DGCLICCD                               *
+.*            13/10/1997  Steve Armstrong   WHL                         *
+.*            Mods for new Master extension file variables              *
+.*            (PTMXOPER - PTMXPOST).                                    *
+.*                                                                      *
+.************************************************************************
+          DEFPROC   DGCLICCD
+.
+          INC       HL7CISFD/INC
+          INC       HL7INBFD/INC
+          INC       PMSQPTFD/INC
+          INC       PMSQVIFD/INC
+.
+CISMFLAG  FORM      1             * CIS message flag
+.                                    0 = don't send HL7 CIS message
+.                                    1 = send HL7 CIS message
+IBAMFLAG  FORM      1             * IBA proprietary message flag
+.                                    0 = don't send IBA proprietary message
+.                                    1 = send IBA proprietary message
+MESSAGID  DIM       20
+BEDSTRNG  DIM       3
+WRDSTRNG  DIM       3
+SVTRNKEY  DIM       30
+.
+DGCLI000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*133,IBCNUCIS
+          READ      CONTROLF,SEVENTY9;*240,PTCNDGDS
+          READ      CONTROLF,HUND10;*107,PTCNA13M
+.
+          MOVE      ZERO,CISMFLAG                * set default interface flag
+          MATCH     "1",IBCNUCIS                 * using CIS interface ?
+          IF        !@LESS
+            COMPARE   ONE,PTCNA13M               * yes - sending A13 ?
+            IF        @EQUAL
+              MOVE      ONE,CISMFLAG             * yes- set flag for CIS message
+            ENDIF
+          ENDIF
+.
+.         Check if we are sending any messages.
+.
+          IF        PTCNDGDS <> 1 & CISMFLAG <> 1
+            GOTO      DGCLI999
+          ENDIF
+.
+.         We are sending IBA Proprietary and/or CIS HL7 messages, so
+.         first open the relevant holding tables
+.
+          MOVE      ZERO,IBAMFLAG
+          IF        PTCNDGDS = 1
+            OPEN      HL7INB01,"hl7inbaf"
+            MOVE      ONE,IBAMFLAG
+          ENDIF
+          IF        CISMFLAG = 1
+            OPEN      HL7CISA1,"hl7cisaf"
+          ENDIF
+          OPEN      PMSQPTA1,"pmsqptaf"
+          OPEN      PMSQVIA1,"pmsqviaf"
+.
+          CALL      DGMESSID                     * get the unique message id
+.
+.         Write a record to pmsqptaf (holding patient details)
+.
+          MOVE      MESSAGID,PMQPMESI
+          MOVE      SP8,PMQPOURN
+          PACK      PMQPSPAR,SP30,SP30,SP20
+          CALL      WRPMQPT1
+.
+.         Write a record to pmsqviaf (holding visit details)
+.
+          MOVE      MESSAGID,PMQVMESI
+          MOVE      ONE,PMQVTRAN
+          MOVE      SP3,MHLRCODE
+          PACK      PMQVSPAR,SP30,SP30,SP1
+          CALL      WRPMQVI1
+.
+.>>>>
+.         Write a pmsqviaf record with the last transfer record details.
+.         (for "L" prefixed variables in final DataGate message).
+.
+          PACK      SVTRNKEY,TADMN,TDATE,TTIME,TWARD,TBED
+          MOVE      TADMN,FORM8
+          CALL      GTPLN000                     * get previous location
+          MOVE      WRDSTRNG,TWARD               * load ward/bed fields
+          MOVE      BEDSTRNG,TBED
+.
+.         Write qvi-2 record with previous location
+.
+          MOVE      MESSAGID,PMQVMESI
+          MOVE      TWO,PMQVTRAN
+          MOVE      SP8,MHLRCODE
+          PACK      PMQVSPAR,SP30,SP30,SP1
+          CALL      WRPMQVI1
+.
+.         Re-read original transfer file record
+.
+          MOVE      SVTRNKEY,KEY30
+          CALL      RDTRAN2                      * restore current tran record
+          BRANCH    OVRCD,DGCLI500
+.>>>>
+.
+DGCLI500  COMPARE   ONE,CISMFLAG                 * sending CIS HL7 A13 message?
+          IF        @EQUAL
+            MOVE      "A13",H7CIMETP
+            MOVE      HL7TRGID,H7CITRID
+            MOVE      HL7INCLD,H7CIINCL
+            MATCH     "HL7REGEN",PRGID
+            IF        @EQUAL
+              MOVE      HL7RCTAG,H7CIRTAG
+              MOVE      HL7SFTAG,H7CISTAG
+            ELSE
+              MOVE      SP20,H7CIRTAG
+              MOVE      SP3,H7CISTAG
+            ENDIF
+            CALL      WRCIS000                   * yes - write hl7cisaf record
+          ENDIF
+.
+          COMPARE   ONE,PTCNDGDS                 * sending proprietary message?
+          IF        @EQUAL
+            MOVE      "CCD",H7INMETP
+            CALL      WRINB000                   * yes - write hl7inbaf record
+          ENDIF
+.
+          CLOSE     HL7INB01
+          CLOSE     HL7CISA1
+          CLOSE     PMSQPTA1
+          CLOSE     PMSQVIA1
+.
+DGCLI999  GOTO      DGCLIEND                     * end procedure
+.
+.*****************************************************************************
+.*                         GTPLN000                                          *
+.*             Get the previous location                                     *
+.* Returns:  WRDSTRNG - previous ward code.                                  *
+.*           BEDSTRNG - previous bed code.                                   *
+.*****************************************************************************
+.
+GTPLN000  MOVE      TWARD,WRDSTRNG               * initialise ward/bed strings
+          MOVE      TBED,BEDSTRNG
+.
+          PACK      KEY30,FORM8,TDATE,TTIME,TWARD,TBED
+          CALL      RDSTRAN2                     * current tran record found ?
+GTPLN500  CALL      RDPTRAN2                     * previous tran record found ?
+          BRANCH    OVRCD,GTPLN999               * no - finish
+.
+          COMPARE   FORM8,TADMN                  * same admission still ?
+          GOTO      GTPLN999 IF NOT EQUAL        * no - finish
+.
+.         Previous tran record found, so check if the ward/bed has changed
+.
+          MATCH     WRDSTRNG,TWARD               * same ward ?
+          IF        @EQUAL
+            MATCH     BEDSTRNG,TBED              * yes - same bed ?
+            GOTO      GTPLN500 IF EQUAL          * yes - get previous record
+          ENDIF
+.
+          MOVE      TWARD,WRDSTRNG               * load ward/bed fields
+          MOVE      TBED,BEDSTRNG
+.
+GTPLN999  RETURN
++
+.         I/O Routines
+.
+          INC       BRHLCOMN
+.
+          INC       HL7CISIO/INC
+          INC       HL7INBIO/INC
+          INC       IBAOVRIO/INC
+          INC       PMSQPTIO/INC
+          INC       PMSQVIIO/INC
+.
+DGCLIEND  ENDPROC
++

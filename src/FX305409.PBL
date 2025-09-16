@@ -1,0 +1,475 @@
+.*****************************************************************************
+.* System    :   Allied Health                                               *
+.* Program   :   FX305409                                                    *
+.* Desc      :   Fixit for E020 VINAH extract validation errors where        *
+.*               contact date is prior to episode start date                 *
+.*****************************************************************************
+.* Date      :   11/09/2014                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will allow the user to input a visit number    *
+.*               for the contact record which failed VINAH validation with   *
+.*               an E020 error.  It will then display all the associated     *
+.*               add contact records (ADT^A03) that are currently waiting    *
+.*               for extraction (in allhdtaf) and allow the user to select   *
+.*               one and trigger a forced episode update message (PPP^PCC)   *
+.*               to be created for extraction.                               *
+.*               This will overcome the issue where a previously accepted    *
+.*               episode has a subsequent contact added where the contact    *
+.*               date is prior to the episode start date.  This would have   *
+.*               occurred prior to the changes to the VINAH extract to cater *
+.*               for the preloading of episode start date.                   *
+.*               Eventually, this program will become redundant.             *
+.* Mods      :                                                               *
+.*        V10.14.01 17/04/2019  Steve Armstrong  TSK 0868837                 *
+.*                  Recompiled for changes to ALLHDTFD.                      *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       ALLCONFD/INC
+          INC       ALLHDTFD/INC
+          INC       ALLREFFD/INC
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CALLPOSN  FORM      1
+DIM2A     DIM       2
+DIM2B     DIM       2
+DIM2C     DIM       2
+DIM8      DIM       8
+FIELD     FORM      2
+FORM2A    FORM      2
+FORM2B    FORM      2
+HOURTM    DIM       2
+MINTIME   DIM       2
+SECTIME   DIM       2
+TMPKEY    DIM       42[15]
+VISNUMBR  DIM       8
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+ZERO6     INIT      "000000"
+.
+.
+.
+PRGID     INIT      "FX305409"
+PRGNAM    INIT      "Fixit to Force Episode Update"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN1000  CALL      GVIS0000               * get visit number
+          BRANCH    EXIT,MAIN9999          * nothing entered
+.
+          CALL      DSPP0000               * display waiting contacts for visit
+          GOTO      MAIN1000
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"allhdtaf";
+          OPEN      ALLHDTA1,"allhdtaf"
+          OPEN      ALLHDTA3,"allhdtaf"
+.
+          DISPLAY   *P64:24,"allrefaf";
+          OPEN      ALLREFA1,"allrefaf"
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                               GVIS0000              Called by: MAIN0000   *
+.* Returns: VISNUMBR - allied health visit number                            *
+.*          EXIT  0 = Ok to continue                                         *
+.*                1 = nothing entered                                        *
+.*****************************************************************************
+.
+GVIS0000  KEYIN     *P1:4,*EF,"Visit Number :":
+                    *P16:4,*V2LON,*JR,VISNUMBR
+.
+          PACK      VISNUMBR,VISNUMBR,SP8
+.
+          MATCH     SP8,VISNUMBR
+          GOTO      GVIS9100 IF EQUAL
+.
+          MOVE      VISNUMBR,KEY8
+          CALL      RDALREF1
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Visit not on file.  ";
+            CALL      HITENTER
+            GOTO      GVIS0000
+          ENDIF
+.
+          DISPLAY   *P1:5,"U/R Number   :",*V2LON,ALREURNO
+.
+          MOVE      ZERO,EXIT
+          GOTO      GVIS9999
+.
+GVIS9100  MOVE      ONE,EXIT
+.
+GVIS9999  RETURN
++
+.***************************************************************************
+.*                             DSPP0000               Called by: MAIN0000  *
+.*     Display all the contact records for a visit currently waiting for   *
+.*     extraction and allow selection of a record to force and episode     *
+.*     update.                                                             *
+.* Requires: Valid read on allrefaf for an episode visit                   *
+.***************************************************************************
+.
+DSPP0000  DISPLAY   *P1:7,*EF,*V2LON,*ULON,"Item",*P6:7," Contact",*P15:7:
+                    "     Date/Time     "
+          MOVE      ONE,CPAGENO
+          MOVE      SEVEN,CVERT                  * Reset line number
+          MOVE      ZERO,FIELD                   * Reset record count
+          PACK      KEY42,ALREURNO,SP1,ZERO,ALREVISN,SP70
+          CALL      RSALHDT3                     * position in file
+DSPP1000  CALL      RKALHDT3                     * read next record
+          BRANCH    OVRCD,DSPP5000               * end of file
+.
+          MATCH     ALHDURNO,ALREURNO            * same U/R still ?
+          GOTO      DSPP5000 IF NOT EQUAL        * no
+.
+          MATCH     " 0",ALHDSTAT                * status of waiting still ?
+          GOTO      DSPP5000 IF NOT EQUAL        * no
+.
+          MATCH     ALHDVISN,ALREVISN            * same visit still ?
+          GOTO      DSPP5000 IF NOT EQUAL        * no
+.
+          MATCH     "2",ALHDRTYP                 * contact ?
+          GOTO      DSPP1000 IF NOT EQUAL        * no - ignore record
+.
+          MATCH     "A",ALHDACTN                 * add ?
+          GOTO      DSPP1000 IF NOT EQUAL        * no - ignore record
+.
+          ADD       ONE,CVERT                    * increment line count
+.
+          COMPARE   TWENTY3,CVERT                * page full ?
+          GOTO      DSPP4000 IF NOT LESS         * yes
+.
+DSPP3000  ADD       ONE,FIELD   
+          UNPACK    ALHDDTTM,CCENT,CYEAR,CMON,CDAY
+          UNPACK    ALHDDTTM,KEY8,DIM2A,DIM2B,DIM2C
+          CALL      PACDATE
+          DISPLAY   *P1:CVERT,*V2LON,FIELD,*HOFF,*P6:CVERT,ALHDCONT,*P15:CVERT:
+                    CPCDATE,SP1,DIM2A,COLON,DIM2B,COLON,DIM2C
+          PACK      TMPKEY[FIELD],ALHDURNO,ALHDSTAT,ALHDVISN,ALHDCONT,ALHDDTTM:
+                                  ALHDRTYP,ALHDACTN
+          GOTO      DSPP1000
+.
+.         new page needed 
+.
+DSPP4000  BRANCH    CPAGENO,DSPP4500
+.
+.         in middle pages : Next & First options
+.
+DSPP4100  MOVE      "1",CALLPOSN                 * set call position
+          CALL      KEYA0000                     * keyin response
+          BRANCH    EXIT,DSPP9999:               * exit
+                         DSPP7000:               * next
+                         DSPP8000                * previous
+          GOTO      DSPP6000                     * number entered
+.
+.         on first page : Next option
+.
+DSPP4500  MOVE      "2",CALLPOSN                 * set call position
+          CALL      KEYA0000                     * keyin response
+          BRANCH    EXIT,DSPP9999:               * exit
+                         DSPP7000:               * next
+                         DSPP5900                * previous
+          GOTO      DSPP6000                     * number entered
+.
+.         end of data
+.
+DSPP5000  BRANCH    CPAGENO,DSPP5500
+.
+.         in middle pages : First option
+.
+DSPP5100  MOVE      "3",CALLPOSN                 * set call position
+          CALL      KEYA0000                     * keyin response
+          BRANCH    EXIT,DSPP9999:               * exit
+                         DSPP5900:               * next
+                         DSPP8000                * prev
+          GOTO      DSPP6000                     * number entered
+.
+.         on first page : No options
+.
+DSPP5500  MOVE      "4",CALLPOSN                 * set call position
+          CALL      KEYA0000                     * keyin response
+          BRANCH    EXIT,DSPP9999:               * exit
+                         DSPP5900:               * next
+                         DSPP5900                * previous
+          GOTO      DSPP6000                     * number entered
+.
+DSPP5900  BEEP
+DSPP5910  BRANCH    CALLPOSN,DSPP4100:
+                             DSPP4500:
+                             DSPP5100:
+                             DSPP5500
+.
+.         number entered
+.
+DSPP6000  MOVE      TMPKEY[FORM2A],KEY42
+          CALL      RDALHDT3
+          BRANCH    OVRCD,DSPP5900
+.
+DSPP6100  ASSIGN    (FORM2A+7),CVERT
+          KEYIN     *P1:CVERT,*HON,*DV,FORM2A,*HOFF:
+                    *P1:24,*EL,"Force episode update (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") :":
+                    *P30:24,*V2LON,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+          MATCH     ANSY,ANS
+          IF        @EQUAL
+            CALL      PROC0000
+            GOTO      DSPP6500
+          ENDIF
+.
+          MATCH     ANSN,ANS
+          GOTO      DSPP6500 IF EQUAL
+.
+          BEEP
+          GOTO      DSPP6100
+.
+DSPP6500  DISPLAY   *P1:CVERT,*V2LON,FORM2A
+          GOTO      DSPP5910
+.
+.         next screen selected
+.
+DSPP7000  MOVE      EIGHT,CVERT
+          ADD       ONE,CPAGENO
+          DISPLAY   *P1:CVERT,*EF
+          MOVE      ZERO,FIELD
+          GOTO      DSPP3000
+.
+.         previous screen selected
+.
+DSPP8000  MOVE      TMPKEY[1],KEY42
+          CALL      RDALHDT3                     * reread first record on screen
+          MOVE      ZERO,FORM2A                  * initialise count
+          WHILE     FORM2A <= 14  
+DSPP8100    CALL      RPALHDT3                   * read previous record
+            BRANCH    OVRCD,DSPP0000             * eof - start again
+.
+            MATCH     ALHDURNO,ALREURNO          * same U/R still ?
+            GOTO      DSPP0000 IF NOT EQUAL      * no
+.
+            MATCH     " 0",ALHDSTAT              * status of waiting still ?
+            GOTO      DSPP0000 IF NOT EQUAL      * no
+.
+            MATCH     ALHDVISN,ALREVISN          * same visit still ?
+            GOTO      DSPP0000 IF NOT EQUAL      * no
+.
+            MATCH     "2",ALHDRTYP               * contact ?
+            GOTO      DSPP8100 IF NOT EQUAL      * no - ignore record
+.
+            MATCH     "A",ALHDACTN               * add ?
+            GOTO      DSPP8100 IF NOT EQUAL      * no - ignore record
+.
+            ADD       ONE,FORM2A                 * increment count
+          DO
+.
+          MOVE      EIGHT,CVERT                  * reset line position
+          SUB       ONE,CPAGENO                  * decrement page number
+          MOVE      ZERO,FIELD                   * reset record counter
+          DISPLAY   *P1:CVERT,*EF
+          GOTO      DSPP3000
+.
+DSPP9999  RETURN
++
+.*********************************************************************
+.*                  KEYA0000                    Called by : DSPP0000 *
+.*        Keyin response to question                                 *
+.*        Returns : EXIT = 0      Number entered                     *
+.*                  EXIT = 1      Exit   entered                     * 
+.*                  EXIT = 2      Next   entered                     * 
+.*                  EXIT = 3      Prev   entered                     * 
+.*********************************************************************
+.
+KEYA0000  DISPLAY   *P1:24,*EL,"Select item, e(",*V2LON,ANSX,*HOFF,")it";
+          MOVE      TEN9,CCOL
+          IF        CALLPOSN = 1 | CALLPOSN = 2
+            DISPLAY   ", (",*V2LON,ANSN,*HOFF,")ext";
+            ADD       EIGHT,CCOL
+          ENDIF
+          IF        CALLPOSN = 1 | CALLPOSN = 3
+            DISPLAY   ", p(",*V2LON,ANSR,*HOFF,")evious";
+            ADD       TEN2,CCOL
+          ENDIF
+.
+          DISPLAY   " :";
+          ADD       FOUR,CCOL
+.
+KEYA1000  KEYIN     *PCCOL:24,*V2LON,*JR,DIM2:
+                    *PCCOL:24,*DV,DIM2
+          PACK      DIM2,DIM2,SP2
+          UNPACK    DIM2,ANS,ANS
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSX,ANS                * exit selected ?
+          GOTO      KEYA9100 IF EQUAL       * yes
+.
+          MATCH     ANSN,ANS                * next page selected ?
+          GOTO      KEYA9200 IF EQUAL       * yes
+.
+          MATCH     ANSR,ANS                * previous page selected ?
+          GOTO      KEYA9300 IF EQUAL       * yes
+.
+          TYPE      DIM2
+          GOTO      KEYA5000 IF EQUAL       * a number entered
+.
+KEYA1500  BEEP
+          GOTO      KEYA1000
+.
+.         number entered directly
+.
+KEYA5000  MOVE      DIM2,FORM2A
+.
+          COMPARE   FORM2A,ZERO             * number < 1 ?
+          GOTO      KEYA1500 IF NOT LESS    * yes - invalid
+.
+          COMPARE   FORM2A,FIELD            * number in range ?
+          GOTO      KEYA1500 IF LESS        * no - too high
+.
+.         set the exit flag
+.
+          MOVE      ZERO,EXIT               * number selected
+          GOTO      KEYA9999
+.
+KEYA9100  MOVE      ONE,EXIT                * exit
+          GOTO      KEYA9999
+.
+KEYA9200  MOVE      TWO,EXIT                * next
+          GOTO      KEYA9999
+.
+KEYA9300  MOVE      THREE,EXIT              * previous
+          GOTO      KEYA9999
+.
+KEYA9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: DSPP0000   *
+.* Create a new PPP-PCC (episode) record based on the selected contact record*
+.* Requires: Valid read on an allhdtaf record                                *
+.*****************************************************************************
+.
+PROC0000  MOVE      SP8,ALHDCONT
+          MOVE      ONE,ALHDRTYP
+          MOVE      ANSC,ALHDACTN
+          MOVE      ZERO,ALHDVFLG
+          MOVE      ONE,ALHDSRCE
+          MOVE      "PPP-PCC",ALHDMTYP
+.
+          CALL      SSEC0000
+.
+          PACK      KEY42,ALHDSTAT,ALHDURNO,ALHDVISN,ALHDCONT,ALHDDTTM,ALHDRTYP:
+                          ALHDACTN
+          CALL      RAALHDT1
+          IF        OVRCD = 1
+            CALL      WRALHDT1
+            DISPLAY   *P1:24,*EL,*B,"Episode update record created.  ";
+          ELSE
+            DISPLAY   *P1:24,*EL,*B,"Record already exists.  ";
+          ENDIF
+          CALL      HITENTER
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                            SSEC0000             Called by: PROC0000       *
+.*               Subtract one second from date/time                          *
+.* Requires: ALHDDTTM - Date/time value (ccyymmddhhmmss)                     *
+.* Returns : ALHDDTTM - Date/time value (ccyymmddhhmmss) decremented by 1 sec*
+.*****************************************************************************
+.
+SSEC0000  UNPACK    ALHDDTTM,DIM8,HOURTM,MINTIME,SECTIME
+          MATCH     "00",SECTIME
+          IF        !@EQUAL
+            MOVE      SECTIME,FORM2B             * just decrement seconds
+            SUB       ONE,FORM2B
+            MOVE      FORM2B,SECTIME
+            REP       " 0",SECTIME
+            PACK      ALHDDTTM,DIM8,HOURTM,MINTIME,SECTIME
+            GOTO      SSEC9999
+          ENDIF
+.
+.         The seconds were "00", so reset these to "59" and decrement the
+.         minutes
+.
+          MOVE      "59",SECTIME
+          MATCH     "00",MINTIME
+          IF        !@EQUAL
+            MOVE      MINTIME,FORM2B             * just decrement minutes
+            SUB       ONE,FORM2B
+            MOVE      FORM2B,MINTIME
+            REP       " 0",MINTIME
+            PACK      ALHDDTTM,DIM8,HOURTM,MINTIME,SECTIME
+            GOTO      SSEC9999
+          ENDIF
+.
+.         The minutes were "00", so reset these to "59" and decrement the
+.         hours
+.
+          MOVE      "59",SECTIME
+          MOVE      "59",MINTIME
+          MATCH     "00",HOURTM
+          IF        !@EQUAL
+            MOVE      HOURTM,FORM2B             * just decrement hours
+            SUB       ONE,FORM2B
+            MOVE      FORM2B,HOURTM
+            REP       " 0",HOURTM
+            PACK      ALHDDTTM,DIM8,HOURTM,MINTIME,SECTIME
+            GOTO      SSEC9999
+          ENDIF
+.
+.         The hours were "00", so reset these to "23" and decrement the
+.         date
+.
+          MOVE      "59",SECTIME
+          MOVE      "59",MINTIME
+          MOVE      "23",HOURTM
+.
+.         We need to decrement the date by 1 day
+.
+          UNPACK    DIM8,CCENT,CYEAR,CMON,CDAY
+          MOVE      CCENT,CC
+          MOVE      CYEAR,YY
+          MOVE      CMON,MM
+          MOVE      CDAY,DD
+          CALL      DMYCON                       * get julian day
+          SUB       ONE,JULDAY                   * decrement julian day
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON                       * get new date
+          PACK      ALHDDTTM,CC,YY,MM,DD,ZERO6
+          REP       " 0",ALHDDTTM
+.
+SSEC9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       ALLHDTIO/INC
+          INC       ALLREFIO/INC

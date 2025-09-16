@@ -1,0 +1,18 @@
+RKFMBA1   MOVE      ZERO,OVRCD
+          READ      FMSBIAA1,SEQ;FMBALED,FMBAACC,FMBAS01,FMBAV01,FMBAS02:
+                                 FMBAV02,FMBAS03,FMBAV03,FMBAS04,FMBAV04:
+                                 FMBAS05,FMBAV05,FMBAS06,FMBAV06,FMBAS07:
+                                 FMBAV07,FMBAS08,FMBAV08,FMBAS09,FMBAV09:
+                                 FMBAS10,FMBAV10,FMBAS11,FMBAV11,FMBAS12:
+                                 FMBAV12,FMBAS13,FMBAV13,FMBASPA 
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRFMBA1   WRITE     FMSBIAA1,SEQ;FMBALED,FMBAACC,FMBAS01,FMBAV01,FMBAS02:
+                                 FMBAV02,FMBAS03,FMBAV03,FMBAS04,FMBAV04:
+                                 FMBAS05,FMBAV05,FMBAS06,FMBAV06,FMBAS07:
+                                 FMBAV07,FMBAS08,FMBAV08,FMBAS09,FMBAV09:
+                                 FMBAS10,FMBAV10,FMBAS11,FMBAV11,FMBAS12:
+                                 FMBAV12,FMBAS13,FMBAV13,FMBASPA 
+          RETURN
+.

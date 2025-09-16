@@ -1,0 +1,1077 @@
+.******************************************************************************
+.* System         : Patient Billing                                           *
+.* Include Name   : ABFSADET.PBL                                              *
+.* Author         : J.Tan                                                     *
+.* Date           : 17/08/2022  TASK 0906597                                  *
+.* Modification   :                                                           *
+.*       V11.03.03 17/11/2023  J.Tan          TSK 0940089                     *
+.*                 Mod checking for blank Discharged DRG                      *
+.*       V11.03.02 28/09/2023  J.Tan          TSK 0931613                     *
+.*                 Mod for ABF Sub-Acute Palliative phase of Care             *
+.*       V11.03.01 30/05/2023  J.Tan          TSK 0923703                     *
+.*                 Mod to 6 decimal places in NWAU calculations               *
+.*       V11.02.00 17/08/2022 J.Tan    TSK 0906597                            *
+.*                 Create Sub Acute NWAU calculation display                  *
+.*                 (No invoicing)                                             *
+.******************************************************************************
+ABFSADET 
+ABFA0000  CALL      SAMN0000          * Initliase variables
+.
+          MOVE      ZERO,PCAREFLG
+          MOVE      ZERO,NSNAPFLG
+.
+          READ      CONTROLF,HUND28;*105,PTCNUABF
+          MATCH     "1",PTCNUABF
+          GOTO      ABFA9000 IF NOT EQUAL   * Not using ABF
+.
+          PACK      KEY5,ANSC,ANSL,ACLAIM
+          CALL      RDCODE1
+          BRANCH    OVRCD,ABFA9000
+.
+          MATCH     "N",TCINDC2            * Check for NWAU Calculations
+          GOTO      ABFA9000 IF NOT EQUAL  * Not an ABF Funding
+.
+          MATCH     SP70,ACARE
+          GOTO      ABFA9000 IF EQUAL
+.
+          PACK      KEY5,ANSC,ANSC,ACARE
+          CALL      RDCODE1
+          BRANCH    OVRCD,ABFA9000
+.
+          MATCH     "X",TCINDC17
+          GOTO      ABFA9000 IF EQUAL   * Excluded from NWAU
+.
+          MATCH     SP70,PTCDUDF6
+          GOTO      ABFA9000 IF EQUAL
+.
+.         UDF 6, 2=Rehabilitation, 3=Palliative, 4=GEM,
+.                5=Psychogeriatric, 6=Maintenance
+.
+          UNPACK    PTCDUDF6,KEY2
+          MOVE      ZERO,F2
+          STRIP     KEY2
+          MOVE      KEY2,F2
+.
+          BRANCH    F2,ABFA9000,ABFA0200,ABFA0100,ABFA0200,ABFA0200:
+                       ABFA0200
+          GOTO      ABFA9000
+.
+ABFA0100  MOVE      SP70,KEY2
+          UNPACK    THCSCOD,KEY2
+          MATCH     "8",KEY2
+          GOTO      ABFA0200 IF NOT EQUAL    * Not Palliative phase of care
+.
+          MATCH     SP70,PRDSDATE
+          GOTO      ABFA9000 IF EQUAL
+.
+          MOVE      ONE,PCAREFLG
+          CALL      SNAP0000        * AN-SNAP code extracted from QUICKSNAP ?
+.
+ABFA0200  MOVE      ZERO,PROGFLAG
+          MOVE      ZERO,NWAUAMNT
+.
+          PROC      ABFSAINV          * Calculate ABF Sub-Acute Invoice
+.
+.         Displaying ABF Details
+.
+          MOVE      SP70,INVOICNO
+.
+          OPEN      PATABFA2,"patabfaf"
+          OPEN      PMSABFA3,"pmsabfaf"
+          OPEN      PMSPWAA1,"pmspwaaf"
+          OPEN      PMSPWAA2,"pmspwaaf"
+.
+          CALL      CLPATDSC                   * Clear discharge record
+          IF        ASTAT=3
+            MOVE      AADMNO,KEY8
+            CALL      RDDSCH1
+          ENDIF
+.
+          UNPACK    ADATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                 * Format the admin date
+          REP       " 0",CPCDATE
+          PACK      KEY16,CPCDATE,SP20
+.
+          MOVE      AFUNDH,D6                 * Save patient health fund
+          MOVE      SP70,AFUNDH               * Blank HF, use Claim Grouper Ver.
+          CALL      GETDRG
+          MOVE      D6,AFUNDH                 * restore HF
+          IF        OVRCD=0
+            MOVE      DDRGCODE,PDRGCODE
+          ENDIF
+.
+          MATCH     SP70,PDRGCODE
+          IF        @EQUAL
+            MOVE      PTMIPDRG,PDRGCODE          * Default to Admission DRG
+            IF        ASTAT=3
+              MATCH     SP70,PTDSDDRG
+              IF        !@EQUAL
+                MOVE      PTDSDDRG,PDRGCODE        * Use Discharged DRG
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          MATCH     DDATE,ADATE
+          IF        @EQUAL
+            MOVE      ONE,ACDAYCS
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,ZERO,ONE,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      "Yes",KEY3
+          COMPARE   ONE,PMABADJV
+          IF        !@EQUAL
+            MOVE      "No ",KEY3
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,TWENTY6,INVOICNO,SP70
+          CALL      RABF0000
+.
+          IF        ACDAYCS=0
+            MOVE      PMABADJV,AACCAMNT       * Private Patient Accom. Overnight
+          ENDIF
+.
+          WRITE     HTMLFILE;"<table border=1 width=100%>":
+                             "<tr><td width=17%>Admitted On:</td>":
+                             "<td width=18%><b>",KEY16,"</b></td>":
+                             "<td width=15%>Same-Day Payment List:</td>":
+                             "<td width=18%><b>&nbsp; ",KEY3,"</b></td>":
+                           "<td width=14%>Priv Pat Accom Adj.(overnight):</td>":
+                             "<td width=18%><b>&nbsp;",PMABADJV,"</b></td>":
+                             "</tr>";
+. 
+          MOVE      SP70,TDESC
+          MATCH     SP70,ACLAIM
+          IF        !@EQUAL & !@EOS
+            PACK      KEY5,ANSC,ANSL,ACLAIM,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TDESC
+            ENDIF
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,ZERO,TWO,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      "Yes",KEY3
+          COMPARE   ONE,PMABADJV
+          IF        !@EQUAL
+            MOVE      "No ",KEY3
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,TWENTY9,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MATCH     "5",PCARETYP
+          IF        @EQUAL
+            MOVE      PMABADJV,APPSAMNT           * Psychogeatric
+          ENDIF
+.
+          WRITE     HTMLFILE;"<tr><td>Claim Code:</td>":
+                               "<td><b>",ACLAIM,"</b>":
+                               " - <b>",TDESC,"</b></td>":
+                               "<td>Bundled ICU:</td>":
+                               "<td><b>&nbsp; ",KEY3,"</b></td>":
+                 "<td rowspan=2>Priv Pat Service - <br>  Psychogeriatric:</td>":
+                   "<td rowspan=2><b>&nbsp;",PMABADJV,"</b></td>":
+                               "</tr>";
+.
+          PACK      KEY14,AFUNDH,AFNDTB,SP70
+          CALL      RDFUND1
+          IF        OVRCD=1
+            MOVE      SP70,HFNAME
+            MOVE      SP70,PTHFBCAT
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,ZERO,FOUR,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,F10P4
+.
+          WRITE     HTMLFILE;"<tr><td>Health Fund:</td>":
+                               "<td><b>",AFUNDH,"</b>":
+                               " - <b>",HFNAME,"</b></td>":
+                               "<td>Min Days Stay(Lower Bound):</td>":
+                               "<td><b>&nbsp;",F10P4,"</b></td>":
+                               "</tr>";
+.
+          MOVE      SP70,TDESC
+          MATCH     SP70,PTHFBCAT
+          IF        !@EQUAL & !@EOS
+            PACK      KEY5,ANSH,ANST,PTHFBCAT,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TDESC
+            ENDIF
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,ZERO,FIVE,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,F10P4
+.
+          PACK      KEY19,AADMNO,ZERO,THIRTY,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+          MATCH     "4",PCARETYP
+          IF        @EQUAL
+            MOVE      PMABADJV,APPSAMNT           * GEM
+          ENDIF
+.
+          WRITE     HTMLFILE;"<tr><td>Table Type:</td>":
+                               "<td><b>",PTHFBCAT,"</b>":
+                               " - <b>",TDESC,"</b></td>":
+                               "<td>Max Days Stay(Upper bound):</td>":
+                               "<td><b>&nbsp;",F10P4,"</b></td>":
+                               "<td>Priv Pat Service - GEM:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+                               "</tr>";
+.
+          CALL      GETM0000                               * In CMXMATRX.PBL
+.
+          PACK      KEY19,AADMNO,ZERO,ZERO,SIX,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+          DIV       "100",FRM10P4A
+.
+          PACK      KEY19,AADMNO,ZERO,THIRTY1,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+          MATCH     "6",PCARETYP
+          IF        @EQUAL
+            MOVE      PMABADJV,APPSAMNT           * Maintenance
+          ENDIF
+.
+          WRITE     HTMLFILE;"<tr><td>Primary CMBS:</td>":
+                               "<td><b>",PRICMBS,"</b></td>":
+                               "<td>Private Patient Service:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+                               "<td>Priv Pat Service - Maint:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+                               "</tr>";
+.
+          PACK      KEY19,AADMNO,ZERO,ZERO,SEVEN,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+          DIV       "100",FORM10P4
+.
+          MOVE      SP70,DIM3
+          PACK      KEY19,AADMNO,ZERO,THIRTY6,INVOICNO,SP70
+          CALL      RABF0000
+          IF        OVRCD=0
+            MOVE      "RA3",DIM3
+          ENDIF
+.
+          IF        PMABADJV=ZERO
+            PACK      KEY19,AADMNO,ZERO,THIRTY7,INVOICNO,SP70
+            CALL      RABF0000
+            IF        OVRCD=0
+              MOVE      "RA4",DIM3
+            ENDIF
+          ENDIF
+.
+          MOVE      PMABADJV,ATAAMNTS          * ATreat
+.
+          WRITE     HTMLFILE;"<tr><td>Secondary CMBS:</td>":
+                               "<td><b>",SECCMBS,"</b></td>":
+                               "<td>Paediatric (Adjustments) %:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+                               "<td>Hospital Remoteness Area:</td>":
+                               "<td><b>&nbsp;",ATAAMNTS,"(",DIM3,")</b></td>":
+                               "</tr>";
+.
+          PACK      KEY19,AADMNO,ZERO,ZERO,EIGHT,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,F10P4
+.
+          PACK      KEY19,AADMNO,ZERO,THIRTY8,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+.
+          WRITE     HTMLFILE;"<tr><td>Tertiary CMBS:</td>":
+                               "<td><b>",TERCMBS,"</b></td>":
+                               "<td>Same Day (Price Weight):</td>":
+                               "<td><b>&nbsp;",F10P4,"</b></td>":
+                               "<td>HAC 1:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+.                          "<td><b>&nbsp;",FORM10P4,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          CALL      GETI0000                               * In CMXMATRX.PBL
+.
+          PACK      KEY19,AADMNO,ZERO,ZERO,NINE,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          PACK      KEY19,AADMNO,ZERO,THIRTY9,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+.
+          WRITE     HTMLFILE;"<tr><td>Primary ICD Disease:</td>":
+                               "<td><b>",PRIICDCD,"</b></td>":
+                               "<td>Short Stay Outlier Base:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+                               "<td>HAC 2:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+.                          "<td><b>&nbsp;",FORM10P4,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          MOVE      SP70,TDESC
+          MATCH     SP70,ASRCE
+          IF        !@EQUAL & !@EOS
+            PACK      KEY5,ANSS,SP1,ASRCE,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TDESC
+            ENDIF
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,TEN,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+.
+          WRITE     HTMLFILE;"<tr><td>Admission Source:</td>":
+                               "<td><b>",ASRCE,"</b>":
+                               " - <b>",TDESC,"</b></td>":
+                               "<td>Short Stay Outlier Per Diem:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+                               "<td>HAC 3:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+.                          "<td><b>&nbsp;",FORM10P4,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          MOVE      SP70,TDESC
+          MATCH     SP70,ATYPE
+          IF        !@EQUAL & !@EOS
+            PACK      KEY5,ANSA,SP1,ATYPE,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TDESC
+            ENDIF
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,TEN1,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY1,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+.
+          WRITE     HTMLFILE;"<tr><td>Admission Type:</td>":
+                               "<td><b>",ATYPE,"</b>":
+                               " - <b>",TDESC,"</b></td>":
+                               "<td>Inlier (Price Weight):</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+                               "<td>HAC 4:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+.                          "<td><b>&nbsp;",FORM10P4,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          LOAD      AUDFCODE,PTCNCMAU,AUSR1,AUSR2,AUSR3,AUSR4,AUSR5,AUSR6:
+                             AUSR7,PTMIUSR8,PTMIUSR9,PTMIUSR0
+.
+          PACK      KEY19,AADMNO,ZERO,TEN2,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          WRITE     HTMLFILE;"<tr><td>Admission UDF:</td>":
+                               "<td><b>",AUDFCODE,"</b></td>":
+                               "<td>Long Stay Outlier Per Diem:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+                               "<td>HAC 5:</td>":
+                               "<td><b>&nbsp;</b></td>":
+                               "</tr>";
+.
+
+          MOVE      ADATE,FROMDATE
+          PACK      TODATE,CCC,CYY,CMM,CDD
+          REP       " 0",TODATE
+          IF        ASTAT=3
+            MOVE      DDATE,TODATE
+          ENDIF
+          CALL      NHOSPDAY
+.         ADD       ADYHOSP,NBRDAYS
+.
+          MOVE      SP70,KEY16
+          MATCH     SP70,DDATE
+          IF        !@EQUAL
+            UNPACK    DDATE,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE  
+            REP       " 0",CPCDATE
+            PACK      KEY16,CPCDATE,SP20
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,TEN3,INVOICNO,SP70
+          CALL      RABF0000
+.
+          IF        PMABADJV=ZERO
+            PACK      KEY19,AADMNO,ZERO,TEN4,INVOICNO,SP70
+            CALL      RABF0000
+          ENDIF
+.
+          IF        PMABADJV=ZERO
+            PACK      KEY19,AADMNO,ZERO,TEN5,INVOICNO,SP70
+            CALL      RABF0000
+          ENDIF
+          MOVE      PMABADJV,F10P4
+          MOVE      PMABADJV,ASPAAMNT       * A_SPA
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY2,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Disch'd On:</td>":
+                               "<td><b>",KEY16,"</b></td>":
+                               "<td>Specialist Psychiatric Age:</td>":
+                               "<td><b>&nbsp;",F10P4,"</b></td>":
+.                              "<td><b>&nbsp;",F10P4,"</b>  ASPA </td>":
+                               "<td>HAC 6:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+.                          "<td><b>&nbsp;",FORM10P4,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.         
+          MOVE      SP70,TDESC
+          MATCH     SP70,DSTAT
+          IF        !@EQUAL & !@EOS
+            PACK      KEY5,ANSD,SP1,DSTAT,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TDESC
+            ENDIF
+          ENDIF
+.
+          MOVE      SP70,DIM3
+          MOVE      ZERO,FORM10P4
+          PACK      KEY19,AADMNO,ZERO,TEN6,INVOICNO,SP70
+          CALL      RABF0000
+          IF        OVRCD=0
+            MOVE      PMABADJV,FORM10P4
+            MOVE      PMABADJV,ARESAMNT      * A_Res
+            MOVE      "R2 ",DIM3 
+          ENDIF
+.
+          IF        PMABADJV = ZERO
+            PACK      KEY19,AADMNO,ZERO,TEN7,INVOICNO,SP70
+            CALL      RABF0000
+            IF        OVRCD=0
+              MOVE      PMABADJV,FORM10P4
+              MOVE      PMABADJV,ARESAMNT      * A_Res
+              MOVE      "RA3",DIM3
+            ENDIF
+          ENDIF
+.
+          IF        PMABADJV = ZERO
+            PACK      KEY19,AADMNO,ZERO,TEN9,INVOICNO,SP70
+            CALL      RABF0000
+            IF        OVRCD=0
+              MOVE      PMABADJV,FORM10P4
+              MOVE      PMABADJV,ARESAMNT      * A_Res
+              MOVE      "RA4",DIM3
+            ENDIF
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY3,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Discharge Status:</td>":
+                               "<td><b>",DSTAT,"</b>":
+                               " - <b>",TDESC,"</b></td>":
+                               "<td>Patient Remoteness Area Adj:</td>";
+.                          "<td><b>&nbsp;",FORM10P4,"(",DIM3,")</b> ARes </td>":
+.
+          MATCH     SP70,DIM3
+          IF        @EQUAL
+            WRITE     HTMLFILE;"<td><b>&nbsp;",FORM10P4,"</b></td>";
+          ELSE
+            WRITE     HTMLFILE;"<td><b>&nbsp;",FORM10P4,"(",DIM3,")</b></td>";
+          ENDIF
+.
+          WRITE     HTMLFILE;"<td>HAC 7:</td>":
+                             "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+.                          "<td><b>&nbsp;",FRM10P4A,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          MOVE      SP70,TDESC
+          MATCH     SP70,DDEST
+          IF        !@EQUAL & !@EOS
+            PACK      KEY5,ANSD,ANSD,DDEST,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TDESC
+            ENDIF
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,TWENTY1,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+          MOVE      PMABADJV,AINDAMNT        * A_Ind
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY4,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Discharge Destination:</td>":
+                               "<td><b>",DDEST,"</b>":
+                               " - <b>",TDESC,"</b></td>":
+                               "<td>Indigenous Adjustment:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+.                              "<td><b>&nbsp;",FORM10P4,"</b>  AInd  </td>":
+                               "<td>HAC 8:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+.                          "<td><b>&nbsp;",FRM10P4A,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          MOVE      SP70,TDESC
+          MATCH     SP70,PRDCCLSS
+          IF        !@EQUAL & !@EOS
+            PACK      KEY5,ANSC,ANSC,PRDCCLSS,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TDESC
+            ENDIF
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,TWENTY2,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+          MOVE      PMABADJV,ARTAMNTS          * A_RT
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY5,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Care Class:</td>":
+                               "<td><b>",PRDCCLSS,"</b>":
+                               " - <b>",TDESC,"</b></td>":
+                               "<td>Radiotherapy Adjustment:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+.                              "<td><b>&nbsp;",FORM10P4,"</b> ART </td>":
+                               "<td>HAC 9:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+.                          "<td><b>&nbsp;",FRM10P4A,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          PACK      KEY19,AADMNO,ZERO,TWENTY3,INVOICNO,SP70
+          CALL      RABF0000
+
+          MOVE      PMABADJV,FORM10P4
+          MOVE      PMABADJV,ADIAAMNT          * A_Dia
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY6,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Contract ID:</td>":
+                               "<td><b>",CONTRCID,"</b></td>":
+                               "<td>Dialysis Adjustment:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+.                              "<td><b>&nbsp;",FORM10P4,"</b>  ADia</td>":
+                               "<td>HAC 10:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+.                          "<td><b>&nbsp;",FRM10P4A,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          MOVE      SP70,KEY50
+          MATCH     SP70,CONTRCID
+          IF        !@EQUAL 
+            IF        CNTRCEFR=0
+              MOVE      "As at the Effective date",KEY50
+            ENDIF
+            IF        CNTRCEFR=1
+              MOVE      "For Admission From",KEY50
+            ENDIF
+            IF        CNTRCEFR=2
+              MOVE      "For Discharge From",KEY50
+            ENDIF
+            IF        CNTRCEFR=3
+              MOVE      "Contract Effective Details not valid/found",KEY50
+            ENDIF
+          ENDIF 
+          PACK      KEY50,KEY50,SP70
+.
+          PACK      KEY19,AADMNO,ZERO,TWENTY5,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+          IF        ACDAYCS=1
+            MOVE      PMABADJV,AACCAMNT       * Private Patient Accom. Daycase
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY7,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Contract Effective:</td>":
+                               "<td><b>",KEY50,"</b></td>":
+                               "<td>Priv Pat Accom Adj.(sameday):</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+                               "<td>HAC 11:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+.                          "<td><b>&nbsp;",FRM10P4A,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          MOVE      SP70,KEY10
+          MATCH     SP70,CONTRCID
+          IF        !@EQUAL & !@EOS
+            PACK      KEY6,CONTRCID,SP70
+            CALL      RDPMCID1
+            IF        OVRCD=0
+              MATCH     SP70,PMCIFDAT
+              IF        !@EQUAL & !@EOS
+                UNPACK    PMCIFDAT,CCENT,CYEAR,CMON,CDAY
+                PACK      KEY10,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR,SP70
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,TWENTY7,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+          MATCH     "3",PCARETYP
+          IF        @EQUAL
+            MOVE      PMABADJV,APPSAMNT           * Palliative
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY8,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Effective From Date:</td>":
+                               "<td><b>",KEY10,"</b></td>":
+                               "<td>Priv Pat Service - Palliative:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+                               "<td>HAC 12:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+.                          "<td><b>&nbsp;",FRM10P4A,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          MOVE      SP70,KEY10
+          MATCH     SP70,CONTRCID
+          IF        !@EQUAL & !@EOS
+            PACK      KEY6,CONTRCID,SP70
+            CALL      RDPMCID1
+            IF        OVRCD=0
+              MATCH     SP70,PMCITDAT
+              IF        !@EQUAL & !@EOS
+                UNPACK    PMCITDAT,CCENT,CYEAR,CMON,CDAY
+                PACK      KEY10,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR,SP70
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,TWENTY8,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+.
+          PACK      KEY19,AADMNO,ZERO,FORTY9,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+          MATCH     "2",PCARETYP
+          IF        @EQUAL
+            MOVE      PMABADJV,APPSAMNT           * Rehab.
+          ENDIF
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Effective To Date:</td>":
+                               "<td><b>",KEY10,"</b></td>":
+                               "<td>Priv Pat Service - Rehab:</td>":
+                               "<td><b>&nbsp;",FORM10P4,"</b></td>":
+                               "<td>HAC 13:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+.                          "<td><b>&nbsp;",FRM10P4A,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          MOVE      ZERO,F6
+          MOVE      SP70,KEY6
+          PACK      KEY19,AADMNO,ZERO,FIFTY9,INVOICNO,SP70      * Charlson Score
+          CALL      RABF0000
+          IF        OVRCD=0
+            MOVE      PMABADJV,F6
+            MOVE      F6,KEY6
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,FIFTY,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          PACK      KEY19,AADMNO,ZERO,SIXTY3,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,AHACAMNT
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Charlson Score</td>":
+                               "<td><b>",KEY6,"</b></td>":
+                               "<td>AHAC Adjustment</td>":
+                               "<td><b>&nbsp;",PMABADJV,"</b></td>":
+                               "<td>HAC 14:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+.                          "<td><b>&nbsp;",FRM10P4A,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          PACK      KEY19,AADMNO,ZERO,TWENTY4,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FORM10P4
+          MOVE      PMABADJV,AICUAMNT
+.
+          UNPACK    PMABCDES,KEY12
+          UNPACK    KEY12,KEY1,KEY6
+          REP       "H r s ) ",KEY6
+          STRIP     KEY6
+          MOVE      ZERO,ICUHOURS
+          MOVE      KEY6,ICUHOURS
+.
+          PACK      KEY19,AADMNO,ZERO,FIFTY1,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+.
+          WRITE     HTMLFILE;"<tr>":
+                               "<td>Provisional DRG (Uncoded Pats)</td>":
+                               "<td><b>",PTMIPDRG,"</b></td>":
+                               "<td>ICU Adjustment:</td>":
+                               "<td><b>&nbsp;",FORM10P4,KEY12,"</b></td>":
+                               "<td>HAC 15:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+.                          "<td><b>&nbsp;",FRM10P4A,"<br>",PMABCDES,"</b></td>":
+                               "</tr>";
+.
+          WRITE     HTMLFILE;"<tr><td>Discharge DRG:</td>":
+                               "<td><b>",PTDSDDRG,"</b></td>":
+                               "<td>Days of Previous Hospitalisation:</td>":
+                               "<td><b>&nbsp;",ADYHOSP,"</b></td>":
+                               "<td>HAC 16:</td>":
+                               "<td><b>&nbsp;</b></td>":
+                               "</tr>";
+.
+          PACK      KEY19,AADMNO,ZERO,SIXTY2,INVOICNO,SP70      * PW
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,FRM10P4A
+          MOVE      PMABADJV,PWAMOUNT          * PW
+.
+          MOVE      SP70,KEY4
+          MATCH     SP70,INVOICNO              * check if invoiced
+          IF        !@EQUAL
+            UNPACK    PMABADRG,KEY4
+          ENDIF
+          WRITE     HTMLFILE;"<tr>":
+                             "<td>Invoiced DRG:</td>":
+                             "<td><b>",KEY4,"</b></td>";
+.
+.         Complete LOS = ADATE to Disc.or Current
+.
+          MOVE      ADATE,FROMDATE
+          PACK      TODATE,CCC,CYY,CMM,CDD
+          REP       " 0",TODATE
+          IF        ASTAT=3
+            MOVE      DDATE,TODATE
+          ENDIF
+          MOVE      ZERO,F6
+          DAYSEP    ADATE,TODATE,F6           * LOS
+.
+          WRITE     HTMLFILE;"<td>Complete LOS</td>":
+                               "<td><b>&nbsp;",F6,"</b></td>":
+                               "<td>Price Weight:</td>":
+                               "<td><b>&nbsp;",FRM10P4A,"</b></td>":
+                               "</tr>";
+.
+          PACK      KEY19,AADMNO,ZERO,SEVENTY,INVOICNO,SP70      * AN-SNAP
+          CALL      RABF0000
+          IF        PCAREFLG=1
+            UNPACK    PTABCDES,KEY6
+            WRITE     HTMLFILE;"<tr><td>AN-SNAP Code/Version:</td>":
+                               "<td><b>&nbsp;",KEY6,"</td>";
+          ELSE
+            WRITE     HTMLFILE;"<tr><td>AN-SNAP Code/Version:</td>":
+                               "<td><b>&nbsp;",PTRDSNAP,"/",PTRDVERS,"</td>";
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,FIFTY3,INVOICNO,SP70      * NWAU
+          CALL      RABF0000
+          IF        OVRCD=0
+            MATCH     SP70,INVOICNO
+            IF        !@EQUAL
+              MOVE      SP70,KEY19
+              UNPACK    PMABCDES,KEY19      * get NWAU amount with 6 decimal
+              SQUEEZE   KEY19
+              MOVE      KEY19,NWAUAMNT
+            ENDIF
+          ENDIF
+.
+.  Leave days = LOS(ADATE to Disc.or Current) - Days without Leave(NBRDAYS)
+.
+          SUB       NBRDAYS,F6                * LOS without Leaves
+.
+          WRITE     HTMLFILE;"<td>No.of Leave Days:</td>":
+                               "<td><b>&nbsp;",F6,"</b></td>":
+                               "<td>NWAU:</td>":
+                               "<td><b>&nbsp;",PMABADJV,"</b></td>":
+                               "</tr>";
+.
+          MOVE      SP70,KEY2
+          PACK      KEY19,AADMNO,ZERO,SEVENTY2,INVOICNO,SP70
+          CALL      RABF0000
+          UNPACK    PMABCDES,KEY2               * Episode number
+.
+.   PCARETYP=2 for Rehab, 3=Palliative care,4=GEM,
+.          5=Psychogeriatric care,6=Maintenance
+.
+          MOVE      SP70,KEY15
+          MATCH     "2",PCARETYP
+          IF        @EQUAL
+            MOVE      "Rehab.",KEY15
+            GOTO      ABFA2000
+          ENDIF
+          MATCH     "3",PCARETYP
+          IF        @EQUAL
+            MOVE      "Palliative",KEY15
+            GOTO      ABFA2000
+          ENDIF
+          MATCH     "4",PCARETYP
+          IF        @EQUAL
+            MOVE      "GEM",KEY15
+            GOTO      ABFA2000
+          ENDIF
+          MATCH     "5",PCARETYP
+          IF        @EQUAL
+            MOVE      "Psychogeriatric",KEY15
+            GOTO      ABFA2000
+          ENDIF
+          MATCH     "6",PCARETYP
+          IF        @EQUAL
+            MOVE      "Maintenance",KEY15
+            GOTO      ABFA2000
+          ENDIF
+.
+ABFA2000  WRITE     HTMLFILE;"<tr><td>",KEY15," Episode Number</td>":
+                               "<td><b>&nbsp;",KEY2,"</b></td>";
+.
+          MOVE      ZERO,F6
+          PACK      KEY19,AADMNO,ZERO,SIXTY4,INVOICNO,SP70
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,F6
+          MOVE      PMABADJV,LOSNDAYS
+.
+          WRITE     HTMLFILE;"<td>Billable LOS</td>":
+                               "<td><b>&nbsp;",F6,"</b></td>":
+                               "<td></td>":
+                               "<td></td>":
+                               "</tr>";
+.
+          WRITE     HTMLFILE;"<tr>";
+.
+          IF        PCAREFLG=1
+            UNPACK    PRDSDATE,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE  
+            REP       " 0",CPCDATE
+            PACK      KEY16,CPCDATE,SP20
+            WRITE     HTMLFILE;"<td>Phase of Care Start Date:</td>":
+                               "<td><b>",KEY16,"</b></td>";
+          ELSE
+            WRITE     HTMLFILE;"<td></td>":
+                               "<td></td>";
+          ENDIF
+.
+          PACK      KEY19,AADMNO,ZERO,SIXTY1,INVOICNO,SP70      * NEP
+          CALL      RABF0000
+.
+          MOVE      PMABADJV,NEPAMNTS
+.
+          WRITE     HTMLFILE;"<td>&nbsp;</td>":
+                               "<td><b></b></td>":
+                               "<td>NEP:</td>":
+                               "<td><b>&nbsp;",PMABADJV,"</b></td>":
+                               "</tr></table>";
+.
+          CALL      SCAL00000                 * Display ABF calculation
+          GOTO      ABFA9999
+.
+ABFA9000  WRITE     HTMLFILE;"<tr><center><b>ABF/NWAU Details ":
+                             "are not applicable to this event</b></td>":
+                             "</center></tr>";
+          GOTO      ABFA9999
+.
+ABFA9999  RETURN
++
+.*******************************************************************************
+.         Display ABF Calculation
+.*******************************************************************************
+SCAL0000  CALL      SUBF0000                  * Calculate ABF amount
+          MOVE      ABFCHRGE,FORM12P2
+.
+. {PW x (1 + ARes + AInd + ART + ADia) x (1 + ATreat) -
+.  [PW x APPS + LOS x AAcc]} x NEP
+.
+          WRITE     HTMLFILE;"<table border=1 width=100%><tr><td>":
+                      "ABF Calculation:</td></tr>":
+                      "<tr><td>":
+                      "= {PW x ":
+                      "(1 + ARes + AInd + ART + ADia) x ":
+                      "(1 + ATreat) - ":
+                      "[PW x APPS + LOS x AAcc]} x NEP</td></tr>";
+.
+          WRITE     HTMLFILE;"<tr><td>":
+                      "= { ",PWAMOUNT," x ":
+                      "(1 + ",ARESAMNT," + ",AINDAMNT," + ":
+                      ARTAMNTS," + ",ADIAAMNT," ) x ":
+                      "(1 + ",ATAAMNTS,") - [":
+                      PWAMOUNT," x ",APPSAMNT," + ",LOSNDAYS," x ",AACCAMNT:
+                      "]} x  $",NEPAMNTS," </td></tr>";
+.
+          WRITE    HTMLFILE;"<tr><td>":
+                      "= $",FORM12P2,"</td></tr><table>"
+.
+SCAL9999  RETURN
++
+.*******************************************************************************
+.         Calculate ABF amount
+.*******************************************************************************
+SUBF0000
+. {PW x (1 + ARes + AInd + ART + ADia) x (1 + ATreat) -
+.  [PW x APPS + LOS x AAcc]} x NEP
+.
+          MATCH     SP70,INVOICNO
+          IF        !@EQUAL
+            MOVE      NWAUAMNT,ABFCHRGE      * NWAU amount in 6 decimal places
+            GOTO      SUBF9000
+          ENDIF
+.
+          MOVE      ONE,F106A
+          ADD       ARESAMNT,F106A           * A_Res
+          ADD       AINDAMNT,F106A           * A_Ind
+          ADD       ARTAMNTS,F106A           * A_RT
+          ADD       ADIAAMNT,F106A           * A_Dia
+.
+          MOVE      ZERO,F106B
+          MOVE      ONE,F106B
+          ADD       ATAAMNTS,F106B           * x A_ATA/A_Treat
+.
+          MOVE      LOSNDAYS,F106D           * LOS
+          MULT      AACCAMNT,F106D           * x A_acc
+          MOVE      PWAMOUNT,F106C           * PW
+          MULT      APPSAMNT,F106C           * x APPS
+          ADD       F106D,F106C              * + (LOS x A_acc)
+.
+          MOVE      PWAMOUNT,ABFCHRGE        * PW
+          MULT      F106A,ABFCHRGE           * 1 + AInd + ARes + ART + ADia
+          MULT      F106B,ABFCHRGE           * PW x ATreat
+          SUB       F106C,ABFCHRGE           * PW x APPS + LOS x AAcc
+.
+SUBF9000  IF        ABFCHRGE<0
+            MOVE      ZERO,ABFCHRGE         * No negative NWAU
+          ENDIF
+          MULT      NEPAMNTS,ABFCHRGE         * ABF Charge= NWAU x NEP
+.
+SUBF9999  RETURN
+.
+.*******************************************************************************
+.         Initialise variables 
+.*******************************************************************************
+SAMN0000  MOVE      ZERO,PWAMOUNT
+          MOVE      ZERO,ASPAAMNT
+          MOVE      ZERO,AINDAMNT
+          MOVE      ZERO,ARESAMNT
+          MOVE      ZERO,ATAAMNTS
+          MOVE      ZERO,ARTAMNTS
+          MOVE      ZERO,ADIAAMNT
+          MOVE      ZERO,AICUAMNT
+          MOVE      ZERO,APPSAMNT
+          MOVE      ZERO,AACCAMNT
+          MOVE      ZERO,LOSNDAYS
+          MOVE      ZERO,AHACAMNT
+          MOVE      ZERO,NEPAMNTS
+          MOVE      ZERO,ABFCHRGE
+          MOVE      ZERO,ACDAYCS
+          MOVE      ZERO,NWAUAMNT
+SAMN9999  RETURN
++
+.*******************************************************************************
+.         Read ABF file (patabfaf for Palliative care, pmsabfaf for others
+.*******************************************************************************
+RABF0000  UNPACK    KEY19,DAADMNO,D3,INVOICNO
+          IF        PCAREFLG=1
+            PACK      KEY27,AADMNO,PRDSDATE,D3,INVOICNO,SP70
+            CALL      RDPTABF2
+            IF        OVRCD=1
+              CALL      CLPATABF
+            ENDIF
+            MOVE      PTABADJV,PMABADJV        * value adjustment
+            MOVE      PTABCDES,PMABCDES        * description
+          ELSE
+            CALL      RDPMABF3
+            IF        OVRCD=ONE
+              CALL      CLPMSABF
+            ENDIF
+          ENDIF
+RABF9999  RETURN
++
+.*******************************************************************************
+.         Check if AN-SNAP code/version extracted from QuickSnap
+.*******************************************************************************
+SNAP0000  MOVE      AADMNO,PTABADMN          * Admission number
+          MOVE      PRDSDATE,PTABENCT        * Start date
+          MOVE      SP70,PTABINVN            * Blank Inv.no for tobe invoiced
+          MOVE      "070",PTABADJT           * AN-SNAP Type of adjustment
+.
+          PACK      KEY27,PTABADMN,PTABENCT,PTABINVN,PTABADJT,SP70
+          CALL      RDPTABF1
+          BRANCH    OVRCD,SNAP9999
+.
+          MATCH     "QUICKSNAP",PTABCUID
+          GOTO      SNAP2000 IF EQUAL        * created by QUICKSNAP
+          MATCH     "QUICKSNAP",PTABUUID
+          GOTO      SNAP9999 IF NOT EQUAL
+.
+SNAP2000  MOVE      SP70,D1
+          UNPACK    PTABCDES,KEY8,D1          * KEY = AN-SNAP Code/Version
+.
+          MATCH     SP70,D1
+          GOTO      SNAP9999 IF EQUAL
+.
+          MOVE      ONE,NSNAPFLG
+.
+SNAP9999  RETURN
++

@@ -1,0 +1,1413 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   CONVTRKM                                                    *
+.* Desc      :   Data Migration Program to upload medical records tracking   *
+.*               master data from a third party legacy system into the MRT   *
+.*               webPAS module.                                              *
+.*****************************************************************************
+.* Date      :   07/03/2011                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through the convtrkm.txt file and    *
+.*               for each valid record found, it will write a new mrtmasaf   *
+.*               record for the patient.  If the mrtmasaf record already     *
+.*               exists, then the record will get updated.                   *
+.* Mods      :                                                               *
+.*        V10.13.01  27/09/2018  Jill Parkinson Task 0856814                 *
+.*                   Added RAMRMAS1 before WRTMAS1                           *
+.*        V10.12.01  13/06/2018  Steve Armstrong   TSK 0856814               *
+.*                   Mods to lock sector 60 prior to getting next unique key *
+.*                   when writing a new mrtmasaf record.                     *
+.*****************************************************************************
+.*        V10.06.04  22/09/2015  Steve Armstrong   CAR 312973                *
+.*                   Mods to remove leading zeros from MASTVOLN.             *
+.*        V10.06.03  22/09/2015  Steve Armstrong   CAR 312973                *
+.*                   Mods to use MRMAURNO instead of MASTURNO when loading   *
+.*                   KEY20 to check if an mrtmasaf record already exists.    *
+.*        V10.06.02  15/07/2015  Steve Armstrong   CAR 312699                *
+.*                   Changed Record Status (MASTSTAT) to be a mandatory field*
+.*        V10.06.01  17/06/2015  Don Nguyen        CAR 312699                *
+.*                   Modified UPLD0000 to check for Record Status (MASTSTAT) *
+.*****************************************************************************
+.*        V10.05.03  12/12/2014  Ebon Clements     CAR 309814                *
+.*                   Added hospital specific categeory code check - VCOD0000 *
+.*        V10.05.02  10/12/2014  Ebon Clements     CAR 309743                *
+.*                   Check MRCNUKEY not on file prior to use - SETV4500      *
+.*        V10.05.01  02/09/2014  Steve Armstrong   CAR 305694                *
+.*                   Mods to only default home hospital/location to the      *
+.*                   current hospital/location if the home hospital is blank *
+.*                   and the site is running multi-hospital.                 *
+.*****************************************************************************
+.*        V10.04.02  31/03/2014  Steve Armstrong   CAR 296128                *
+.*                   Fixed validation routine (CVAL0000) to use mrtmasaf     *
+.*                   variable instead of upload variable.                    *
+.*        V10.04.01  17/03/2014  Steve Armstrong   CAR 296128                *
+.*                   Mods to add temp mapping tables for coded fields.       *
+.*                   Added display of warning message if error records found.*
+.*****************************************************************************
+.*        V10.03.02  11/04/2013  Steve Armstrong   CAR 268090                *
+.*                   Added new fields to upload file (MASTCHOS & MASTCLOC).  *
+.*        V10.03.01  06/06/2012  Steve Armstrong   CAR 266738                *
+.*                   Mods to default population of MRMACHOS.                 *
+.*****************************************************************************
+.*        V10.02.02  10/08/2011  Steve Armstrong   CAR 248262                *
+.*                   Removed check for deceased patients.                    *
+.*        V10.02.01  30/06/2011  Steve Armstrong   CAR 240724                *
+.*                   Mods for addition of hospital codes to MRTMASFD &       *
+.*                   MRTLOCFD.                                               *
+.*        V10.02.00  07/03/2011  Steve Armstrong   CAR 240663                *
+.*                   Created program                                         *
+.*****************************************************************************
+.
+          INC       STD001FD      
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       IBACONFD/INC
+          INC       MLTCODFD/INC
+          INC       MRTCONFD/INC
+          INC       MRTMASFD/INC
+          INC       MRTHISFD/INC
+          INC       MRTLOCFD/INC
+          INC       PATCODFD/INC
+          INC       PATHSPFD/INC
+          INC       PATMA1FD/INC
+.
+.         MR Tracking Master Details Upload file layout - convtrkm.txt
+.
+TRAKMUPL  FILE      HL7, FIXED=4000         * Pipe delimited upload file
+.                                             4096 is maximum
+.
+.Name     Type    Length       Description
+.----     ----    ------       -----------
+MASTURNO  DIM       8      1   U/R Number                             (mrmaurno)
+MASTHHOS  DIM       3      9   Home Hospital (pathspaf)               (mrmahhos)
+MASTHLOC  DIM       4     12   Home Location (coded - mrtlocaf)       (mrmahloc)
+MASTDOTY  DIM       3     16   Type of document (Cat TY)              (mrmadoty)
+MASTVOLN  DIM       2     19   Volume                                 (mrmavoln)
+MASTSTAT  DIM       3     21   Record Status (Cat RS)                 (mrmastat)
+MASTFILM  DIM       25    24   MicroFilm Address                      (mrmafilm)
+MASTEPDT  DIM       8     49   'Episode To' Date (ccyymmdd)           (mrmaepdt)
+MASTOHOS  DIM       3     57   Originating Hospital (pathspaf)        (mrmaohos)
+MASTCOMM  DIM       20    60   Comments                               (mrmacomm)
+MASTCHOS  DIM       3     80   Current Hospital (pathspaf)            (mrmachos)
+MASTCLOC  DIM       4     83   Current Location (coded - mrtlocaf)    (mrmacloc)
+.
+. End of Record           87
+.
+.
+.         Temporary Mapping Files
+.
+.
+.         Hospital File - hospital.dat (pathspaf)
+.
+HOSPLFLG  FORM      1                            * Hospital mapping flag
+TEMP1     IFILE     SQL, FIXED=7, KEY="U1-3"
+.
+.Name     Type      Length   Physical   Start   Description
+.----     ----      ------   --------   -----   -----------
+OLDHOSPL  DIM       3        3          1       Old hospital code
+NEWHOSPL  DIM       3        3          4       New hospital code
+.End of Record                          7
+.
+.         MRT Location File - location.dat (mrtlocaf)
+.
+LOCATFLG  FORM      1                            * MRT Location mapping flag
+TEMP2     IFILE     SQL, FIXED=15, KEY="U1-3,4-7"
+.
+.Name     Type      Length   Physical   Start   Description
+.----     ----      ------   --------   -----   -----------
+.OLDHOSPL DIM       3        3          1       Old hospital code
+OLDLOCAT  DIM       4        4          4       Old location code
+.NEWHOSPL DIM       3        3          8       New hospital code
+NEWLOCAT  DIM       4        4         11       New location code
+.End of Record                         15
+.
+.         Type of Document File - documtyp.dat (Cat TY)
+.
+TYPEDFLG  FORM      1                            * Type of Document mapping flag
+TEMP3     IFILE     SQL, FIXED=7, KEY="U1-3"
+.
+.Name     Type      Length   Physical   Start   Description
+.----     ----      ------   --------   -----   -----------
+OLDTYPED  DIM       3        3          1       Old type of document code
+NEWTYPED  DIM       3        3          4       New type of document code
+.End of Record                          7
+.
+.         Record Status File - recordst.dat (Cat RS)
+.
+RECSTFLG  FORM      1                            * Record Status mapping flag
+TEMP4     IFILE     SQL, FIXED=7, KEY="U1-3"
+.
+.Name     Type      Length   Physical   Start   Description
+.----     ----      ------   --------   -----   -----------
+OLDRECST  DIM       3        3          1       Old record status code
+NEWRECST  DIM       3        3          4       New record status code
+.End of Record                          7
+.
+.
+. LOCAL VARIABLE DEFINITIONS
+. --------------------------
+ADDCOUNT  FORM      8             * records added count
+.
+CODCOUNT  FORM      8             * code error record count
+RECCOUNT  FORM      8
+CURRCENT  FORM      2             * current century
+CURRDATE  DIM       8
+.
+DATEFLG1  FORM      1             * Date Type flag
+.                                     0 = full date (ccyymmdd)
+.                                     1 = partial date (ccyymm)
+DATEFLG2  FORM      1             * Dates Allowed flag
+.                                     0 = any date allowed
+.                                     1 = future dates not allowed
+.                                     2 = future dates only allowed
+DIM2C     DIM       2
+DIM2D     DIM       2
+DIM2M     DIM       2
+DIM2Y     DIM       2
+DIM3      DIM       3
+DIM4      DIM       4
+DTECOUNT  FORM      8             * date error record count
+.
+ERORDESC  DIM       70
+ERORFLAG  FORM      1             * Field Validation Error Flag
+.                                     0 = No Errors on Field Validations
+.                                     1 = Errors on Field Validations
+.
+FORM10    FORM      10
+.
+MANCOUNT  FORM      8             * mandatory field error record count
+.
+NUMCOUNT  FORM      8             * numeric error record count
+.
+TEMPHOSP  DIM       3             * Hospital for multi hospital category codes
+TEMPCATG  DIM       6             * Category (or HF for HF Table validation)
+TEMPCODE  DIM       10            * Coded field (length = max code field length)
+TEMPDATE  DIM       8
+TMPSTRNG  DIM       40            * Temporary string (max field length)
+TEMPTYPE  FORM      1             * Type of coded field
+TMPFIELD  DIM       8             * Field name
+.
+UNKCOUNT  FORM      8             * unknown U/R counter
+UPDCOUNT  FORM      8             * records updated count
+UPDTFLAG  FORM      1             * update flag
+.                                     0 = write a new record
+.                                     1 = update an existing record
+.
+VCHKFLAG  FORM      1             * validation flag
+.                                     0 = writing data to database
+.                                     1 = only validating import data file
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+PIPE      INIT      "|"
+.
+.
+.
+PRGNAM    INIT      "Upload MR Tracking Master Data"
+PRGID     INIT      "CONVTRKM"
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                   MAIN0000                                 *
+.*                                 Main Module                                *
+.******************************************************************************
+.
+MAIN0000  CALL      INIT0000                * Initialise variables
+.                                     
+MAIN0100  CALL      OPTN0000                * select options
+          BRANCH    EXIT,MAIN9999           * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000        * proceed with upload
+.
+MAIN1000  CALL      OPEN0000                * Select option
+          BRANCH    EXIT,MAIN0100
+.
+          CALL      DMAP0000               * display mapping files
+          BRANCH    EXIT,MAIN0100:         * no (to continue)
+                         MAIN9999          * cancel (to continue)
+.
+          CALL      ASKQ0000                * validation run only ?
+.
+          CALL      CONTQST                 * ok to continue ?
+          BRANCH    CEXIT,MAIN2000:         * yes
+                          MAIN0100:         * no
+                          MAIN0100          * cancel
+.
+MAIN2000  CALL      UPLD0000                * upload the data file
+.
+MAIN9999  CHAIN     PGM
++
+.******************************************************************************
+.*                                  INIT0000       Called by: MAIN0000        *
+.*                  Open all files and initialise variables                   *
+.******************************************************************************
+.
+INIT0000  CALL      DISPHEAD
+.
+          DISPLAY   *P56:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          DISPLAY   *P64:24,"mrthisaf";
+          OPEN      MRTHISA1,"mrthisaf"
+.
+          DISPLAY   *P64:24,"mrtlocaf";
+          OPEN      MRTLOCA1,"mrtlocaf"
+.
+          DISPLAY   *P64:24,"mrtmasaf";
+          OPEN      MRTMASA1,"mrtmasaf"
+          OPEN      MRTMASA2,"mrtmasaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          IF        IBCNMHOS=1
+            DISPLAY   *P64:24,"mltcodaf";
+            OPEN      MLTCODA1,"mltcodaf"
+          ENDIF
+.
+          DISPLAY   *P64:24,"pathspas";
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          MOVE      ONE,CNOUNDLN
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run data upload                         *
+.*                        TRUE  (1)  Exit selected                           *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Data Upload"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run data upload
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.******************************************************************************
+.*                                  OPEN0000       Called by: MAIN0000        *
+.*                  Open upload files and mapping tables                      *
+.* Returns:   EXIT  0 = Ok to continue                                        *
+.*                  1 = File(s) not found so can't continue                   *
+.******************************************************************************
+.
+OPEN0000  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TRAKMUPL,"convtrkm"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+.         Hospital mapping file (pathspaf)
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TEMP1,"hospital"             * hospital file found ?
+          TRAPCLR   IO
+          IF        OVRCD=1
+            MOVE      ZERO,HOSPLFLG              * no
+          ELSE
+            MOVE      ONE,HOSPLFLG               * yes
+          ENDIF
+.
+.         MRT Location mapping file (mrtlocaf)
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TEMP2,"location"             * location file found ?
+          TRAPCLR   IO
+          IF        OVRCD=1
+            MOVE      ZERO,LOCATFLG              * no
+          ELSE
+            MOVE      ONE,LOCATFLG               * yes
+          ENDIF
+.
+.         Type of Document mapping file (Cat TY)
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TEMP3,"documtyp"             * type of document file found ?
+          TRAPCLR   IO
+          IF        OVRCD=1
+            MOVE      ZERO,TYPEDFLG              * no
+          ELSE
+            MOVE      ONE,TYPEDFLG               * yes
+          ENDIF
+.
+.         Record Status mapping file (Cat RS)
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TEMP4,"recordst"             * record status file found ?
+          TRAPCLR   IO
+          IF        OVRCD=1
+            MOVE      ZERO,RECSTFLG              * no
+          ELSE
+            MOVE      ONE,RECSTFLG               * yes
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,*B,"Upload file - convtrkm.txt - not found.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.******************************************************************************
+.*                                  DMAP0000              Called by: MAIN0000 *
+.*                       Display File Name & Mapping files                    *
+.* Requires: Mapping Flags                                                    *
+.* Returns:  EXIT  0 = Ok to continue                                         *
+.*                 1 = No selected                                            *
+.*                 2 = Cancel selected                                        *
+.******************************************************************************
+.
+DMAP0000  DISPLAY   *P1:4,*EF,*V2LON,SP9,*ULON,"Mapping Tables"
+.
+          MOVE      DNO,DIM3
+          LOAD      DIM3,HOSPLFLG,DYES
+.
+          DISPLAY   *P1:6,*EL,"Mapping Hospital Code (pathspaf)       ":
+                    *V2LON,DIM3
+.
+          MOVE      DNO,DIM3
+          LOAD      DIM3,LOCATFLG,DYES
+.
+          DISPLAY   *P1:7,*EL,"Mapping Hosp/Location Code (mrtlocaf)  ":
+                    *V2LON,DIM3
+.
+          MOVE      DNO,DIM3
+          LOAD      DIM3,TYPEDFLG,DYES
+.
+          DISPLAY   *P1:8,*EL,"Mapping Type of Document Code (Cat TY) ":
+                    *V2LON,DIM3
+.
+          MOVE      DNO,DIM3
+          LOAD      DIM3,RECSTFLG,DYES
+.
+          DISPLAY   *P1:9,*EL,"Mapping Record Status Code (Cat RS)    ":
+                    *V2LON,DIM3
+.
+DMAP8000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,DMAP9000:        * yes
+                          DMAP9100:        * no
+                          DMAP9200         * cancel
+.
+DMAP9000  MOVE      ZERO,EXIT
+          GOTO      DMAP9999
+.
+DMAP9100  MOVE      ONE,EXIT
+          GOTO      DMAP9999
+.
+DMAP9200  MOVE      TWO,EXIT
+.
+DMAP9999  RETURN
++
+.*****************************************************************************
+.*                               ASKQ0000              Called by: MAIN0000   *
+.*                  Ask if running validation only                           *
+.* Returns: VCHKFLAG  - validation flag                                      *
+.*                       0 = normal mode                                     *
+.*                       1 = validation only mode                            *
+.*****************************************************************************
+.
+ASKQ0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Data Upload":
+                    *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+ASKQ1000  MOVE      ANSY,ANS
+          KEYIN     *P1:10,*EL,"Validation only (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+                    *P25:10,*V2LON,*RV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS                     * Y input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DYES,*HOFF:
+                      *P35:10,"(No data will be uploaded)"
+            MOVE      ONE,VCHKFLAG               * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          MATCH     ANSN,ANS                     * N input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DNO,*HOFF:
+                      *P35:10,"(Data will be uploaded)"
+            MOVE      ZERO,VCHKFLAG              * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          GOTO      ASKQ1000                     * invalid input
+.
+ASKQ9999  RETURN
++
+.******************************************************************************
+.*                                  UPLD0000       Called by: MAIN0000        *
+.*                     Upload Medical Records Tracking Master Records         *
+.******************************************************************************
+.
+UPLD0000  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      CCC,CURRCENT
+.
+          DISPLAY   *P1:12,"Processing ",*V2LON,"convtrkm.txt ",*HOFF:
+                    *P1:14,"Started    : ",*V2LON,CTIMEIS,*HOFF:
+                    *P1:16,"U/R Number : ":
+                    *P1:17,"Location   : ":
+                    *P1:18,"Type       : ":
+                    *P1:19,"Volume     : ":
+                    *P1:20,"Records    : ";
+.
+          MOVE      ZERO,RECCOUNT                * initialise records read count
+          MOVE      ZERO,ADDCOUNT                * initialise added record count
+          MOVE      ZERO,UPDCOUNT                * init. updated record count
+          MOVE      ZERO,CODCOUNT                * init. code error record count
+          MOVE      ZERO,DTECOUNT                * init. date error record count
+          MOVE      ZERO,MANCOUNT                * init. mand error record count
+          MOVE      ZERO,NUMCOUNT                * init. num error record count
+          MOVE      ZERO,UNKCOUNT                * init. unknown pt record count
+.
+          CALL      HEAD0000
+.
+.         Loop through the MRT master records upload file (convtrkm)
+.
+UPLD1000  MOVE      ZERO,UPDTFLAG                * set flag for write
+.
+          READ      TRAKMUPL,SEQ;MASTURNO,MASTHHOS,MASTHLOC,MASTDOTY,MASTVOLN:
+                                 MASTSTAT,MASTFILM,MASTEPDT,MASTOHOS,MASTCOMM:
+                                 MASTCHOS,MASTCLOC
+          GOTO      UPLD4000 IF OVER
+.
+          ADD       ONE,RECCOUNT
+          IF        (RECCOUNT % 100) = 0 | RECCOUNT = 1
+            DISPLAY   *P14:16,*V2LON,MASTURNO:
+                      *P14:17,MASTHLOC:
+                      *P14:18,MASTDOTY:
+                      *P14:19,MASTVOLN:
+                      *P14:20,RECCOUNT;
+          ENDIF
+.
+          CALL      POUT0000                     * pad out fields with spaces
+.
+          CALL      CLMRTMAS                     * clear mrtmasaf variables
+          CALL      CLPATMAS                     * clear patient master vars.
+.
+          CALL      VURN0000                     * validate U/R
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      MAND0000                     * check for Mandatory fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      DVAL0000                     * date validation
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      VNUM0000                     * validate numeric fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+.         Set the key fields that may require mapping prior to checking
+.         if the record already exists
+.
+          CALL      SETK0000
+          PACK      KEY20,MRMAURNO,MRMAHHOS,MRMAHLOC,MRMADOTY,MASTVOLN
+          CALL      RDMRMAS1                     * master record on file ?
+          BRANCH    OVRCD,UPLD2000               * no
+.
+          MOVE      ONE,UPDTFLAG                 * yes - set flag for update
+.
+UPLD2000  CALL      SETV0000                     * set up mrtmasaf variables
+.
+          CALL      CVAL0000                     * code validation
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          BRANCH    VCHKFLAG,UPLD1000            * error checking only
+.
+.         Write to tracking master file (mrtmasaf)
+.
+          IF        UPDTFLAG = 0                  
+             PACK      KEY20,MRMAURNO,MRMAHHOS,MRMAHLOC,MRMADOTY,MASTVOLN
+             CALL      RAMRMAS1                     * master record on file ?
+             IF        OVRCD=1
+               CALL      WRTMAS1                    * write mrtmasaf record
+               ADD       ONE,ADDCOUNT
+             ELSE
+                CALL      UPMRMAS1                   * update mrtmasaf record
+                ADD       ONE,UPDCOUNT
+             ENDIF
+          ELSE
+            CALL      UPMRMAS1                   * update mrtmasaf record
+            ADD       ONE,UPDCOUNT
+          ENDIF
+.
+          GOTO      UPLD1000                     * get next record
+.         
+.         Upload completed
+.         
+UPLD4000  ASSIGN    (CODCOUNT+DTECOUNT+MANCOUNT+NUMCOUNT+UNKCOUNT),FORM10
+          IF        FORM10 > 0
+            CALL      LINE0000                   * print bottom line if errors
+          ENDIF
+.
+          COMPARE   CLNO,FIFTY4                  * room for stats ?
+          CALL      HEAD0000 IF LESS             * no - new page req'd.
+.
+          CLOCK     TIME,CTIMEIS
+          DISPLAY   *P14:20,*V2LON,RECCOUNT,*HOFF:
+                    *P1:22,"Finished   : ",*V2LON,CTIMEIS
+.
+.         Warn the user if there were any records with errors
+.
+          IF        FORM10 > 0
+            DISPLAY   *P1:23,*V2LON,*BLINKON,"Warning:  Records found with ":
+                      "errors.  Refer to error report."
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,*B,"Upload complete.  ";
+          CALL      HITENTER
+.
+          PRINT     *N:
+                    *1,"Total records read                    - ",RECCOUNT,*N:
+                    *1,"Records added                         - ",ADDCOUNT,*N:
+                    *1,"Records updated                       - ",UPDCOUNT,*N:
+                    *1,"Records with invalid codes detected   - ",CODCOUNT,*N:
+                    *1,"Records with invalid numeric fields   - ",NUMCOUNT,*N:
+                    *1,"Records with blank mandatory fields   - ",MANCOUNT,*N:
+                    *1,"Records with unknown U/R numbers      - ",UNKCOUNT,*N:
+                    *1,"Records with invalid dates detected   - ",DTECOUNT:
+                    *N,*N,*1,"*** End of Report ***"
+.
+UPLD9999  RETURN
++
+.******************************************************************************
+.*                                  SETK0000              Called by: UPLD0000 *
+.*                       Load the mrtmasaf record variables                   *
+.******************************************************************************
+.
+.         Set variables for writing a new mrtmasaf record
+.
+SETK0000  MOVE      MASTHHOS,MRMAHHOS
+          MOVE      MASTHLOC,MRMAHLOC
+          IF        LOCATFLG = 1
+            PACK      KEY7,MASTHHOS,MASTHLOC
+            CALL      RDTEMP2                    * hosp/loc. code on map file ?
+            IF        OVRCD = 0
+              MOVE      NEWHOSPL,MRMAHHOS        * yes - load mapped hospital
+              MOVE      NEWLOCAT,MRMAHLOC        * load mapped location
+            ENDIF
+          ENDIF
+.
+          MOVE      MASTDOTY,MRMADOTY
+          IF        TYPEDFLG = 1
+            MOVE      MASTDOTY,KEY3
+            CALL      RDTEMP3                    * doc type code on map file ?
+            IF        OVRCD = 0
+              MOVE      NEWTYPED,MRMADOTY        * yes - load mapped doc. type
+            ENDIF
+          ENDIF
+.
+SETK9999  RETURN
++
+.******************************************************************************
+.*                                  SETV0000              Called by: UPLD0000 *
+.*                       Load the mrtmasaf record variables                   *
+.******************************************************************************
+.
+.         Set common variables for both write and update
+.
+SETV0000  COMPARE   ZERO,IBCNMHOS                 * using multi hospital ?
+          GOTO      SETV1000 IF EQUAL             * no
+.
+          MATCH     SP3,MASTCHOS                  * yes-current hospital blank ?
+          GOTO      SETV1000 IF NOT EQUAL         * no
+.
+          MOVE      MASTHHOS,MRMACHOS             * yes - default to home values
+          MOVE      MASTHLOC,MRMACLOC
+          GOTO      SETV2000
+.
+SETV1000  MOVE      MASTCHOS,MRMACHOS             * load current data
+          MOVE      MASTCLOC,MRMACLOC
+.
+SETV2000  IF        LOCATFLG = 1
+            PACK      KEY7,MRMACHOS,MRMACLOC
+            CALL      RDTEMP2                    * hosp/loc. code on map file ?
+            IF        OVRCD = 0
+              MOVE      NEWHOSPL,MRMACHOS        * yes - load mapped hospital
+              MOVE      NEWLOCAT,MRMACLOC        * load mapped location
+            ENDIF
+          ENDIF
+.
+          MOVE      MASTSTAT,MRMASTAT
+          IF        RECSTFLG = 1
+            MOVE      MASTSTAT,KEY3
+            CALL      RDTEMP4                    * rec status code on map file ?
+            IF        OVRCD = 0
+              MOVE      NEWRECST,MRMASTAT        * yes - load mapped status
+            ENDIF
+          ENDIF
+.
+          MOVE      MASTFILM,MRMAFILM
+.
+.         Only load the episode to date if there is a microfilm address.
+.         If the episode to date is blank when there is a microfilm address,
+.         default to the current date.
+.
+          MOVE      SP8,MRMAEPDT
+          MATCH     SP25,MASTFILM
+          IF        !@EQUAL
+            MATCH     SP8,MASTEPDT
+            IF        @EQUAL
+              MOVE      CURRDATE,MRMAEPDT
+            ELSE
+              MOVE      MASTEPDT,MRMAEPDT
+            ENDIF
+          ENDIF
+.
+.         If the originating hospital is blank, then default it
+.         to the home hospital
+.
+          MATCH     SP3,MASTOHOS
+          IF        @EQUAL
+            MOVE      MASTHHOS,MRMAOHOS
+          ELSE
+            MOVE      MASTOHOS,MRMAOHOS
+          ENDIF
+          IF        HOSPLFLG = 1
+            MOVE      MRMAOHOS,KEY3
+            CALL      RDTEMP1                    * hospital code on map file ?
+            IF        OVRCD = 0
+              MOVE      NEWHOSPL,MRMAOHOS        * yes - load mapped hospital
+            ENDIF
+          ENDIF
+.
+          MOVE      MASTCOMM,MRMACOMM
+.
+          BRANCH    UPDTFLAG,SETV5000            * update mrtmasaf
+.
+.         Set variables for writing a new mrtmasaf record
+.         Note: Home Hospital/Location and Document Type have already
+.         been set in SETK0000.
+.
+          MOVE      MASTVOLN,MRMAVOLN
+.
+          MOVE      " 60",PRXCODE                * System Lock Sector 60
+          CALL      GETSLK00                     * Get System Lock-Sector 60
+.
+SETV4500  READ      CONTROLF,SIXTY;*95,MRCNUKEY
+          ADD       ONE,MRCNUKEY
+          WRITAB    CONTROLF,SIXTY;*95,MRCNUKEY
+          SUB       ONE,MRCNUKEY
+          MOVE      MRCNUKEY,MRMAKEY
+.
+          PACK      KEY10,MRMAKEY,SP70
+          CALL      RAMRMAS2                * Read a master file record
+          COMPARE   ONE,OVRCD
+          GOTO      SETV4500 IF NOT EQUAL   * Record exists, get next unq key
+.
+          CALL      RELSLK00                     * Release System Lock-Sector 60
+.
+          MOVE      CURRDATE,MRMADTCR
+          MOVE      CTIMEIS,MRMATMCR
+          MOVE      "CONVTRKM  ",MRMACUID
+          GOTO      SETV9999
+.
+.         Set variables for updating an existing mrtmasaf record
+.
+SETV5000  MOVE      CURRDATE,MRMADTUP
+          MOVE      CTIMEIS,MRMATMUP
+          MOVE      "CONVTRKM  ",MRMAUUID
+.
+SETV9999  RETURN
++
+.*****************************************************************************
+.*                              VURN0000           Called by: UPLD0000       *
+.*                        Validate U/R Number                                *
+.* Requires: MASTURNO - U/R number (right justified)                         *
+.* Returns:  Valid read on PMI data                                          *
+.*           EXIT  0 = PMI record found - ok to continue                     *
+.*                 1 = PMI record not found - ignore record                  *
+.*          UNKCOUNT - updated count of unknown U/R numbers                  *
+.*          MRMAURNO - U/R number right justified                            *
+.*****************************************************************************
+.
+VURN0000  MATCH     SP8,MASTURNO                 * blank U/R ?
+          IF        @EQUAL
+            MOVE      "U/R missing ",ERORDESC    * yes
+            GOTO      VURN9150
+          ENDIF
+.
+          MOVE      MASTURNO,KEY8
+          CALL      RDMAST1                      * U/R on file ?
+          BRANCH    OVRCD,VURN9100               * no - error
+.
+          COMPARE   ONE,PSTAT                    * merged U/R ?
+          GOTO      VURN9000 IF NOT EQUAL        * no
+.
+.         We have a merged U/R record, so get the new U/R
+.
+          MATCH     PPSNAME,SP20                 * blank previous name field ?
+          GOTO      VURN9100 IF EQUAL            * yes - error
+.
+          MOVE      PPSNAME,MASTURNO             * no - load new U/R
+          GOTO      VURN0000                     * get new pmi record
+.
+VURN9000  MOVE      MASTURNO,MRMAURNO            * load U/R number
+          MOVE      ZERO,EXIT
+          GOTO      VURN9999
+.
+VURN9100  MOVE      "PMI Record not found ",ERORDESC
+VURN9150  CALL      PERR0000                     * print error line
+          ADD       ONE,UNKCOUNT                 * increment unknown U/R count
+          MOVE      ONE,EXIT
+.
+VURN9999  RETURN
++
+.*****************************************************************************
+.*                            POUT0000             Called by: PMST0000       *
+.*            Pad out all the record fields with spaces                      *
+.*****************************************************************************
+.
+POUT0000  PACK      MASTURNO,MASTURNO,SP8
+          RJUSTIFY  MASTURNO
+          PACK      MASTHHOS,MASTHHOS,SP3 
+          PACK      MASTHLOC,MASTHLOC,SP4 
+          PACK      MASTDOTY,MASTDOTY,SP3 
+          PACK      MASTVOLN,MASTVOLN,SP2 
+          RJUSTIFY  MASTVOLN
+          MOVE      MASTVOLN,FORM2               * remove any leading zeros
+          MOVE      FORM2,MASTVOLN
+.
+          PACK      MASTSTAT,MASTSTAT,SP3
+          PACK      MASTFILM,MASTFILM,SP25
+          PACK      MASTEPDT,MASTEPDT,SP8 
+          PACK      MASTOHOS,MASTOHOS,SP3 
+          PACK      MASTCOMM,MASTCOMM,SP20
+          PACK      MASTCHOS,MASTCHOS,SP3
+          PACK      MASTCLOC,MASTCLOC,SP4
+.
+POUT9999  RETURN
++
+.******************************************************************************
+.*                                     HEAD0000                               *
+.*              Routine to print the error report header                      *
+.******************************************************************************
+.
+HEAD0000  MOVE      "- Error Report",CPHDROPT
+          CALL      HEAD132                 * Print the report header
+.
+          PRINT     "<convtrkm>"
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"U/R No.",*12,PIPE,*14,"Home Hosp.",*25,PIPE:
+                    *27,"Location",*36,PIPE,*38,"Type",*43,PIPE,*45,"Volume":
+                    *52,PIPE,*54,"Error Description",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      SEVEN,CLNO                   * initialise line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: HEAD0000  *
+.*                      Draw line across page                               *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.****************************************************************************
+.*                             MAND0000                Called by: UPLD0000  *
+.*                 Check for standard Mandatory fields                      *
+.* Returns: EXIT   0 = all mandatory fields are populated                   *
+.*                 1 = one or more mandatory fields are blank               *
+.*          MANCOUNT - updated count of records with mandatory fields       *
+.*                     missing                                              *
+.****************************************************************************
+.
+MAND0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          IF        IBCNMHOS = 1
+            MOVE      MASTHHOS,TMPSTRNG
+            MOVE      "MASTHHOS",TMPFIELD        * home hospital
+            CALL      CHKM0000
+          ENDIF
+.
+          MOVE      MASTHLOC,TMPSTRNG
+          MOVE      "MASTHLOC",TMPFIELD          * home location
+          CALL      CHKM0000
+.
+          MOVE      MASTDOTY,TMPSTRNG
+          MOVE      "MASTDOTY",TMPFIELD          * type of document
+          CALL      CHKM0000
+.
+          MOVE      MASTVOLN,TMPSTRNG
+          MOVE      "MASTVOLN",TMPFIELD          * volume number
+          CALL      CHKM0000
+.
+          MOVE      MASTSTAT,TMPSTRNG
+          MOVE      "MASTSTAT",TMPFIELD          * record status
+          CALL      CHKM0000
+.
+          COMPARE   ONE,IBCNMHOS                 * using multi hospital ?
+          GOTO      MAND9000 IF NOT EQUAL        * no - finished
+.
+.         We are using multi hospital, so make sure that the current
+.         hospital (MASTCHOS) and current location (MASTCLOC) fields
+.         are either both populated or both blank
+.
+          MATCH     SP3,MASTCHOS                 * current hospital blank ?
+          GOTO      MAND1000 IF EQUAL            * yes
+.
+          MOVE      MASTCLOC,TMPSTRNG            * no - current loc'n mandatory
+          MOVE      "MASTCLOC",TMPFIELD
+          CALL      CHKM0000
+          GOTO      MAND9000
+.
+MAND1000  MATCH     SP3,MASTCLOC                 * current location blank ?
+          GOTO      MAND9000 IF EQUAL            * yes
+.
+          MOVE      MASTCHOS,TMPSTRNG            * no - current hosp. mandatory
+          MOVE      "MASTCHOS",TMPFIELD
+          CALL      CHKM0000
+.
+MAND9000  BRANCH    ERORFLAG,MAND9100            * errors on mand. fields
+.
+          MOVE      ZERO,EXIT                    * no errors on mand. fields
+          GOTO      MAND9999
+.
+MAND9100  ADD       ONE,MANCOUNT                 * incr. mand error record count
+          MOVE      ONE,EXIT
+.
+MAND9999  RETURN
++
+.*****************************************************************************
+.*                            CHKM0000             Called by: MAND0000       *
+.*                    Check if a mandatory field is blank                    *
+.* Requires: TMPSTRNG - field to be checked                                  *
+.*           TMPFIELD - 8 character field name                               *
+.* Returns:  ERORFLAG = 1   field is blank (error)                           *
+.*****************************************************************************
+.
+CHKM0000  MATCH     TMPSTRNG,SP4                 * blank field ?
+          GOTO      CHKM9999 IF NOT EQUAL        * no - finished
+.
+          MOVE      "Mandatory Field blank ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set error flag
+.
+CHKM9999  RETURN
++
+.*****************************************************************************
+.*                              DVAL0000           Called by: UPLD0000       *
+.*                  Validate all date fields                                 *
+.* Returns:  EXIT - 0 = No date validation errors                            *
+.*                  1 = Date validation errors                               *
+.*          DTECOUNT - updated count of records with date field errors       *
+.*****************************************************************************
+.
+DVAL0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MOVE      MASTEPDT,TEMPDATE
+          MOVE      ZERO,DATEFLG1                * ccyymmdd
+          MOVE      ONE,DATEFLG2                 * future date not allowed
+          MOVE      "MASTEPDT",TMPFIELD
+          CALL      VDAT0000
+.
+          BRANCH    ERORFLAG,DVAL9100            * errors on date validation
+.
+          MOVE      ZERO,EXIT                    * no errors on date validation
+          GOTO      DVAL9999
+.
+DVAL9100  ADD       ONE,DTECOUNT                 * incr. date error record count
+          MOVE      ONE,EXIT
+.
+DVAL9999  RETURN
++
+.*****************************************************************************
+.*                              VDAT0000           Called by: DVAL0000       *
+.*                  Validate a date field                                    *
+.* Requires:  TEMPDATE - Date in format ccyymmdd                             *
+.*            DATEFLG1 - Date Type flag                                      *
+.*                          0 = full date (ccyymmdd)                         *
+.*                          1 = partial date (ccyymm)                        *
+.*            DATEFLG2 - Dates Allowed flag                                  *
+.*                          0 = any date allowed                             *
+.*                          1 = no future dates allowed                      *
+.*            TMPFIELD - Date field name                                     *
+.* Returns:   ERORFLAG = 1 if an error in date validation occurs.            *
+.*****************************************************************************
+.
+VDAT0000  MATCH     SP8,TEMPDATE                 * blank date ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+.         Validate that the date has been fully populated
+.
+          SQUEEZE   TEMPDATE
+          MOVELPTR  TEMPDATE,FORM1
+          IF        DATEFLG1 = 0 & FORM1 <> 8 | DATEFLG1 = 1 & FORM1 <> 6
+            MOVE      "Insufficient digits ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate that the date is numeric
+.
+VDAT0100  TYPE      TEMPDATE
+          IF        !@EQUAL
+            MOVE      "Not numeric ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          UNPACK    TEMPDATE,DIM2C,DIM2Y,DIM2M,DIM2D
+.
+.         Validate the century is >= 18 and <= current century
+.
+          MOVE      DIM2C,FORM2
+          IF        FORM2 < 18 | FORM2 > CURRCENT
+            MOVE      "Century not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate the month
+.
+          MOVE      DIM2M,FORM2
+          IF        FORM2 < 1 | FORM2 > 12
+            MOVE      "Month not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          COMPARE   ONE,DATEFLG1                 * short date (ccyymm) ?
+          GOTO      VDAT9999 IF EQUAL            * yes - finished
+.
+.         Validate the day is:
+.              < 32 for January, March, May, July, August, October & December
+.              < 31 for April, June, September & November
+.              < 29 for February, except in a leap year where it is < 30
+.
+          BRANCH    FORM2,VDAT1000:              * Jan
+                          VDAT3000:              * Feb
+                          VDAT1000:              * Mar
+                          VDAT2000:              * Apr
+                          VDAT1000:              * May
+                          VDAT2000:              * Jun
+                          VDAT1000:              * Jul
+                          VDAT1000:              * Aug
+                          VDAT2000:              * Sep
+                          VDAT1000:              * Oct
+                          VDAT2000:              * Nov
+                          VDAT1000               * Dec
+.
+.         Validate days for month of 31 days
+.
+VDAT1000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 31
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for month of 30 days
+.
+VDAT2000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 30
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for February
+.         A leap year is one where:
+.           1. Every year divisible by 4 is a leap year.
+.           2. But every year divisible by 100 is NOT a leap year
+.           3. Unless the year is also divisible by 400, then it is still a
+.              leap year.
+.
+VDAT3000  MOVE      DIM2D,FORM2
+          PACK      DIM4,DIM2C,DIM2Y
+          MOVE      DIM4,FORM4
+          IF        (FORM4%4) = 0
+            IF        (FORM4%100) = 0
+              IF        (FORM4%400) = 0
+                GOTO      VDAT3200
+              ENDIF
+            ELSE
+              GOTO      VDAT3200
+            ENDIF
+          ENDIF
+.
+.         Check for normal Feb days
+.
+VDAT3100  IF        FORM2 < 1 | FORM2 > 28
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Check for leap year Feb days
+.
+VDAT3200  IF        FORM2 < 1 | FORM2 > 29
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+VDAT3900  MOVE      "Day not valid ",ERORDESC
+          CALL      DERR0000
+          GOTO      VDAT9999
+.
+VDAT4000  COMPARE   ZERO,DATEFLG2                * any date allowed ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+          BRANCH    DATEFLG2,VDAT5000:           * date cannot be in the future
+                             VDAT6000            * date must be in the future
+.
+.         Make sure the date is not in the future
+.
+VDAT5000  MATCH     TEMPDATE,CURRDATE
+          IF        @LESS
+            MOVE      "Cannot be in the future ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+          GOTO      VDAT9999
+.
+.         Make sure the date is in the future
+.
+VDAT6000  MATCH     TEMPDATE,CURRDATE
+          IF        !@LESS
+            MOVE      "Must be in the future ",ERORDESC
+            CALL      DERR0000
+          ENDIF
+.
+VDAT9999  RETURN
++
+.*****************************************************************************
+.*                            DERR0000             Called by: VDAT0000       *
+.*                    Process date error                                     *
+.* Requires: TMPFIELD - field name                                           *
+.*           ERORDESC - error description                                    *
+.* Returns:  ERORFLAG = 1 if an error in date validation occurs.             *
+.*****************************************************************************
+.
+DERR0000  ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set date error flag
+.
+DERR9999  RETURN
++
+.*****************************************************************************
+.*                            VNUM0000             Called by: UPLD0000       *
+.*                    Validate numeric fields                                *
+.* Returns:  EXIT - 0 = No numeric validation errors                         *
+.*                  1 = Numeric validation errors                            *
+.*          NUMCOUNT - updated count of records with numeric field errors    *
+.*****************************************************************************
+.
+VNUM0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+.         Volume numeric field
+.
+          TYPE      MASTVOLN                     * volume numeric ?
+          GOTO      VNUM0050 IF NOT EQUAL        * no - error
+          GOTO      VNUM9000                     * yes - valid value
+.
+VNUM0050  MOVE      "MASTVOLN",TMPFIELD
+          CALL      NERR0000
+.
+VNUM9000  BRANCH    ERORFLAG,VNUM9100            * errors on number validation
+.
+          MOVE      ZERO,EXIT                    * no errors on no. validation
+          GOTO      VNUM9999
+.
+VNUM9100  ADD       ONE,NUMCOUNT                 * incr. num. error record count
+          MOVE      ONE,EXIT
+.
+VNUM9999  RETURN
++
+.*****************************************************************************
+.*                            NERR0000             Called by: VNUM0000       *
+.*                    Process number error                                   *
+.* Requires: TMPFIELD - field name                                           *
+.* Returns:  ERORFLAG = 1 if an error in time validation occurs.             *
+.*****************************************************************************
+.
+NERR0000  MOVE      "Invalid numeric field ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set number error flag
+.
+NERR9999  RETURN
++
+.*****************************************************************************
+.*                           CVAL0000              Called by: UPLD0000       *
+.*                 Validate all the relevant coded fields.                   *
+.*        This validation is performed on the database fields just prior     *
+.*        to writing the data and after any mappings have been performed.    *
+.* Returns:  EXIT - 0 = No code validation errors                            *
+.*                  1 = Code validation errors                               *
+.*          CODCOUNT - updated count of records with coded field errors      *
+.*****************************************************************************
+.
+CVAL0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MATCH     SP3,MRMADOTY                 * document type blank ?
+          GOTO      CVAL0500 IF EQUAL            * yes
+.
+          PACK      TEMPCATG,ANST,ANSY
+          PACK      TEMPCODE,MRMADOTY,SP10
+          PACK      TEMPHOSP,MRMAHHOS,SP10
+          MOVE      "MASTDOTY",TMPFIELD
+          MOVE      ONE,TEMPTYPE                 * patcodes (document type)
+          CALL      VCOD0000
+.
+CVAL0500  MATCH     SP3,MRMAHHOS                 * blank home hospital ?
+          GOTO      CVAL1000 IF EQUAL            * yes
+.
+          PACK      TEMPCODE,MRMAHHOS,SP10
+          MOVE      "MASTHHOS",TMPFIELD
+          MOVE      THREE,TEMPTYPE               * pathspaf (hospital)
+          CALL      VCOD0000
+.
+CVAL1000  MATCH     SP3,MRMAOHOS                 * blank originating hospital ?
+          GOTO      CVAL2000 IF EQUAL            * yes
+.
+          PACK      TEMPCODE,MRMAOHOS,SP10
+          MOVE      "MASTOHOS",TMPFIELD
+          MOVE      THREE,TEMPTYPE               * pathspaf (hospital)
+          CALL      VCOD0000
+.
+CVAL2000  PACK      TEMPCATG,MRMAHHOS,SP6
+          PACK      TEMPCODE,MRMAHLOC,SP10
+          MOVE      "MASTHLOC",TMPFIELD
+          MOVE      TWO,TEMPTYPE                 * mrtlocaf (location)
+          CALL      VCOD0000
+.
+          MATCH     SP3,MRMASTAT                 * blank code ?
+          GOTO      CVAL2500 IF EQUAL            * yes - no validation req'd
+.
+          PACK      TEMPCATG,ANSR,ANSS
+          PACK      TEMPCODE,MRMASTAT,SP10
+          PACK      TEMPHOSP,MRMAHHOS,SP10
+          MOVE      "MASTSTAT",TMPFIELD
+          MOVE      ONE,TEMPTYPE                 * patcodes (record status)
+          CALL      VCOD0000
+.
+CVAL2500  MATCH     SP3,MRMACHOS                 * blank current hospital ?
+          GOTO      CVAL3000 IF EQUAL            * yes
+.
+          PACK      TEMPCODE,MRMACHOS,SP10
+          MOVE      "MASTCHOS",TMPFIELD
+          MOVE      THREE,TEMPTYPE               * pathspaf (hospital)
+          CALL      VCOD0000
+.
+CVAL3000  MATCH     SP3,MRMACLOC                 * blank current location ?
+          GOTO      CVAL9000 IF EQUAL            * yes
+.
+          PACK      TEMPCATG,MRMACHOS,SP6
+          PACK      TEMPCODE,MRMACLOC,SP10
+          MOVE      "MASTCLOC",TMPFIELD
+          MOVE      TWO,TEMPTYPE                 * mrtlocaf (location)
+          CALL      VCOD0000
+.
+CVAL9000  BRANCH    ERORFLAG,CVAL9100            * errors on code validation
+.
+          MOVE      ZERO,EXIT                    * no errors on code validation
+          GOTO      CVAL9999
+.
+CVAL9100  ADD       ONE,CODCOUNT                 * incr. code error record count
+          MOVE      ONE,EXIT
+.
+CVAL9999  RETURN
++
+.*****************************************************************************
+.*                           VCOD0000              Called by: CVAL0000       *
+.*                   Validate a coded field                                  *
+.* Requires: TEMPCATG - temporary category variable                          *
+.*           TEMPCODE - temporary code variable                              *
+.*           TEMPHOSP - temporary hospital code variable for category code   *
+.*           TEMPTYPE - temporary code type                                  *
+.*           TMPFIELD - temporary field name                                 *
+.* Returns:  ERORFLAG = 1 if an error in code validation occurs.             *
+.*****************************************************************************
+.
+VCOD0000  BRANCH    TEMPTYPE,VCOD1000:           * patcodes (category-codes)
+                             VCOD2000:           * mrtlocaf (location)
+                             VCOD3000            * pathspaf (hospital)
+.
+.         Validate a category-coded field (patcodes)
+.
+VCOD1000  PACK      KEY5,TEMPCATG,TEMPCODE
+          CALL      RDCODE1                      * valid code ?
+          BRANCH    OVRCD,VCOD9100               * no - error
+.
+          IF        IBCNMHOS=1
+            MATCH    "1",PTCDHOSS                * Check if hospital specific
+            IF       @EQUAL
+              PACK     KEY8,TEMPHOSP,TCODE,ACODE,SP70
+              CALL     RDMLCOD1
+              BRANCH   OVRCD,VCOD9100            * no - error not valid for
+            ENDIF                                * this hospital
+          ENDIF
+.
+          GOTO      VCOD9999                     * yes
+.
+.         Validate a location field (mrtlocaf)
+.
+VCOD2000  MOVE      TEMPCATG,KEY3
+          PACK      KEY7,KEY3,TEMPCODE
+          CALL      RDMRLOC1                     * location on file ?
+          BRANCH    OVRCD,VCOD9100               * no - error
+          GOTO      VCOD9999                     * yes
+.
+.         Validate a hospital field (pathspaf)
+.
+VCOD3000  MOVE      TEMPCODE,KEY3
+          CALL      RDPTHSP1                     * hospital on file ?
+          BRANCH    OVRCD,VCOD9100               * no - error
+          GOTO      VCOD9999                     * yes
+.
+VCOD9100  MOVE      "Invalid coded field ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error
+.
+          MOVE      ONE,ERORFLAG                 * set code error flag
+.
+VCOD9999  RETURN
++
+.*****************************************************************************
+.*                              PERR0000           Called by: CHKM0000       *
+.*                   Print an error detail line               DERR0000       *
+.* Requires: Valid read on PMI records (for name fields)      VCOD0000       *
+.*           ERORDESC - error description                     VURN0000       *
+.*           CLNO - current page line count                   NERR0000       *
+.* Returns:  CLNO - updated page line count                                  *
+.*****************************************************************************
+.
+PERR0000  COMPARE   CLNO,SIXTY3                  * page full ?
+          IF        @LESS
+            CALL      LINE0000                   * yes - print bottom line
+            CALL      HEAD0000                   * print header
+          ENDIF
+.
+          PRINT     *1,PIPE,*3,MASTURNO,*12,PIPE,*14,MASTHHOS,*25,PIPE:
+                    *27,MASTHLOC,*36,PIPE,*38,MASTDOTY,*43,PIPE,*45,MASTVOLN:
+                    *52,PIPE,*54,ERORDESC,*132,PIPE
+          ADD       ONE,CLNO                     * increment page line count
+.
+PERR9999  RETURN
++
+.*****************************************************************************
+.*        Temp File I/O Routines                                             *
+.*****************************************************************************
+.
+.         Hospital code (pathspaf)
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY3
+          READ      TEMP1,KEY3;OLDHOSPL,NEWHOSPL
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.         Hosp/Location Code (mrtlocaf)
+.
+RDTEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY5
+          READ      TEMP2,KEY7;OLDHOSPL,OLDLOCAT,NEWHOSPL,NEWLOCAT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.         MRT Type of Document (Cat TY)
+.
+RDTEMP3   MOVE      ZERO,OVRCD
+          RESET     KEY3
+          READ      TEMP3,KEY3;OLDTYPED,NEWTYPED
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.         Record Status (Cat RS)
+.
+RDTEMP4   MOVE      ZERO,OVRCD
+          RESET     KEY3
+          READ      TEMP4,KEY3;OLDRECST,NEWRECST
+          GOTO      OVERCOND IF OVER
+          RETURN
++
+.******************************************************************************
+.*        I/O includes                                                        *
+.******************************************************************************
+.
+          INC       STD001IO
+.
+          INC       CLMRTMAS
+          INC       CLPATMAS
+.
+          INC       MLTCODIO/INC
+          INC       MRTMASIO/INC
+          INC       MRTHISIO/INC
+          INC       MRTLOCIO/INC
+          INC       PATCODIO/INC
+          INC       PATHSPIO/INC
+          INC       PATMA1IO/INC

@@ -1,0 +1,54 @@
+.
+.         INC       OUTUSAIO.INC
+.
+.         FILE  I/O REQUESTS FOR USED SESSIONS FILE
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY25   DIM           25             KEY FOR OUTUSEA1
+.
+.         NOTE:-
+.                  RDAAAX  IS OUT READ CALL ON FILE OUTAAAX
+.                  RDKAAAX  IS OUT READKS CALL
+.                  WRAAAX  IS OUT WRITE CALL
+.                  UPAAAX  IS OUT UPDATE CALL
+.                  DEAAAX  IS OUT DELETE CALL
+. 
+.         NOTE  OVRCD=1   RECORD DOSENT EXIST
+.                     2   RECORD IS LOCKED
+.
+RDAUSEA1 RESET     KEY25
+         MOVE      ZERO,OVRCD
+         READ      OUTUSEA1,KEY25;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSUSEA1 RESET     KEY25
+         READ      OUTUSEA1,KEY25;;
+         RETURN  
+.
+RDUSEA1  MOVE      ZERO,OVRCD
+         RESET     KEY25
+         READ      OUTUSEA1,KEY25;OUSSITE,OUSCLIN,OUSDATE:
+                                  OUSSTRT,OUSACST,OUSACEND,OUSDLY,OUSSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDKUSEA1 MOVE      ZERO,OVRCD
+         READKS    OUTUSEA1;OUSSITE,OUSCLIN,OUSDATE:
+                            OUSSTRT,OUSACST,OUSACEND,OUSDLY,OUSSPARE
+.
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+WRUSEA1  RESET     KEY25
+         WRITE     OUTUSEA1,KEY25;KEY25,OUSACST,OUSACEND,OUSDLY,OUSSPARE
+         RETURN  
+.
+UPUSEA1  UPDATE    OUTUSEA1;OUSSITE,OUSCLIN,OUSDATE:
+                            OUSSTRT,OUSACST,OUSACEND,OUSDLY,OUSSPARE
+         RETURN  
+.
+DEUSEA1  RESET     KEY25
+         DELETE    OUTUSEA1,KEY25
+         RETURN

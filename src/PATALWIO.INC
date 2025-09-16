@@ -1,0 +1,44 @@
+.
+RDSALLW1 RESET     KEY2
+         READ      PATALLW1,KEY2;;
+         RETURN  
+.
+RDALLW1  MOVE      ZERO,OVRCD
+         RESET     KEY2
+         READ      PATALLW1,KEY2;ALWCODE,ALWDESC,ALWAMT,PTAWSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDKALLW1 MOVE      ZERO,OVRCD
+         READKS    PATALLW1;ALWCODE,ALWDESC,ALWAMT,PTAWSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDPALLW1 MOVE      ZERO,OVRCD
+         READKP    PATALLW1;ALWCODE,ALWDESC,ALWAMT,PTAWSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDLALLW1 MOVE      ZERO,OVRCD
+         READL     PATALLW1,KEY2;ALWCODE,ALWDESC,ALWAMT,PTAWSPAR
+         GOTO      OVERLOCK IF LOCKED
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+WRALLW1  MOVE      ZERO,OVRCD
+         TRAP      OVERLOCK IF IO
+         WRITE     PATALLW1,KEY2;KEY2,ALWDESC,ALWAMT,PTAWSPAR
+         TRAPCLR   IO
+         RETURN  
+.
+UPALLW1  UPDATE    PATALLW1;ALWCODE,ALWDESC,ALWAMT,PTAWSPAR
+         RETURN  
+.
+ULALLW1  UNLOCK    PATALLW1
+         RETURN  
+.
+DEALLW1  RESET     KEY2
+         DELETE    PATALLW1,KEY2
+         RETURN
+.
+.                                                                                                                       

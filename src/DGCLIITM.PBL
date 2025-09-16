@@ -1,0 +1,152 @@
+.************************************************************************
+.*  Include  : DGCLIITM  -  Send CMBS Items                             *
+.*                                                                      *
+.*  Author   : Steve Armstrong  (07/12/2007)                            *
+.*                                                                      *
+.*  Mods     :                                                          *
+.*  V10.06.01 12/03/2015  Steve Armstrong  CAR 314108                   *
+.*            Removed definition of PTCGDATE as PATCGPFD is no longer   *
+.*            in use.                                                   *
+.************************************************************************
+.*  V10.03.01 17/04/2013  Davin S          CAR 280425                   *
+.*            Changed IBCNUCIS - value 1 or greater will write trigger  *
+.*  V10.00.01 19/03/2010  Steve Armstrong   CAR 135505                  *
+.*            Added setting of H7CITRID & H7CIINCL                      *
+.************************************************************************
+.*   V9.11.02  07/11/2008  Steve Armstrong  CAR 183001                  *
+.*             Changed to use afundh instead of pmmicntr to load        *
+.*             pmqihfnd                                                 *
+.*   V9.11.01  31/10/2008  Davin       CAR 182311                       *
+.*             Changed to use pmmivisn to read pattranf record          *
+.************************************************************************
+          DEFPROC  DGCLIITM
+.
+          INC       HL7CISFD/INC
+          INC       HL7INBFD/INC
+          INC       MEHLERFD/INC
+          INC       OPRSRGFD/INC
+          INC       PATRE1FD/INC
+          INC       PATTRNFD/INC
+          INC       PMSQPTFD/INC
+          INC       PMSQVIFD/INC
+          INC       PMSQITFD/INC
+.
+CISMFLAG  FORM      1             * CIS message flag (for BRHLCOMN)
+.                                    0 = don't send HL7 CIS message
+.                                    1 = send HL7 CIS message
+IBAMFLAG  FORM      "0"           * IBA proprietary message flag (for BRHLCOMN)
+.                                    0 = don't send IBA proprietary message
+.
+MESSAGID  DIM       20
+SVTRNKEY  DIM       30
+.
+DGCLI000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*133,IBCNUCIS
+          READ      CONTROLF,HUND12;*108,PTCNH7IT
+.
+          MATCH     "1",IBCNUCIS                 * using CIS interface ?
+          GOTO      DGCLI999 IF LESS             * no - finished
+.
+          MOVE      ONE,CISMFLAG
+.
+          MATCH     "1",PTCNH7IT                 * sending CMBS items ?
+          GOTO      DGCLI999 IF NOT EQUAL        * no - finished
+.
+.         We are sending a HL7 message, so first open the relevant holding.
+.         tables
+.
+          OPEN      HL7CISA1,"hl7cisaf"
+          OPEN      PMSQPTA1,"pmsqptaf"
+          OPEN      PMSQVIA1,"pmsqviaf"
+          OPEN      PMSQITA1,"pmsqitaf"
+          OPEN      PATTRAN2,"pattranf"
+          OPEN      OPRSRGA1,"oprsrgaf"
+.
+          CALL      DGMESSID                     * get the unique message id
+.
+.         Write a record to pmsqptaf (holding patient details)
+.
+          MOVE      MESSAGID,PMQPMESI
+          MOVE      SP8,PMQPOURN
+          PACK      PMQPSPAR,SP30,SP30,SP20
+          CALL      WRPMQPT1
+.
+.         Read the last transfer record for the admission
+.
+          PACK      SVTRNKEY,TADMN,TDATE,TTIME,TWARD,TBED  * save transfer key
+          MOVE      PMMIVISN,FORM8
+          PACK      KEY30,FORM8,Z70
+          CALL      RDSTRAN2                     
+          CALL      RDPTRAN2
+          BRANCH    OVRCD,DGCLI400               * shouldn't happen
+.
+          COMPARE   FORM8,TADMN                  * same admission still ?
+          GOTO      DGCLI400 IF NOT EQUAL        * shouldn't happen
+.
+.         Write a record to pmsqviaf (holding visit details)
+.
+          MOVE      MESSAGID,PMQVMESI
+          MOVE      ONE,PMQVTRAN
+          MOVE      SP3,MHLRCODE
+          PACK      PMQVSPAR,SP30,SP30,SP1
+          CALL      WRPMQVI1
+.
+.         Re-read original transfer file record
+.
+DGCLI400  MOVE      SVTRNKEY,KEY30
+          CALL      RDTRAN2                      * restore current tran record
+.
+.         Write a record to pmsqitaf (holding CMBS item details).  First, get
+.         the Operating surgical details record (assume only one team).
+.
+          PACK      KEY11,PMMIUNIQ,SP20
+          CALL      RSOPSRG1                     * position on unique id
+          CALL      RKOPSRG1                     * read next record
+          BRANCH    OVRCD,DGCLI800               * eof - no oprsrgaf record
+.
+          MATCH     PMMIUNIQ,OPSGUNID            * same unique id still ?
+          GOTO      DGCLI800 IF NOT EQUAL        * no - no oprsrgaf record
+.
+          MOVE      OPSGTISS,PMQISTIM            * load operation start time
+.
+DGCLI800  MOVE      MESSAGID,PMQIMESI            * load message id
+          MOVE      PMMITRAN,PMQITRAN            * load transaction number
+          MOVE      PMMIITEM,PMQIITEM            * load CMBS item code
+          MOVE      PMMITDAT,PMQITDAT            * load transaction date
+          MOVE      PMMISERV,PMQISERV            * load no of services
+          MOVE      HL7ITMFL,PMQITTYP            * load transaction type
+          PACK      PMQIDOCT,PMMIODOC,SP10       * load operating doctor
+          MOVE      PMMISESS,PMQISESS            * load theatre session
+          MOVE      PMMIAMTT,PMQIAMNT            * load gross total amount
+          MOVE      PMMIGSTC,PMQIGSTC            * load GST code
+          MOVE      AFUNDH,PMQIHFND              * load health fund code
+          MOVE      SP30,PMQISPAR
+          CALL      WRPMQIT1
+.
+          MOVE      "P03",H7CIMETP
+          MOVE      HL7TRGID,H7CITRID
+          MOVE      HL7INCLD,H7CIINCL
+          CALL      WRCIS000                     * write hl7cisaf header record
+.
+          CLOSE     HL7CISA1
+          CLOSE     PMSQPTA1
+          CLOSE     PMSQVIA1
+          CLOSE     PMSQITA1
+.
+DGCLI999  GOTO      DGCLIEND                     * end procedure
++
+.         I/O Routines
+.
+          INC       BRHLCOMN
+.
+          INC       HL7CISIO/INC
+          INC       HL7INBIO/INC
+          INC       IBAOVRIO/INC
+          INC       OPRSRGIO/INC
+          INC       PMSQPTIO/INC
+          INC       PMSQVIIO/INC
+          INC       PMSQITIO/INC
+          INC       PATTRNIO/INC
+.
+DGCLIEND  ENDPROC
++

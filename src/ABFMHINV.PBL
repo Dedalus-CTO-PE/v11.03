@@ -1,0 +1,1148 @@
+. Program  : ABFMHINV
+.
+. Function : This include produces the Next invoice for 
+.            ABF Admitted Mental Health Events
+.
+.            PROGFLAG is used to determine if the invoice is to be displayed,
+.            printed or just have the total calculated
+.
+.        IF PROGFLAG = 1  THEN WORK OUT THE AMOUNT TO BE INVOICED
+.
+.        IF PROGFLAG = 2  THEN DISPLAY NEXT INVOICE
+.
+.        IF PROGFLAG = 3  THEN PRINT NEXT INVOICE
+.
+.        IF PROGFLAG = 4  THEN UPDATE PATFINS WITH AMOUNTS TO BE INVOICED
+.
+.*******************************************************************************
+. Modification : 
+.            V11.03.05 17/11/2023  J.Tan          TSK 0940089
+.                      Mod checking for blank Discharged DRG
+.            V11.03.04 20/09/2023  J.Tan          TSK 0916870
+.                      Mod defaulting NEP value with blank code set/indicator
+.            V11.03.03 28/08/2023  J.Tan          TSK 0916870
+.                      Added Claim code Cat CL Multiple NEP value
+.            V11.03.02 13/07/2023  J.Tan          TSK 0923703
+.                      Fixed checking for Daycase Private patient
+.            V11.03.01 10/07/2023  J.Tan          TSK 0923703
+.                      Fixed Hospital Remoteness for multi hospital
+.                      Mods to have AMHCC End code in Accommodation description
+.            V11.03.00 22/05/2023 J.Tan    TSK 0923703
+.                      Created ABF for Admitted Mental Health Events
+.*******************************************************************************
+.
+          DEFPROC   ABFMHINV
+.
+          INC       PATCALAG/INC
+          INC       PMSPX2FD/INC
+          INC       IBAPOSFD/INC
+          INC       BOKRX1FD/INC
+          INC       PATDADFD/INC
+          INC       PMSVMTFD/INC
+          INC       PATCHCFD/INC
+          INC       VISXDCFD/INC
+          INC       PATACCFD/INC
+.
+          INC       PMSNEPFD/INC
+          INC       PMSADJFD/INC
+          INC       PMSAMHFD/INC
+          INC       PMSABFFD/INC
+          INC       PMSRDIFD/INC
+.
+ATYPCODE  DIM       3[99]
+ATYPBDAY  FORM      3[99]
+CALCFLAG  FORM      1
+CALCTIME  FORM      6
+COUNTER   FORM      3
+DDRGCODE  DIM       4
+NEPVALUE  FORM      10.4
+.
+FORM6     FORM      6
+FORM6A    FORM      6
+FORM102   FORM      10.2
+TTRNDATE  DIM       8
+TTRNTIME  DIM       8
+SAVATYPE  DIM       3
+SAVDATE   DIM       8
+SAVTIME   DIM       8
+STMOVE    DIM       1
+.
+          CALL      IVAR0000                  * Initialise variables
+.
+          MOVE      ADATE,KEY8                * Use Adm.date
+          IF        ASTAT=3
+            MOVE      DDATE,KEY8              * Discharged date
+          ENDIF
+.
+          OPEN      PMSPX2A1,"pmspx2af"
+          OPEN      PATECDA1,"patecdaf"
+          OPEN      PMSVMTA1,"pmsvmtaf"
+          OPEN      PATDADA1,"patdadaf"
+          OPEN      BOKRX1A1,"bokrx1af"
+          OPEN      PATCHCO1,"patchcof"
+          OPEN      PATACCA1,"pataccaf"
+          OPEN      VISXDCA1,"visxdcaf"
+.
+          OPEN      PMSADJA1,"pmsadjaf"
+          OPEN      PMSAMHA2,"pmsamhaf"
+          OPEN      PATTRAN2,"pattranf"
+          OPEN      PATWR1A1,"patwr1af"
+.
+          MATCH     "IBAHMS58",PRGID
+          IF        @EQUAL
+            OPEN      PMSABFA1,FNAMEP
+          ELSE
+            OPEN      PMSABFA1,"pmsabfaf"
+          ENDIF
+.
+          OPEN      PMSAMHA2,"pmsamhaf"
+.
+MHIV0000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,HUND24;*121,PTCNDGED
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          MOVE      ZERO,ACDAYCS              * Assume not a day case
+          MOVE      SP70,PMVXMHOS
+          OPEN      PMSVX1A1,"pmsvx1af"
+          PACK      KEY8,AADMNO
+          CALL      RDPMVX11
+.
+          MOVE      AURNO,KEY8
+          CALL      RDMAST1
+          CALL      RDPMPX21
+.
+          MOVE      ADATE,AGEDATE      * use Admission date
+          REP       " 0",AGEDATE
+          CALL      CALCAGE            * recalculate patient's age
+          MOVE      PSAGEYRS,PSAGE
+.
+          CALL      DABF0000                  * Delete existing Patient ABF det.
+.
+          MOVE      AFUNDH,D6                 * Save patient health fund
+          MOVE      SP70,AFUNDH               * Blank HF, use Claim Grouper Ver.
+          CALL      GETDRG
+          MOVE      D6,AFUNDH                 * restore HF
+          IF        OVRCD=0
+            MOVE      DDRGCODE,PDRGCODE
+          ENDIF
+.
+          MATCH     SP70,PDRGCODE
+          IF        @EQUAL
+            MOVE      PTMIPDRG,PDRGCODE         * Default to Admission DRG
+            IF        ASTAT=3
+              MATCH     SP70,PTDSDDRG
+              IF        !@EQUAL
+                MOVE      PTDSDDRG,PDRGCODE   * Use Discharged DRG
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          IF        ASTAT=3
+            MATCH     ADATE,DDATE
+            IF        @EQUAL
+              MOVE      ONE,ACDAYCS           * flag for daycase
+            ENDIF
+          ENDIF
+          CALL      CPRV0000                  * Check for Private patient
+.
+          MOVE      ADATE,FROMDATE
+          REP       " 0",FROMDATE
+          PACK      TODATE,CCC,CYY,CMM,CDD    * Use current date
+.
+          IF        ASTAT=3
+            MOVE      DDATE,TODATE
+          ENDIF
+          REP       " 0",TODATE
+.
+          CALL      LCNT0000                  * look for a Contract ID
+          BRANCH    EXIT,MHIV9000
+.
+          PACK      CONTRCID,CONTRCID,SP70
+          MATCH     SP70,CONTRCID
+          GOTO      MHIV9000 IF EQUAL         * Can not find Contract
+          MOVE      CONTRCID,SAVCONTR
+.
+.         Get the length of stay
+.
+          CALL      NHOSPDAY
+          MOVE      NBRDAYS,CALDAYS
+.
+          MOVE      NBRDAYS,TOTDAYS           * Actual LOS
+          MATCH     ADATE,DDATE
+          IF        @EQUAL
+            MOVE      ONE,TOTDAYS             * Daycase LOS=1
+          ENDIF
+.
+          MOVE      NBRDAYS,LOSNDAYS          * Patient LOS
+          CALL      CLOS0000                  * Check for sameday LOS
+.
+          PACK      LSDESC1,PMMHAMHD,SP70
+          PACK      LSDESC2,PMMHAMHC,SP70
+.
+          UNPACK    IDATEF INTO FCENT1,FYEAR1,FMON1,FDAY1
+          PACK      IDATET,CCC,CYY,CMM,CDD
+          IF        ASTAT=3
+            MOVE      DDATE,IDATET
+          ENDIF
+          REP       " 0",IDATET
+.
+          MOVE      ONE,ABFFLAG
+.
+          CALL      SNPW0000                  * Save Price weight value
+.
+.         Check for default Multiple NEP value (blank code set/indicator)
+.
+          MOVE      SP70,KEY2
+          MOVE      SP70,D3
+          CALL      MNEP0000
+.
+.         Check Multiple NEP value for matching indicator on Care class
+.
+          CALL      GADJ0000                  * Get Adjustment value
+.
+          MOVE      "CC",KEY2                 * Care class
+          MOVE      ACARE,D3
+          CALL      MNEP0000                  * Check Care Class mult.NEP values
+.
+.         If Multiple NEP value for matching indicator on Claim code exists,
+.         this will override the NEP Value from Care class and IND22 of Cat CL
+.
+          MOVE      "CL",KEY2                 * Claim code
+          MOVE      ACLAIM,D3
+          CALL      MNEP0000                  * Check Claim code mult.NEP values
+.
+.         Write NEP Value to ABF file
+.
+          MOVE      NEPVALUE,NEPAMNTS         * NEP value Adjust.
+          MOVE      NEPVALUE,FORM104          * Adjustment value
+          PACK      ADJMDESC,SP70,SP70
+          MOVE      "061",KEY3                * NEP adjust.
+          CALL      WABF0000                  * Write to ABF Patient details
+.
+          CALL      CPPW0000                  * Calculate Patient weight
+.
+          CALL      CABF0000                  * Calculate ABF amount
+          MULT      NEPAMNTS,ABFCHRGE         * ABF Charge= NWAU x NEP 
+          MOVE      ABFCHRGE,GROSSTOT
+          MOVE      GROSSTOT,NETTOT
+.
+          MOVE      ZERO,EXIT
+          MOVE      ZERO,NOFEE
+.
+          GOTO      MHIV9999
+.
+MHIV9000  MOVE      ONE,NOFEE                 * No ABF charge setup
+          MOVE      ONE,EXIT
+.
+MHIV9999  GOTO      NDIP9999
++
+.*******************************************************************************
+.         Initialise variables
+.*******************************************************************************
+IVAR0000  MOVE     ZERO,PRIVFLAG
+          MOVE     ZERO,ARESFLAG
+          MOVE     ZERO,ACCMFLAG
+          MOVE     ZERO,APPSAMNT            * APPS
+          MOVE     ZERO,AACCAMNT            * AAcc
+          MOVE     ZERO,ATREFLAG
+          MOVE     ZERO,AINDAMNT
+          MOVE     ZERO,ARESAMNT
+          MOVE     ZERO,ATAAMNTS            * A_ATA - Patient treatment remote.
+          MOVE     ZERO,ABFCHRGE
+          MOVE     ZERO,ABFFLAG
+          MOVE     ZERO,CALCFLAG
+.
+          MOVE     ZERO,LOSNDAYS
+          MOVE     SP70,MDCNUMBR
+          MOVE     ZERO,NEPAMNTS
+          MOVE     ZERO,NEPVALUE
+          MOVE     ZERO,PWAMOUNT
+          MOVE     ZERO,PSYCBDAY
+.
+          MOVE     ZERO,BASELVAL   * Baseline
+          MOVE     ZERO,EMRADVAL   * Emergency Admission
+          MOVE     ZERO,ADTRNVAL   * Admission transfer status
+          MOVE     ZERO,PTSEXVAL   * Patient Sex
+          MOVE     ZERO,CHSCOVAL   * Charlson scores
+          MOVE     ZERO,PTAGEVAL   * Age
+          MOVE     ZERO,MDCVALUE   * MDC
+.
+          MOVE     ZERO,PPAYABLE   * Patient Balance payable
+          MOVE     ZERO,REBTOT
+          MOVE     ZERO,TOTXTRA
+          MOVE     ZERO,SAMTG
+.
+          MOVE      ZERO,LINETOT
+          MOVE      ZERO,LINEGST
+          MOVE      ZERO,LSTRATE
+          PACK      LSDESC1,SP70
+          PACK      LSDESC2,SP70
+          MOVE      SP70,PDRGCODE
+          PACK      ADJMDESC,SP70,SP70
+.
+          MOVE      ONE,F3
+          WHILE     F3 <= 100
+            MOVE      ZERO,COMPLVAL[F3]
+            ADD       ONE,F3
+          DO
+.
+IVAR9999  RETURN
++
+.*******************************************************************************
+.         Look for a Contract ID for the DRG Code
+.*******************************************************************************
+LCNT0000  PACK      KEY9,ACLAIM,AFUNDH,SP70
+          CALL      GETCNEFF               * Get Contract Effective From
+          BRANCH    EXIT,LCNT9000
+.
+          MOVE      "004",VSXDTYDA           * 004 = AMHCC End code
+          PACK      KEY11,AADMNO,VSXDTYDA,SP70
+          CALL      RDVSXDC1
+          BRANCH    OVRCD,LCNT9000
+.
+          MATCH     "1",VSXDDELT
+          GOTO      LCNT9000 IF EQUAL      * record deleted
+.
+          MOVE      ADATE,CEFFDATE         * default to admission date
+          IF        ASTAT=3
+            MOVE      DDATE,KEY8           * Discharged date
+          ELSE
+            PACK      KEY8,CCC,CYY,CMM,CDD * Use Current date
+            REP       " 0",KEY8
+          ENDIF
+          LOAD      CEFFDATE,CNTRCEFR,ADATE,KEY8
+.
+          PACK      KEY16,VSXDVAL1,SP70    * AMHCC End Class code
+          CALL      RSPMAMH2
+LCNT1000  CALL      RKPMAMH2
+          BRANCH    OVRCD,LCNT9000
+.
+          MATCH     VSXDVAL1,PMMHAMHC
+          GOTO      LCNT9000 IF NOT EQUAL     * Different AMHCC Code
+.
+          MOVE      PMMHCNTR,KEY6
+          CALL      VALCONTR                * Validate Contract ID
+          BRANCH    EXIT,LCNT1000
+.
+          MOVE      PMMHCNTR,CONTRCID
+          MOVE      ZERO,EXIT
+          GOTO      LCNT9999
+.
+LCNT9000  MOVE      ONE,EXIT
+LCNT9999  RETURN
++
+.*******************************************************************************
+.         Deleting existing ABF Patient details
+.*******************************************************************************
+DABF0000  PACK      KEY19,AADMNO,SP70
+          CALL      RSPMABF1
+          CALL      RKPMABF1
+          BRANCH    OVRCD,DABF9999
+.
+          MATCH     DAADMNO,PMABADMN       * Same admission no ?
+          GOTO      DABF9999 IF NOT EQUAL
+.
+          MATCH     SP70,PMABINVN
+          GOTO      DABF9999 IF NOT EQUAL  * Invoice must be blank
+.
+          PACK      KEY19,PMABADMN,PMABINVN,PMABADJT
+          CALL      DEPMABF1
+          GOTO      DABF0000
+.
+DABF9999  RETURN
++
+.*******************************************************************************
+.         Save Price weight value to Patient details
+.*******************************************************************************
+SNPW0000  MOVE      "003",KEY3             * Average Phase Length
+          MOVE      PMMHAVPL,FORM104
+          CALL      WABF0000               * Write to ABF Patient details
+.
+          MOVE      "004",KEY3             * Lower bound Adjustment
+          MOVE      PMMHLOWB,FORM104
+          CALL      WABF0000               * Write to ABF Patient details
+.
+          MOVE      "005",KEY3             * Upper bound Adjustment
+          MOVE      PMMHUPPB,FORM104
+          CALL      WABF0000               * Write to ABF Patient details
+.
+          IF        PRIVFLAG=1
+            MOVE      "006",KEY3           * Private Patient Service Adjustment
+            MOVE      PMMHPPSA,FORM104
+            IF        FORM104<>0
+              CALL      WABF0000           * Write to ABF Patient details
+              MOVE      PMMHPPSA,APPSAMNT  * Private Patient Service adjust.
+            ENDIF
+          ENDIF
+.
+          MOVE      "009",KEY3             * Short Stay PW Adjustment
+          MOVE      PMMHSSOB,FORM104
+          CALL      WABF0000               * Write to ABF Patient details
+.
+          MOVE      "010",KEY3             * Short Stay perdiem PW Adjustment
+          MOVE      PMMHSSOP,FORM104
+          CALL      WABF0000               * Write to ABF Patient details
+.
+          MOVE      "011",KEY3             * Inlier PW Adjustment
+          IF        PMMHINLI<>0
+            MOVE      PMMHINLI,FORM104
+            CALL      WABF0000             * Write to ABF Patient details
+          ENDIF
+.
+          MOVE      "012",KEY3             * Long stay per diem PW Adjustment
+          MOVE      PMMHLSOP,FORM104
+          CALL      WABF0000               * Write to ABF Patient details
+.
+          MOVE      "073",KEY3             * AMHCC Code
+          MOVE      ZERO,FORM104
+          PACK      ADJMDESC,PMMHAMHC,SP70
+          CALL      WABF0000               * Write to ABF Patient details
+          MOVE      SP70,ADJMDESC
+.
+SNPW9999  RETURN
++
+.*******************************************************************************
+.         Check LOS for Same day LOS
+.*******************************************************************************
+CLOS0000  COMPARE   ZERO,LOSNDAYS
+          GOTO      CLOS9999 IF NOT EQUAL
+.
+          COMPARE   TWO,ASTAT
+          GOTO      CLOS9999 IF NOT EQUAL    * Not currently admitted 
+.
+.         LOS =0, if Intended Stay is 'Same day' (Cat VI ind1=2)
+.         LOS = Planned LOS (ASTAY) if 'Overnight' (Cat VI ind1=1)
+.
+          MOVE      PMVXIDUS,KEY3
+          MATCH     SP70,PMVXIDUS
+          IF        @EQUAL
+            PACK      KEY8,AADMNO
+            CALL      RDBKRX11
+            IF        OVRCD=0
+              MOVE      BKRXUDF5,KEY3
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,KEY3            * Check Intended Stay
+          GOTO      CLOS9999 IF EQUAL
+.
+          MOVE      "VI",KEY2
+          PACK      KEY5,KEY2,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,CLOS9999
+.
+          MATCH     "2",TCINDC1
+          GOTO      CLOS9000 IF EQUAL   * Same day patient
+          MATCH     "1",TCINDC1
+          GOTO      CLOS9999 IF NOT EQUAL
+.
+          MOVE      ASTAY,LOSNDAYS    * Use Planned LOS
+          GOTO      CLOS9999
+.
+CLOS9000  MOVE      ZERO,LOSNDAYS     * Same day
+CLOS9999  RETURN
++
+.*******************************************************************************
+.         Calculate Patient PW
+.*******************************************************************************
+CPPW0000  COMPARE   ZERO,LOSNDAYS
+          GOTO      CPPW1000 IF NOT EQUAL
+.
+          PACK      KEY8,CCC,CYY,CMM,CDD
+          REP       " 0",KEY8
+          MATCH     ADATE,KEY8
+          GOTO      CPPW9000 IF EQUAL      * Patient admitted today
+.
+          MOVE      ONE,LOSNDAYS           * LOS =1
+.
+.         Check Lower and Upper bound
+.
+CPPW1000  COMPARE   PMMHLOWB,LOSNDAYS
+          GOTO      CPPW4000 IF LESS       * less than lower bound
+.
+          COMPARE   LOSNDAYS,PMMHUPPB
+          GOTO      CPPW6000 IF LESS       * > Upper bound
+.
+.         If LOS within Lower bound and Upper bound, use the Inlier PW
+.
+          MOVE      PMMHINLI,PWAMOUNT      * Inlier PW
+          GOTO      CPPW9000
+.
+.         If LOS < Lower bound, use Short stay outlier PW + (Short Stay Perdiem
+.                   rate PW x LOS)
+.
+CPPW4000  MOVE      PMMHSSOP,PWAMOUNT      * Short Stay perdiem
+          MULT      LOSNDAYS,PWAMOUNT
+          ADD       PMMHSSOB,PWAMOUNT      * Short Stay Outlier PW
+.
+          GOTO      CPPW9000
+.
+.         If LOS > Upper bound, use the Inlier PW + (Long Stay perdiem 
+.                   rate PW x Additional days)
+.             Addtional days = LOS - Upper Bound
+.
+CPPW6000  MOVE      ZERO,FORM4
+          MOVE      LOSNDAYS,FORM4
+          SUB       PMMHUPPB,FORM4         * Additional days
+.
+          MOVE      PMMHLSOP,PWAMOUNT      * Long Stay perdiem
+          IF        FORM4>0
+            MULT      FORM4,PWAMOUNT
+          ENDIF
+          ADD       PMMHINLI,PWAMOUNT      * Inlier PW
+.
+CPPW9000  MOVE      PWAMOUNT,FORM104
+          MOVE      "062",KEY3             * Patient PW
+          CALL      WABF0000               * Write to ABF Patient details
+.
+          MOVE      LOSNDAYS,FORM104
+          MOVE      "064",KEY3             * Patient PW
+          CALL      WABF0000               * Write to ABF Patient details
+.
+CPPW9999  RETURN
++
+.*******************************************************************************
+.         Get Adjustment value
+.*******************************************************************************
+GADJ0000  PACK      KEY9,CONTRCID,SP70
+          CALL      RSPMADJ1
+GADJ1000  CALL      RKPMADJ1
+          BRANCH    OVRCD,GADJ9999
+.
+          MATCH     CONTRCID,PMAJCNTR      * Same contract id ?
+          GOTO      GADJ9999 IF NOT EQUAL
+.
+          CALL      CADJ0000               * Check adjustment value
+          GOTO      GADJ1000
+.
+GADJ9999  RETURN
++
+.*******************************************************************************
+.         Adjustment
+.*******************************************************************************
+CADJ0000  MOVE      ZERO,ADJTYVAL
+          MOVE      PMAJADJT,ADJTYVAL         * Adjustment type
+.
+          BRANCH    ADJTYVAL,CADJ9999,CADJ9999,CADJ9999,CADJ2000,CADJ2000:
+                             CADJ9999,CADJ2000,CADJ9999,CADJ3000,CADJ9999:
+                             CADJ9999,CADJ9999,CADJ4000,CADJ4000
+.
+          MOVE      ADJTYVAL,F3
+          SUB       "22",F3
+          BRANCH    F3,CADJ7000,CADJ7000,CADJ9000,CADJ9000,CADJ9000   * NEP
+.
+          GOTO      CADJ9999
+.
+CADJ2000  BRANCH    ARESFLAG,CADJ9999
+          CALL      ARES0000        * Residential Remoteness Area adjustment
+          GOTO      CADJ9999
+.
+CADJ3000  CALL      AIND0000        * Indigenous Adjustment
+          GOTO      CADJ9999
+.
+CADJ4000  IF        PRIVFLAG=1
+            CALL      ACCP0000      * Private patient Accommodation Adjustment
+          ENDIF
+          GOTO      CADJ9999
+.
+CADJ7000  BRANCH    ATREFLAG,CADJ9999
+          CALL      ETRE0000        * Patient Treatment remoteness area adj.
+          GOTO      CADJ9999
+.
+CADJ9000  CALL      ANEP0000        * National Efficient Price (NEP)
+          GOTO      CADJ9999
+.
+CADJ9999  RETURN
++
+.*******************************************************************************
+.         Check Residential remoteness area adjustment
+.*******************************************************************************
+ARES0000  MOVE      PMAJADJV,FORM104       * Adjustment value
+.
+          OPEN      IBAPOST1,"ibapostf"
+          PACK      KEY45,PSUBRB,SP70
+          PACK      KEY56,PMVXPOST,KEY45,PADD4,SP70
+          CALL      RDIBPOS1
+          COMPARE   ZERO,OVRCD
+          GOTO      ARES2000 IF EQUAL
+.
+          PACK      KEY56,PMVXPOST,KEY45,SP70
+          CALL      RSIBPOS1
+          CALL      RKIBPOS1
+          BRANCH    OVRCD,ARES9999
+.
+          MATCH     PMVXPOST,IBPOPCOD
+          GOTO      ARES9999 IF NOT EQUAL     * Different postcode
+.
+ARES2000  MATCH     SP70,IBPORRAV
+          GOTO      ARES9999 IF EQUAL
+.
+          MATCH     "R2   ",IBPORRAV
+          IF        @EQUAL
+            IF        ADJTYVAL=4
+              MOVE      "016",KEY3           * Patient remoteness area adjust.
+              CALL      WABF0000             * Write to ABF Patient details
+              MOVE      PMAJADJV,ARESAMNT    * Residential value adjust.
+              MOVE      ONE,ARESFLAG
+            ENDIF
+          ELSE
+            MATCH     "RA3  ",IBPORRAV
+            IF        @EQUAL
+              IF        ADJTYVAL=5
+                MOVE      "017",KEY3         * Patient remoteness area adjust.
+                CALL      WABF0000           * Write to ABF Patient details
+                MOVE      PMAJADJV,ARESAMNT  * Residential value adjust.
+                MOVE      ONE,ARESFLAG
+              ENDIF
+            ELSE
+              MATCH     "RA4  ",IBPORRAV
+              IF        @EQUAL
+                IF        ADJTYVAL=7
+                  MOVE      "019",KEY3       * Patient remoteness area adjust.
+                  CALL      WABF0000         * Write to ABF Patient details
+                  MOVE      PMAJADJV,ARESAMNT  * Residential value adjust.
+                  MOVE      ONE,ARESFLAG
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+ARES9999  RETURN
++
+.*******************************************************************************
+.         Check Indigenous Adjustment
+.*******************************************************************************
+AIND0000  MOVE      PMAJADJV,FORM104       * Adjustment value
+          MATCH     SP70,PMVXABRG          * Aboriginality
+          GOTO      AIND9999 IF EQUAL
+          PACK      KEY5,ANSV,ANSA,PMVXABRG
+          CALL      RDCODE1
+          BRANCH    OVRCD,AIND9999
+.
+          MATCH     "4",TCINDC2
+          GOTO      AIND9999 IF EQUAL
+          MATCH     "9",TCINDC2
+          GOTO      AIND9999 IF EQUAL
+.
+          MOVE      PMAJADJV,AINDAMNT  * Indigeneous value adjust.
+          MOVE      "021",KEY3         * Indigeneous adjust.
+          CALL      WABF0000           * Write to ABF Patient details
+.
+AIND9999  RETURN
++
+.*******************************************************************************
+.         Patient Treatment remoteness (Hospital)
+.*******************************************************************************
+ETRE0000  MOVE      PMAJADJV,FORM104       * Adjustment value
+          UNPACK    SP70,KEY8,KEY45,KEY3
+.
+          READ      CONTROLF,TEN3;CHADD1,CHADD2,CHPOST
+          PACK      KEY8,CHPOST,SP70      * Postcode
+          PACK      KEY45,CHADD2,SP70     * Suburb
+.
+          OPEN      PATHSPA1,"pathspaf"
+          PACK      KEY3,SP70
+          CALL      RSPTHSP1
+          CALL      RKPTHSP1
+          BRANCH    OVRCD,ETRE1000
+.
+          IF        IBCNMHOS=1
+            PACK      KEY3,PMVXMHOS,SP70
+            CALL      RDPTHSP1
+          ENDIF
+.
+          PACK      KEY8,PTHSPCOD,SP7 0   * Postcode
+          PACK      KEY45,PTHSADD2,SP70   * Suburb
+          PACK      KEY3,PTHSADD3,SP70    * State
+.
+ETRE1000  OPEN      IBAPOST1,"ibapostf"
+          PACK      KEY56,KEY8,KEY45,KEY3,SP70
+          CALL      RDIBPOS1
+          COMPARE   ZERO,OVRCD
+          GOTO      ETRE2000 IF EQUAL
+.
+          PACK      KEY56,KEY8,KEY45,SP70
+          CALL      RSIBPOS1
+          CALL      RKIBPOS1
+          BRANCH    OVRCD,ETRE9999
+.
+          MATCH     KEY8,IBPOPCOD
+          GOTO      ETRE9999 IF NOT EQUAL     * Different postcode
+.
+ETRE2000  MATCH     SP70,IBPORRAV
+          GOTO      ETRE9999 IF EQUAL
+.
+          MATCH     "RA3  ",IBPORRAV
+          IF        @EQUAL
+            IF        ADJTYVAL=23
+                MOVE      "036",KEY3         * Pat.Treatment remoteness area adj
+                CALL      WABF0000           * Write to ABF Patient details
+                MOVE      PMAJADJV,ATAAMNTS  * Residential value adjust.
+                MOVE      ONE,ATREFLAG
+            ENDIF
+          ELSE
+            MATCH     "RA4  ",IBPORRAV
+            IF        @EQUAL
+              IF        ADJTYVAL=24
+                MOVE      "037",KEY3       * Pat.Treatment remoteness area adj.
+                CALL      WABF0000           * Write to ABF Patient details
+                MOVE      PMAJADJV,ATAAMNTS  * Residential value adjust.
+                MOVE      ONE,ATREFLAG
+              ENDIF
+            ENDIF
+          ENDIF
+.
+ETRE9999  RETURN
++
+.*******************************************************************************
+.         Private patient Accommodation adjustment
+.*******************************************************************************
+ACCP0000  BRANCH    ACCMFLAG,ACCP9999
+.
+.         ADJTYVAL = 013 for sameday, 014 for Overnight
+.
+          IF        ADJTYVAL=13
+            COMPARE   ONE,ACDAYCS           * daycase
+            GOTO      ACCP9999 IF NOT EQUAL
+            MOVE      PMAJADJV,FORM104      * Adjustment value
+            MOVE      "025",KEY3
+            MOVE      "Private Pt Accom Sameday",ADJMDESC
+          ELSE
+            IF          ADJTYVAL=14
+              BRANCH      ACDAYCS,ACCP9999
+              MOVE        PMAJADJV,FORM104  * Adjustment value
+              MOVE        "026",KEY3
+              MOVE        "Private Pt Accom Overnight",ADJMDESC
+            ENDIF
+          ENDIF
+.
+          CALL      WABF0000         * Write to ABF Patient details
+          MOVE      PMAJADJV,AACCAMNT  * Private Patient Accom.value adjust.
+          MOVE      ONE,ACCMFLAG
+ACCP9999  RETURN
++
+.*******************************************************************************
+.         NEP Adjustment
+.*******************************************************************************
+ANEP0000  MOVE      "CL",KEY2
+          PACK      KEY5,KEY2,ACLAIM
+          CALL      RDCODE1
+          BRANCH    OVRCD,ANEP9999
+.
+          MATCH     "B",TCINDC22
+          IF        @EQUAL
+            COMPARE   "26",ADJTYVAL
+            GOTO      ANEP8000 IF EQUAL
+          ENDIF
+.
+          MATCH     "C",TCINDC22
+          IF        @EQUAL
+            COMPARE   "27",ADJTYVAL
+            GOTO      ANEP8000 IF EQUAL
+          ENDIF
+.
+          MATCH     SP70,TCINDC22
+          GOTO      ANEP2000 IF EQUAL
+          MATCH     "A",TCINDC22
+          GOTO      ANEP9999 IF NOT EQUAL
+.
+ANEP2000  COMPARE   "25",ADJTYVAL
+          GOTO      ANEP9999 IF NOT EQUAL
+.
+ANEP8000  MOVE      PMAJADJV,NEPVALUE  * Save default NEP value adjustment
+ANEP9999  RETURN
++
+.*******************************************************************************
+.         Calculate ABF amount
+.*******************************************************************************
+CABF0000  
+.
+.        {[PW x APaed x (1 + ARes + AInd) x (1 + ATreat)] -
+.        [PW x  APPS + LOS x AAcc]} x NEP
+.
+          MOVE      ONE,F106A
+          ADD       ARESAMNT,F106A           * A_Res
+          ADD       AINDAMNT,F106A           * A_Ind
+.
+          MOVE      ONE,F106B                * 1 +
+          ADD       ATAAMNTS,F106B           * A_ATA/A_Treat
+.
+          MOVE      LOSNDAYS,F106C           * LOS
+          MULT      AACCAMNT,F106C           * AAcc
+.
+          MOVE      PWAMOUNT,F106D           * PW
+          MULT      APPSAMNT,F106D           * APPS
+          ADD       F106C,F106D
+.
+          MOVE      PWAMOUNT,ABFCHRGE        * [PW
+          MULT      F106A,ABFCHRGE           * x (1+A_Res+A_Ind)
+          MULT      F106B,ABFCHRGE           * x (1 + ATreat)] 
+          SUB       F106D,ABFCHRGE           * - [PW x APPS + LOS x AAcc]
+.
+          IF        ABFCHRGE<0
+            MOVE      ZERO,ABFCHRGE         * No negative NWAU
+          ENDIF
+          MOVE      ABFCHRGE,NWAUAMNT       * save NWAU amount with 6 decimal
+.
+          MOVE      SP70,KEY19
+          MOVE      NWAUAMNT,KEY19          * NWAU amount in 6 decimal places
+          SQUEEZE   KEY19
+          PACK      ADJMDESC,KEY19,SP70,SP20
+.
+          MOVE      ABFCHRGE,FORM104        * NWAU amount
+          MOVE      "053",KEY3
+          CALL      WABF0000                * Write to ABF Patient details
+          MOVE      SP70,ADJMDESC
+.
+CABF9999  RETURN
++
+.*******************************************************************************
+.         Write to ABF Patient details
+.*******************************************************************************
+WABF0000  MOVE      AADMNO,PMABADMN          * Admission number
+          MOVE      SP70,PMABINVN            * Blank Inv.no for tobe invoiced
+          MOVE      KEY3,PMABADJT            * Type of adjustment
+.
+          PACK      KEY19,PMABADMN,PMABINVN,PMABADJT,SP70
+          CALL      RDPMABF1
+          BRANCH    OVRCD,WABF1000
+.
+          MOVE      FORM104,PMABADJV       * Value of adjustment
+          MATCH     SP70,ADJMDESC
+          IF        !@EQUAL
+            PACK      PMABCDES,ADJMDESC,SP70    * Description of adjustment
+          ENDIF
+.
+          PACK      PMABUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PMABUDAT
+          CLOCK     TIME,PMABUTIM
+          MOVE      WBSEUID,PMABUUID
+          CALL      UPPMABF1
+.
+          GOTO      WABF9999
+.
+WABF1000  CALL      CLPMSABF                 * Clear fields
+          MOVE      "6",PMABABFT             * Type of ABF Details
+          MOVE      " 1",PMABEPSN            * Episode Number
+          PACK      PMABADRG,PDRGCODE,SP70   * AR-DRG
+.
+          UNPACK    KEY19,PMABADMN,PMABINVN,PMABADJT
+          MOVE      FORM104,PMABADJV       * Value of adjustment
+          MATCH     SP70,ADJMDESC
+          IF        !@EQUAL
+            PACK      PMABCDES,ADJMDESC,SP70    * Description of adjustment
+          ENDIF
+.
+          PACK      PMABCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PMABCDAT
+          CLOCK     TIME,PMABCTIM
+          MOVE      WBSEUID,PMABUUID
+.
+          CALL      RAPMABF1
+          IF        OVRCD=1
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRPMABF1
+            TRAPCLR   IO
+          ENDIF
+.
+WABF9999  RETURN
++
+.******************************************************************************
+.        Read bed type
+.        F1=1 - Calculate Psychiatric day from bed type transfer - Cat BT
+.           2 - Calculate ICUA hours
+.           3 - Calculate Psychiatric day from Ward/Bed Class.- Cat CG
+.******************************************************************************
+RBTY0000  BRANCH     F1,RBTY0400,RBTY0400,RBTY0200
+          GOTO       RBTY9000
+.
+.         F1=3 for Checking change of Ward
+.
+RBTY0200  MATCH      SP70,TWARD
+          GOTO       RBTY9000 IF EQUAL       * Blank ward
+.
+          PACK       KEY6,TWARD,SP70
+          CALL       RDWARD1
+          BRANCH     OVRCD,RBTY9000
+.
+          MATCH      SP70,WCLASS
+          GOTO       RBTY9000 IF EQUAL       * Blank ward class.
+.
+          MOVE       "CG",KEY2
+          PACK       KEY5,KEY2,WCLASS
+          CALL       RDCODE1
+          BRANCH     OVRCD,RBTY9000
+.
+          MATCH      "A",TCINDC26
+          GOTO       RBTY9000 IF NOT EQUAL   * Not Psychiatric Class.
+          GOTO       RBTY8000
+.
+.         Checking change of bed type
+.
+RBTY0400  MATCH      SP70,TRBTYP
+          GOTO       RBTY9000 IF EQUAL       * Blank bed type
+.
+          PACK       KEY5,ANSB,ANST,TRBTYP
+          CALL       RDCODE1
+          BRANCH     OVRCD,RBTY9000
+.
+.         F1=1 for Psychiatric days,  F1=2 for ICUA hours
+.
+          BRANCH     F1,RBTY1000,RBTY2000
+          GOTO       RBTY9000
+.
+RBTY1000  MATCH      "A",TCINDC3             * Check bed type
+          GOTO       RBTY9000 IF NOT EQUAL   * Not Psychiatric bed
+          GOTO       RBTY8000
+.
+RBTY2000  MATCH      "A",TCINDC14            * Check bed type
+          GOTO       RBTY9000 IF NOT EQUAL   * Not ICUA bed
+.
+RBTY8000  MOVE       ZERO,EXIT
+          GOTO       RBTY9999
+.
+RBTY9000  MOVE       ONE,EXIT
+RBTY9999  RETURN
++
+.******************************************************************************
+.         Rounding the time difference
+.******************************************************************************
+RTIM0000  ASSIGN    FORM6A/SIXTY,CALCTIME
+          MOVE      CALCTIME,FORM6              * Set to Hrs
+          MOVE      FORM6,F6                    * save the actual hrs
+          ASSIGN    CALCTIME*SIXTY,CALCTIME     * Set hrs back to mins
+          ASSIGN    (FORM6A-CALCTIME),FORM6A    * now subtract from sav var
+          MOVE      FORM6A,F2                   * Now have remainding mins
+          IF        F2 > ZERO
+            ADD       ONE,FORM6                 * Round up mins to 1 hr
+          ENDIF
+RTIM9999 RETURN
++
+.******************************************************************************
+.        Check for Claim Code/Care class Multiple NEP Values
+.******************************************************************************
+MNEP0000  MATCH     SP70,KEY2
+          IF        !@EQUAL
+            MATCH     SP70,D3
+            GOTO      MNEP9999 IF EQUAL
+            PACK      KEY5,KEY2,D3
+            CALL      RDCODE1
+            BRANCH    OVRCD,MNEP9999
+          ENDIF
+.
+          MOVE      ZERO,OVRCD               * assume file exists
+          TRAP      OVERCOND IF IO           * trap for error openning file
+          OPEN      PMSNEPA1,"pmsnepaf"      * open kiwicard file
+          TRAPCLR   IO
+          BRANCH    OVRCD,MNEP9999           * open failed
+.
+          MOVE      " 3",DIM2                * Inpatients
+          PACK      KEY58,CONTRCID,DIM2,KEY2,Z70
+          CALL      RSPMNEP1
+MNEP1000  CALL      RPPMNEP1
+          BRANCH    OVRCD,MNEP9999
+.
+          MATCH     PMNECNTR,CONTRCID        * Same contract id ?
+          GOTO      MNEP9999 IF NOT EQUAL
+.
+          MATCH     DIM2,PMNEVTYP            * Check type of visit
+          GOTO      MNEP9999 IF NOT EQUAL
+.
+          MATCH     KEY2,PMNECODE            * Check Code set
+          GOTO      MNEP9999 IF NOT EQUAL
+.
+          MATCH     "1",PMNEACTV
+          GOTO      MNEP1000 IF EQUAL        * Inactive
+.
+          CALL      CIND0000                 * Check indicators
+          BRANCH    EXIT,MNEP1000            * Check next record
+.
+MNEP9999  RETURN
++
+.******************************************************************************
+.        Check for Indicator number and value
+.        Exit = 1 (Not valid)
+.******************************************************************************
+CIND0000  MATCH     SP70,PMNEINDC          * check for blank Indicator number
+          GOTO      CIND2000 IF EQUAL
+.
+          STRIP     PMNEINDC
+          MOVE      ZERO,F2
+          MOVE      PMNEINDC,F2
+.
+.         Check indicator number and value of patient care class
+.
+          MOVE      SP70,KEY1
+          LOAD      KEY1,F2,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10:
+                            TCINDC11,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41
+.
+          STRIP     PMNEINDV
+          PACK      D1,PMNEINDV,SP70
+          MATCH     KEY1,D1
+          GOTO      CIND9000 IF NOT EQUAL
+.
+CIND2000  MOVE      PMNENEPP,NEPVALUE  * NEP value Adjust.
+          MOVE      ZERO,EXIT
+          GOTO      CIND9999
+.
+CIND9000  MOVE      ONE,EXIT
+CIND9999  RETURN
++
+.*******************************************************************************
+.         Check for Private Patient
+.*******************************************************************************
+CPRV0000  MOVE      ADATE,FROMDATE
+          MOVE      SP70,SAVATYPE
+          MOVE      ZERO,COUNTER
+          MOVE      SP70,STMOVE
+.
+          PACK      KEY30,AADMNO,SP70
+          CALL      RDSTRAN2
+CPRV1000  CALL      RDKTRAN2
+          BRANCH    OVRCD,CPRV2000
+.
+          COMPARE   TADMN,AADMNO             * same admission ?
+          GOTO      CPRV2000 IF NOT EQUAL    * No.
+.
+          MOVE      TMOVE,STMOVE
+          MATCH     "A",TMOVE
+          GOTO      CPRV1200 IF EQUAL
+.
+          MATCH     "R",TMOVE
+          GOTO      CPRV1400 IF NOT EQUAL        * Return from leave
+.
+CPRV1200  MOVE      TDATE,FROMDATE
+          MOVE      TATYPE,SAVATYPE
+          GOTO      CPRV1000
+.
+CPRV1400  MATCH     "L",TMOVE
+          GOTO      CPRV3000 IF EQUAL             * leave record
+          MATCH     "D",TMOVE
+          GOTO      CPRV3000 IF EQUAL             * discharge record
+.
+.         must be Change record, check if Adm.type has changed
+.
+          BRANCH    ACDAYCS,CPRV4000              * daycase use the last tatype
+.
+          MATCH     TATYPE,SAVATYPE
+          GOTO      CPRV1000 IF EQUAL
+          GOTO      CPRV3000
+.
+.         Check previous movement
+.
+CPRV2000  MOVE      ONE,OVRCD
+          MATCH     "D",STMOVE
+          GOTO      CPRV5000 IF EQUAL
+          MATCH     "L",STMOVE
+          GOTO      CPRV5000 IF EQUAL             * Currently on leave
+.
+          PACK      TDATE,CCC,CYY,CMM,CDD
+          REP       " 0",TDATE
+.
+CPRV3000  CALL      ABDY0000                      * store no of days
+          BRANCH    OVRCD,CPRV5000
+.
+          MATCH     "D",STMOVE
+          GOTO      CPRV5000 IF EQUAL
+.
+CPRV4000  MOVE      TATYPE,SAVATYPE
+          MOVE      TDATE,FROMDATE
+.
+          GOTO      CPRV1000
+.
+.         Loop through the array for No of bed days for each Adm.type
+.
+CPRV5000  COMPARE   ZERO,COUNTER
+          GOTO      CPRV9999 IF EQUAL
+.
+          MOVE      ZERO,F2
+CPRV6000  ADD       ONE,F2
+          COMPARE   F2,COUNTER
+          GOTO      CPRV9999 IF LESS
+.
+          MOVE      ZERO,FORM3
+          MOVE      ATYPCODE[F2],KEY3   * adm.type
+          MOVE      ATYPBDAY[F2],FORM3  * Bed days
+.
+          PACK      KEY9,ACLAIM,KEY3,FORM3
+          CALL      RDPTACC1                 * read the account status file
+          COMPARE   ZERO,OVRCD
+          GOTO      CPRV6400 IF EQUAL
+.
+CPRV6200  CALL      RKPTACC1                 * get the next record on the
+          BRANCH    OVRCD,CPRV6000           * account status file
+.
+          MATCH     ACLAIM,PTASCLAM          * match claim codes
+          GOTO      CPRV6000 IF NOT EQUAL
+          MATCH     KEY3,PTASATYP            * match admission types
+          GOTO      CPRV6000 IF NOT EQUAL
+.
+CPRV6400  CMATCH    "P",PTASACCS             * Check 1st char =P for Private
+          GOTO      CPRV6000 IF NOT EQUAL
+.
+          MOVE      ONE,PRIVFLAG             * Flag for Private Patient
+.
+CPRV9999  RETURN
++
+.******************************************************************************
+.         Add bed days to the array
+.******************************************************************************
+ABDY0000  MOVE      ZERO,NBRDAYS
+          MOVE      TDATE,TODATE
+          DAYSEP    FROMDATE,TODATE,NBRDAYS
+.
+          MATCH     FROMDATE,TODATE
+          IF        @EQUAL
+            COMPARE   ONE,ACDAYCS
+            GOTO      ABDY9999 IF NOT EQUAL
+            MOVE      ONE,NBRDAYS           * daycase
+          ENDIF
+.
+          MOVE      ZERO,F2
+ABDY1000  COMPARE   COUNTER,F2
+          GOTO      ABDY2000 IF NOT LESS
+.
+          ADD       ONE,F2
+.
+          MATCH     SAVATYPE,ATYPCODE[F2]
+          GOTO      ABDY1000 IF NOT EQUAL
+.
+          ADD       NBRDAYS,ATYPBDAY[F2]
+          GOTO      ABDY9999
+.
+ABDY2000  ADD       ONE,F2
+          MOVE      SAVATYPE,ATYPCODE[F2]   * adm.type
+          MOVE      NBRDAYS,ATYPBDAY[F2]  * Bed days
+          ADD       ONE,COUNTER
+ABDY9999  RETURN
++
+.******************************************************************************
+          INC       CALCAGE
+          INC       CLPMSABF
+          INC       GETDRG
+.
+          INC       PMSPX2IO/INC
+          INC       IBAPOSIO/INC
+          INC       BOKRX1IO/INC
+          INC       PATDADIO/INC
+          INC       PMSVMTIO/INC
+          INC       PATCHCIO/INC
+          INC       VISXDCIO/INC
+          INC       PATACCIO/INC
+.
+          INC       PMSNEPIO/INC
+          INC       PMSADJIO/INC
+          INC       PMSAMHIO/INC
+          INC       PMSABFIO/INC
+          INC       PMSRDIIO/INC
+          INC       IBAOVRIO/INC
+.
+NDIP9999  ENDPROC
++

@@ -1,0 +1,59 @@
+.
+.         FILE  I/O REQUESTS FOR ALL U/R DELETION AUDIT FILES
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.
+.         NOTE:-
+.                  UPAAAX  IS THE WRITE CALL
+.                  RDAAAX  IS THE READ CALL
+.                  RDSAAAX  IS THE READ SECTOR 0 CALL
+.                  WRSAAAX  IS THE WRITE ONE TO SECTOR 0 CALL
+.
+RDAUDU    READ      PATAU1A1,SECTOR;AUURNO,AUTITL,AUSNAM,AUGNAM,AUDATE:
+                             AUTIME,AUADD1,AUADD2,AUSUBR,AUADD4,AUPOST:
+                             AUMEDI,AUTELP,AUSEX
+          ADD       ONE,SECTOR
+          READ      PATAU1A1,SECTOR;AUBDAT,AUOPID,AUOPER
+          RETURN
+.
+RDSAUDU   READ      PATAU1A1,ZERO;SECTOR,AUSTAT
+          RETURN
+.
+WRSAUDU   WRITE     PATAU1A1,ZERO;SEC1,AUSTAT
+          WEOF      PATAU1A1,SEC1
+          RETURN
+.
+WRSAUDUX  WRITAB    PATAU1A1,ZERO;*6,AUSTAT
+          RETURN
+.
+UPAUDU    READ      PATAU1A1,ZERO;SECTOR,AUSTAT
+          WRITE     PATAU1A1,SECTOR;AUURNO,AUTITL,AUSNAM,AUGNAM,AUDATE:
+                             AUTIME,AUADD1,AUADD2,AUSUBR,AUADD4,AUPOST:
+                             AUMEDI,AUTELP,AUSEX
+          ADD       ONE,SECTOR
+          WRITE     PATAU1A1,SECTOR;AUBDAT,AUOPID,AUOPER
+          ADD       ONE,SECTOR
+          WEOF      PATAU1A1,SECTOR
+          WRITE     PATAU1A1,ZERO;SECTOR,AUSTAT
+          RETURN
+.
+OPPTAUU1  CLEAR     CFNAME
+          APPEND    "patau1",CFNAME
+          APPEND    PORT,CFNAME
+          RESET     CFNAME
+          REP       " 0",CFNAME
+.
+          TRAP      OPPTAU30 IF IO
+          OPEN      PATAU1A1,CFNAME
+          TRAPCLR   IO
+          GOTO      OPPTAU99
+.
+OPPTAU30  NORETURN
+          PREP      PATAU1A1,CFNAME
+          MOVE      ONE,AUSTAT
+          CALL      WRSAUDU
+OPPTAU99  RETURN
++
+.
+

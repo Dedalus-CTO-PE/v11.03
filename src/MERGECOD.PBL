@@ -1,0 +1,292 @@
+.*****************************************************************************
+.*   MERGECOD.PBL                                                            *
+.*   Include for processing additional merge related records for PRS2 & ESIS *
+.*****************************************************************************
+.*                          WRMRG000                                         *
+.*             Write a patmrgaf record for the merge                         *
+.* Requires: OLDURNUM - Old U/R Number                                       *
+.*           NEWURNUM - New U/R Number                                       *
+.*           WBSEUID - Web User ID                                           *
+.*           Previous call to IBACLOCK to get current date                   *
+.*                                                                           *
+.* Modifications:                                                            *
+.* V11.02.01 22.06.2022   DA Sarkies     TSK 0918318                         *
+.*                  Added a Read around the write to prevent duplicate key   *
+.*                  error                                                    *
+.*                                                                           *
+.*****************************************************************************
+.
+WRMRG000  MOVE      THREE,PTMRSTAT            * Merge processed
+          MOVE      OLDURNUM,PTMROLUR         * Old U/R
+          MOVE      NEWURNUM,PTMRNWUR         * New U/R
+          PACK      KEY17,PTMRSTAT,PTMROLUR,PTMRNWUR
+          CALL      RDPTMRG1
+          IF        OVRCD = 0
+            PACK      PTMRRDTE,CCC,CYY,CMM,CDD   * current date
+            REP       " 0",PTMRRDTE
+            PACK      PTMRSDTE,CCC,CYY,CMM,CDD
+            REP       " 0",PTMRSDTE
+            CLOCK     TIME,CTIMEIS
+            MOVE      CTIMEIS,PTMRSTIM
+            REP       " 0",PTMRSTIM
+            CALL      UPPTMRG1
+          ELSE
+            UNPACK    KEY17,DPTMRSTA,PTMROLUR,PTMRNWUR
+            MOVE      DPTMRSTA,PTMRSTAT
+            PACK      PTMRRDTE,CCC,CYY,CMM,CDD   * current date
+            REP       " 0",PTMRRDTE
+            MOVE      SP10,PTMRRHOS              * Requesting hospital
+            MOVE      SP20,PTMRAPPR              * Approval indicators
+            PACK      PTMRSDTE,CCC,CYY,CMM,CDD   * current date
+            REP       " 0",PTMRSDTE
+            CLOCK     TIME,CTIMEIS
+            MOVE      CTIMEIS,PTMRSTIM
+            REP       " 0",PTMRSTIM
+            UNPACK    SP70,PTMRLOCK,PTMRFILL
+            MATCH     "HL7RECVR",PRGID
+            IF        @EQUAL
+              MOVE      "HL7RECVR  ",PTMRUSER
+            ELSE
+              PACK      PTMRUSER,WBSEUID,SP70
+            ENDIF
+            CALL      RAPTMRG1
+            IF        OVRCD = 1
+              CALL      WRPTMRG1
+            ENDIF
+          ENDIF
+.
+WRMRG999  RETURN
++
+.*****************************************************************************
+.*                          WESIM000                                         *
+.*        Write a record to the ESIS merge table (watesmaf)                  *
+.* Requires: OLDURNUM - Old U/R Number                                       *
+.*           NEWURNUM - New U/R Number                                       *
+.*           PTCNHDPS - State Parameter                                      *
+.*           CHCSDTE  - Starting Date for HCS data                           *
+.*****************************************************************************
+.
+WESIM000  COMPARE   THREE,PTCNHDPS               * State set to Victoria ?
+          GOTO      WESIM999 IF NOT EQUAL        * no - finished
+.
+          PACK      KEY16,OLDURNUM,Z70
+          CALL      RSWTESP1                     * position after U/R
+          CALL      RPWTESP1                     * read previous record
+          BRANCH    OVRCD,WESIM999               * eof - finished
+.
+          MATCH     OLDURNUM,WTEPURNO            * same U/R still ?
+          GOTO      WESIM999 IF NOT EQUAL        * no - finished
+.
+          PACK      WTEMEDAT,SP70                * load file variables
+          PACK      WTEMCURN,OLDURNUM
+          PACK      WTEMRURN,NEWURNUM
+.
+          PACK      KEY24,WTEMCURN,WTEMRURN,WTEMEDAT,SP70
+          CALL      RAWTESM1                     * record on file ?
+          IF        OVRCD = 1
+            CALL      WRWTESM1                   * no - write watesmaf record
+          ENDIF
+.
+          CALL      WRESP000
+.
+WESIM999  RETURN
++
+.*****************************************************************************
+.*                          WPRSP000                                         *
+.*        Write a record to the PRS2 PMI Detail Changes file (prspmiaf)      *
+.* Requires: OLDURNUM - Old U/R Number                                       *
+.*           NEWURNUM - New U/R Number                                       *
+.*           PRSTRIGF - flag for writing to prspmiaf                         *
+.*                       0 = No                                              *
+.*                       1 = Yes                                             *
+.*****************************************************************************
+.
+WPRSP000  COMPARE   ONE,PRSTRIGF                 * writing to prspmiaf ?
+          GOTO      WPRSP999 IF NOT EQUAL        * no - finished
+.
+          MOVE      NEWURNUM,P2PMURNO            * load file variables
+          MOVE      "12",P2PMUNIQ
+          MOVE      OLDURNUM,P2PMVALU
+          PACK      P2PMSPAR,SP70
+.
+          PACK      KEY11,P2PMURNO,P2PMUNIQ,SP70
+          CALL      RAP2PMI1                     * record on file ?
+          IF        OVRCD = 1
+            CALL      WRP2PMI1                   * no - write new record
+          ELSE
+            CALL      UPP2PMI1                   * yes - update existing record
+          ENDIF
+.
+WPRSP999  RETURN
++
+.*****************************************************************************
+.*                                 WRESP000                                  *
+.*                          Write/update watespaf                            *
+.* Requires: NEWURNUM - New U/R Number                                       *
+.*           Previous call to IBACLOCK to get current date                   *
+.*****************************************************************************
+.
+WRESP000  PACK      KEY16,NEWURNUM,Z70
+          CALL      RSWTESP1                     * position after new U/R
+          CALL      RPWTESP1                     * read previous record
+          BRANCH    OVRCD,WRESP100               * eof - no records for U/R
+.
+          MATCH     NEWURNUM,WTEPURNO            * same U/R still ?
+          GOTO      WRESP100 IF NOT EQUAL        * no - no records for U/R
+.
+          CALL      CHKESI00                     * any PMI ESIS fields changed ?
+          BRANCH    EXIT,WRESP999                * no
+          GOTO      WRESP200                     * yes
+.
+WRESP100  CALL      CLWATESI                     * clear file variables
+.
+WRESP200  PACK      WTEPURNO,NEWURNUM            * load file variables
+          PACK      WTEPEDAT,SP70
+          PACK      WTEPPDOB,PBDATE,SP70
+          PACK      WTEPEDOB,PMPXEDOB,SP70
+          PACK      WTEPPSEX,PSEX,SP70
+          PACK      WTEPMEDI,PMEDI,SP70
+          SQUEEZE   PTMXMCCD
+          PACK      WTEPMREF,PTMXMCCD,SP70
+          PACK      WTEPRESI,PTYPE,SP70
+          PACK      WTEPPOST,PPOST,SP70
+          PACK      WTEPSUBR,PSUBRB,SP70
+          PACK      WTEPABRG,PMPXABRG,SP70
+          PACK      WTEPSPAR,SP70
+.
+          PACK      KEY16,NEWURNUM,SP70
+          CALL      RAWTESP1                     * record on file ?
+          IF        OVRCD = 1
+            MATCH     "HL7RECVR",PRGID           * no - write new record
+            IF        @EQUAL
+              MOVE      "HL7RECVR  ",WTEPWEBC
+            ELSE
+              PACK      WTEPWEBC,WBSEUID,SP70
+            ENDIF
+            PACK      WTEPCDAT,CCC,CYY,CMM,CDD,SP70
+            REP       " 0",WTEPCDAT
+            PACK      WTEPCTIM,CTIMEIS,SP70
+            REP       " 0",WTEPCTIM
+            CALL      WRWTESP1
+          ELSE
+            MATCH     "HL7RECVR",PRGID           * yes - update existing record
+            IF        @EQUAL
+              MOVE      "HL7RECVR  ",WTEPWEBU
+            ELSE
+              PACK      WTEPWEBU,WBSEUID,SP70
+            ENDIF
+            PACK      WTEPUDAT,CCC,CYY,CMM,CDD,SP70
+            REP       " 0",WTEPUDAT
+            PACK      WTEPUTIM,CTIMEIS,SP70
+            REP       " 0",WTEPUTIM
+            CALL      UPWTESP1
+          ENDIF
+.
+WRESP999  RETURN
++
+.******************************************************************************
+.*                                 CHKESI00                                   *
+.*            Check if any ESIS fields have changed since last sent           *
+.* Requires: Valid read on PMI data records for new U/R                       *
+.*           Valid read on watespaf record for U/R                            *
+.* Returns:  EXIT  0 = change has been made to an ESIS related PMI field      *
+.*                 1 = no change has been made to an ESIS related PMI field   *
+.******************************************************************************
+.
+CHKESI00  MATCH     WTEPPDOB,PBDATE              * DOB changed ?
+          GOTO      CHKESI90 IF NOT EQUAL        * yes
+.
+          MATCH     WTEPEDOB,PMPXEDOB            * estimated DOB changed ?
+          GOTO      CHKESI90 IF NOT EQUAL        * yes
+.
+          MATCH     WTEPPSEX,PSEX                * gender changed ?
+          GOTO      CHKESI90 IF NOT EQUAL        * yes
+.
+          MATCH     WTEPMEDI,PMEDI               * medicare no. changed ?
+          GOTO      CHKESI90 IF NOT EQUAL        * yes
+.
+          SQUEEZE   PTMXMCCD
+          MATCH     WTEPMREF,PTMXMCCD            * medicare ref. no. changed ?
+          GOTO      CHKESI90 IF NOT EQUAL        * yes
+.
+          MATCH     WTEPRESI,PTYPE               * patient type changed ?
+          GOTO      CHKESI90 IF NOT EQUAL        * yes
+.
+          MATCH     WTEPPOST,PPOST               * postcode changed ?
+          GOTO      CHKESI90 IF NOT EQUAL        * yes
+.
+          MATCH     WTEPSUBR,PSUBRB              * suburb changed ?
+          GOTO      CHKESI90 IF NOT EQUAL        * yes
+.
+          MATCH     WTEPABRG,PMPXABRG            * aboriginality changed ?
+          GOTO      CHKESI90 IF NOT EQUAL        * yes
+.
+          MOVE      ONE,EXIT                     * No changes have occurred
+          GOTO      CHKESI99
+.
+CHKESI90  MOVE      ZERO,EXIT                    * Changes have occurred
+.
+CHKESI99  RETURN
++
+.******************************************************************************
+.*                                 CLWATESI                                   *
+.*            Clear the data fields for watesiaf                              *
+.******************************************************************************
+.
+CLWATESI  PACK      WTEPURNO,SP70
+          PACK      WTEPEDAT,SP70
+          PACK      WTEPPDOB,SP70
+          PACK      WTEPEDOB,SP70
+          PACK      WTEPPSEX,SP70
+          PACK      WTEPMEDI,SP70
+          PACK      WTEPMREF,SP70
+          PACK      WTEPRESI,SP70
+          PACK      WTEPPOST,SP70
+          PACK      WTEPSUBR,SP70
+          PACK      WTEPABRG,SP70
+          PACK      WTEPWEBC,SP70
+          PACK      WTEPCDAT,SP70
+          PACK      WTEPCTIM,SP70
+          PACK      WTEPWEBU,SP70
+          PACK      WTEPUDAT,SP70
+          PACK      WTEPUTIM,SP70
+          PACK      WTEPSPAR,SP70
+.
+          RETURN
++
+.*****************************************************************************
+.*                                 PRS2T000                                  *
+.*               Check if we need to record the merge on prspmiaf            *
+.* Requires: PTCNHDPS - state parameter                                      *
+.*           OLDURNUM - Old U/R Number                                       *
+.*           CHCSDTE  - Starting Date for HCS data                           *
+.* Returns:  PRSTRIGF - flag for writing to prspmiaf                         *
+.*                       0 = No                                              *
+.*                       1 = Yes                                             *
+.******************************************************************************
+.
+PRS2T000  MOVE      ZERO,PRSTRIGF              * Init. PRS PMI trigger flag (No)
+.
+          COMPARE   THREE,PTCNHDPS               * State set to Victoria ?
+          GOTO      PRS2T999 IF NOT EQUAL        * no - finished
+.
+.         Get the last discharge record for the U/R
+.
+          PACK      KEY24,OLDURNUM,Z70
+          CALL      RDSDSCH3                     * position after old U/R
+          CALL      RDPDSCH3                     * read previous record
+          BRANCH    OVRCD,PRS2T999               * eof - finished
+.
+          MATCH     OLDURNUM,DURNO               * same U/R still ?
+          GOTO      PRS2T999 IF NOT EQUAL        * no - finished
+.
+          MATCH     CHCSDTE,DDATE                * disch. date < start HDP date
+          GOTO      PRS2T999 IF LESS             * yes - finished
+.
+.         The discharge date is greater than or equal to the start HDP date,
+.         so set the flag to write a record to prspmiaf
+.
+          MOVE      ONE,PRSTRIGF                 * set flag to write to prspmiaf
+.
+PRS2T999  RETURN
++

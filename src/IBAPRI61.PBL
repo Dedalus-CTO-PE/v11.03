@@ -1,0 +1,1966 @@
+.******************************************************************************
+.*  System       :  Private practice bulk billing                             *
+.*  Program      :  IBAPRI61                                                  *
+.*  Function     :  Process Rejections                                        *
+.******************************************************************************
+.*  Date         :  25/03/92                                                  *
+.*  Author       :  Whirlpool                                                 *
+.*  Modifications:                                                            *
+.*        V10.04.01 15/04/2014  J.Tan          CAR 261630                     *
+.*                  Removed port number from temp file name                   *
+.*        V9.03.01  03/03/2004  Lina Vo    CAR 47921                          *
+.*                  Removed use PRIDBTFD & IO.                                *
+.*        V9.02.01  02/10/2001  J.Tan                                         *
+.*                  Mods to use PMSHCPFD instead of PATDO1FD                  *
+.*        V5.08.01  29/08/2000  Caleb Sharman                                 *
+.*                  Changed Health Fund variables to be 8 chars               *
+.*        V5.08.B01 21/03/2000  J.Tan                                         *
+.*                  Recompiled for PRIBULFD (GST amount)                      *
+.*        V5.07.02  12/10/1999  J Habasque                                    *
+.*                  Recompiled for PRIBULFD                                   *
+.*        V5.07.01  09/06/1999  Greg Horvat                                   *
+.*                  Recompiled for PRIINVIO - Fixed problem with direct read  *
+.*                                                                            *
+.*                  V6.00.02 07/10/92  Steve Armstrong                        *
+.*                           Modified for alphanumeric debtor number          *
+.*                  V6.00.03 01/03/93  DIG       SRF 120122  Quote 7558       *
+.*                           Re-Compiled for changes to Bulk Billing and      *
+.*                           addition of Cash Deposits.                       *
+.*                                                                            *
+.******************************************************************************
+.
+          INC       STD001FD
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+          INC       PRIBULFD/INC
+...          INC       PRIDBTFD/INC
+          INC       PRIINVFD/INC
+          INC       PATINVFD/INC
+          INC       PATMA1FD/INC
+          INC       PATVISFD/INC
+          INC       RCPREGFD/INC
+          INC       PMSHCPFD/INC
+
+ACTION    DIM       9
+ACTIONFL  FORM      1
+AMOUNT    FORM      8.2
+CHANGE    FORM      1
+CLAIM     DIM       8
+CLAIMAMT  FORM      8.2
+CMDLINE   DIM       80
+COL       FORM      2
+DIM10     DIM       10
+DIM15     DIM       15
+DIM20     DIM       20
+DIM4      DIM       4
+DIM6      DIM       6
+DIM8      DIM       8
+DIM8A     DIM       8
+DIMA      DIM       1
+DIMB      DIM       1
+DOCNAME   DIM       20
+FORM0P4   FORM      .4
+FORM10P4  FORM      10.4
+FORM3     FORM      3
+FORM4B    FORM      4
+FORM8     FORM      8
+ICURS     FORM      2
+INDXFLAG  FORM      1
+INVOICE   DIM       8
+ITEM      DIM       38[11]
+ITEMNO    FORM      2
+ITEMNUMB  DIM       9
+ITEMSEL   DIM       38[11]
+TOFLAG    FORM      1
+MAXCOUNT  FORM      4
+MCURPAGE  FORM      4
+MMAXPAGE  FORM      4
+MMAXTRAN  FORM      4
+MODE      FORM      1                  * 0 = insert 1 = change
+MREQPAGE  FORM      4
+MSKIPASK  FORM      1
+NAME      DIM       30
+NAME14    DIM       14
+NXTSCRN   FORM      1
+REBATAMT  FORM      8.2
+REGISTER  DIM       3
+REJECAMT  FORM      8.2
+SAVCLAIM  DIM       8
+SAVEVERT  FORM      2
+SAVKEY28  DIM       28
+SAVINV    DIM       8
+FROMFLAG  FORM      1
+SCLAIM    DIM       8
+SCREEN    FORM      2
+SINVN     DIM       8
+SITEM     DIM       9
+SKEY38    DIM       38
+SROW      FORM      2
+ZEDS      INIT      "zzzzzzzzzzzzzzzzzzzz"
+TEMPNAME  DIM       8        * to be set up correctly
+.
+. ----  Process Rejections Tempfile -----
+.
+TEMPFILE  IFILE     SQL, FIXED=66, KEY="U1-3,4-11,12-19,20-28"
+TEMPFIL2  IFILE     SQL, FIXED=66, KEY="U4-11,12-19,20-28,63-65"
+.
+. Name    Type      length    Physical     Start
+.-------  --------  ------    --------     -----
+TMPUNIQ   DIM       3            3           1
+TMPCLAIM  DIM       8            8           4
+TMPINVN   DIM       8            8          12
+TMPITEM   DIM       9            9          20
+TMPNAME   DIM       14          14          29
+TMPACTN   FORM      1            2          43
+TMPCLAMT  FORM      8.2          6          45
+TMPRBAMT  FORM      8.2          6          51
+TMPRJAMT  FORM      8.2          6          57
+TMPREG    DIM       3            3          63
+.
+.                                          -----
+.                                           66
+.                                          -----
+PRGID     INIT      "IBAPRI61"
+PRGNAM    INIT      "Process Rejections"
+VERSION   INIT      "V11.03.00"
+.
+.*****************************************************************************
+.*                              ML0000                                       *
+.*                             Mainline                                      *
+.*****************************************************************************
+.
+ML0000    CALL      INIT0000                * initialistion
+.
+ML1000    CALL      CREA0000
+          CALL      MODB0000
+          BRANCH    EXIT,ML9000 
+.
+          CALL      POST0000                * post the temp file
+ML9000    CALL      KILL0000                * remove the temp files
+          
+ML9999    CHAIN     PGM
+.
+.*****************************************************************************
+.*                              INIT0000                                     *
+.*                        Initialisation section                             *
+.*****************************************************************************
+.
+INIT0000
+          CALL      DISPHEAD
+          OPEN      PRIBULK1,"pribulkf"
+          OPEN      PRIBULK3,"pribulkf"
+          OPEN      PRIBULK6,"pribulkf"
+          OPEN      RCPREGA1,"rcpregaf"
+          OPEN      PATVISA1,"patvisaf"
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+...          OPEN      PRIDEBT1,"pridebtf"
+          OPEN      PRIINVO1,"priinvof"
+          OPEN      PATINVR1,"patinvrf"
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          CALL      TFILENAM                * Get temp file name
+          MOVE      TFILNAME,TEMPNAME
+.
+INIT9999  RETURN
+.
+.********************************************************************** 
+.*                               IREJ0000                             *
+.*                           Input a rejection                        *
+.********************************************************************** 
+.
+IREJ0000
+          CALL      KCLM0000                * keyin the claim number
+          BRANCH    EXIT,IREJ9999
+.
+IREJ1000  CALL      KINV0000                * keyin invoice number
+          BRANCH    EXIT,IREJ0000
+.
+IREJ1500  CALL      KITM0000                * keyin the item number
+          BRANCH    EXIT,IREJ1000
+.
+.------   Record has not been entered so continue -----
+.
+          MOVE      PRBBAMNT,CLAIMAMT
+          MOVE      PRBBPAID,REBATAMT
+          ASSIGN    (PRBBAMNT - PRBBPAID),REJECAMT
+.
+IREJ2000  CALL      KACT0000                * keyin the action 
+          BRANCH    EXIT,IREJ1000
+.
+          IF        ACTIONFL = 0
+.------     Display the claim/rebate and rejection amounts -----
+            MOVE      REJECAMT,CLAIMAMT
+            DISPLAY   *P44:CVERT,CLAIMAMT,*P57:CVERT,REBATAMT:
+                      *P70:CVERT,REJECAMT
+            CALL      KAMT0000              * keyin claim amount if this is
+.                                             a re-submission
+          ELSE
+.------     Display the claim/rebate and rejection amounts -----
+            DISPLAY   *P44:CVERT,CLAIMAMT,*P57:CVERT,REBATAMT:
+                      *P70:CVERT,REJECAMT
+            GOTO      IREJ9999
+          ENDIF
+.
+IREJ9999  RETURN
+.
+.********************************************************************** 
+.*                            KCLM0000                                *
+.*                       Keyin the Claim number                       *  
+.********************************************************************** 
+.
+KCLM0000  MOVE      ZERO,EXIT
+          IF        MODE = 0
+            MOVE      UNDLN8,SCLAIM         * underlines for add mode
+          ELSE
+            MOVE      CLAIM,SCLAIM          * default for change mode
+          ENDIF
+KCLM1000  MOVE      ZERO,EXIT
+          KEYIN     *P6:CVERT,*DV,SCLAIM:
+                    *P6:CVERT,*V2LON,*JR,CLAIM:
+                    *P6:CVERT,*DV,CLAIM
+.
+          PACK      CLAIM,CLAIM,SP10
+          MATCH     SP8,CLAIM               * test if nothing entered
+          GOTO      KCLM3000 IF NOT EQUAL
+          IF        MODE = 0
+            GOTO      KCLM9000              * exit in add mode
+          ELSE
+            MOVE      SCLAIM,CLAIM          * set and display default in change
+            DISPLAY   *P6:CVERT,*V2LON,CLAIM
+            GOTO      KCLM9999
+          ENDIF
+.
+KCLM3000  MATCH     "       ?",CLAIM        * test for a question mark option
+          GOTO      KCLM5000 IF EQUAL
+.
+          TYPE      CLAIM                   * is the field numeric
+          IF        !@EQUAL
+            BEEP
+            DISPLAY   *P1:24,"Claim number must be numeric. ";
+            CALL      HITENTER
+            GOTO      KCLM1000
+          ENDIF
+.
+.------   Test if claim is on the bulk billing file ------
+.
+          PACK      KEY28,CLAIM,SP20
+          CALL      RSPRBB1
+          CALL      RKPRBB1
+          BRANCH    OVRCD,KCLM4000
+.
+          MOVE      CLAIM,FORM8
+          COMPARE   FORM8,PRBBCLAM
+          GOTO      KCLM4000 IF NOT EQUAL
+.
+.------   Test if claim has any rejected transactions ------
+.
+          PACK      KEY38,THREE,CLAIM,SP30
+          CALL      RSPRBB6
+          CALL      RKPRBB6
+          BRANCH    OVRCD,KCLM4500 
+.
+          COMPARE   THREE,PRBBSTAT
+          GOTO      KCLM4500 IF NOT EQUAL
+.
+          MOVE      CLAIM,FORM8
+          COMPARE   FORM8,PRBBCLAM
+          GOTO      KCLM4500 IF NOT EQUAL
+          GOTO      KCLM9999
+.
+KCLM4000  BEEP
+          DISPLAY  *P1:24,*EL,"Claim number is not on file. ";
+          CALL     HITENTER
+          GOTO     KCLM1000
+.
+KCLM4500  BEEP
+          DISPLAY  *P1:24,*EL,"Their are no rejected invoices for this claim. ";
+          CALL     HITENTER
+          GOTO     KCLM1000
+.
+.------   Code to handle a "?" on claim codes ------
+.
+KCLM5000
+          DISPLAY  *P6:CVERT,SP8            * clear ? displayed
+          MOVE     CVERT,SAVEVERT           * save the current line number
+          MOVE     ZERO,HLEF
+          CALL     GETSCR00                 * save the screen
+KCLM5500  MOVE     THREE,FROMFLAG           * set flag for priclmds
+          MOVE     THREE,TOFLAG             * we only want rejected trans
+          MOVE     ZERO,INDXFLAG            * use index 6
+          CALL     PRICLMDS                 * display the claims
+          MOVE     SAVEVERT,CVERT           * reset the line number
+.
+KCLM6000  DISPLAY  *P1:24,*EL,"Claim Number : "
+          KEYIN    *P16:24,*DV,SCLAIM:
+                   *P16:24,*V2LON,*JR,CLAIM:
+                   *P16:24,*DV,CLAIM
+.
+          PACK      CLAIM,CLAIM,SP10
+          MATCH     SP8,CLAIM               * test if nothing entered
+          GOTO      KCLM7000 IF NOT EQUAL
+          IF        MODE = 0
+            GOTO      KCLM8900              * exit if in add mode
+          ELSE
+            MOVE      SCLAIM,CLAIM          * set default in change mode
+            GOTO      KCLM7500
+          ENDIF
+.
+KCLM7000  MATCH     "       ?",CLAIM        * test for a "?" option
+          GOTO      KCLM5500 IF EQUAL
+.
+          TYPE      CLAIM                   * is the entry numeric ?
+          IF        !@EQUAL
+            BEEP
+            DISPLAY   *P1:24,"Claim number must be numeric. ";
+            CALL      HITENTER
+            GOTO      KCLM6000
+          ENDIF
+.
+.------   Test if this claim is on the bulk billing file ------
+.
+          PACK      KEY28,CLAIM,SP20
+          CALL      RSPRBB1
+          CALL      RKPRBB1
+          BRANCH    OVRCD,KCLM8000
+.
+          MOVE      CLAIM,FORM8
+          COMPARE   FORM8,PRBBCLAM
+          GOTO      KCLM8000 IF NOT EQUAL
+.
+.------   Test if claim has any rejected transactions ------
+.
+          PACK      KEY38,THREE,CLAIM,SP30
+          CALL      RSPRBB6
+          CALL      RKPRBB6
+          BRANCH    OVRCD,KCLM8500 
+.
+          COMPARE   THREE,PRBBSTAT
+          GOTO      KCLM8500 IF NOT EQUAL
+.
+          MOVE      CLAIM,FORM8
+          COMPARE   FORM8,PRBBCLAM
+          GOTO      KCLM8500 IF NOT EQUAL
+.
+.------   Redisplay the screen and display the entry ------
+.
+KCLM7500  CALL      PUTSCR00
+          DISPLAY   *P6:CVERT,*V2LON,CLAIM
+          GOTO      KCLM9999
+.
+KCLM8000  BEEP
+          DISPLAY  *P1:24,*EL,"Claim number is not on file. ";
+          CALL     HITENTER
+          GOTO     KCLM6000
+.
+KCLM8500  BEEP
+          DISPLAY  *P1:24,*EL,"Their are no rejected invoices for this claim. ";
+          CALL     HITENTER
+          GOTO     KCLM6000
+.
+KCLM8900  CALL      PUTSCR00
+KCLM9000  MOVE      ONE,EXIT
+KCLM9999  RETURN
+.
+.********************************************************************** 
+.*                            KINV0000                                *
+.*                       Keyin the invoice                            *  
+.********************************************************************** 
+.
+KINV0000
+          MOVE      ZERO,EXIT
+.
+          IF        MODE = 0       
+            MOVE      UNDLN8,SINVN          * underlines for add mode
+          ELSE
+            MOVE      INVOICE,SINVN         * default for change mode
+          ENDIF
+.
+KINV1000  KEYIN     *P15:CVERT,*DV,SINVN,*P24:CVERT,*DV,SP10,*DV,SP4:
+                    *P15:CVERT,*V2LON,*JR,INVOICE:
+                    *P15:CVERT,*DV,INVOICE
+.
+          PACK      INVOICE,INVOICE,SP8
+          MATCH     SP8,INVOICE             * test if nothing entered
+          GOTO      KINV3000 IF NOT EQUAL
+          IF        MODE = 0
+            GOTO      KINV9000              * exit in add mode
+          ELSE
+            MOVE      SINVN,INVOICE         * set default in change mode
+            DISPLAY   *P15:CVERT,*V2LON,INVOICE
+            GOTO      KINV9999
+          ENDIF
+.
+KINV3000  MATCH     "       ?",INVOICE      * test for a "?" option 
+          GOTO      KINV5000 IF EQUAL
+.
+          TYPE      INVOICE                 * numeric ?
+          IF        !@EQUAL
+            BEEP
+            DISPLAY   *P1:24,"Invoice number must be numeric. ";
+            CALL      HITENTER
+            GOTO      KINV0000
+          ENDIF
+.
+.------   Test if invoice has any rejected transactions ------
+.
+          PACK      KEY38,THREE,CLAIM,INVOICE,SP30
+          CALL      RSPRBB6
+          CALL      RKPRBB6
+          BRANCH    OVRCD,KINV4500 
+.
+          COMPARE   THREE,PRBBSTAT
+          GOTO      KINV4500 IF NOT EQUAL
+.
+          MATCH     INVOICE,PRBBINVN
+          GOTO      KINV4500 IF NOT EQUAL
+.
+          MOVE      CLAIM,FORM8
+          COMPARE   FORM8,PRBBCLAM
+          GOTO      KINV4500 IF NOT EQUAL
+.
+          GOTO      KINV4800
+.
+KINV4500  BEEP
+          DISPLAY   *P1:24,*EL,"Their are no rejected items for this invoice. ";
+          CALL      HITENTER
+          GOTO      KINV1000
+.
+KINV4800  CALL      GNAM0000                * Get patients name for invoice
+.
+          DISPLAY   *P1:24,*EL,"Patient's Name : ",NAME
+          GOTO      KINV9999
+.
+KINV5000
+          MOVE      CVERT,SAVEVERT          * save the line number
+          DISPLAY   *P15:CVERT,SP8          * clear the "?" displayed
+          MOVE      ZERO,HLEF
+          CALL      GETSCR00                * save the screen
+KINV5500  CALL      QINV0000                * question mark routine
+          MOVE      SAVEVERT,CVERT          * reset the line
+.
+KINV6000  DISPLAY   *P1:24,*EL,"Invoice Number : "
+          KEYIN     *P18:24,*DV,SINVN: 
+                    *P18:24,*V2LON,*JR,INVOICE:
+                    *P18:24,*DV,INVOICE
+.
+          PACK      INVOICE,INVOICE,SP8
+          MATCH     SP8,INVOICE             * test if nothing entered
+          GOTO      KINV7000 IF NOT EQUAL
+          IF        MODE = 0
+            GOTO      KINV8900              * exit in add mode
+          ELSE
+            MOVE      SINVN,INVOICE         * set default in change mode
+            GOTO      KINV8000
+          ENDIF
+.
+KINV7000  MATCH     "       ?",INVOICE      * test for a "?" option
+          GOTO      KINV5500 IF EQUAL
+.
+          TYPE      INVOICE                 * numeric
+          IF        !@EQUAL
+            BEEP
+            DISPLAY   *P1:24,"Invoice number must be numeric. ";
+            CALL      HITENTER
+            GOTO      KINV6000
+          ENDIF
+.
+.------   Test if invoice has any rejected transactions ------
+.
+          PACK      KEY38,THREE,CLAIM,INVOICE,SP30
+          CALL      RSPRBB6
+          CALL      RKPRBB6
+          BRANCH    OVRCD,KINV7500 
+.
+          COMPARE   THREE,PRBBSTAT
+          GOTO      KINV7500 IF NOT EQUAL
+.
+          MATCH     INVOICE,PRBBINVN
+          GOTO      KINV7500 IF NOT EQUAL
+.
+          MOVE      CLAIM,FORM8
+          COMPARE   FORM8,PRBBCLAM
+          GOTO      KINV7500 IF NOT EQUAL
+.
+          GOTO      KINV7800
+.
+KINV7500  BEEP
+          DISPLAY   *P1:24,*EL,"Their are no rejected items for this invoice. ";
+          CALL      HITENTER
+          GOTO      KINV6000
+.
+KINV7800  CALL      GNAM0000                * Get patients name for invoice
+.
+KINV8000  CALL      PUTSCR00
+          DISPLAY   *P15:CVERT,*V2LON,INVOICE,*HOFF,*P1:24,*EL:
+                               "Patient's Name : ",NAME
+          GOTO      KINV9999
+.
+KINV8900  CALL      PUTSCR00
+KINV9000  MOVE      ONE,EXIT
+KINV9999  RETURN
+.
+.********************************************************************** 
+.*                            KITM0000                                *
+.*                       Keyin the item                               *  
+.********************************************************************** 
+.
+KITM0000
+          MOVE      ZERO,EXIT
+.
+          IF        MODE = 0       
+            MOVE      UNDLN9,SITEM          * underlines for add mode
+          ELSE
+            MOVE      ITEMNUMB,SITEM        * default for change mode
+          ENDIF
+.
+KITM1000  KEYIN     *P24:CVERT,*DV,SITEM:
+                    *P24:CVERT,*V2LON,ITEMNUMB:
+                    *P24:CVERT,*DV,ITEMNUMB
+.
+          PACK      ITEMNUMB,ITEMNUMB,SP9
+          MATCH     SP9,ITEMNUMB             * test if nothing entered
+          GOTO      KITM3000 IF NOT EQUAL
+          IF        MODE = 0
+            DISPLAY   *P1:24,*EL;
+            GOTO      KITM9000               * exit in add mode
+          ELSE
+            MOVE      SINVN,ITEMNUMB         * set default in change mode
+            DISPLAY   *P24:CVERT,*V2LON,ITEMNUMB:
+                      *P1:24,*EL;
+            GOTO      KITM9999
+          ENDIF
+.
+KITM3000  CMATCH    QUEST,ITEMNUMB           * test for a "?" option 
+          GOTO      KITM5000 IF EQUAL
+.
+.------   Validate that this item is on file for this claim -----
+.------   and that it is a rejected transaction. -----
+.
+          CALL      VCIR0000                
+          IF        EXIT = 1       
+            BEEP
+            DISPLAY   *P1:24,*EL,"This Item is not rejected for this claim. ";
+            CALL     HITENTER
+            GOTO     KITM0000
+          ELSE
+            IF       EXIT = 2
+              GOTO     KITM0000
+            ENDIF
+          ENDIF
+.
+          MOVE      PRBBREGR,REGISTER
+          CALL      TEST0000                * test if on the temp file already
+          BRANCH    EXIT,KITM0000
+.
+          DISPLAY   *P1:24,*EL;
+          GOTO      KITM9999
+.
+KITM5000
+          MOVE      CVERT,SAVEVERT          * save the line number
+          DISPLAY   *P24:CVERT,SP9          * clear the "?" displayed
+          MOVE      ZERO,HLEF
+          CALL      GETSCR00                 * save the screen
+KITM5500  CALL      QITM0000                * question mark routine
+          MOVE      SAVEVERT,CVERT          * reset the line
+.
+KITM6000  DISPLAY   *P1:24,*EL,"Item Number : "
+          KEYIN     *P15:24,*DV,SINVN: 
+                    *P15:24,*V2LON,ITEMNUMB:
+                    *P15:24,*DV,ITEMNUMB
+.
+          PACK      ITEMNUMB,ITEMNUMB,SP9
+          MATCH     SP9,ITEMNUMB             * test if nothing entered
+          GOTO      KITM7000 IF NOT EQUAL
+          IF        MODE = 0
+            GOTO      KITM8900               * exit in add mode
+          ELSE
+            MOVE      SINVN,ITEMNUMB         * set default in change mode
+            GOTO      KITM8000
+          ENDIF
+.
+KITM7000  MATCH     "       ?",ITEMNUMB      * test for a "?" option
+          GOTO      KITM5500 IF EQUAL
+.
+.------   Validate that this invoice is on file for this claim -----
+.------   and that it is a rejected transaction.               -----
+.
+          CALL      VCIR0000
+          IF        EXIT = 1        
+            BEEP
+            DISPLAY   *P1:24,*EL,"This Item is not rejected for this claim. ";
+            CALL     HITENTER
+            GOTO     KITM6000
+          ELSE
+            IF        EXIT = 2
+              GOTO      KITM6000
+            ENDIF
+          ENDIF
+.
+          MOVE      PRBBREGR,REGISTER
+          CALL      TEST0000                * test if on the temp file already
+          BRANCH    EXIT,KITM6000
+.
+KITM8000  CALL      PUTSCR00
+          DISPLAY   *P24:CVERT,*V2LON,ITEMNUMB:
+                    *P1:24,*EL;
+          GOTO      KITM9999
+.
+KITM8900  CALL      PUTSCR00
+KITM9000  MOVE      ONE,EXIT
+KITM9999  RETURN
+.
+.********************************************************************** 
+.*                            KACT0000                                *
+.*                       Keyin the action                             *  
+.********************************************************************** 
+.
+KACT0000
+          DISPLAY   *P1:24,*EL,*V2LON,ZERO,*HOFF," = Re-submit, ":
+                    *V2LON,ONE,*HOFF," = Delete"
+.
+KACT1000  KEYIN    *P34:CVERT,*EL,*DV,SP9,*P34:CVERT,*DV,UNDLN1:
+                   *P34:CVERT,*V2LON,FORM1
+.
+          IF       FORM1 = 1
+            DISPLAY  *P34:CVERT,"Delete"
+            MOVE     "Delete",ACTION
+          ELSE
+            IF       FORM1 = 0
+              DISPLAY  *P34:CVERT,"Re-Submit"
+              MOVE     "Re-Submit",ACTION
+            ELSE
+              BEEP
+              GOTO     KACT1000
+            ENDIF
+          ENDIF
+.
+          MOVE         FORM1,ACTIONFL
+.
+          DISPLAY      *P1:24,*EL
+KACT9999  RETURN
+.
+.********************************************************************** 
+.*                            KAMT0000                                *
+.*                       Keyin the amount                             *  
+.********************************************************************** 
+.
+KAMT0000 
+.
+          KEYIN   *P44:CVERT,*DV,REJECAMT:
+                  *P44:CVERT,*V2LON,AMOUNT 
+.
+          IF      AMOUNT = 0.00      
+            MOVE    REJECAMT,CLAIMAMT       * rejected amount is the default
+            DISPLAY   *P44:CVERT,CLAIMAMT
+          ELSE
+            IF      AMOUNT > REJECAMT
+              BEEP
+              DISPLAY   *P1:24,*EL,"Error : Claimed  amount > Rejected amount. ";
+              CALL      HITENTER
+              GOTO      KAMT0000
+            ELSE
+              MOVE      AMOUNT,CLAIMAMT     * valid amount entered
+              DISPLAY   *P44:CVERT,CLAIMAMT
+            ENDIF
+          ENDIF
+.
+KAMT9999  RETURN
+.
+.********************************************************************** 
+.*                               MODB0000                             *
+.*   Control block for Adding, Changing, Deleting test result codes   *
+.********************************************************************** 
+.
+MODB0000  MOVE      ZERO,CHANGE
+.
+          CALL      MAXP0000                * Get MMAXPAGE & MMAXTRAN
+.
+          MOVE      ZERO,MAXCOUNT           * Init. Max Trans. Count
+.
+          CALL      DISB0000                * Display the screen
+.
+          MOVE      ZERO,MSKIPASK           * Stop display at every screen
+.
+          COMPARE   ZERO,MMAXTRAN           * No Records as Yet ?
+          GOTO      MODB1000 IF EQUAL       * Yes - Go Straight to Add Mode
+.
+MODB0100  MOVE      TRUE,EXIT               * Set exit flag
+          MOVE      SP1,ANS
+          KEYIN     *P1:24,*EL,"(",*V2LON,*DV,ANSA,*HOFF,")dd":
+                    ", (",*V2LON,*DV,ANSC,*HOFF,")hange":
+                    ", (",*V2LON,*DV,ANSD,*HOFF,")elete":
+                    ", (",*V2LON,*DV,ANSR,*HOFF,")edisplay":
+                    ", (",*V2LON,*DV,ANSE,*HOFF,")xit":
+                    ", (",*V2LON,*DV,ANSP,*HOFF,")ost : ",*V2LON,ANS
+.
+          ENDSET    ANS
+          APPEND    SP1,ANS
+          RESET     ANS
+          REP       "A1C2D3R4E5P6 0102030405060",ANS   * Cannot enter numbers
+          MOVE      ANS,FORM2
+          BRANCH    FORM2,MODB1000,MODB2000,MODB3000,MODB4000,MODB5000,MODB6000
+.
+          BEEP
+          GOTO      MODB0100
+.
+.-------- Add items ------
+.
+MODB1000  CALL      MADD0000
+          GOTO      MODB0100
+.
+.-------- Change items ------
+.
+MODB2000  CALL      MCHG0000
+          GOTO      MODB0100
+.
+.-------- Delete items ------
+.
+MODB3000  CALL      MDEL0000
+          GOTO      MODB0100
+.
+.-------- Redisplay screen ------
+.
+MODB4000  MOVE      ZERO,MSKIPASK            * Stop display at every screen
+          CALL      DISB0000
+          GOTO      MODB0100
+.
+.-------- Exit without posting ------
+.
+MODB5000  MOVE      FALSE,EXIT
+.
+          COMPARE   ZERO,CHANGE              * see if any changes made
+          GOTO      MODB9999 IF EQUAL        
+.
+          KEYIN     *P1:24,*EL,"Exit without posting changes. Ok to proceed (":
+                    *V2LON,*DV,ANSY,*HOFF,*DV,SLASH,*V2LON,*DV,ANSN,*HOFF:
+                    ") ? ",*B,*V2LON,ANS
+.
+          CMATCH    ANSY,ANS
+          GOTO      MODB9999 IF EQUAL
+.
+          GOTO      MODB0100
+.
+.-------- Post option chosen ------
+.
+MODB6000  MOVE      ZERO,EXIT                * Unset exit flag - update files
+          RETURN
+.
+.------ Exit option chosen ------
+.
+MODB9999  MOVE      TRUE,EXIT
+          RETURN
++
+.**************************************************************************
+.*                                  MADD0000                              *
+.*                        Add codes to the temp file                      *
+.**************************************************************************
+MADD0000  DISPLAY   *P1:24,*EL;
+          MOVE      ZERO,MODE                * Insert mode
+          CALL      MAXP0000
+.
+MADD0100 
+          ADD       ONE,MMAXTRAN
+.
+          CALL      MAXP2000
+.
+          COMPARE   MCURPAGE,MMAXPAGE        * Is curr scrn page the end ?
+          GOTO      MADD1000 IF EQUAL        * Yes - calculate screen pos
+.
+          MOVE      MMAXPAGE,MREQPAGE        * else display last screen
+          MOVE      ONE,MSKIPASK             * Stop display at last screen
+.
+          CALL      DISB0000                 * because MMAXPAGE=last screen page
+.
+.------ Calculate screen position ------
+.
+MADD1000  MOVE      MCURPAGE,FORM4
+          SUB       ONE,FORM4
+          MULT      TEN8,FORM4
+          MOVE      MMAXTRAN,FORM4B
+          SUB       FORM4,FORM4B
+          ADD       FOUR,FORM4B
+          MOVE      FORM4B,CVERT             * Position down the screen
+.
+          MOVE      MMAXTRAN,FORM3           * Transaction number
+          DISPLAY   *P1:CVERT,*V2LON,FORM3   
+.
+. ----- Clear Temp File Variables -----
+.
+          UNPACK    SP30,TMPCLAIM,TMPINVN,TMPNAME
+          MOVE      SP10,TMPITEM
+          MOVE      SP3,TMPREG
+          MOVE      ZERO,TMPACTN
+          MOVE      ZERO,TMPCLAMT
+          MOVE      ZERO,TMPRBAMT
+          MOVE      ZERO,TMPRJAMT
+.
+          CALL      IREJ0000                 * Input rejection details       
+          BRANCH    EXIT,MADD8500
+.
+.------------------------------------------------------------------------------
+.         Write new record
+.------------------------------------------------------------------------------
+.
+.------ set up temp file variables ------
+.
+          MOVE      MMAXTRAN,FORM3
+          MOVE      FORM3,TMPUNIQ
+.
+          CALL      SETV0000                 * set up the variables
+.
+          PACK      KEY28,TMPUNIQ,TMPCLAIM,TMPINVN,TMPITEM
+          CALL      WRTMPR1                  * write to the temp file
+.
+          MOVE      ONE,CHANGE               * A change has been made
+.
+          GOTO      MADD0100                 * Add another record
+.
+.------ end of add mode so re-display screen ------
+.
+MADD8500  DISPLAY   *P1:CVERT,*EL
+          SUB       ONE,MMAXTRAN
+          MOVE      ONE,MSKIPASK
+.
+          CALL      DISB0000                 * display the screen
+.
+          MOVE      TRUE,EXIT
+.
+MADD9999  CALL      MAXP0000                 * Get Max. page & transaction
+          RETURN
++
+.************************************************************************
+.*                                MCHG0000                              *
+.*                      Change codes in the temp file                   *
+.************************************************************************
+MCHG0000  DISPLAY   *P1:24,*EL;
+          MOVE      ONE,MODE                * Change mode
+          KEYIN     *P1:24,*EL,"Change item : ",*V2LON,FORM4A;
+.
+          COMPARE   ZERO,FORM4A             * see if an item has been selected
+          GOTO      MCHG9999 IF EQUAL
+.
+          COMPARE   MMAXTRAN,FORM4A         * item must not be > maximum no. of
+          GOTO      MCHG1000 IF EQUAL         items entered so far
+.
+          GOTO      MCHG1000 IF LESS
+.
+.------ item entered is not on file ------
+.
+MCHG0100  DISPLAY   *P1:24,*EL,*B,"Item out of Range - Hit <":
+                               *V2LON,"ENTER",*HOFF,"> to Continue ";
+          KEYIN     *EOFF,ANS;
+          DISPLAY   *P1:24,*EL;
+.
+          GOTO      MCHG0000
+.
+.------ Calculate screen page transaction is on & transaction # down page -----
+.
+MCHG1000  MOVE      MMAXTRAN,FORM4           * Save MMAXTRAN
+          MOVE      MMAXPAGE,FORM4B          * Save MMAXPAGE
+          MOVE      FORM4A,MMAXTRAN          * Use trx num to calculate MMAXPAGE
+.
+          CALL      MAXP2000                 * Calculate MMAXPAGE
+.
+          MOVE      MMAXPAGE,MREQPAGE        * MMAXPAGE is the page req
+          MOVE      FORM4,MMAXTRAN           * Restore MMAXTRAN
+          MOVE      FORM4B,MMAXPAGE          * Restore MMAXPAGE
+.
+          COMPARE   MCURPAGE,MREQPAGE        * if we have the required page 
+          GOTO      MCHG1500 IF EQUAL          then get the screen position
+.
+          MOVE      ONE,MSKIPASK             * Display till required screen
+.
+          CALL      DISB0000                 * display the batch screen
+.
+.------ calculate the screen position ------
+.
+MCHG1500  MOVE      MCURPAGE,FORM4
+          SUB       ONE,FORM4
+          MULT      TEN8,FORM4
+          MOVE      FORM4A,FORM4B
+          SUB       FORM4,FORM4B
+          ADD       FOUR,FORM4B
+          MOVE      FORM4B,CVERT             * Position down the screen
+.
+          MOVE      ZERO,FORM4               * Counter for no.of records read
+          MOVE      SP30,KEY28
+.
+          CALL      RSTMPR1                  * position on the temp file
+.
+.------ read through the temp file ------
+.
+MCHG2000  CALL      RKTMPR1
+          BRANCH    OVRCD,MCHG0100           * Record not found
+.
+          ADD       ONE,FORM4
+.
+          COMPARE   FORM4,FORM4A             * Same as transaction # ?
+          GOTO      MCHG2900 IF EQUAL        * Yes - exit from read loop
+.
+          GOTO      MCHG2000                 * Otherwise keep on reading
+.
+.------ Save current record's key for positioning read before update ------
+.
+MCHG2900  PACK      SAVKEY28,TMPUNIQ,TMPCLAIM,TMPINVN,TMPITEM
+.
+          CALL      SAVV0000
+.
+          MOVE      FORM4A,FORM3
+.
+          CALL      IREJ0000                 * change report code
+.
+          MOVE      SAVKEY28,KEY28           * re-read current record as we
+          CALL      RDTMPR1                    lose it when re-displaying
+.
+          COMPARE   ZERO,EXIT                * see if a new code has been 
+          GOTO      MCHG3000 IF EQUAL          entered
+.
+          CALL      SETV0000
+          DISPLAY   *P6:CVERT,*EL,*V2LON,CLAIM,*P15:CVERT,INVOICE:
+                    *P24:CVERT,ITEMNUMB,*HOFF:
+                    *P34:CVERT,ACTION,*P44:CVERT,CLAIMAMT,*P57:CVERT,REBATAMT:
+                    *P70:CVERT,REJECAMT
+.
+.------ update temp file if neccessary ------
+.
+MCHG3000  MOVE      SAVKEY28,KEY28
+          UNPACK    SAVKEY28,TMPUNIQ,TMPCLAIM,TMPINVN,TMPITEM
+          CALL      RDTMPR1                  * read the temp file
+.
+          COMPARE   ZERO,CHANGE              * Any changes made ?
+          GOTO      MCHG0000 IF EQUAL        * No - get next record to change
+.
+          CALL      SETV0000                 * set tmp file variables
+.
+          CALL      UPTMPR1                  * update the temp file
+.
+          GOTO      MCHG0000                 * Get next record to change
+.
+MCHG9999  RETURN
++
+.************************************************************************
+.*                                MDEL0000                              *
+.*                      Delete codes from the temp file                 *
+.************************************************************************
+MDEL0000  KEYIN     *P1:24,*EL,"Delete item : ",*V2LON,FORM4A;
+.
+          COMPARE   ZERO,FORM4A             * see if an item was selected
+          GOTO      MDEL9999 IF EQUAL
+.
+          COMPARE   MMAXTRAN,FORM4A         * item must not be > the maximum
+          GOTO      MDEL1000 IF EQUAL         no. of items entered so far
+.
+          GOTO      MDEL1000 IF LESS
+.
+.------ invalid item selected ------
+.
+          DISPLAY   *P1:24,*EL,*B,"Item out of range - Hit <":
+                               *V2LON,"ENTER",*HOFF,"> to Continue ";
+          KEYIN     *EOFF,ANS;
+          DISPLAY   *P1:24,*EL;
+.
+          GOTO      MDEL0000
+.
+.------ Calculate screen page transaction is on & transaction # down page -----
+.
+MDEL1000  MOVE      MMAXTRAN,FORM4           * Save MMAXTRAN
+          MOVE      MMAXPAGE,FORM4B          * Save MMAXPAGE
+          MOVE      FORM4A,MMAXTRAN          * Use trx num to calculate MMAXPAGE
+.
+          CALL      MAXP2000                 * Calculate MMAXPAGE
+.
+          MOVE      MMAXPAGE,MREQPAGE        * MMAXPAGE is the page req
+          MOVE      FORM4,MMAXTRAN           * Restore MMAXTRAN
+          MOVE      FORM4B,MMAXPAGE          * Restore MMAXPAGE
+.
+          COMPARE   MCURPAGE,MREQPAGE        * see if we have the required page
+          GOTO      MDEL1500 IF EQUAL          already
+.
+          MOVE      ONE,MSKIPASK             * Display till required screen
+.
+          CALL      DISB0000                 * display the batch screen
+.
+.------ calculate screen position ------
+.
+MDEL1500  MOVE      MCURPAGE,FORM4
+          SUB       ONE,FORM4
+          MULT      TEN8,FORM4
+          MOVE      FORM4A,FORM4B
+          SUB       FORM4,FORM4B
+          ADD       FOUR,FORM4B
+          MOVE      FORM4B,CVERT             * Position down the screen
+.
+          MOVE      ZERO,FORM4               * Counter for no.of records read
+          MOVE      SP30,KEY28
+.
+          CALL      RSTMPR1                  * position on the temp file
+.
+.------ read through the temp file ------
+.
+MDEL2000  CALL      RKTMPR1
+          BRANCH    OVRCD,MDEL2500
+.
+          ADD       ONE,FORM4
+.
+          COMPARE   FORM4,FORM4A             * Same as transaction # ?
+          GOTO      MDEL3000 IF EQUAL        * Yes - exit from read loop
+.
+          GOTO      MDEL2000                 * Otherwise keep on reading
+.
+.------ item selected is out of range ------
+.
+MDEL2500  KEYIN     *P1:24,*EL,*B,*V2LON,"*** SERIOUS ERROR *** ",*HOFF:
+                    "Field required is past end of range ... ",*EOFF,ANS;
+.
+          GOTO      MDEL9999
+.
+.------ Found record ------
+.
+MDEL3000  DISPLAY   *P6:CVERT,*V2LON,*BLINKON,TMPCLAIM,*P15:CVERT,TMPINVN:
+                              *P24:CVERT,TMPITEM;
+.
+.------ see if user wants to delete the item ------
+.
+MDEL3100  KEYIN     *P1:24,*EL,"Are you sure you want to delete this item (":
+                    *V2LON,*DV,ANSY,*HOFF,*DV,SLASH,*V2LON,*DV,ANSN,*HOFF:
+                    ") ? ",*V2LON,ANS
+.
+          CMATCH    ANSY,ANS
+          GOTO      MDEL4000 IF EQUAL
+.
+          CMATCH    ANSN,ANS
+          GOTO      MDEL3200 IF EQUAL
+.
+          BEEP
+          GOTO      MDEL3100                  * inavalid option
+.
+.------ not O.K. to delete the item ------
+.
+MDEL3200  DISPLAY   *P6:CVERT,TMPCLAIM,*P15:CVERT,TMPINVN,*P24:CVERT,TMPITEM;
+.
+          GOTO      MDEL0000
+.
+.------ Delete record ------
+.
+MDEL4000  PACK      KEY28,TMPUNIQ,TMPCLAIM,TMPINVN,TMPITEM
+.
+          CALL      DETMPR1                  * delete from temp file
+.
+.------ Keep unique counter in sequence ----
+.
+MDEL5000  PACK      KEY28,TMPUNIQ,SP30
+          CALL      RSTMPR1
+MDEL5500  CALL      RKTMPR1
+          BRANCH    OVRCD,MDEL6000
+.
+          MOVE      TMPUNIQ,FORM3
+          SUB       ONE,FORM3
+          MOVE      FORM3,TMPUNIQ
+          CALL      UPTMPR1
+          GOTO      MDEL5500
+.
+MDEL6000  CALL      MAXP0000                 * Recalculate MMAXPAGE & MMAXTRAN
+.
+          MOVE      ONE,MSKIPASK             * Display till required screen
+.
+          DISPLAY   *P1:5,*EF
+          CALL      DISB0000                 * display the batch screen
+.
+.
+          GOTO      MDEL0000
+.
+MDEL9999  RETURN
++
+.********************************************************************** 
+.*                             CREA0000                               *
+.*                  Kill and re-create the temp files                 *
+.**********************************************************************
+CREA0000  CALL      KILL0000                * remove the temp files
+.
+          PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TEMPNAME,CMDLINE
+          APPEND    " 66 u1-3,4-11,12-19,20-28 u4-11,12-19,20-28,63-65",CMDLINE
+          APPEND    SP30,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPFILE,TEMPNAME
+          OPEN      TEMPFIL2,TEMPNAME
+.
+CREA9999  RETURN
++
+.********************************************************************** 
+.*                             KILL0000                               *
+.*                        Kill the Temp Files                         *
+.**********************************************************************
+KILL0000  CLOSE     TEMPFILE
+          PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TEMPNAME,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+KILL9999  RETURN
++
+.**********************************************************************
+.*                              DISB0000                              *
+.*                 Redisplay batch keyin screen                       *
+.*        Requires : MSKIPASK - 0=Accept/More asked                   *
+.*                              1=Disp till MREQPAGE                  *
+.*        Returns  : MCURPAGE - Current displayed screen page         *
+.**********************************************************************
+DISB0000 
+          CALL      HEAD0000
+.
+          MOVE      ONE,MCURPAGE                * Current screen page is 1st
+          MOVE      FIVE,CVERT
+          MOVE      ONE,FORM3
+.
+.------ position on the temp file ------
+.
+          MOVE      SP30,KEY28
+          CALL      RSTMPR1
+.
+.------ read through the temp file ------
+.
+DISB1000  CALL      RKTMPR1
+          BRANCH    OVRCD,DISB9999
+.
+          COMPARE   ZERO,MSKIPASK               * displaying all entries
+          GOTO      DISB2000 IF EQUAL
+.
+          COMPARE   MREQPAGE,MCURPAGE           * skip if not required page
+          GOTO      DISB2100 IF NOT EQUAL
+.
+.------ display details ------
+.
+DISB2000  
+          IF        TMPACTN = 1
+            MOVE      "Delete",ACTION
+          ELSE
+            MOVE      "Re-Submit",ACTION
+          ENDIF
+          DISPLAY   *P1:CVERT,*V2LON,TMPUNIQ,*P6:CVERT,*EL,TMPCLAIM:
+                    *P15:CVERT,TMPINVN,*P24:CVERT,TMPITEM,*HOFF:
+                    *P34:CVERT,ACTION,*P44:CVERT,TMPCLAMT,*P57:CVERT,TMPRBAMT:
+                    *P70:CVERT,TMPRJAMT
+.
+.------ test to see if paging is required ------
+.
+DISB2100  ADD       ONE,FORM3
+          ADD       ONE,CVERT
+.
+          COMPARE   CVERT,TWENTY2        * see if the screen is full
+          GOTO      DISB3000 IF LESS
+.
+          GOTO      DISB1000
+.
+.------ page full see if more desired ------
+.
+DISB3000  BRANCH    MSKIPASK,DISB3050          * skip if not asking question
+.
+          KEYIN     *P1:24,*EL,"(",*V2LON,*DV,ANSM,*HOFF,")ore, ":
+                    "(",*V2LON,*DV,ANSA,*HOFF,")ccept this screen ? ":
+                    *V2LON,ANS
+.
+          RESET     ANS
+          GOTO      DISB9999 IF EOS
+.
+          CMATCH    ANSA,ANS
+          GOTO      DISB9999 IF EQUAL
+.
+          CMATCH    ANSM,ANS
+          GOTO      DISB3100 IF EQUAL
+.
+          BEEP
+          GOTO      DISB3000                   * invalid option
+.
+.------ Skipped question - keep on displaying if not page required ------
+.
+DISB3050  COMPARE   MCURPAGE,MREQPAGE
+          GOTO      DISB9999 IF EQUAL
+.
+.------ More option chosen ------
+.
+DISB3100  MOVE      FIVE,CVERT
+          ADD       ONE,MCURPAGE
+          DISPLAY   *P1:CVERT,*EF;
+          CALL      HEAD0000
+.
+          GOTO      DISB1000
+.
+DISB9999  RETURN
+.
+.**********************************************************************
+.*                               MAXP0000                             *
+.*             Routine to find MMAXPAGE & MMAXTRAN                    *
+.**********************************************************************
+MAXP0000  MOVE      ZERO,MMAXTRAN
+          MOVE      SP30,KEY28
+          CALL      RSTMPR1                  * position on temp file
+.
+.------ read through temp file ------
+.
+MAXP1000  CALL      RKTMPR1
+          BRANCH    OVRCD,MAXP2000
+.
+          ADD       ONE,MMAXTRAN
+          GOTO      MAXP1000
+.
+.------ calculate MMAXPAGE ------
+.
+MAXP2000  MOVE      MMAXTRAN,FORM10P4        * Big number so no roundoff errors
+          DIV       TEN8,FORM10P4         * 18 transactions per page
+          MOVE      FORM10P4,DIM15           * Exact DIM copy so no roundup
+          MOVE      DIM15,DIM10              * Only mantissa required
+          UNPACK    DIM10,DIM6,DIM4          * DIM6 dummy variable
+          REP       " 0",DIM4                * In case DIM4=SP4
+          MOVE      DIM4,MMAXPAGE            * DIM4 to FORM4 - exact copy
+          MOVE      FORM10P4,FORM0P4         * Remove mantissa
+          MOVE      FORM0P4,FORM10P4         * Use only fractions
+          MULT      "10000",FORM10P4         * Remove fractions
+.
+          COMPARE   ZERO,FORM10P4            * Right on page boundary ?
+          GOTO      MAXP9999 IF EQUAL        * Yes - exit
+.
+          ADD       ONE,MMAXPAGE
+.
+MAXP9999  RETURN
+.
+.*****************************************************************************
+.*                             SETV0000                                      *
+.*****************************************************************************
+.
+SETV0000
+          MOVE      REGISTER,TMPREG
+          MOVE      CLAIM,TMPCLAIM
+          MOVE      INVOICE,TMPINVN
+          MOVE      ITEMNUMB,TMPITEM
+          MOVE      NAME,TMPNAME
+          MOVE      ACTIONFL,TMPACTN
+          MOVE      CLAIMAMT,TMPCLAMT
+          MOVE      REBATAMT,TMPRBAMT
+          MOVE      REJECAMT,TMPRJAMT
+SETV9999  RETURN
+.
+.*****************************************************************************
+.*                             SAVV0000                                      *
+.*****************************************************************************
+.
+SAVV0000
+          MOVE     TMPREG,REGISTER
+          MOVE     TMPCLAIM,CLAIM
+          MOVE     TMPINVN,INVOICE
+          MOVE     TMPITEM,ITEMNUMB
+          MOVE     TMPNAME,NAME
+          MOVE     TMPACTN,ACTIONFL
+          MOVE     TMPCLAMT,CLAIMAMT
+          MOVE     TMPRBAMT,REBATAMT
+          MOVE     TMPRJAMT,REJECAMT
+          IF       ACTIONFL = 1
+            MOVE     "Delete",ACTION
+          ELSE
+            MOVE     "Re-Submit",ACTION
+          ENDIF
+SAVV9999  RETURN
+.
+.*****************************************************************************
+.*                             HEAD0000                                      *
+.*****************************************************************************
+.
+HEAD0000
+          DISPLAY   *P1:4,*ULON,*V2LON:
+                    *P1:4,"No. ":
+                    *P6:4,"Claim No":
+                    *P15:4,"Invoice ":
+                    *P24:4,"Item No. ":
+                    *P34:4," Action  ":
+                    *P44:4,"Claimed Amt ":
+                    *P57:4,"Rebate Amt  ":
+                    *P70:4,"  Rejected "
+HEAD9999  RETURN
++
+.*****************************************************************************
+.*                              QINV0000                                     *
+.*              Question mark for invoices for a given claim                 *
+.*****************************************************************************
+.
+QINV0000  DISPLAY   *P1:3,*EF,*P1:3,*V2LON,*ULON,"Claim Number : ":      
+                    CLAIM
+          DISPLAY   *P1:4,*ULON,*V2LON,"Invoice ",*P11:4,"Date Sent ":
+                    *P23:4,"Status  ",*P33:4,"Patient       ":
+                    *P49:4,"Register                 "
+          MOVE      FIVE,CVERT
+          MOVE      CLAIM,FORM8
+          MOVE      SP8,SAVINV
+.
+          PACK      KEY38,THREE,CLAIM,SP20
+          CALL      RSPRBB6
+QINV1000  CALL      RKPRBB6
+          BRANCH    OVRCD,QINV3000
+.
+          COMPARE   FORM8,PRBBCLAM
+          GOTO      QINV3000 IF NOT EQUAL
+.
+          IF        PRBBSTAT <> 3
+            GOTO      QINV3000               * Yes - ignore record
+          ENDIF
+.
+          MATCH     SP8,SAVINV
+          IF        !@EQUAL
+            MATCH     SAVINV,PRBBINVN
+            GOTO      QINV1000 IF EQUAL
+          ENDIF
+.
+          MOVE      PRBBINVN,SAVINV
+          MOVE      PRBBINVN,INVOICE
+          CALL      GNAM0000                 * get the patient name
+          MOVE      SP8,INVOICE
+.
+          MOVE      SP30,REGDESC
+          PACK      KEY3,PRBBREGR
+          CALL      RDREGA1
+.
+          UNPACK    PRBBDATE,CCENT,CYEAR,CMON,CDAY
+          MOVE      NAME,NAME14
+          DISPLAY   *P1:CVERT,*V2LON,PRBBINVN,*HOFF,*P11:CVERT:
+                    CDAY,SLASH,CMON,SLASH,CCENT,CYEAR:
+                    *P23:CVERT,"Rejected",*P33:CVERT,NAME14:
+                    *P49:CVERT,PRBBREGR:
+                    *P54:CVERT,REGDESC
+.
+          ADD       ONE,CVERT
+          COMPARE   TWENTY2,CVERT
+          GOTO      QINV1000 IF LESS
+.
+          KEYIN     *P1:24,*EL," (",*V2LON,*DV,ANSE,*HOFF,")xit, (":
+                    *V2LON,*DV,ANSN,*HOFF,")ext Screen : ",*V2LON,ANS;
+.
+          CMATCH    ANSE,ANS
+          GOTO      QINV3000 IF EQUAL
+.
+          MOVE      FIVE,CVERT
+          MOVE      ONE,CCOL
+          DISPLAY   *P1:5,*EF
+          GOTO      QINV1000
+.
+.         End of codes
+.
+QINV3000  MOVE      ZERO,OVRCD
+          RETURN
+.
+.*****************************************************************************
+.*                              QITM0000                                     *
+.*              Question mark for items for a given claim                 *
+.*****************************************************************************
+.
+QITM0000  DISPLAY   *P1:3,*EF,*P1:3,*V2LON,*ULON,"Claim Number : ":      
+                    CLAIM,*P33:3,"Invoice Number : ",INVOICE
+          DISPLAY   *P1:4,*ULON,*V2LON,"Item No. ",*P11:4,"Date Sent ":
+                    *P23:4,"Status  ",*P33:4,"Patient       ":
+                    *P49:4,"Register                 "
+          MOVE      FIVE,CVERT
+          MOVE      CLAIM,FORM8
+.
+          PACK      KEY38,THREE,CLAIM,INVOICE,SP20
+          CALL      RSPRBB6
+QITM1000  CALL      RKPRBB6
+          BRANCH    OVRCD,QITM3000
+.
+          COMPARE   FORM8,PRBBCLAM
+          GOTO      QITM3000 IF NOT EQUAL
+.
+          MATCH     INVOICE,PRBBINVN
+          GOTO      QITM3000 IF NOT EQUAL
+.
+          IF        PRBBSTAT <> 3
+            GOTO      QITM3000               * Yes - ignore record
+          ENDIF
+.
+          CALL      GNAM0000                 * get the patient name
+.
+          MOVE      SP30,REGDESC
+          PACK      KEY3,PRBBREGR
+          CALL      RDREGA1
+.
+          UNPACK    PRBBDATE,CCENT,CYEAR,CMON,CDAY
+          MOVE      NAME,NAME14
+          DISPLAY   *P1:CVERT,*V2LON,PRBBITMN,*HOFF,*P11:CVERT:
+                    CDAY,SLASH,CMON,SLASH,CCENT,CYEAR:
+                    *P23:CVERT,"Rejected",*P33:CVERT,NAME14:
+                    *P49:CVERT,PRBBREGR:
+                    *P54:CVERT,REGDESC
+.
+          ADD       ONE,CVERT
+          COMPARE   TWENTY2,CVERT
+          GOTO      QITM1000 IF LESS
+.
+          KEYIN     *P1:24,*EL," (",*V2LON,*DV,ANSE,*HOFF,")xit, (":
+                    *V2LON,*DV,ANSN,*HOFF,")ext Screen : ",*V2LON,ANS;
+.
+          CMATCH    ANSE,ANS
+          GOTO      QITM3000 IF EQUAL
+.
+          MOVE      FIVE,CVERT
+          MOVE      ONE,CCOL
+          DISPLAY   *P1:5,*EF
+          GOTO      QITM1000
+.
+.         End of codes
+.
+QITM3000  MOVE      ZERO,OVRCD
+          RETURN
+.
+.*****************************************************************************
+.*                             GNAM0000                                      *
+.*                        Get the patients name                              *
+.*****************************************************************************
+.
+GNAM0000
+          MOVE      SP30,NAME
+          PACK      KEY3,PRBBREGR
+          CALL      RDREGA1
+          BRANCH    OVRCD,GNAM9999
+.
+          PACK      KEY8,INVOICE
+          BRANCH    REGIBACD,GNAM1000,GNAM5000
+          GOTO      GNAM9999
+.
+GNAM1000  CALL      RDINV1
+          BRANCH    OVRCD,GNAM9999
+.
+          MOVE      PINVADM,PVIBILL
+          MOVE      PVIBILL,KEY8
+          CALL      RDVISA1
+          BRANCH    OVRCD,GNAM9999
+.
+          MOVE      PVIURNO,PURNO
+          GOTO      GNAM8000
+
+GNAM5000  CALL      RDPRIN1
+          BRANCH    OVRCD,GNAM9999
+.
+          BRANCH    PRINSCAN,GNAM6000
+.
+...          PACK      KEY8,PRINDEBT
+...          CALL      RDPRDB1
+...          BRANCH    OVRCD,GNAM9999
+.
+...          MOVE      PRDBGNAM,ANS
+...          PACK      NAME,ANS,DOT,PRDBSNAM
+          MOVE      "Unknown Debtor",NAME
+          GOTO      GNAM9999
+.
+GNAM6000  MOVE      PRINDEBT,PURNO
+.
+GNAM8000  PACK      KEY8,PURNO
+          CALL      RDMAST1
+          BRANCH    OVRCD,GNAM9999
+.
+          MOVE      PGNAME,ANS
+          PACK      NAME,ANS,DOT,PSNAME
+        
+GNAM9999  RETURN
+.
+.*****************************************************************************
+.*                             TEST0000                                      *
+.*                        Test if on the tempfile                            *
+.*****************************************************************************
+.
+TEST0000  MOVE      ZERO,EXIT
+.
+          IF        MODE = 1
+            MATCH     SCLAIM,CLAIM
+            GOTO      TEST1000 IF NOT EQUAL
+.
+            MATCH     SINVN,INVOICE
+            GOTO      TEST1000 IF NOT EQUAL
+.
+            MATCH     SITEM,ITEMNUMB
+            GOTO      TEST1000 IF NOT EQUAL
+.
+            GOTO      TEST9999
+          ENDIF
+.
+.----- Test if the claim and invoice has already been entered ----
+.
+TEST1000  PACK      KEY28,CLAIM,INVOICE,ITEMNUMB,REGISTER
+          CALL      RATMPR2
+          BRANCH    OVRCD,TEST9999
+          BEEP
+          DISPLAY   *P1:24,*EL,"Claim/Invoice/Item combination already entered. ";
+          CALL      HITENTER
+.
+TEST9000  MOVE      ONE,EXIT
+TEST9999  RETURN
+.
+.*****************************************************************************
+.*                             POST0000                                      *
+.*                        Post the temp file                                 *
+.*****************************************************************************
+.
+POST0000
+          PACK      KEY28,SP30
+          CALL      RSTMPR1
+.
+POST1000  CALL      RKTMPR1                 * Read next record
+          BRANCH    OVRCD,POST9999          * Exit if over
+.
+          BRANCH    TMPACTN,POST5000        * branch if delete trans
+.
+.------   Re-submit records   ------
+.
+          PACK      KEY28,TMPCLAIM,TMPINVN,TMPITEM,TMPREG
+          CALL      RDPRBB1                 * Read the file record
+          BRANCH    OVRCD,POST1000
+.
+          MOVE      FOUR,PRBBSTAT           * update status to re-submitted
+.
+          CALL      UPPRBB1                 * update the file
+.
+.------   Write a new record to be processed ------
+.
+          MOVE      ZERO,PRBBCLAM            
+          MOVE      ZERO,PRBBSTAT      
+          MOVE      SP10,PRBBDATE
+          MOVE      SP10,PRBBRDAT
+          MOVE      SP3,PRBBREGR
+          MOVE      TMPCLAMT,PRBBAMNT
+          MOVE      ZERO,PRBBPAID
+          MOVE      TMPREG,PRBBREGR
+          MOVE      TMPINVN,PRBBINVN
+          MOVE      TMPITEM,PRBBITMN
+          MOVE      ZERO,PRBBGSTM
+.
+          PACK      KEY28,PRBBCLAM,PRBBINVN,PRBBITMN,PRBBREGR
+          CALL      WRPRBB1
+          GOTO      POST1000
+.
+.------   Deleted claims ------
+.
+POST5000
+          PACK      KEY28,TMPCLAIM,TMPINVN,TMPITEM,TMPREG
+          CALL      RDPRBB1                 * Read the file record
+          BRANCH    OVRCD,POST1000
+.
+          MOVE      FIVE,PRBBSTAT           * update status to deleted     
+.
+          CALL      UPPRBB1                 * update the file
+          GOTO      POST1000
+.
+POST9999  RETURN
++         
+.******************************************************************************
+.*                                 VCIR0000                                   *
+.*            Validate claim, invoice, item and register details              *
+.******************************************************************************
+.
+VCIR0000  MOVE      ZERO,EXIT
+          MOVE      ZERO,FORM1
+          PACK      KEY38,THREE,CLAIM,INVOICE,ITEMNUMB,SP20
+          CALL      RSPRBB6                 * Position in bulk billing file
+VCIR1000  CALL      RKPRBB6                 * Read next bulk billing record
+          BRANCH    OVRCD,VCIR9000
+.
+          MOVE      CLAIM,FORM8
+          COMPARE   FORM8,PRBBCLAM          * test if the same claim  
+          GOTO      VCIR9000 IF NOT EQUAL
+.
+          MATCH     INVOICE,PRBBINVN        * test if the same invoice
+          GOTO      VCIR9000 IF NOT EQUAL
+.
+          MATCH     ITEMNUMB,PRBBITMN       * test if the same invoice
+          GOTO      VCIR9000 IF NOT EQUAL
+.
+          COMPARE   THREE,PRBBSTAT
+          GOTO      VCIR9000 IF NOT EQUAL 
+.
+          BRANCH    FORM1,VCIR3000          * if already 1 then their is > 1
+.                                             rec. for this claim/invoice/item
+          ADD       ONE,FORM1
+          GOTO      VCIR1000
+.
+.------   Keyin the register because > 1 record for claim invioice -----
+.
+VCIR3000  
+          MOVE      CVERT,SROW
+          CALL      DREG0000                * Handle display and entry of 
+.                                             registers in a box format
+          MOVE      SROW,CVERT
+          IF        EXIT = 1
+            MOVE      TWO,EXIT
+          ENDIF
+          GOTO      VCIR9999
+.
+VCIR9000  IF        FORM1 = 0
+            MOVE      ONE,EXIT
+          ELSE
+            IF      FORM1 = 1
+              PACK      KEY38,THREE,CLAIM,INVOICE,ITEMNUMB,SP20      
+              CALL      RSPRBB6                 * Position in bulk billing file
+              CALL      RKPRBB6                 * Read next bulk billing record
+            ENDIF
+          ENDIF
+VCIR9999  RETURN
+.
+.*****************************************************************************
+.*                                DREG0000                                   *
+.*    Returns      : A valid bulk billing record for the selected register   *
+.*                   EXIT = 0 - Code entered                                 *
+.*                          1 - Abort (EXITCHAR)                             *
+.*****************************************************************************
+.
+DREG0000  TOPIC     "REGISTER"                    * Help facility
+          MOVE      TEN,CVERT                     * init vars
+          MOVE      ONE,SCREEN
+          MOVE      ONE,ITEMNO
+          MOVE      ONE,ICURS
+          CALL      IARR0000                      * init arrays used
+.
+          MOVE      "48",HLEF
+          MOVE      "9",HTOP
+          MOVE      "79",HRIG
+          MOVE      "23",HBOT
+          CALL      GETSCR00                      * save portion of screen
+.
+          SUSPEND   
+          BOX       16,48,9,79,23                 * draw a box
+          BOXCLR    49,10,78,22                   * clear box
+          DISPLAY   *P58:9,*HON," REGISTERS "
+          DISPLAY   *P48:21,*G33
+          HLINE     *G37,21,49,78
+          DISPLAY   *P79:21,*G34
+          FLUSH     48,9,79,23                    * draw a box
+.
+. Now loop thru Codes file in code order and display priority's
+.
+          PACK      KEY38,THREE,CLAIM,INVOICE,ITEMNUMB,SP20
+          CALL      RSPRBB6
+DREG1000  CALL      RKPRBB6                      * read next record
+          BRANCH    OVRCD,DREG6000               * no more records
+.
+          MOVE      CLAIM,FORM8
+          COMPARE   FORM8,PRBBCLAM
+          GOTO      DREG6000 IF NOT EQUAL
+.
+          MATCH     INVOICE,PRBBINVN              * still same invoice
+          GOTO      DREG6000 IF NOT EQUAL
+.
+          MATCH     ITEMNUMB,PRBBITMN             * still same item
+          GOTO      DREG6000 IF NOT EQUAL
+.
+          COMPARE   THREE,PRBBSTAT
+          GOTO      DREG6000 IF NOT EQUAL
+.
+          PACK      SKEY38,PRBBSTAT,CLAIM,INVOICE,ITEMNUMB,PRBBBULK,PRBBCODE:
+                           PRBBREGR * save key
+.
+. check if we need a new screen
+.
+          COMPARE   TEN2,ITEMNO
+          GOTO      DREG5000 IF LESS
+.
+. we need a new screen
+.
+          MOVE      ONE,NXTSCRN                   * we have a next screen
+          CALL      KSEL0000                      * keyin routine 1
+          BRANCH    EXIT,DREG8000:                * Item selected
+                         DREG9000:                * Abort selected
+                         DREG2000:                * Previous screen selected
+                         DREG2500                 * Next screen selected
+.
+. Previous screen was selected
+.
+DREG2000  MOVE      ITEM[SCREEN],KEY38            * save 1st item on screen
+.
+          CALL      RSPRBB6                      * position on 1st key on scrn
+.
+. read back 11 records until 1st record on previous screen is reached
+.
+          MOVE      ZERO,FORM2                    * init counter
+DREG2200  CALL      RKPRBB6                      * read back 1 record
+          ADD       ONE,FORM2                     * increment counter
+          COMPARE   TEN1,FORM2                    * read back far enough?
+          GOTO      DREG2200 IF NOT EQUAL
+.
+. we have read back far enough
+.
+          BOXCLR    49,10,78,20                   * clear box
+          MOVE      TEN,CVERT                     * init screen row
+          MOVE      ONE,ITEMNO                    * init item no.
+          SUB       ONE,SCREEN                    * update screen number
+          MOVE      ONE,ICURS
+          GOTO      DREG5000
+.
+. Next screen was selected
+.
+DREG2500  ADD       ONE,SCREEN                    * increment screen No.
+.
+          MOVE      SKEY38,ITEM[SCREEN]          * save 1st item on screen
+          BOXCLR    49,10,78,20                   * clear box
+          MOVE      TEN,CVERT                     * init screen row
+          MOVE      ONE,ITEMNO                    * init item no.
+.
+. display record
+.
+DREG5000  MOVE      SP30,REGDESC
+          PACK      KEY3,PRBBREGR
+          CALL      RDREGA1
+          MOVE      REGDESC,DIM20
+          DISPLAY   *P49:CVERT,*V2LON,ITEMNO,*HOFF,". ",*V2LON,PRBBREGR,*HOFF:
+                    SP2,DIM20  
+.
+. save each record as it is displayed for selection purposes
+.
+          PACK      KEY38,PRBBSTAT,PRBBCLAM,PRBBINVN,PRBBITMN,PRBBBULK:
+                          PRBBCODE,PRBBREGR
+          MOVE      KEY38,ITEMSEL[ITEMNO]
+.
+          ADD       ONE,CVERT                     * increment vertical position
+          ADD       ONE,ITEMNO                    * increment item counter
+          GOTO      DREG1000
+.
+. We have no more records to display
+.
+DREG6000  MOVE      ZERO,NXTSCRN                  * No next screen
+          CALL      KSEL0000                     * keyin routine 2
+          BRANCH    EXIT,DREG8000:                * Item selected
+                         DREG9000:                * Abort selected
+                         DREG2000                 * Previous screen selected
+.
+. an item was selected so get record selected
+.
+DREG8000  MOVE      ITEMSEL[ICURS],KEY38
+.
+          CALL      RDPRBB6
+          MOVE      ZERO,EXIT
+          GOTO      DREG9500
+.
+DREG9000  MOVE      ONE,EXIT
+DREG9500  
+          CALL      PUTSCR00                      * restore portion of screen
+.
+DREG9999  TOPIC     SP8
+          RETURN                                                   
++
+.*************************************************************************
+.*  KSEL0000  :  Keyin routine                                           *
+.*************************************************************************
+KSEL0000  MOVE      ICURS,CVERT
+          ADD       NINE,CVERT
+          DISPLAY   *P49:CVERT,*V2LON,*HON,ICURS,"."
+.
+             IF    SCREEN = 1
+             IF   NXTSCRN = 1
+                   DISPLAY  *P49:22,SP20,SP5,*P49:22,*V2LON,"A",*HOFF:
+                   "bort, ",*V2LON,"N",*HOFF,"ext"
+             ELSE
+                  DISPLAY  *P49:22,SP20,SP5,*P49:22,*V2LON,"A",*HOFF,"bort"
+             ENDIF
+          ELSE
+             IF   NXTSCRN = 1
+                  DISPLAY  *P49:22,SP20,SP5,*P49:22,*V2LON,"A",*HOFF,"bort, ":
+                  *V2LON,"N",*HOFF,"ext, ",*V2LON,"P",*HOFF,"revious"
+             ELSE
+                  DISPLAY  *P49:22,SP20,SP5,*P49:22,*V2LON,"A",*HOFF,"bort, ":
+                  *V2LON,"P",*HOFF,"revious"
+             ENDIF
+          ENDIF
+.
+KSEL1000  KEYIN     *NOEDIT,*EOFF,*+,DIMA
+.
+KSEL0090  GOTO      KSEL2000 IF LEFT
+          GOTO      KSEL2000 IF RIGHT
+          GOTO      KSEL3000 IF UP  
+          GOTO      KSEL5000 IF DOWN
+          GOTO      KSEL8000 IF PAGEDOWN
+          GOTO      KSEL8500 IF PAGEUP
+.
+          RESET     DIMA
+          GOTO      KSEL8700 IF EOS
+.
+          TYPE      DIMA
+          GOTO      KSEL2050 IF EQUAL
+.
+          MATCH     ANSA,DIMA
+          GOTO      KSEL9000 IF EQUAL
+.
+          MATCH     ANSN,DIMA
+          GOTO      KSEL8000 IF EQUAL
+.
+          MATCH     ANSP,DIMA
+          GOTO      KSEL8500 IF EQUAL
+.
+KSEL2000  BEEP
+          GOTO      KSEL1000
+.
+. A numeric was input
+.
+KSEL2050 MOVE       DIMA,FORM1
+         COMPARE    ONE,FORM1
+         GOTO       KSEL2000 IF LESS
+          IF        FORM1 > 1
+            MOVE      FORM1,DIM2
+            GOTO      KSEL2080
+          ENDIF
+          IF        ITEMNO < 11
+            MOVE      FORM1,DIM2
+            GOTO      KSEL2080
+          ENDIF
+          KEYIN     *NOEDIT,*EOFF,*+,DIMB
+          TYPE      DIMB
+          GOTO      KSEL2000 IF NOT EQUAL
+          PACK      DIM2,DIMA,DIMB
+.
+KSEL2080  MOVE      DIM2,FORM2
+          IF        FORM2 >= ITEMNO
+             BEEP
+             GOTO   KSEL1000
+          ENDIF
+          MOVE      DIM2,ICURS
+          GOTO      KSEL8700
+.
+. UP was selected
+.
+KSEL3000  IF   ICURS = 1
+                  BEEP
+                  GOTO   KSEL1000
+          ELSE
+                  ASSIGN  (NINE+ICURS),FORM2      * get row to de-highlite
+                  DISPLAY *P49:FORM2,*V2LON,ICURS,"."  * de-highlite
+                  SUB     ONE,ICURS               * new position
+                  SUB     ONE,FORM2               * row for highlite
+                  DISPLAY *P49:FORM2,*V2LON,*HON,ICURS,"."
+                  GOTO    KSEL1000
+          ENDIF  
+.
+. DOWN was selected
+.
+KSEL5000  MOVE      ITEMNO,FORM2                  * Get correct No items on scrn
+          SUB       ONE,FORM2
+          IF   ICURS = FORM2
+                  BEEP
+                  GOTO   KSEL1000
+          ELSE
+                  ASSIGN  (NINE+ICURS),FORM2      * get row to de-highlite
+                  IF  !(FORM2 = 0)
+                  DISPLAY *P49:FORM2,*V2LON,ICURS,"."  * de-highlite
+                  ENDIF
+                  ADD     ONE,ICURS               * new position
+                  ADD     ONE,FORM2               * row for highlite
+                  DISPLAY *P49:FORM2,*V2LON,*HON,ICURS,"."
+                  GOTO    KSEL1000
+          ENDIF  
+.
+KSEL8000  IF        NXTSCRN =1
+                    MOVE    FOUR,EXIT             * Next screen selected
+                    MOVE    ONE,ICURS
+                    GOTO    KSEL9999
+          ELSE
+                    BEEP
+                    GOTO    KSEL1000
+          ENDIF
+.
+KSEL8500  IF        !(SCREEN = 1)
+                    MOVE    THREE,EXIT            * Previous screen selected
+                    MOVE    ONE,ICURS
+                    GOTO    KSEL9999
+          ELSE
+                    BEEP
+                    GOTO    KSEL1000
+          ENDIF
+.
+KSEL8700  MOVE      ONE,EXIT                      * 'Enter' input
+          GOTO      KSEL9999
+.
+KSEL9000  MOVE      TWO,EXIT                      * Abort selected
+.
+KSEL9999  RETURN
++
+.***************************************************************************
+.*  IARR0000  :  Initialise Arrays                                         *
+.***************************************************************************
+IARR0000  MOVE      ONE,FORM2
+          WHILE     FORM2 < 12
+            PACK     ITEM[FORM2],SP20,SP20
+            PACK     ITEMSEL[FORM2],SP20,SP20
+            ADD      ONE,FORM2
+          DO
+IARR9999  RETURN
+.
+.*****************************************************************************
+.*                             Tempfile I/O                                  *
+.*****************************************************************************
+.
+RSTMPR1   RESET     KEY28
+          READ      TEMPFILE,KEY28;;
+          RETURN
+.
+RATMPR1   RESET     KEY28
+          MOVE      ZERO,OVRCD
+          READ      TEMPFILE,KEY28;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTMPR1   RESET     KEY28
+          MOVE      ZERO,OVRCD
+          READ      TEMPFILE,KEY28;TMPUNIQ,TMPCLAIM,TMPINVN,TMPITEM,TMPNAME:
+                                   TMPACTN,TMPCLAMT,TMPRBAMT,TMPRJAMT,TMPREG
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTMPR1   MOVE      ZERO,OVRCD
+          READKS    TEMPFILE;TMPUNIQ,TMPCLAIM,TMPINVN,TMPITEM,TMPNAME,TMPACTN:
+                             TMPCLAMT,TMPRBAMT,TMPRJAMT,TMPREG
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTMPR1   MOVE      ZERO,OVRCD
+          READKP    TEMPFILE;TMPUNIQ,TMPCLAIM,TMPINVN,TMPITEM,TMPNAME,TMPACTN:
+                             TMPCLAMT,TMPRBAMT,TMPRJAMT,TMPREG
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPTMPR1   
+          UPDATE    TEMPFILE;TMPUNIQ,TMPCLAIM,TMPINVN,TMPITEM,TMPNAME,TMPACTN:
+                             TMPCLAMT,TMPRBAMT,TMPRJAMT,TMPREG
+          RETURN
+.
+WRTMPR1   RESET     KEY28
+          WRITE     TEMPFILE,KEY28;TMPUNIQ,TMPCLAIM,TMPINVN,TMPITEM,TMPNAME:
+                                   TMPACTN,TMPCLAMT,TMPRBAMT,TMPRJAMT,TMPREG
+          RETURN
+.
+DETMPR1   RESET     KEY28
+          DELETE    TEMPFILE,KEY28
+          RETURN
+.
+RATMPR2   RESET     KEY28
+          MOVE      ZERO,OVRCD
+          READ      TEMPFIL2,KEY28;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.*****************************************************************************
+.*                            I/O Section                                    *
+.*****************************************************************************
+.
+          INC       STD001IO
+          INC       TFILENAM                * Generate Temp File Name
+          INC       IBASEQIO/INC            * Sequential Numbers File
+          INC       WEBERRIO/INC            * Web Server Error Logging
+.
+          INC       PRICLMDS
+          INC       PRIBULIO/INC
+          INC       PRIINVIO/INC
+          INC       PATINVIO/INC
+          INC       PATMA1IO/INC
+          INC       PATVISIO/INC
+...          INC       PRIDBTIO/INC
+          INC       PMSHCPIO/INC
+          INC       RCPREGIO/INC

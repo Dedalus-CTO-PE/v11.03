@@ -1,0 +1,298 @@
+.**************************************************************************
+.*  DGPMIALR  :  Update Alert details for a Datagate request              *
+.*               ~~~~~~~~~~~~~~~~~~~~~                                    *
+.*                                                                        *
+.*  Author    :  Steve Armstrong   20/02/1998                             *
+.*  Mods      :                                                           *
+.*               V10.03.01 29/11/2011  Jill Parkinson CAR 249362          *
+.*                         Changed key from key13 to key16                *
+.*               V5.07.01 03/09/1999  Steve Armstrong                     *
+.*                        Fixed I*C on patalrtf (for delete)              *
+.*               V5.07.00 22/12/1998  Davin                               *
+.*                        Y2K mods                                        *
+.**************************************************************************
+.*               V5.05.01 05/05/1998  Steve Armstrong                     *
+.*                        Mods to delete all alert records for U/R if a   *
+.*                        delete record is received from eclipse          *
+.*                                                                        *
+.**************************************************************************
+.
+          DEFPROC   DGPMIALR
+ IFGE     $$VER,7
+.
+ALSTATUS  FORM      1     * 1=Add,  2=Delete Alert
+ALRTCODE  DIM       5     * Alert Code
+ALCATEGY  DIM       5     * Alert Category
+ALRTDATE  DIM       8     * Date alert applies from (ccyymmdd)
+ALTHREAT  DIM       1     * Life Threatening (Y/N)
+DIM1A     DIM       1     * 1st character of category
+DIM1B     DIM       1     * 2nd character of category
+DIM3      DIM       3     * code for alert
+PTCNLFCH  DIM       1     * parameter for character for Life Threating Alert
+SAVKEY13  DIM       13    * saved key for alerts file
+.
+.
+DGPMIALR  MOVE      "ALR",RPLYHEAD
+          READ      DGATEOUT;PURNO,ALSTATUS,ALCATEGY,ALRTCODE,ALRTDATE,ALTHREAT
+.
+          CALL      VALID000                      * validate U/R number
+          BRANCH    EXIT,DGALR900                 * error
+.
+          CALL      VALCT000                      * validate category/code
+          BRANCH    EXIT,DGALR900                 * error
+.
+          CALL      UPDAL000                      * get/write the alerst
+          BRANCH    EXIT,DGALR900                 * error
+.
+. --- send back a successful response ---
+.     NB.  SP1 at end of reply has been added because the interpreter does
+.     not place a "|" after the last field, and Datagate requires this.  By
+.     putting an extra field on the end (which is blank), a "|" will then
+.     be added after the last field.
+.
+          MOVE      "00000",RPLYCODE
+          MOVE      SP50,RPLYDESC
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                          RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                          DGMISC3,SP1
+          ADD       ONE,SUCCPROC                  * increm # success transactns
+          GOTO      DGALR999
+.
+. --- send back an Error response ---
+.
+DGALR900  PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                            DGMISC3,SP1
+          ADD       ONE,ERRRPROC                  * increm # error transactions
+.
+DGALR999  GOTO      DGALREND                      * got end of procedure
++
+.***************************************************************************
+.*  VALID000  :  read patients details & make sure we have a valid patient *
+.*               Returns:  EXIT=0 --> Valid patient,   EXIT=1 --> ERROR    *
+.***************************************************************************
+.
+VALID000  MOVE      PURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,VALID850                * no master details
+.
+          MOVE      ZERO,EXIT                     * we have a valid patient
+          GOTO      VALID999
+.
+VALID850  MOVE      "Patient Master details not found-",RPLYDESC
+          PACK      RPLYDESC,RPLYDESC,KEY8
+          MOVE      "01100",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      VALID999
+.
+VALID999  RETURN
++
+.***************************************************************************
+.*  VALCT000  :  Validate that the category and code are valid             *
+.*               Returns:  EXIT=0 --> Valid cat/code,  EXIT=1 --> ERROR    *
+.***************************************************************************
+.
+.         First validate that the category is H1 - H9
+.
+VALCT000  UNPACK    ALCATEGY,DIM1A,DIM1B,ANS,ANS,ANS
+          MATCH     ANSH,DIM1A                    * alert category ?
+          GOTO      VALCT800 IF NOT EQUAL         * no - error
+.
+          TYPE      DIM1B                         * alert category ?
+          GOTO      VALCT800 IF NOT EQUAL         * no - error
+.
+.         Check that the category is set up on the system
+.
+          PACK      KEY5,DIM1A,DIM1B,SP5
+          CALL      RDCODE1                       * category on file ?
+          BRANCH    OVRCD,VALCT850                * no - error
+.
+.         Check that the code is set up
+.
+          PACK      ALRTCODE,ALRTCODE,SP5
+          UNPACK    ALRTCODE,DIM3,ANS,ANS
+.
+          MATCH     SP3,DIM3                      * is there a code
+          GOTO      VALCT900 IF EQUAL             * no - error
+.
+          PACK      KEY5,DIM1A,DIM1B,DIM3
+          CALL      RDCODE1                       * code on file ?
+          BRANCH    EXIT,VALCT900                 * no - error
+.
+          MOVE      ZERO,EXIT                     * yes - we have a valid code
+          GOTO      VALCT999
+.
+VALCT800  MOVE      "Category not valid for alerts",RPLYDESC
+          MOVE      "01302",RPLYCODE
+          GOTO      VALCT950
+.
+VALCT850  MOVE      "Alert Category not on file",RPLYDESC
+          MOVE      "01300",RPLYCODE
+          GOTO      VALCT950
+.
+VALCT900  MOVE      "Alert Code not on file:",RPLYDESC
+          PACK      RPLYDESC,RPLYDESC,ALRTCODE,DOT
+          MOVE      "01301",RPLYCODE
+.
+VALCT950  MOVE      ONE,EXIT
+.
+VALCT999  RETURN
++
+.***************************************************************************
+.*  UPDAL000  :  update the alerts for the patient                         *
+.***************************************************************************
+.
+UPDAL000  IF        ALSTATUS = 1 | ALSTATUS = 2
+            OPEN      CONTROLF,"controlf"
+            OPEN      PATALRT1,"patalrtf"
+            READ      CONTROLF,TEN;*250,CAUDA1
+            READ      CONTROLF,SEVENTY7;*98,PTCNLFCH
+            IF        CAUDA1 <> 1
+              OPEN      PATAUDAL,"pataudal"
+            ENDIF
+          ENDIF
+.
+          BRANCH    ALSTATUS,UPDAL100:            * add
+                             UPDAL500             * delete
+.
+          MOVE      "Status not valid",RPLYDESC
+          MOVE      "01303",RPLYCODE
+          GOTO      UPDAL950
+.
+.         Add an alert.
+.         Validate that the life threatening flag is ok and if so, set to
+.         the correct value for patalrtf.
+.
+UPDAL100  OPEN      CONTROLF,"controlf"
+          OPEN      PATALRT1,"patalrtf"
+          READ      CONTROLF,TEN;*250,CAUDA1
+          READ      CONTROLF,SEVENTY7;*98,PTCNLFCH
+          IF        CAUDA1 <> 1
+            OPEN      PATAUDAL,"pataudal"
+          ENDIF
+          MATCH     ANSY,ALTHREAT                * "Y" in field ?
+          IF        @EQUAL
+            MOVE      PTCNLFCH,ALTHREAT
+            GOTO      UPDAL150                   * yes - ok
+          ENDIF
+.
+          MATCH     ANSN,ALTHREAT                * "N" in field ?
+          IF        @EQUAL
+            MOVE      SP1,ALTHREAT
+            GOTO      UPDAL150                   * yes - ok
+          ENDIF
+.
+          MOVE      "Life Threatening Flag not valid",RPLYDESC
+          MOVE      "01304",RPLYCODE
+          GOTO      UPDAL950
+.
+.         All fields are valid so see if we need to update or add a new record
+.
+UPDAL150  PACK      PTALCATG,ALCATEGY,SP2
+          PACK      PTALCODE,ALRTCODE,SP3
+          PACK      PTALCNTR,SP1,SP1,ONE
+          PACK      KEY16,PURNO,PTALCATG,PTALCODE,PTALCNTR
+          CALL      RDPTALR1                     * alert on file already ?
+          IF        OVRCD = 0
+            IF        CAUDA1 <> 1
+              CALL      IBACLOCK
+              PACK      PTALAUDD,CCC,CYY,CMM,CDD
+              REP       " 0",PTALAUDD
+              MOVE      CTIMEIS,PTALAUDT
+              MOVE      PORT,PTALAUDP
+              MOVE      ANSB,PTALAUDR
+              MOVE      ONE,PTALAUDS
+              MOVE      PASSCODE,PTALAUDO
+.
+              CALL      AWPTALR1                 * write before audit record
+            ENDIF
+            MOVE      ALRTDATE,PTALDATE          * yes
+            MOVE      ALTHREAT,PTALLIFE
+            CALL      UPPTALR1                   * update record
+            IF        CAUDA1 <> 1
+              CALL      IBACLOCK
+              PACK      PTALAUDD,CCC,CYY,CMM,CDD
+              REP       " 0",PTALAUDD
+              MOVE      CTIMEIS,PTALAUDT
+              MOVE      PORT,PTALAUDP
+              MOVE      ANSC,PTALAUDR
+              MOVE      ONE,PTALAUDS
+              MOVE      PASSCODE,PTALAUDO
+              CALL      AWPTALR1                 * write after audit record
+            ENDIF
+          ELSE
+            PACK      PTALCATG,ALCATEGY,SP2
+            PACK      PTALCODE,ALRTCODE,SP3
+            PACK      PTALCNTR,SP1,SP1,ONE
+            MOVE      ALRTDATE,PTALDATE          * no
+            MOVE      ALTHREAT,PTALLIFE
+            MOVE      SP30,PTALSPAR
+            PACK      KEY16,PURNO,PTALCATG,PTALCODE,PTALCNTR
+            CALL      WRPTALR1                   * write new record
+            IF        CAUDA1 <> 1
+              CALL      IBACLOCK
+              PACK      PTALAUDD,CCC,CYY,CMM,CDD
+              REP       " 0",PTALAUDD
+              MOVE      CTIMEIS,PTALAUDT
+              MOVE      PORT,PTALAUDP
+              MOVE      ANSA,PTALAUDR
+              MOVE      ONE,PTALAUDS
+              MOVE      PASSCODE,PTALAUDO
+              CALL      AWPTALR1                 * write added audit record
+            ENDIF
+          ENDIF
+.
+          GOTO      UPDAL900
+.
+.         Delete an alert.  Eclipse will send a delete message to indicate
+.         that we need to delete all alerts for this patient prior to sending
+.         new "add" records.
+.
+UPDAL500  PACK      KEY16,PURNO,SP20
+          CALL      RSPTALR1                     * position on U/R number
+UPDAL550  CALL      RKPTALR1                     * read next record
+          BRANCH    OVRCD,UPDAL900               * eof - finished
+.
+          MATCH     PURNO,PTALURNO               * same U/R number still ?
+          GOTO      UPDAL900 IF NOT EQUAL        * no - finished
+.
+.         Check if we need to write an audit delete record
+.
+          IF        CAUDA1 <> 1
+            CALL      IBACLOCK
+            PACK      PTALAUDD,CCC,CYY,CMM,CDD
+            REP       " 0",PTALAUDD
+            MOVE      CTIMEIS,PTALAUDT
+            MOVE      PORT,PTALAUDP
+            MOVE      ANSD,PTALAUDR
+            MOVE      ONE,PTALAUDS
+            MOVE      PASSCODE,PTALAUDO
+            CALL      AWPTALR1                   * write deleted audit record
+          ENDIF
+.
+.         Delete alert record
+.
+          PACK      SAVKEY16,PTALURNO,PTALCATG,PTALCODE,PTALCNTR
+          PACK      KEY16,PTALURNO,PTALCATG,PTALCODE,PTALCNTR
+          CALL      DEPTALR1           
+          MOVE      SAVKEY16,KEY16
+          CALL      RSPTALR1
+          GOTO      UPDAL550
+.
+UPDAL900  MOVE      ZERO,EXIT
+          GOTO      UPDAL999
+.
+UPDAL950  MOVE      ONE,EXIT
+.
+UPDAL999  RETURN
+.
+. IO's go in here
+.
+          INC       PATALRIO/INC
+          INC       IBAOVRIO/INC
+.
+.
+ XIF
+DGALREND  ENDPROC

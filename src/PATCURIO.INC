@@ -1,0 +1,63 @@
+.
+.         INCLUDE NAME : PATCURIO.INC
+.
+.         FILE  I/O REQUESTS FOR COMMENTS FILE
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY11  DIM             11            KEY FOR PATCURA1
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE PATAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+.
+.
+RDSCMUR1  MOVE      ZERO,OVRCD
+          RESET     KEY11
+          READ      PATCURA1,KEY11;;
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDCMUR1   MOVE      ZERO,OVRCD
+          RESET     KEY11
+          READ      PATCURA1,KEY11;DCMURNO,DCMURLNO,CMURLINE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCMURNO,QCMURNO
+          MOVE      QCMURNO,CMURNO
+          MOVE      DCMURLNO,CMURLNO
+          RETURN  
+.
+RDKCMUR1  MOVE      ZERO,OVRCD
+          READKS    PATCURA1;DCMURNO,DCMURLNO,CMURLINE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCMURNO,QCMURNO
+          MOVE      QCMURNO,CMURNO
+          MOVE      DCMURLNO,CMURLNO
+          RETURN  
+.
+RDPCMUR1  MOVE      ZERO,OVRCD
+          READKP    PATCURA1;DCMURNO,DCMURLNO,CMURLINE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCMURNO,QCMURNO
+          MOVE      QCMURNO,CMURNO
+          MOVE      DCMURLNO,CMURLNO
+          RETURN  
+.
+WRCMUR1   RESET     KEY11
+          WRITE     PATCURA1,KEY11;KEY11,CMURLINE
+          RETURN  
+.
+UPCMUR1   PACK      DCMURNO,CMURNO
+          MOVE      CMURLNO,DCMURLNO
+          UPDATE    PATCURA1;DCMURNO,DCMURLNO,CMURLINE
+          RETURN  
+.
+DECMUR1   RESET     KEY11
+          DELETE    PATCURA1,KEY11
+          RETURN
+.
+

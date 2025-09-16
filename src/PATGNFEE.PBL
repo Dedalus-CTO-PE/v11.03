@@ -1,0 +1,338 @@
+.
+.         PATGNFEE - Generate casemix funding rates or normal rates after
+.                   allocating a new DRG Code.
+.
+.        V10.03.02  05/09/2012  J.Tan          CAR 267784
+.                   Mods Checking for TCINDC19 Claim Code
+.        V10.03.01  10/01/2012 J.Tan   CAR 257682
+.                   Replaced RDPTHLFA1 to RDPTHLF1
+.        V10.01.01  09/12/2010 J.Tan   CAR 233034
+.                   Mods bed fees file to use health fund table type
+.         V9.11.01  06/10/2008  J.Tan       CAR 180188
+.                   Mods to set up CASMXKEY
+.         V9.08.01  15/03/2007  J.Tan       CAR 136149
+.                   Mods to use default claim code from system parameter
+.         V9.02.01  06/12/2001  Tonii 
+.                   Removed Episode flag for casemix funding
+.         V5.10.01  28/03/2001  Jill Habasque
+.                   Fixed branch after calling CHKCMXPT
+.         V5.10.00  06/03/2001  Pat Dirito                                  
+.                   Added Check for MRTWEB02 - Display Statement             
+.         V5.08.01  06/06/2000  Jill Habasque                               
+.                   Changed from key10 to key14 for the health fund file     
+.         V5.07.01  25/11/1999  Davin
+.                   Changed for 4 character drgs
+.         V6.04.01  09/04/97 J.Tan
+.                   Mods to use discharge DRG code for casemix funding only
+.                   if a DRG code is entered as the provisional DRG
+.
+.*********************************************************************
+.         CRAT0000 - Check if rates need to be changed
+.*********************************************************************
+PATGNFEE
+CRAT0000  COMPARE   ZERO,AINVPRT            * Invoice printed ?
+          GOTO      CRAT9999 IF NOT EQUAL   * Yes.
+.
+          UNPACK    SP10,KEY4,KEY5
+          UNPACK    PTMIPCMX,KEY4,KEY5
+          MATCH     SP5,KEY5
+          GOTO      CRAT9999 IF NOT EQUAL   * MBS code was entered
+.
+          MATCH     PTMIPCMX,PTDSDDRG       * Check provisional DRG with Dis.DRG
+          GOTO      CRAT9999 IF EQUAL       * Same, no change
+.
+          MATCH     SP4,PTDSDDRG
+          IF        @EQUAL
+            GOTO      CRAT9999              * No Disch.DRG, don't change rates
+          ELSE
+            PACK      CMDRG,PTDSDDRG,SP20   * Set DRG code 
+          ENDIF
+.
+.         Check the episode flag (0 or 1 for casemix)
+.
+          PACK      CMCODE,CMDRG,SP70
+          PACK      KEY18,ACLAIM,AFUNDH,CMCODE,SP70
+          MOVE      ADATE,CEFFDATE
+          CALL      VALCMXFN                * Validate casemix funding
+          IF        CMXFLAG<>1
+            GOTO      CRAT9999              * Not a casemix funding
+          ENDIF
+.
+          MOVE      ZERO,LOWFLAG            * to use high outliers
+          IF        ASTAT = 3           
+            MATCH     DDATE,ADATE
+            IF        !@EQUAL
+              MOVE      ADATE,FROMDATE
+              MOVE      DDATE,TODATE
+              CALL      NHOSPDAY                * Length of stay
+              ADD       ONE,NBRDAYS
+              CALL      VLUM0000                * Read lumpsum overnight
+              IF        NBRDAYS<=PTHLCOFF
+                MOVE      ONE,LOWFLAG           * set to use low outliers
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          PACK      KEY9,ACLAIM,AFUNDH,SP70
+          CALL      GETCNEFF               * Get Contract Effective From
+          BRANCH    EXIT,CRAT8000
+.
+          MOVE      ZERO,CMIXFLAG           * Initialise casemix flag
+          OPEN      PATTRAN2,"pattranf"
+          MOVE      ZERO,ADMFLAG            * Flag for generate casemix funding
+          PACK      KEY30,AADMNO,SP20
+          CALL      RDSTRAN2
+CRAT1000  CALL      RDKTRAN2
+          BRANCH    OVRCD,CRAT8000
+.
+          COMPARE   TADMN,AADMNO
+          GOTO      CRAT8000 IF NOT EQUAL   * not same admission
+.
+          MOVE      ZERO,BDAYS
+          MOVE      ADATE,FROMDATE
+          MOVE      TDATE,TODATE
+          MATCH     FROMDATE,TODATE
+          GOTO      CRAT2000 IF EQUAL       * Same trans date
+.
+.         Get the number of bed days
+.
+          PACK      DIM30,TADMN,TDATE,TTIME,TWARD,TBED
+          CALL      NHOSPDAY
+          MOVE      NBRDAYS,BDAYS
+          ADD       ONE,BDAYS
+.
+          MOVE      DIM30,KEY30             * Reposition
+          CALL      RDTRAN2
+.
+CRAT2000  MOVE      ZERO,ADMFLAG            * set No to admission flag
+          MOVE      ONE,MSGFLAG             * no error messages display
+          MOVE      TRBTYP,SAVBTYP          * set bed type
+          PROC      PATGNCMX                * Generate the new casemix rates
+.
+.         If this is admission record, we need to determine if this DRG will
+.         be charged by casemix funding or not
+.
+          CMATCH    ANSA,TMOVE
+          IF        @EQUAL
+            BRANCH    NOFEE,CRAT3000        * rates not setup -use normal charge
+            MOVE      ONE,CMIXFLAG          * set flag to use casemix
+            MOVE      LUMPAT,PTTRLSPT
+            MOVE      LUMHF,PTTRLSRB
+          ELSE
+            BRANCH    NOFEE,CRAT3000
+            BRANCH    CMIXFLAG,CRAT2200     * generate fees using casemix
+            GOTO      CRAT3000              * generate normal rates
+          ENDIF
+.
+CRAT2200  MOVE      ZERO,PTTREPSD 
+          MOVE      DAYHF,TRATEH
+          MOVE      DAYPAT,TRATEF
+          MOVE      DAYEND,TRBEND
+          MOVE      ADDHF,PTTRADRB
+          MOVE      ADDPAT,PTTRADPT
+          MOVE      ADDEND,PTTRAEND
+          GOTO      CRAT4000
+.
+CRAT3000  CALL      GBFE0000               * Generate bed fees
+          BRANCH    NOFEE,CRAT1000         * No rates setup
+          MOVE      SBFPAT,TRATEF
+          MOVE      SBFHF,TRATEH
+          MOVE      SBFENDDY,TRBEND
+          MOVE      ZERO,PTTRLSPT
+          MOVE      ZERO,PTTRLSRB
+          MOVE      ZERO,PTTRADRB          * No additional rate
+          MOVE      ZERO,PTTRADPT
+          MOVE      ZERO,PTTRAEND
+          MOVE      ZERO,PTTREPSD
+.
+CRAT4000  PACK      TRCDATE,CCC,CYY,CMM,CDD
+          REP       " 0",TRCDATE
+          CLOCK     TIME,TRCTIME
+          MOVE      WBSEUID,PTTRUUID
+.
+          CALL      UPTRAN2
+          GOTO      CRAT1000                 * Next trans record
+.
+CRAT8000  
+CRAT9999  RETURN
++
+.******************************************************************************
+.        Routine to get the bed fee rate
+.******************************************************************************
+GBFE0000  OPEN      PATBFEE1,"patbfeef"
+          OPEN      PATFN1A1,"patfn1af"
+          MOVE      ZERO,FORM2
+          MOVE      ZERO,NOFEE
+.
+          PACK      DIM23 WITH ACLAIM,AFUNDH,AFNDTB,ATYPE,SAVBTYP
+.
+          COMPARE   NINE,CFEETYP
+          GOTO      GBFE2000 IF EQUAL       * Johns Hopkins
+.
+          MOVE      SP70,PTHFBCAT
+          PACK      KEY14,AFUNDH,AFNDTB,SP70
+          CALL      RDFUND1
+.
+.         Display the Bed Fee for the above codes
+.
+          PACK      DIM18 WITH ACLAIM,AFUNDH,PTHFBCAT,ATYPE,SAVBTYP
+.
+.         Get the bed fee for the above parameters
+.
+GBFE1000  PACK      KEY27,DIM18,SP3
+          CALL      RDSBFEE1
+GBFE1200  CALL      RDKBFEE1
+          BRANCH    OVRCD OF GBFE4500
+.
+          PACK      DIM18A WITH BFCLM,BFHFUND,PTBFHTYP,BFATYPE,BFBTYPE
+          MATCH     DIM18,DIM18A
+          GOTO      GBFE4500 IF NOT EQUAL
+.
+          MOVE      TDATE,CEFFDATE
+          LOAD      CEFFDATE,CNTRCEFR,ADATE,DDATE
+.
+.         If Contract Effective From is 'For Discharges From', Discharged date
+.         is blank and TCINDC19=D, default Effective date to Current date
+.
+          IF        CNTRCEFR=2
+            PACK      DDATE,DDATE,SP70
+            MATCH     SP70,DDATE
+            IF        @EQUAL
+              PACK      KEY5,ANSC,ANSL,ACLAIM
+              CALL      RDCODE1
+              IF        OVRCD=0
+                MATCH     "D",TCINDC19
+                IF        @EQUAL
+                  PACK      CEFFDATE,CCC,CYY,CMM,CDD,SP70
+                  REP       " 0",CEFFDATE
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          MOVE      PTBFCNID,KEY6         * Contract ID
+          CALL      VALCONTR              * Validate the Contract ID
+          BRANCH    EXIT,GBFE1200         * not valid
+.
+          MOVE      PTBFCNID,CONTRCID     * Contract ID
+          GOTO      GBFE3000
+.
+.         Get Johns Hopkins bed fee for the above parameters
+.
+GBFE2000  OPEN      JHSBFEA1,"jhsbfeaf"
+          PACK      KEY26,DIM23,SP3
+          CALL      RSJHBFE1
+GBFE2200  CALL      RKJHBFE1
+          BRANCH    OVRCD OF GBFE4500
+.
+          PACK      DIM23A WITH BFCLM,BFHFUND,BFHFTAB,BFATYPE,BFBTYPE
+          MATCH     DIM23,DIM23A
+          GOTO      GBFE4500 IF NOT EQUAL
+.
+GBFE3000  COMPARE   THREE,ASTAT
+          GOTO      GBFE3600 IF NOT EQUAL
+.
+.         For a day case patient, BFENDDY should be zero
+.
+          MATCH     ADATE,DDATE
+          GOTO      GBFE3600 IF NOT EQUAL
+.
+          COMPARE   ZERO,BFENDDY
+          GOTO      GBFE4200 IF NOT EQUAL
+          GOTO      GBFE4000
+.
+GBFE3600  COMPARE   ZERO,BDAYS
+          GOTO      GBFE3800 IF NOT EQUAL
+.
+.         If ADYHOSP is zero, the bed fee should be the first column after
+.         a day case fee
+.
+          COMPARE   ZERO,BFENDDY
+          GOTO      GBFE4200 IF EQUAL
+          GOTO      GBFE4000
+.
+GBFE3800  COMPARE   BDAYS,BFENDDY
+          GOTO      GBFE4200 IF LESS
+.
+GBFE4000  MOVE      BFPAT,SBFPAT
+          MOVE      BFHF,SBFHF
+          MOVE      BFENDDY,SBFENDDY
+          GOTO      GBFE9999
+.
+.             Save the bed fee
+.
+GBFE4200  MOVE      BFPAT,SBFPAT
+          MOVE      BFHF,SBFHF
+          MOVE      BFENDDY,SBFENDDY
+          GOTO      GBFE1200
+.
+.         Use default bed fee if hospitalization day not in range
+.
+GBFE4500  ADD       ONE,FORM2
+          BRANCH    FORM2 OF GBFE5000,GBFE6000
+.
+          MATCH     "MRTWEB02",PRGID
+          IF        !@EQUAL
+            DISPLAY   *P1:23,*EF,*B,"Default Not Set Up. ",*V2LON,DIM23;
+            CALL      HITENTER
+          ENDIF
+          MOVE      ONE,NOFEE
+          GOTO      GBFE9999
+.
+GBFE5000  PACK      DIM18 WITH ACLAIM,SP6,SP3,ATYPE,SAVBTYP
+          PACK      DIM23 WITH ACLAIM,SP6,SP8,ATYPE,SAVBTYP
+          COMPARE   NINE,CFEETYP
+          GOTO      GBFE2000 IF EQUAL     * JH
+          GOTO      GBFE1000
+.
+GBFE6000  READ      CONTROLF,TWENTY;*193,PTCNDCLM
+          CALL      DCLM0000
+          PACK      DIM18 WITH PTCNDCLM,SP6,SP3,ATYPE,SAVBTYP
+          PACK      DIM23 WITH PTCNDCLM,SP6,SP8,ATYPE,SAVBTYP
+          COMPARE   NINE,CFEETYP
+          GOTO      GBFE2000 IF EQUAL     * JH
+          GOTO      GBFE1000
+.
+GBFE9999  RETURN
++
+.*******************************************************************************
+.         VLUM0000 - Overnight lumpsum
+.*******************************************************************************
+VLUM0000  MOVE      ZERO,NOFEE
+          MOVE      ZERO,PTHLLREB
+          MOVE      ZERO,PTHLLPAT
+.
+          MOVE      SP70,CASMXKEY
+          MOVE      SP10,PTHFBCAT           * Initialise table type
+          MATCH     SP6,AFUNDH
+          IF        !@EQUAL
+            OPEN      PATFN1A1,"patfn1af"
+            PACK      KEY14,AFUNDH,AFNDTB,SP10
+            CALL      RDFUND1                 * read health fund file 
+          ENDIF
+.
+          OPEN      PATHLFA1,"pathlfaf"
+          PACK      KEY21,ACLAIM,AFUNDH,PTHFBCAT,CMDRG
+          CALL      RDPTHLF1
+          IF        OVRCD = 1
+            PACK      KEY21,ACLAIM,SP6,SP3,CMDRG
+            CALL      RDPTHLF1
+            IF        OVRCD = 1
+              READ      CONTROLF,TWENTY;*193,PTCNDCLM
+              CALL      DCLM0000
+              PACK      KEY21,PTCNDCLM,SP6,SP3,CMDRG
+              CALL      RDPTHLF1
+              BRANCH    OVRCD,VLUM9000        * no lumpsum charges
+            ENDIF
+          ENDIF
+          MOVE      KEY21,CASMXKEY
+          GOTO      VLUM9999
+.
+VLUM9000  MOVE      ONE,NOFEE
+VLUM9999  RETURN
++
+.*******************************************************************************
+.
+          INC       PATDBTYP
+          INC       PATGNCMX
++

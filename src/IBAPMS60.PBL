@@ -1,0 +1,860 @@
+.***************************************************************************
+.* System    :   PAT - inpatient                                           *
+.* Program   :   IBAPMS60                                                  *
+.* Desc      :   Peri Natal Report                                         *
+.***************************************************************************
+.* Date      :   12/10/2011                                                *
+.* Author    :   Saroeun J. Soeur                                          *
+.* Function  :   print out a list of birth details for all babies          *
+.*               with dob within a date range                              *
+.*               Report and Extract should be exact match!                 *
+.* Mods      :                                                             *
+.*                                                                         *
+.*        V11.03.01  14/04/2023  Alina Bhari     TSK 0931243               *
+.*                   Displayed Apgar Score @ 1 minute and Apgar Score @ 5  *
+.*                   minute as 10 if record value is equal to x            *
+.*        V10.03.02  19/06/2012  Saroeun Soeur   CAR 262265                *
+.*                   fixed extract to remove trailing spaces               *
+.*        V10.03.01  06/02/2012  Saroeun Soeur   CAR 259290                *
+.*                   added multi hospital support                          *
+.*        V10.03.00  17/10/2011  Saroeun Soeur   CAR 253304                *
+.*                   created report/extract prog. for birth reg.           *
+.***************************************************************************
+.---------------------------------------------------------------------------
+.  FD INCLUDES
+.---------------------------------------------------------------------------
+          INC       STD001FD
+.
+          INC       PATCODFD/INC
+          INC       PMSBTHFD/INC
+          INC       PATMI1FD/INC
+          INC       PATMA1FD/INC
+          INC       PATHSPFD/INC
+          INC       PMSVX1FD/INC
+          INC       PMSLBRFD/INC
+          INC       IBASEQFD/INC 
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
++
+.------------------------------------------------------------------------------
+.         Temp. File - store all the records that match the users
+.                      criteria
+.------------------------------------------------------------------------------
+.
+TREPORT1  IFILE     SQL, FIXED=337, KEY="U1-8,9-16,17-26"
+.TREPORT2 IFILE     SQL, FIXED=337, KEY="U146-153,27-34,17-26,1-8"
+FLATFILE  FILE      ASCII, FIXED=337
++
+. Name    Type      Length     Physical     Start   Description
+. ----    ----      ------     --------     -----   -----------
+TMPBDATE  DIM         8            8          1       Date of birth
+TMPBTIME  DIM         8            8          9       Time of birth
+TMPUNIQ   DIM        10           10         17       Birth Unique Id
+TMPCHURN  DIM         8            8         27       Child UR No.
+TMPCHNAM  DIM        45           45         35       Child Full Name
+TMPCHSEX  DIM         1            1         80       Child Sex
+TMPAPGR1  DIM         1            1         81       Apgar score at 1 minute
+TMPAPGR2  DIM         1            1         82       Apgar score at 5 minute
+TMPEGEST  DIM         2            2         83       Estimated Gestation at Birth
+TMPWEIGH  DIM         5            5         85       Birth Weight
+TMPMMURN  DIM         8            8         90       Mother's UR No.
+TMPMMNAM  DIM        45           45         98       Mother's Full Name
+TMPDLVTY  DIM         3            3        143       Method of Delivery (Cat mn)
+.         for extract
+.
+TMPHOSID  DIM         8            8        146     * PTHSHDPC
+TMPMSNAM  DIM        20           20        154
+TMPMGNAM  DIM        25           25        174
+TMPMADD1  DIM        35           35        199
+TMPMADD2  DIM        35           35        234
+TMPMSUBR  DIM        35           35        269
+TMPMPOST  DIM         8            8        304
+TMPCHSTA  DIM         3            3        312
+TMPCHSQU  DIM         2            2        315
+TMPCHNUM  DIM        10           10        317
+TMPCUNIQ  DIM        10           10        327       Birth Unique Id
+.
+.                                 Total:    337
++
+.------------------------------------------------------------------------------
+.         Local variables
+.------------------------------------------------------------------------------
+.
+USERID    DIM       10
+URNUMBR   DIM       8
+FRBRDTE   DIM       8         * from date
+TOBRDTE   DIM       8         * to date
+TTODATE   DIM       8         * date
+DDATE     DIM       10
+FROMDATE  DIM       11        * from date
+STRTDATE  DIM       11        * start date
+YYYY      DIM       4
+SPECIAL   FORM      1         * Special print flag
+DMM       DIM       2
+DDD       DIM       2
+DIM3      DIM       3
+DISPNAME  DIM       60
+CWEBDNAI  DIM       1
+NAME35    DIM       35
+FIRSTREC  FORM      1
+CMDLINE   DIM       90
+COUNT     FORM      3
+MOMURNO   DIM       8
+SUBURN    DIM       8
+OPCND     FORM      1
+STATUS    FORM      1
+CHNAME    DIM       26
+MONAME    DIM       26
+ANSEXTRA  DIM       1
+EXTRON    DIM       1
+DIM20     DIM       20
+DIM8      DIM       8
+FILENAME  DIM       8
+SAVTUNIQ  DIM       10
+SAVTBUNQ  DIM       10
+HOSPID    DIM       3
+IBCNMHOS  FORM      1
+FNAME     DIM       8
+TPAPGR1N  DIM       2
+TPAPGR2N  DIM       2
++
+.------------------------------------------------------------------------------
+.         Constant variables
+.------------------------------------------------------------------------------
+.
+MAXCLNO   FORM      "38"      * Maximum Line Number
+FSLASH    INIT      "/"
+TILDA23    INIT      "~~~~~~~~~~~~~~~~~~~~~~~"
+CATOP     INIT      "OP"
+DOWNCASE  INIT      "AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz"
+EXTRDSRC  INIT      "Create Extract (Y/N) ?:"
+SEMICOMA  INIT      ";"
+PIPE      INIT      "|"
+HYPHEN    INIT      "-"
+CATMP     INIT      "mp"
+TMPAPGRX  INIT       "X"
++
+.------------------------------------------------------------------------------
+.         Constant program variables
+.------------------------------------------------------------------------------
+.
+PRGID     INIT      "IBAPMS60"
+PRGNAM    INIT      "Birth Registration Report"
+VERSION   INIT      "V11.03.01"
++
+.------------------------------------------------------------------------------
+.         MAIN0000
+.------------------------------------------------------------------------------
+.
+MAIN0000  CALL      INIT0000            * Initialise
+.
+          CALL      GETC0000                * Get Search Criteria
+          BRANCH    EXIT,MAIN9999,MAIN3000
+.
+          MOVE      "1",EXTRON              * Generate extract
+          CALL      IBACLOCK                * Get current date
+.
+          GOTO      MAIN4000
+.
+MAIN3000  MOVE      ZERO,EXTRON
+          GOTO      MAIN4000
+.
+MAIN4000  CALL      GENR0000            * Generate Report/Extract
+.
+          CALL      PRNR0000            * Print Report
+.
+          MATCH     "1",EXTRON
+          IF        @EQUAL
+            CALL      MVEX0000          * move extract file
+          ENDIF
+.
+          CALL      KILL0000            * Kill temp file
+.
+MAIN9999  CHAIN     PGM
++
+.------------------------------------------------------------------------------
+.         move extract file using script
+.------------------------------------------------------------------------------
+MVEX0000  PREP      FLATFILE,FILENAME 
+          CLEAR     CMDLINE
+          APPEND    "ibapms60.us1 ",CMDLINE
+          APPEND    FILENAME,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+MVEX9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Initialise
+.------------------------------------------------------------------------------
+.
+INIT0000  CALL      DISPHEAD             * header
+.
+          OPEN      PMSBTHA1,"pmsbthaf";
+          OPEN      PATMA1A1,"patma1af";
+          OPEN      PATMX1A1,"patmx1af";
+          OPEN      PATMI1A1,"patmi1af";
+          OPEN      PATHSPA1,"pathspaf";
+          OPEN      PMSVX1A1,"pmsvx1af";
+          OPEN      PATCODE1,"patcodes";
+          OPEN      PMSLBRA1,"pmslbraf";
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          MOVE      ZERO,COUNT
+.
+          CALL      TFILENAM
+          MOVE      TFILNAME,FNAME
+          CALL      TFILENAM
+          MOVE      TFILNAME,FILENAME
+.
+INIT9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Generate extract
+.------------------------------------------------------------------------------
+GNXT0000  PACK      DIM20,SP70
+          PACK      KEY5,CATMP,TMPCHSTA,SP70
+          CALL      RDCODE1
+          IF        OVRCD<>1
+            PACK      DIM20,TDESC,SP70
+            MATCH     SP70,ACODE
+            IF        @EQUAL
+              PACK    DIM20,SP70
+            ENDIF
+          ENDIF
+.
+          UNPACK    TMPBDATE,YYYY,DMM,DDD
+          STRIP     TMPHOSID
+          SQUEEZE   TMPCHURN
+          SQUEEZE   TMPCUNIQ
+          STRIP     TMPMSNAM
+          STRIP     TMPMGNAM
+          STRIP     TMPMADD1
+          STRIP     TMPMADD2
+          STRIP     TMPMSUBR
+          STRIP     TMPMPOST
+          STRIP     TMPCHSEX
+          STRIP     DIM20
+          SQUEEZE   TMPCHSQU
+          SQUEEZE   TMPCHNUM
+.
+          WRITE     FLATFILE,SEQ;TMPHOSID,PIPE:
+                                TMPCHURN,HYPHEN,TMPCUNIQ,PIPE:
+                                DDD,HYPHEN,DMM,HYPHEN,YYYY,PIPE:
+                                TMPMSNAM,PIPE:
+                                TMPMGNAM,PIPE:
+                                TMPMADD1,PIPE:
+                                TMPMADD2,PIPE:
+                                TMPMSUBR,PIPE:
+                                TMPMPOST,PIPE:
+                                TMPCHSEX,PIPE:
+                                DIM20,PIPE:
+                                TMPCHSQU,PIPE:
+                                TMPCHNUM   
+.
+GNXT9999  RETURN
+.------------------------------------------------------------------------------
+.         Remove temp file
+.------------------------------------------------------------------------------
+KILL0000  CLOSE     TREPORT1
+          MOVE      ZERO,STATUS
+.
+          DISPLAY   *P1:24,*EL,*P28:24,*V2LON,"** Deleting Index File **";
+.
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAME,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+KILL9999  RETURN
++
+.------------------------------------------------------------------------------
+.         create temp file
+.------------------------------------------------------------------------------
+CRET0000  MOVE      ZERO,STATUS
+          CALL      KILL0000
+.
+          PACK      CMDLINE,SP70,SP70
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAME,CMDLINE
+          APPEND    " 337 U1-8,9-16,17-26 U146-153,27-34,17-26,1-8 ",CMDLINE
+          APPEND    SP70,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          MOVE      ONE,STATUS
+.
+          MOVE      ZERO,OPCND
+          TRAP      CRET8000 IF IO
+          PREP      TREPORT1,FNAME
+          TRAPCLR   IO
+
+          GOTO      CRET9999
+.
+CRET8000  MOVE      ONE,OPCND
+          DISPLAY   *P1:24,*EL,*B,"** Temporary Index File ",*V2LON,FNAME:
+                               *HOFF," not found **   ";
+          CALL      HITENTER
+          TRAPCLR   IO
+.
+CRET9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Print report
+.------------------------------------------------------------------------------
+.
+PRNR0000  MOVE      TRUE,FIRSTREC
+.
+          PACK      KEY26,SP70
+          CALL      RDSREPR1                 * position read
+PRNR1000  CALL      RDKREPR1                 * read next
+          BRANCH    OVRCD,PRNR9000
+.
+          MATCH     "1",EXTRON
+          IF        @EQUAL
+            CALL      GNXT0000
+          ENDIF
+.
+          CALL      CHPG0000                 * Check If Need new Page
+.
+          IF        FIRSTREC = TRUE
+            CALL      PAGE0000               * Setup Patient Heading Stuff
+            CALL      FIRP0000
+            MOVE      "9",CLNO
+            CALL      HEAD0000               * Setup Patient Heading Stuff
+            MOVE      FALSE,FIRSTREC
+          ENDIF
+.
+          CALL      PRNA0000
+.
+          GOTO      PRNR1000
+.
+PRNR9000  IF        FIRSTREC=TRUE
+            CALL      PAGE0000               * New Page
+            CALL      FIRP0000
+          ENDIF
+.
+          PRINT     *N,"Total for period:",COUNT
+          ADD       "1",CLNO
+          PRINT     *N,"End of Report"
+          ADD       "2",CLNO
+
+          DISPLAY   *P1:24,*EL,"Print Complete.   ";
+          CALL      HITENTER
+.
+PRNR9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Print report data
+.------------------------------------------------------------------------------
+.
+PRNA0000  UNPACK    TMPBDATE,YYYY,DMM,DDD
+          PACK      DDATE,DDD,FSLASH,DMM,FSLASH,YYYY
+.
+          PACK      CHNAME,TMPCHNAM,SP70
+          PACK      MONAME,TMPMMNAM,SP70
+.
+          MOVE      TMPAPGR1,TPAPGR1N
+          MATCH     TPAPGR1N,TMPAPGRX
+          IF        @EQUAL
+            MOVE    "10",TPAPGR1N
+          ENDIF
+.
+          MOVE      TMPAPGR2,TPAPGR2N
+          MATCH     TPAPGR2N,TMPAPGRX
+          IF        @EQUAL
+            MOVE    "10",TPAPGR2N
+          ENDIF
+.
+          PRINT     *001,"|",DDATE," ",TMPBTIME:
+                    *021,"|",TMPCHURN:
+                    *030,"|",CHNAME:
+                    *057,"|",TMPCHSEX:
+                    *061,"|",TPAPGR1N," ",TPAPGR2N:
+                    *068,"|",TMPEGEST:
+                    *073,"|",TMPWEIGH:
+                    *080,"|",TMPMMURN:
+                    *090,"|",MONAME:
+                    *117,"|",TMPDLVTY:
+                    *132,"|"
+.
+          CALL      UND132
+.
+PRNA9999  RETURN
+.---------------------------------------------------------------------------
+.
+.---------------------------------------------------------------------------
+FIRP0000  UNPACK    FRBRDTE,YYYY,DMM,DDD
+          PACK      FROMDATE,DDD,FSLASH,DMM,FSLASH,YYYY
+
+          UNPACK    TOBRDTE,YYYY,DMM,DDD
+          PACK      STRTDATE,DDD,FSLASH,DMM,FSLASH,YYYY
+.
+          PRINT     *N,*001,"NOTE:Number of patients on report should match":
+                            " number of patients on extract file."
+          ADD       "1",CLNO
+          PRINT     *N,*001,"Birth Date Range :",FROMDATE," - ",STRTDATE
+          ADD       "1",CLNO
+          PRINT     *N,*001,"Hospital :",PTHSNAME
+.
+FIRP9999  RETURN
++
+.---------------------------------------------------------------------------
+.         check if a new page is needed
+.---------------------------------------------------------------------------
+.
+CHPG0000  IF        CLNO >= MAXCLNO
+            CALL      PAGE0000               * begin a new page
+            CALL      HEAD0000               * print header details
+            MOVE      "45",MAXCLNO
+          ENDIF
+.
+CHPG9999  RETURN
++
+.---------------------------------------------------------------------------
+.         Print report header
+.---------------------------------------------------------------------------
+.
+HEAD0000  IF        CLNO >= MAXCLNO
+              CALL      PAGE0000
+          ENDIF
+.
+          CALL       UND132
+.
+          PRINT     *001,"|Date/Time Birth":
+                    *021,"|Child UR":
+                    *030,"|Child Name":
+                    *057,"|Sex":
+                    *061,"|Apgars":
+                    *068,"|Gest":
+                    *073,"|Weight":
+                    *080,"|Mother UR":
+                    *090,"|Mother Name":
+                    *117,"|Delivery Type":
+                    *132,"|"
+.
+          ADD       ONE,CLNO
+.
+          CALL      UND132
+.
+          ADD       "5",CLNO
+          MOVE      FALSE,SPECIAL
+.
+HEAD9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Print selection criteria
+.------------------------------------------------------------------------------
+.
+PAGE0000  CLOCK     TIME,CTIMEIS
+          CALL      HEAD132
+.
+          MOVE       "9",CLNO
+.
+PAGE9999 RETURN
++
+.-----------------------------------------------------
+.         Generate the temp file data
+.-----------------------------------------------------
+.
+GENR0000  CALL      CRET0000             * create temp file
+.
+          PACK      KEY23,TILDA23,TILDA23
+          CALL      RSPMBTH1
+GENR1000  CALL      RPPMBTH1
+          BRANCH    OVRCD,GENR9999
+.
+          MOVE      PMBTADMM,KEY8           * mothers admission
+          CALL      RDPMVX11                * visit extension record on file ?
+          BRANCH    OVRCD,GENR1000          * no - ignore record
+.
+          COMPARE    ONE,IBCNMHOS
+          IF         @EQUAL
+            MATCH      SP70,HOSPID
+            IF         !@EQUAL & !@EOS
+              MATCH      HOSPID,PMVXMHOS
+              GOTO       GENR1000 IF NOT EQUAL
+            ENDIF
+          ENDIF
+.
+          MATCH     TOBRDTE,PMBTBDAT    * birth to date
+          GOTO      GENR2000 IF EQUAL
+.
+          MATCH     FRBRDTE,PMBTBDAT
+          GOTO      GENR1000 IF LESS
+.
+          MATCH     TOBRDTE,PMBTBDAT
+          GOTO      GENR1000 IF NOT LESS
+.
+GENR2000  MATCH     PMBTUNIQ,SAVTUNIQ
+          GOTO      GENR3000 IF NOT EQUAL
+.
+          MATCH     PMBTBUNQ,SAVTBUNQ
+          GOTO      GENR3000 IF NOT EQUAL
+.
+          MOVE      PMBTUNIQ,SAVTUNIQ
+          MOVE      PMBTBUNQ,SAVTBUNQ
+.
+          GOTO      GENR1000
+.
+GENR3000  MOVE      PMBTUNIQ,SAVTUNIQ
+          MOVE      PMBTBUNQ,SAVTBUNQ
+.
+          CALL      CLRT0000            * clear temp variables
+          CALL      WRTM0000            * write record to temp file 
+.
+          GOTO      GENR1000
+.          
+GENR9999  RETURN
++
+.-----------------------------------------------------
+.         clear temp variables
+.-----------------------------------------------------
+CLRT0000  MOVE      SP70,TMPBDATE
+          MOVE      SP70,TMPBTIME
+          MOVE      SP70,TMPCUNIQ
+          MOVE      SP70,TMPCHURN
+          MOVE      SP70,TMPCHNAM
+          MOVE      SP70,TMPCHSEX
+          MOVE      SP70,TMPAPGR1
+          MOVE      SP70,TMPAPGR2
+          MOVE      SP70,TMPEGEST
+          MOVE      SP70,TMPWEIGH
+          MOVE      SP70,TMPMMURN
+          MOVE      SP70,TMPMMNAM
+          MOVE      SP70,TMPDLVTY
+.
+          MOVE      SP70,TMPHOSID 
+          MOVE      SP70,TMPMSNAM
+          MOVE      SP70,TMPMGNAM
+          MOVE      SP70,TMPMADD1
+          MOVE      SP70,TMPMADD2
+          MOVE      SP70,TMPMSUBR
+          MOVE      SP70,TMPMPOST
+          MOVE      SP70,TMPCHSTA
+          MOVE      SP70,TMPCHSQU
+          MOVE      SP70,TMPCHNUM
+          MOVE      SP70,TMPAPGRX
+          MOVE      SP70,TPAPGR2N
+          MOVE      SP70,TPAPGR1N
+
+CLRT9999  RETURN
++
+.-----------------------------------------------------
+.         write temp file with birth dates matches
+.-----------------------------------------------------
+WRTM0000  MOVE      PMBTBDAT,TMPBDATE
+          MOVE      PMBTBTIM,TMPBTIME
+          MOVE      PMBTLURN,TMPCHURN
+          MOVE      PMBTGEND,TMPCHSEX
+          MOVE      PMBTAPG1,TMPAPGR1
+          MOVE      PMBTAPG2,TMPAPGR2
+          MOVE      PMBTESTG,TMPEGEST
+          MOVE      PMBTBWGH,TMPWEIGH
+          MOVE      PMBTMDEL,TMPDLVTY
+          MOVE      PMBTBSTA,TMPCHSTA
+          MOVE      PMBTPLUR,TMPCHSQU
+          MOVE      PMBTBUNQ,TMPCUNIQ
+.
+          PACK      KEY24,PMBTUNIQ,PMBTADMM,TILDA23,SP70
+          CALL      RSPMLBR1  
+WRTM0100  CALL      RPPMLBR1
+          BRANCH    OVRCD,WRTM0500
+.
+          MATCH     PMBTUNIQ,PMLBUNIQ
+          GOTO      WRTM0500 IF NOT EQUAL
+.
+          MATCH     PMBTADMM,PMLBADMN
+          GOTO      WRTM0500 IF NOT EQUAL
+.
+          MOVE      PMLBNUMB,TMPCHNUM          
+.
+WRTM0500  MOVE      SP70,MOMURNO
+          CALL      GEMU0000            * get mother's UR
+          MOVE      MOMURNO,TMPMMURN            * PMBTADMM
+.
+          MOVE      SP70,PACFNAME
+          MOVE      SP70,TMPMMNAM
+          MOVE      TMPMMURN,SUBURN
+          CALL      GEMF0000            * get mother's fullname
+          BRANCH    EXIT,WRTM1000
+.
+          MOVE      PSNAME,TMPMSNAM
+          MOVE      PGNAME,TMPMGNAM
+          MOVE      PADD1,TMPMADD1
+          MOVE      PADD2,TMPMADD2
+          MOVE      PSUBRB,TMPMSUBR
+          MOVE      PPOST,TMPMPOST
+          MOVE      PACFNAME,TMPMMNAM
+.
+WRTM1000  MOVE      SP70,PACFNAME
+          MOVE      SP70,TMPCHNAM
+          MOVE      PMBTLURN,SUBURN
+          CALL      GEMF0000            * get Childs fullname
+          BRANCH    EXIT,WRTM2000
+.
+          MOVE      PACFNAME,TMPCHNAM
+.
+WRTM2000  ADD       ONE,COUNT
+          MOVE      COUNT,TMPUNIQ
+          PACK      KEY26,TMPBDATE,TMPBTIME,TMPUNIQ,SP70
+          CALL      WRTREPR1
+.
+WRTM9999  RETURN
++
+.-----------------------------------------------------
+.         get mothers ur number
+.-----------------------------------------------------
+GEMU0000  PACK      KEY8,PMBTADMM,SP70
+          CALL      RDMISS1
+          BRANCH    OVRCD,GEMU9000
+.
+          MOVE      AURNO,MOMURNO
+          CALL      RDPMVX11
+          BRANCH    OVRCD,GEMU9000
+.
+          PACK      KEY3,PMVXMHOS,SP70
+          CALL      RDPTHSP1
+          BRANCH    OVRCD,GEMU9000
+.
+          MOVE      PTHSHDPC,TMPHOSID
+.
+          GOTO      GEMU9999
+.
+GEMU9000  MOVE      SP70,MOMURNO          
+.
+GEMU9999  RETURN
+.-----------------------------------------------------
+.
+.-----------------------------------------------------
+GEMF0000  MOVE      ZERO,EXIT
+          PACK      KEY8,SUBURN,SP70
+          CALL      RDMAST1
+          BRANCH    OVRCD,GEMF9100
+.
+          STRIP     PGNAME
+          STRIP     PSNAME
+          PACK      PACFNAME,PGNAME,SP1,PSNAME
+.
+          GOTO      GEMF9999
+.
+GEMF9100  MOVE      SP70,PACFNAME
+          MOVE      ONE,EXIT
+.
+GEMF9999  RETURN
+.-----------------------------------------------------
+.         GETC0000  - get report options
+.-----------------------------------------------------
+.
+GETC0000  MOVE      ZERO,EXIT
+          CALL      KDAT0000            * keyin date
+          BRANCH    EXIT,GETC9100
+.
+          MOVE      ZERO,EXIT
+          CALL      KHOS0000 
+          BRANCH    EXIT,GETC9100
+.
+          MOVE      ZERO,EXIT
+          CALL      KEXT0000            * extract?
+          BRANCH    EXIT,GETC9200
+.
+          GOTO      GETC9999
+.
+GETC9100  MOVE      ONE,EXIT
+          GOTO      GETC9999
+.         
+GETC9200  MOVE      TWO,EXIT
+          GOTO      GETC9999
+.
+GETC9999  RETURN
++
+.------------------------------------------------------
+.         KEXT0000 - does the user want an extract ?
+.------------------------------------------------------
+KEXT0000  KEYIN     *P1:24,*EF,*DV,EXTRDSRC,*V2LON:
+                    ANSEXTRA
+.         
+          MATCH     SP70,ANSEXTRA            * Test for spaces
+          IF        @EQUAL
+            PACK      ANSEXTRA,SP70
+            DISPLAY   *P1:24,*EF,EXTRDSRC,*V2LON,"N"
+            GOTO      KEXT9100
+          ENDIF
+.
+          REP       "yYnN",ANSEXTRA
+.
+          MATCH     ANSEXTRA,ANSY
+          IF        @EQUAL
+            GOTO      KEXT9000
+          ENDIF
+          
+          GOTO      KEXT9100
+.
+KEXT9000  MOVE      ZERO,EXIT
+          GOTO      KEXT9999
+.
+KEXT9100  MOVE      ONE,EXIT
+          GOTO      KEXT9999
+.
+KEXT9999  RETURN
++
+.------------------------------------------------------
+.         KDATE0000 - get date range from user
+.------------------------------------------------------
+KDAT0000  DISPLAY   *P1:4,*EF,"From Date :":
+                        *P1:6,"To Date   :";
+.
+KDAT1000  MOVE      FOUR,CVERT
+          MOVE      TWENTY,CCOL
+          MOVE      ONE,CCENTRY
+          MOVE      CCC,CCENT
+          MOVE      ZERO,CDAY
+          UNPACK    SP6,CYEAR,CMON,CDAY
+          CALL      KEYDATE                     * Keyin todate
+          BRANCH    OVRCD,KDAT9000
+.
+          PACK      FRBRDTE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",FRBRDTE
+.
+          MOVE      SIX,CVERT
+          CALL      KEYDATE                     * Keyin fromdate
+          BRANCH    OVRCD,KDAT1000
+.
+          PACK      TOBRDTE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",TOBRDTE
+.
+          MATCH     FRBRDTE,TOBRDTE             * match date range
+          GOTO      KDAT2000 IF NOT LESS
+          DISPLAY   *P1:24,*EL,*B,*V2LON,"** Invalid date range entered **    ";
+          CALL      HITENTER
+          GOTO      KDAT0000
+.
+KDAT2000  CALL      CONTQST
+          MOVE      ZERO,EXIT
+          BRANCH    CEXIT,KDAT3000,KDAT1000,KDAT9000
+.
+.------ yes selected ------
+.
+KDAT3000  UNPACK    TOBRDTE,CCENT,CYEAR,CMON,CDAY
+          MOVE      CCENT,CC
+          MOVE      CYEAR,YY
+          MOVE      CMON,MM
+          MOVE      CDAY,DD
+          CALL      DMYCON                  * convert to julian format
+.
+          ADD       ONE,JULDAY              * add one day to todate
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+.
+          CALL      JULCON                  * convert back to DDMMYY format
+.
+          PACK      TTODATE,CC,YY,MM,DD
+          REP       " 0",TTODATE
+.
+          GOTO      KDAT9999
+KDAT9000  MOVE      ONE,EXIT
+KDAT9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Temp file I/O - write, read and update
+.------------------------------------------------------------------------------
+.
+WRTREPR1  RESET     KEY26
+          WRITE     TREPORT1,KEY26;TMPBDATE,TMPBTIME,TMPUNIQ,TMPCHURN,TMPCHNAM:
+                                   TMPCHSEX,TMPAPGR1,TMPAPGR2:
+                                   TMPEGEST,TMPWEIGH,TMPMMURN,TMPMMNAM:
+                                   TMPDLVTY,TMPHOSID,TMPMSNAM,TMPMGNAM:
+                                   TMPMADD1,TMPMADD2,TMPMSUBR,TMPMPOST:
+                                   TMPCHSTA,TMPCHSQU,TMPCHNUM,TMPCUNIQ
+          RETURN
+.
+RDKREPR1  MOVE      ZERO,OVRCD
+          READKS    TREPORT1;TMPBDATE,TMPBTIME,TMPUNIQ,TMPCHURN,TMPCHNAM:
+                             TMPCHSEX,TMPAPGR1,TMPAPGR2:
+                             TMPEGEST,TMPWEIGH,TMPMMURN,TMPMMNAM:
+                             TMPDLVTY,TMPHOSID,TMPMSNAM,TMPMGNAM:
+                             TMPMADD1,TMPMADD2,TMPMSUBR,TMPMPOST:
+                             TMPCHSTA,TMPCHSQU,TMPCHNUM,TMPCUNIQ
+
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDSREPR1  RESET     KEY26
+          READ      TREPORT1,KEY26;;
+          RETURN
+.
+.WRTREPR2  RESET     KEY34
+.          WRITE     TREPORT2,KEY34;TMPBDATE,TMPBTIME,TMPUNIQ,TMPCHURN,TMPCHNAM:
+.                                   TMPCHSEX,TMPAPGR1,TMPAPGR2:
+.                                   TMPEGEST,TMPWEIGH,TMPMMURN,TMPMMNAM:
+.                                   TMPDLVTY,TMPHOSID,TMPMSNAM,TMPMGNAM:
+.                                   TMPMADD1,TMPMADD2,TMPMSUBR,TMPMPOST:
+.                                   TMPCHSTA,TMPCHSQU,TMPCHNUM,TMPCUNIQ
+.          RETURN
+.
+.RDKREPR2  MOVE      ZERO,OVRCD
+.          READKS    TREPORT2;TMPBDATE,TMPBTIME,TMPUNIQ,TMPCHURN,TMPCHNAM:
+.                             TMPCHSEX,TMPAPGR1,TMPAPGR2:
+.                             TMPEGEST,TMPWEIGH,TMPMMURN,TMPMMNAM:
+.                             TMPDLVTY,TMPHOSID,TMPMSNAM,TMPMGNAM:
+.                             TMPMADD1,TMPMADD2,TMPMSUBR,TMPMPOST:
+.                             TMPCHSTA,TMPCHSQU,TMPCHNUM,TMPCUNIQ
+.
+.          GOTO      OVERCOND IF OVER
+.          RETURN
+.
+.RDSREPR2  RESET     KEY34
+.          READ      TREPORT2,KEY34;;
+.          RETURN
+.
++
+.*******************************************************************************
+.       Keyin hospital ID
+.*******************************************************************************
+KHOS0000  MOVE       ZERO,EXIT
+          MOVE       SP70,HOSPID
+          COMPARE    ONE,IBCNMHOS
+          GOTO       KHOS9999 IF NOT EQUAL
+.
+          DISPLAY    *P1:23,*EL,"Hospital Id : ";
+          MOVE       TEN5,ECOL
+          MOVE       "23",EVERT
+          MOVE       SP3,CKYIDEF3
+          MOVE       ZERO,CKYIMAND           * Not Mandatory
+          OPEN       PATHSPA1,"pathspaf"
+.
+          CALL       PATHSPKY
+          BRANCH     EXIT,KHOS1000,KHOS9000
+          MOVE       PTHSHOSP,HOSPID
+          MOVE       ZERO,EXIT
+          GOTO       KHOS9999
+.
+KHOS1000  MOVE       "All Hospitals",PTHSNAME
+          MOVE       SP70,HOSPID
+          MOVE       ZERO,EXIT
+          GOTO       KHOS9999
+.
+KHOS9000  MOVE       ONE,EXIT
+KHOS9999  RETURN
++
+.------------------------------------------------------------------------------
+.         I/O includes
+.------------------------------------------------------------------------------
+          INC       STD001IO
+.
+          INC       PATHSPKY
+          INC       TFILENAM
+          INC       PATCODIO/INC
+          INC       PMSBTHIO/INC
+          INC       PATMI1IO/INC
+          INC       PATMA1IO/INC
+          INC       PATHSPIO/INC
+          INC       PMSVX1IO/INC
+          INC       PMSLBRIO/INC                  
+          INC       IBASEQIO/INC 
+          INC       WEBERRIO/INC
+

@@ -1,0 +1,514 @@
+.*****************************************************************************
+.*    Program      : IBAPMS57.PBL                                            *
+.*    Description  : Report for missing contract ids in Bed/Theatre Fees     *
+.*       Option 1- loops through bed fees file and reports missing contr ids *
+.*                 loops through theatre fees file and reports missing cn ids*
+.*                 updates controlf parameter if there are no missing cn ids *
+.*    Author       : Peter Vela                                              *
+.*    Date         : 14/02/2011                                              *
+.*    Modifications:                                                         *
+.* V10.11.01  04/09/2017 Ebon Clements  TSK 0844248                          *
+.*            Removed local definitions of PATBFEFD and PATTFEFD             *
+.* V10.03.01  02/01/2013 Patrick Adair  CAR 261630                           *
+.*                       Removed port number from temp file name             *
+.*        V10.01.00 Peter Vela       CAR 233034/233048                       *
+.*                  Created program                                          *
+.*****************************************************************************
+.
+          INC       STD001FD
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       PATBFEFD/INC
+          INC       PATCONFD/INC
+          INC       PATMBFFD/INC
+          INC       PATMTFFD/INC
+          INC       PATTFEFD/INC
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+TEMPFIL1   IFILE    SQL, FIXED=13, KEY="U1-3,4-9,10-12"
+.
+.Name     Type      Length Physical Start Description
+.----     ----      ------ -------- ----- -----------
+TMPBCLAM  DIM       3      3        1     Claim code
+TMPBHFND  DIM       6      6        4     Health Fund
+TMPBATYP  DIM       3      3        10    Admission Type
+.
+.End of Record                            133
+.
+TEMPFIL2   IFILE    SQL, FIXED=10, KEY="U1-3,4-9"
+.
+.Name     Type      Length Physical Start Description
+.----     ----      ------ -------- ----- -----------
+TMPTCLAM  DIM       3      3        1     Claim code
+TMPTHFND  DIM       6      6        4     Health Fund
+.
+. LOCAL VARIABLES
+. ---------------
+CMDLINE   DIM       100
+.
+DIM6      DIM       6
+.
+ERRNUM    FORM      8
+.
+RECNU1    FORM      8
+RECNU2    FORM      8
+REPTLNN1  FORM      2
+REPTLNN2  FORM      2
+RECNUM    FORM      8
+.
+TMPFILN1  DIM       8
+TMPFILN2  DIM       8
+. 
+PRGNAM    INIT      "Report Missing Contract IDs"
+PRGID     INIT      "IBAPMS57"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                         MAIN0000                                          *
+.*                      Mainline code                                        *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000                * init and open files
+.
+MAIN0100  CALL      OPTN0000                * select options
+          BRANCH    EXIT,MAIN9999           * EXIT = 1 if 0 chosen in menu
+.
+MAIN1000  CALL      CONTQST                 * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:         * yes
+                          MAIN0000:         * no
+                          MAIN9999          * cancel
+.
+MAIN2000  BRANCH    COPTION,MAIN2100
+.
+MAIN2100  CALL      CTM10000                * create bed fee temp file
+          CALL      CRBF0000                * bed fee report
+          CALL      PRL10000                * print bed fee report
+          CALL      KIL10000                * remove bed fees temporary file
+.
+          CALL      CTM20000                * create theatre fee temp file
+          CALL      CRTF0000                * theatre fee report 
+          CALL      PRL20000                * print theatre fee report
+          CALL      KIL20000                * remove bed fees temporary file 
+.
+          CALL      UPFL0000                * update the mapping file flag 
+.                                           * controlf PTCNMFFL
+          GOTO      MAIN0100
+.
+MAIN9999  CHAIN     PGM
++
+.*****************************************************************************
+.*                          INIT0000               Called by: MAIN0000       *
+.*  Display heading and check that the files needed exist & open them        *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD
+.
+          OPEN       CONTROLF,"controlf"
+.
+          OPEN       PATBFEE1,"patbfeef"
+          OPEN       PATMBFA1,"patmbfaf"
+.
+          OPEN       PATTFEE1,"pattfeef"
+          OPEN       PATMTFA1,"patmtfaf"
+.
+          MOVE       ZERO,ERRNUM
+          MOVE       ZERO,RECNU1
+          MOVE       ZERO,RECNU2
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run fixit                               *
+.*                        TRUE  (1)  Exit option selected                    *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Report";
+.
+OPTN0500  KEYIN     *P1:8,*EL,"Select Option : ":
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               CRBF0000                                    *
+.*         Loop through bed fees file and write to temporary file            *
+.*****************************************************************************
+CRBF0000  DISPLAY   *P1:20,*EL,"PATBFE Record No. : ";
+          MOVE      SP70,KEY27
+          CALL      RDSBFEE1                      * position at start
+CRBF1000  CALL      RDKBFEE1                      * read next record
+          BRANCH    OVRCD,CRBF9999                * no more records
+          ADD       ONE,RECNUM                    * update record counter
+.
+          IF        (RECNUM%1000) = 0
+            DISPLAY   *P12:20,*V2LON,RECNUM
+          ENDIF
+.
+          PACK      KEY12,BFCLM,BFHFUND,BFATYPE,SP70
+          CALL      RDPTMBF1
+          IF        OVRCD=1
+            PACK      KEY12,BFCLM,BFHFUND,BFATYPE,SP70
+            CALL      RATEM11
+            IF        OVRCD=1
+              MOVE      BFCLM,TMPBCLAM
+              MOVE      BFHFUND,TMPBHFND
+              MOVE      BFATYPE,TMPBATYP
+              CALL      WRTEM11
+              ADD       ONE,ERRNUM
+            ENDIF
+          ELSE
+            MATCH     SP70,PTMBCNTR
+            IF        @EQUAL | @EOS
+              PACK      KEY12,BFCLM,BFHFUND,BFATYPE,SP70
+              CALL      RATEM11
+              IF        OVRCD=1
+                MOVE      BFCLM,TMPBCLAM
+                MOVE      BFHFUND,TMPBHFND
+                MOVE      BFATYPE,TMPBATYP
+                CALL      WRTEM11
+                ADD       ONE,ERRNUM
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          GOTO      CRBF1000                      * get next record
+.
+CRBF9999  RETURN
++
+.*****************************************************************************
+.*                               CRTF0000                                    *
+.*         Loop through Theatre fees file and write to temporary file        *
+.*****************************************************************************
+CRTF0000  DISPLAY   *P1:20,*EL,"PATTFE Record No. : ";
+          MOVE      ZERO,RECNUM
+          MOVE      SP70,KEY24
+          CALL      RDSTFEE1                      * position at start
+CRTF1000  CALL      RDKTFEE1                      * read next record
+          BRANCH    OVRCD,CRTF8000                * no more records
+          ADD       ONE,RECNUM                    * update record counter
+.
+          IF        (RECNUM%1000) = 0
+            DISPLAY   *P15:20,*V2LON,RECNUM
+          ENDIF
+.
+          PACK      KEY9,TFCLM,TFHFUND,SP70
+          CALL      RDPTMTF1
+          IF        OVRCD=1
+            PACK      KEY9,TFCLM,TFHFUND,SP70
+            CALL      RATEM21
+            IF        OVRCD=1
+              MOVE      TFCLM,TMPTCLAM
+              MOVE      TFHFUND,TMPTHFND
+              CALL      WRTEM21
+              ADD       ONE,ERRNUM
+            ENDIF
+          ELSE
+            MATCH     SP70,PTMTCNTR
+            IF        @EQUAL | @EOS
+              PACK      KEY9,TFCLM,TFHFUND,SP70
+              CALL      RATEM21
+              IF        OVRCD=1
+                MOVE      TFCLM,TMPTCLAM
+                MOVE      TFHFUND,TMPTHFND
+                CALL      WRTEM21
+                ADD       ONE,ERRNUM
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          GOTO      CRTF1000                      * get next record
+.
+CRTF8000  CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:22,"Ended  : ",CDATE,SP1,CTIMEIS
+.
+CRTF9999  RETURN
++
+.******************************************************************************
+.*                             CTM10000                 Called by:            *
+.*                 create temporary file for bed fees                         *
+.******************************************************************************
+CTM10000  CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TMPFILN1
+.
+          CALL      KIL10000
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TMPFILN1,CMDLINE
+          APPEND    " 13 U1-3,4-9,10-12",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPFIL1,TMPFILN1
+.
+          CALL      CLE10000                * empty it if Oracle
+.
+CTM19999  RETURN
++
+.******************************************************************************
+.*                             KIL10000                  Called by:           *
+.*                   erase temporary file bed fees                            *
+.******************************************************************************
+KIL10000  CLOSE     TEMPFIL1
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TMPFILN1,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+KIL19999  RETURN
++
+.******************************************************************************
+.*                             CLE10000                 Called by:            *
+.*               close and erase the temporary file bed fees oracle           *
+.******************************************************************************
+CLE10000  PACK      KEY12,SP70
+          CALL      RSTEM11
+          CALL      RKTEM11
+          BRANCH    OVRCD,CLE19999
+.
+          PACK      KEY12,TMPBCLAM,TMPBHFND,TMPBATYP,SP70
+          CALL      DETEM11
+.
+          GOTO      CLE10000
+.
+CLE19999  RETURN
++
+.******************************************************************************
+.*                             PRL10000                 Called by:            *
+.******************************************************************************
+PRL10000  MOVE      ZERO,REPTLNN1
+          CALL      PRH10000
+.
+          PACK      KEY12,SP70
+          CALL      RSTEM11
+PRL11000  CALL      RKTEM11
+          BRANCH    OVRCD,PRL19999
+.
+          CALL      PRD10000
+.
+          GOTO      PRL11000
+.
+PRL19999  RETURN
+.**********************************************************************
+.         Print error detail
+.**********************************************************************
+PRD10000  COMPARE    "50",REPTLNN1
+          CALL       PRH10000 IF NOT LESS
+.
+          PRINT      *1,TMPBCLAM,*15,TMPBHFND,*30,TMPBATYP
+          ADD        ONE,REPTLNN1
+.
+PRD19999  RETURN
++
+.**********************************************************************
+.         Print Heading
+.**********************************************************************
+PRH10000  MOVE       ZERO,REPTLNN1
+.
+          CALL       HEAD132
+    PRINT      *1,"BED FEE MAPPING RECORDS NOT FOUND / MISSING CONTRACT IDS:",*N
+          PRINT      *1,"Claim Code",*15,"Health Fund",*30,"Admission Type"
+.
+          CALL       UND132
+          ADD        THREE,REPTLNN1
+PRH19999  RETURN
++
+.******************************************************************************
+.*                             CTM20000                 Called by:            *
+.*                 create temporary file for theatre fees                     *
+.******************************************************************************
+CTM20000  CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TMPFILN2
+.
+          CALL      KIL20000
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TMPFILN2,CMDLINE
+          APPEND    " 10 U1-3,4-9",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPFIL2,TMPFILN2
+.
+          CALL      CLE20000                * empty it if Oracle
+.
+CTM29999  RETURN
++
+.******************************************************************************
+.*                             KIL20000                  Called by:           *
+.*                   erase temporary file theatre fees                        *
+.******************************************************************************
+KIL20000  CLOSE     TEMPFIL2
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TMPFILN2,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+KIL29999  RETURN
++
+.******************************************************************************
+.*                             CLE20000                 Called by:            *
+.*               close and erase the temporary file theatre fees oracle       *
+.******************************************************************************
+CLE20000  PACK      KEY9,SP70
+          CALL      RSTEM21
+          CALL      RKTEM21
+          BRANCH    OVRCD,CLE29999
+.
+          PACK      KEY9,TMPBCLAM,TMPBHFND,TMPBATYP,SP70
+          CALL      DETEM21
+.
+          GOTO      CLE20000
+.
+CLE29999  RETURN
+.******************************************************************************
+.*                             PRL20000                 Called by:            *
+.******************************************************************************
+PRL20000  MOVE      ZERO,REPTLNN2
+          CALL      PRH20000
+.
+          PACK      KEY9,SP70
+          CALL      RSTEM21
+PRL21000  CALL      RKTEM21
+          BRANCH    OVRCD,PRL29999
+.
+          CALL      PRD20000
+.
+          GOTO      PRL21000
+.
+PRL29999  RETURN
+.**********************************************************************
+.         Print error detail
+.**********************************************************************
+PRD20000  COMPARE    "50",REPTLNN2
+          CALL       PRH20000 IF NOT LESS
+.
+          PRINT      *1,TMPTCLAM,*15,TMPTHFND
+          ADD        ONE,REPTLNN2
+.
+PRD29999  RETURN
++
+.**********************************************************************
+.         Print Heading
+.**********************************************************************
+PRH20000  MOVE       ZERO,REPTLNN2
+.
+          CALL       HEAD132
+    PRINT      *1,"THEATRE FEE MAPPING RECORDS NOT FOUND / MISSING CONTRACT IDS:",*N
+          PRINT      *1,"Claim Code",*15,"Health Fund"
+.
+          CALL       UND132
+          ADD        THREE,REPTLNN2
+PRH29999  RETURN
++
+.**********************************************************************
+.         Update the mapping file flag in controlf - PTCNMFFL
+.**********************************************************************
+UPFL0000  MOVE       ZERO,PTCNMFFL
+          IF         ERRNUM=ZERO
+            MOVE       ONE,PTCNMFFL 
+          ENDIF
+.
+          WRITAB    CONTROLF,HUND18;*116,PTCNMFFL
+.
+UPFL9999  RETURN
+.==============================================================================
+.                Tempfile I/O bed fees
+.==============================================================================
+RSTEM11   RESET     KEY12
+          READ      TEMPFIL1,KEY12;;
+          RETURN
+.
+RATEM11   RESET     KEY12
+          MOVE      ZERO,OVRCD
+          READ      TEMPFIL1,KEY12;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEM11   MOVE      ZERO,OVRCD
+          READKS    TEMPFIL1;TMPBCLAM,TMPBHFND,TMPBATYP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEM11   MOVE      ZERO,OVRCD
+          READKP    TEMPFIL1;TMPBCLAM,TMPBHFND,TMPBATYP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEM11   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      TEMPFIL1,KEY12;TMPBCLAM,TMPBHFND,TMPBATYP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEM11   RESET     KEY12
+          WRITE     TEMPFIL1,KEY12;TMPBCLAM,TMPBHFND,TMPBATYP
+          RETURN
+.
+DETEM11   RESET     KEY12
+          DELETE    TEMPFIL1,KEY12
+          RETURN
+.
+.==============================================================================
+.                Tempfile I/O theatre fees
+.==============================================================================
+RSTEM21   RESET     KEY9
+          READ      TEMPFIL2,KEY9;;
+          RETURN
+.
+RATEM21   RESET     KEY9
+          MOVE      ZERO,OVRCD
+          READ      TEMPFIL2,KEY9;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEM21   MOVE      ZERO,OVRCD
+          READKS    TEMPFIL2;TMPTCLAM,TMPTHFND
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEM21   MOVE      ZERO,OVRCD
+          READKP    TEMPFIL2;TMPTCLAM,TMPTHFND
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEM21   MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      TEMPFIL2,KEY9;TMPTCLAM,TMPTHFND
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEM21   RESET     KEY9
+          WRITE     TEMPFIL2,KEY9;TMPTCLAM,TMPTHFND
+          RETURN
+.
+DETEM21   RESET     KEY9
+          DELETE    TEMPFIL2,KEY9
+          RETURN
+.
+.*****************************************************************************
+.
+          INC       STD001IO
+          INC       TFILENAM                     * Generate Temp File Name
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATBFEIO/INC
+          INC       PATMBFIO/INC
+          INC       PATMTFIO/INC
+          INC       PATTFEIO/INC
+          INC       WEBERRIO/INC                 * Web Server Error Logging

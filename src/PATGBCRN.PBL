@@ -1,0 +1,281 @@
+.******************************************************************************
+.* System         : Patient Management                                        *
+.* Include        : PATGBCRN.PBL                                              *
+.* Description    : Generate BPAY Customer Reference Number for an invoice    *
+.*                : Uses 1) MOD10V01 (W01M101F3) (STANDARD LUHNS MODULUS 10)  *
+.*                  or   2) MOD10V05                                          *
+.******************************************************************************
+.* Date           : 12/09/2003                                                *
+.* Author         : Davin Sloan                                               *
+.*                                                                            *
+.* Vars Required  : VARGBCRN - Variables required for this routine            *
+.*                                                                            *
+.* Files Required : PATCONFD - Control file                                   *
+.*                                                                            *
+.* Parameters Req : BPAYINVN - Patient Invoice Number (INP or PRI)            *
+.*                  BPAYHOSP - Hospital ID                                    *
+.*                  IBCNMHOS - Multi Hospital Indicator                       *
+.*                                                                            *
+.* Returns        : BPAYREFN - BPAY Customer Reference Number                 *
+.*                                                                            *
+.* Modifications  :                                                           *
+.*                                                                            *
+.*        V10.06.01 15/05/2015  Davin             CAR 310155                  *
+.*                  Added check digit routine that uses MOD10V05              *
+.*        V10.03.04 20/06/2013  Davin             CAR 287161                  *
+.*                  Right justify ptcnhbpi and keep any leading zeros         *
+.*        V10.03.03 09/04/2013  Don Nguyen        CAR 282342                  *
+.*                  Reverted previous change; moved the logic around the use  *
+.*                  of UR number for BPAYINVN to the caller of GBCRN000().    *
+.*        V10.03.02 26/03/2013  Don Nguyen        CAR 282342                  *
+.*                  Mods to use UR for CRN generation (if PTCNURBP = 1)       *
+.*        V10.03.01 18/07/2012  Don Nguyen        CAR 264561                  *
+.*                  Mods to make use of the new 4 digit Hospital BPAY         *
+.*                  Identifier (if configured) and also BPAYHOSP.             *
+.*        V9.12.01  11/08/2009  Davin S           CAR 203137                  *
+.*                  Mods to print BPAY number format according to length of   *
+.*                  the BPAY hospital identifier.                             *
+.*        V9.11.02  28/05/2009  Davin S           CAR 186133                  *
+.*                  Added 2 leading zeros to the invoice number               *
+.*        V9.11.01  19/03/2009  Davin S           CAR 178015                  *
+.*                  Changed to use invoice number instead of admission number *
+.*                  Added bpayinvn - generate bpay crn from INP or PRI        *
+.*        V9.03.01  02/04/2004  Peter Vela        CAR 48227                   *
+.*                  Ported from 6.11 to 9.03                                  *
+.*        V6.11.03  21/01/2004  Steve Armstrong   CAR 42341                   *
+.*                  Mods to update admission number with leading zeroes so    *
+.*                  that the number is fixed length (always 8 digits)         *
+.*        V6.11.02  22/10/2003  Steve Armstrong   CAR 42341                   *
+.*                  Mods to not display if aadmno is zero.                    *
+.*        V6.11.01  25/09/2003  Davin         CAR 42341                       *
+.*                  Changed to reset wghtaray before calculating check digit  *
+.*                                                                            *
+.******************************************************************************
++
+PATGBCRN
+GBCRN000  PACK      BPAYREFN,SP70                * set ref. number to blank
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,HUND05;*211,PTCNBPAY
+          COMPARE   ONE,PTCNBPAY
+          GOTO      GBCRN999 IF NOT EQUAL
+.
+          MATCH     SP70,BPAYINVN
+          GOTO      GBCRN999 IF EQUAL            * no invoice number
+          GOTO      GBCRN999 IF EOS              * no invoice number
+.
+          READ      CONTROLF,HUND18;*245,PTCNHBPI  * NEW Hospital BPAY Identifier (1-4 digits)
+.
+          READ      CONTROLF,HUND20;*173,PTCNBPM5  * use MOD10V05? (1=yes/0=no)
+.
+          COMPARE   IBCNMHOS,ONE                 * Multi-hospital?
+          GOTO      GBCRN100 IF NOT EQUAL        * no
+.
+.         Multi-hospital...
+.
+          PACK      KEY3,BPAYHOSP,SP70
+          CALL      RDPTHSP1                     * Hospital details exist?
+          BRANCH    OVRCD,GBCRN100               * no; get Hospital BPAY ID
+                                                 * from control file.
+.
+          MATCH     "0000",PTHSHBID              * is Hosp BPAY ID = "0000"?
+          GOTO      GBCRN100 IF EQUAL            * yes; don't use
+.
+          MATCH     PTHSHBID,SP10                * is it blank?
+          GOTO      GBCRN100 IF EQUAL            * yes; don't use
+.
+          PACK      PTCNHBPI,PTHSHBID            * use it (from hospital file)
+.
+GBCRN100  MATCH     "1",PTCNBPM5
+          IF        @EQUAL
+            CALL      MD10V500                   * generate check digit (MD10V5)
+          ELSE
+            CALL      MD10V100                   * generate check digit (MD10V1)
+          ENDIF
+.
+GBCRN999  RETURN
++
+.------------------------------------------------------------------------------
+.        Uses MOD10V01 (right to left)
+.------------------------------------------------------------------------------
+.         The check digit is calculated as follows:
+.           e.g. IF hospital id="126"
+.                AND invoice number="1002024"
+.                THEN...
+.
+.1 2 6 0 1 0 0 2 0 2 4
+.2 1 2 1 2 1 2 1 2 1 2     (this is a constant 'weight' used each time)
+ 
+.Multiply each digit by its corresponding weight.
+.If the result is > 10, subtract 9 (so you get the following):
+ 
+.2 2 (12-9) 0 2 0 0 2 0 2 8
+ 
+.Next, you add the results together:
+ 
+.2+2+3+0+2+0+0+2+0+2+8 = 21
+ 
+.Then, divide by 10 and keep the remainder:
+ 
+.21/10 = 2 with remainder 1
+ 
+.Last, subtract the remainder from 10:
+ 
+.10 - 1 = 9 <---- check digit
+ 
+.The full BPAY number is then shown on the invoice as: "126 01002024 9"
+.>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+.
+MD10V100  RJUSTIFY  PTCNHBPI
+          PACK      BPAYREFN,PTCNHBPI,BPAYINVN   * set refno to id+invno
+.
+          REP       " 0",BPAYREFN
+          PACK      BPAYREFN,BPAYREFN,SP70
+.
+          MOVE      SP1,ANS
+          MOVE      ZERO,FORM1
+          MOVE      ZERO,CHKDIGIT
+          RESET     WGHTARAY
+          STRIP     BPAYREFN                * remove trailing spaces
+          MOVELPTR  BPAYREFN,CRNLNGTH       * get length of id+admno
+          WHILE     CRNLNGTH>=1
+.
+            RESET     BPAYREFN,CRNLNGTH     * move to last digit
+            CMOVE     BPAYREFN,ANS          * get char
+            MOVE      ANS,FORM1             * save as number
+            CMOVE     WGHTARAY,ANS          * get weight value
+            MOVE      ANS,BPAYWGHT          * save as number
+            ASSIGN    (BPAYWGHT*FORM1),CHKPRDCT   * product of weight & digit
+            IF        CHKPRDCT > 9
+              SUB       NINE,CHKPRDCT       * only want single digit
+            ENDIF
+            ADD     CHKPRDCT,CHKDIGIT       * add all the products together
+.
+            BUMP      WGHTARAY              * get next weight value
+            SUB       ONE,CRNLNGTH          * position back one character
+          DO
+          ASSIGN    (CHKDIGIT%10),CHKDIGIT  * get "remainder"
+          ASSIGN    (10-CHKDIGIT),CHKDIGIT  * subtract remainder from 10
+          IF        CHKDIGIT=10
+            MOVE      ZERO,CHKDIGIT         * keep check digit as zero
+          ENDIF
+.
+.>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+.         Format BPAY Customer Reference Number (including check digit).
+.         Base format on length of hospital identifier (ptcnhbpi):
+.         - if ptcnhbpi length<3 use new SJOG format.
+.           e.g.1: IF hospital id="26"
+.                 AND invoice number="1002024"
+.                 THEN full BPAY number="26 0001002024 1"
+.
+.         - if ptcnhbpi length>=3 use original format.
+.           e.g.2: IF hospital id="026"
+.                  AND invoice number="1002024"
+.                  THEN full BPAY number="026 01002024 1" (same check digit)
+.
+.           e.g.3: IF hospital id="0026"
+.                  AND invoice number="1002024"
+.                  THEN full BPAY number="0026 01002024 1" (same check digit)
+.
+.           e.g.4: IF hospital id="126"
+.                  AND invoice number="1002024"
+.                  THEN full BPAY number="126 01002024 9" (new check digit)
+.
+.         NOTES: Both formats use invoice number.
+.                Check digit is the same under both formats if the hospital id
+.                is the same (i.e." 26" gives the same result as "026").
+.>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+.
+          SQUEEZE   PTCNHBPI
+          MOVELPTR  PTCNHBPI,FORM1
+.
+          MOVE      BPAYINVN,KEY8
+.
+          REP       " 0",KEY8
+          MOVE      CHKDIGIT,KEY4
+          SQUEEZE   KEY4
+.
+          IF        FORM1<4
+            IF        FORM1<3
+              MOVE      PTCNHBPI,FORM2        * display as "99 9999999999 9"
+              MOVE      FORM2,KEY2
+              PACK      BPAYREFN,KEY2,SP1,ZERO,ZERO,KEY8,SP1,KEY4,SP70
+            ELSE
+              MOVE      PTCNHBPI,KEY3         * display as "999 99999999 9"
+              PACK      BPAYREFN,KEY3,SP1,KEY8,SP1,KEY4,SP70
+            ENDIF
+          ELSE
+            MOVE      PTCNHBPI,D4             * display as "9999 99999999 9"
+            PACK      BPAYREFN,D4,SP1,KEY8,SP1,KEY4,SP70
+          ENDIF
+.
+MD10V199  RETURN
++
+.------------------------------------------------------------------------------
+.        Uses MOD10V05 (left to right)
+.------------------------------------------------------------------------------
+.         The check digit is calculated as follows:
+.           e.g. IF hospital id="1234"
+.                AND invoice number="1003009"
+.                THEN...
+.
+.1  2  3  4  0  1  0  0  3  0  0  9
+.1  2  3  4  5  6  7  8  9  10 11 12        (Weight Factor)
+
+.Multiply each digit by its corresponding weight:
+.1  4  9  16 0  6  0  0  27 0  0  108
+
+.Next, you add the results together:
+
+.1+4+9+16+0+6+0+0+27+0+0+108 = 171
+
+.Then, divide by 10 and keep the remainder:
+
+.171/10 = 17 with remainder 1 <---- check digit
+
+.The full BPAY number is then shown on the invoice as: "1234 01003009 1"
+.>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+.
+MD10V500  STRIP     PTCNHBPI
+          REP       " 0",BPAYINVN
+.
+          PACK      BPAYREFN,PTCNHBPI,BPAYINVN   * set refno to id+invno/ur
+          PACK      BPAYREFN,BPAYREFN,SP70
+.
+          MOVE      SP1,ANS
+          MOVE      SP2,D2
+          MOVE      ONE,F2
+          MOVE      ZERO,FORM1
+          MOVE      ZERO,CHKDIGIT
+          RESET     WGHTARA2
+          STRIP     BPAYREFN                * remove trailing spaces
+          MOVELPTR  BPAYREFN,CRNLNGTH       * get length of id+ur/inv.no
+          WHILE     F2<=CRNLNGTH
+.
+            RESET     BPAYREFN,F2           * move to next digit
+            CMOVE     BPAYREFN,ANS          * get char
+            MOVE      ANS,FORM1             * save as number
+            MOVE      WGHTARA2,D2           * get weight value
+            MOVE      D2,BPAYWGH2           * save as number
+            ASSIGN    (BPAYWGH2*FORM1),CHKPRDCT   * product of weight & digit
+            ADD       CHKPRDCT,CHKDIGIT     * add all the products together
+.
+            BUMP      WGHTARA2,2            * get next weight value
+            ADD       ONE,F2                * move forward one character
+          DO
+          ASSIGN    (CHKDIGIT%10),CHKDIGIT  * get "remainder"
+.
+.>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+. Display full BPAY number:
+.
+          SQUEEZE   PTCNHBPI                * BPAY hospital ID
+.
+          MOVE      BPAYINVN,KEY8           * invoice or urnumber
+          REP       " 0",KEY8
+          MOVE      CHKDIGIT,KEY4           * check digit
+          SQUEEZE   KEY4
+.
+          PACK      BPAYREFN,PTCNHBPI,SP1,KEY8,SP1,KEY4,SP70
+.
+MD10V599  RETURN
++
+.

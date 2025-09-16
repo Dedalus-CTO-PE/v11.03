@@ -1,0 +1,91 @@
+create table pmsclpaf
+(
+pmcpadmn    varchar2(8),
+pmcpclpt    varchar2(3),
+pmcpuniq    varchar2(8),
+pmcpdig1    varchar2(9),
+pmcpddt1    varchar2(8),
+pmcpdtm1    varchar2(8),
+pmcpd1o1    varchar2(3),
+pmcpd1o2    varchar2(3),
+pmcpd1o3    varchar2(3),
+pmcpd1o4    varchar2(3),
+pmcpd1d1    varchar2(8),
+pmcpd1t1    varchar2(8),
+pmcpd1d2    varchar2(8),
+pmcpd1t2    varchar2(8),
+pmcpd1d3    varchar2(8),
+pmcpd1t3    varchar2(8),
+pmcpd1d4    varchar2(8),
+pmcpd1t4    varchar2(8),
+pmcpdig2    varchar2(9),
+pmcpddt2    varchar2(8),
+pmcpdtm2    varchar2(8),
+pmcpd2o1    varchar2(3),
+pmcpd2o2    varchar2(3),
+pmcpd2o3    varchar2(3),
+pmcpd2o4    varchar2(3),
+pmcpd2d1    varchar2(8),
+pmcpd2t1    varchar2(8),
+pmcpd2d2    varchar2(8),
+pmcpd2t2    varchar2(8),
+pmcpd2d3    varchar2(8),
+pmcpd2t3    varchar2(8),
+pmcpd2d4    varchar2(8),
+pmcpd2t4    varchar2(8),
+pmcpdig3    varchar2(9),
+pmcpddt3    varchar2(8),
+pmcpdtm3    varchar2(8),
+pmcpd3o1    varchar2(3),
+pmcpd3o2    varchar2(3),
+pmcpd3o3    varchar2(3),
+pmcpd3o4    varchar2(3),
+pmcpd3d1    varchar2(8),
+pmcpd3t1    varchar2(8),
+pmcpd3d2    varchar2(8),
+pmcpd3t2    varchar2(8),
+pmcpd3d3    varchar2(8),
+pmcpd3t3    varchar2(8),
+pmcpd3d4    varchar2(8),
+pmcpd3t4    varchar2(8),
+pmcpdig4    varchar2(9),
+pmcpddt4    varchar2(8),
+pmcpdtm4    varchar2(8),
+pmcpd4o1    varchar2(3),
+pmcpd4o2    varchar2(3),
+pmcpd4o3    varchar2(3),
+pmcpd4o4    varchar2(3),
+pmcpd4d1    varchar2(8),
+pmcpd4t1    varchar2(8),
+pmcpd4d2    varchar2(8),
+pmcpd4t2    varchar2(8),
+pmcpd4d3    varchar2(8),
+pmcpd4t3    varchar2(8),
+pmcpd4d4    varchar2(8),
+pmcpd4t4    varchar2(8),
+pmcpactv    varchar2(1),
+pmcpdtcr    varchar2(8),
+pmcptmcr    varchar2(8),
+pmcpwbcr    varchar2(10),
+pmcpdtup    varchar2(8),
+pmcptmup    varchar2(8),
+pmcpwbup    varchar2(10),
+pmcpspar    varchar2(50),
+lf          varchar2(1),
+constraint pmsclpa1 primary key( 
+pmcpadmn,
+pmcpclpt,
+pmcpuniq)
+)
+tablespace indx 
+initrans 2 
+storage ( 
+  initial 16k 
+) 
+enable primary key using index 
+  tablespace indx 
+  initrans 3 
+  storage ( 
+    initial 16k 
+  ); 
+create public synonym pmsclpaf for pmsclpaf;

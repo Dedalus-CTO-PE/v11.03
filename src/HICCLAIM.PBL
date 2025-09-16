@@ -1,0 +1,608 @@
+. *----------------------------------------------------------------------
+. * Include Name  :   HICCLAIM.PBL
+. *
+. * Function      :   Function to print Medicare Claim     
+. *
+. * Mods              
+. * V10.14.01 13/06/2019  J.Tan            TSK 0875795
+. *           Fixed key reading pridoct for Link doc(pmhcldoc)- Actual Doc.seen
+. * V10.13.01 31/07/2018  J.Tan            TSK 0848506
+. *           Mod PP Doctor from DIM6 to DIM10
+. * V10.06.02 31/03/2015 Peter Vela      CAR 298921
+. *           Use linked doctor from PMSHCPFD for OTBBADCS
+. * V10.06.01 16/03/2015 Ebon Clements   CAR 298921
+. *           Changed key pack using OTBBADCS to still use a DIM 6
+. *                   V9.07.02 04/08/2006 J.Tan  CAR 114258
+. *                            Mods to initialise 'Batch no previously batched
+. *                   V9.07.01 24/07/2006 J.Tan  CAR 113531
+. *                            Mods initialse adjustment amount from claim file
+. *                   V9.04.12 30/11/2005 J.Tan  CAR 77215
+. *                            Mods check if generated batch no already exists
+. *                   V9.04.11 10/08/2005 J.Tan  CAR 69062
+. *                            Fixed checking for blank payee prov
+. *                   V9.04.10 05/08/2005 J.Tan  CAR 69062
+. *                            Fixed checking existing claim number
+. *                   V9.04.09 01/08/2005 J.Tan    CAR 69062
+. *                            Zero filled for voucher number
+. *                   V9.04.08 28/07/2005 J.Tan    CAR 69403
+. *                            Mods to use service prov if payee prov is blank
+. *                   V9.04.07 07/07/2005 J.Tan    CAR 66498
+. *                            Fixed reprint claim if MCI/payee/provider changed
+. *                   V9.04.06 06/07/2005 J.Tan    CAR 66119
+. *                            Mods checking for the actual doctor seen
+. *                   V9.04.05 01/07/2005 J.Tan    
+. *                            Calculate 85% of item amount 
+. *                   V9.04.04 02/06/2005 J.Tan    CAR 56701
+. *                            Fixed checking blank provider
+. *                   V9.04.03 24/05/2005 Ebon Clements  CAR 62018
+. *                            Added provider usage
+. *                   V9.04.02 29/04/2005 Ebon Clements 
+. *                            Moved open on OUTBITA1 to server
+. *                   V9.04.01 21/04/2005 J.Tan
+. *                            Mods for resubmit
+. *                   V9.04.00 22/03/2005 J.Tan
+. *                            Created include
+. *
+. * Parameter     :   CASEKEYS
+. * Return        :   Exit = 1 - Claim already batched
+. *                          2 - No Item to print
+. *
+. *       INC         OUTBOAFD/INC
+. *       INC         OUTBB1FD/INC
+. *       INC         OUTBITFD/INC
+. *       INC         OUTMA1FD/INC
+. *       INC         PMSHCPFD/INC
+. *       INC         PRIITMFD/INC
+. *       INC         PRIEXCFD/INC
+. *       INC         PATCODFD/INC
+. *----------------------------------------------------------------------
+.
+HICCLAIM  MOVE      ZERO,FORM2A
+          MOVE      ZERO,EXIT
+          READ      CONTROLF,ZERO;*132,IBCNUMCI
+          MATCH     "1",IBCNUMCI
+          GOTO      HICC9000 IF NOT EQUAL     * Not using med claim
+.
+          OPEN      PRIITEM1,"priitemf"
+          OPEN      HICCLMA1,"hicclmaf"
+          OPEN      HICCITA1,"hiccitaf"
+          OPEN      PMSHCPA1,"pmshcpaf"
+          OPEN      PRIEXCA1,"priexcaf"
+          OPEN      PRIPRAC1,"pripracf"
+          OPEN      PRIDOCT1,"pridoctf"
+          OPEN      CONTROLF,"controlf"
+          OPEN      HICBCNA1,"hicbcnaf"
+          OPEN      HICBCNA2,"hicbcnaf"
+.
+.         Get maximum number of claims per batch
+.
+          READ      CONTROLF,HUND03;*57,PTCNMCLM,*60,PTCNOPND
+          IF        PTCNMCLM=0
+            MOVE      ONE,PTCNMCLM
+            WRITAB    CONTROLF,HUND03;*57,PTCNMCLM
+          ENDIF
+.
+HICC0000  MOVE      CASEKEYS,KEY28
+          CALL      RDBOKA1              * read booking 
+          BRANCH    OVRCD,HICC9000
+.
+          MOVE      OBAOUTNO,KEY8
+          CALL      RDBOKB1
+          BRANCH    OVRCD,HICC9000
+.
+          PACK      KEY18,OBASITE,OBACLIN,OBADAY,OBASTRT,SP70
+          CALL      RDMASA1              * read clinic master for med.prac.
+          BRANCH    OVRCD,HICC9000
+.
+          UNPACK    SP70,PRPRPMCI,PRPRPYEE,PRPRCODE
+          MOVE      OTMAMPRC,KEY6
+          CALL      RDPRPR1              * read med prac for mci and payee
+.
+          MATCH     SP70,OTMAMPRC        * Check for medical practice
+          GOTO      HICC9000 IF EQUAL
+.
+          MATCH     SP70,OTBBADCS        * Check for actual doctor seen
+          GOTO      HICC0040 IF EQUAL
+.
+          PACK      KEY10,OTBBADCS,SP70
+          CALL      RDPMHCP1
+          BRANCH    OVRCD,HICC0040
+.
+          MATCH     SP70,PMHCLDOC
+          GOTO      HICC0040 IF EQUAL
+.
+          MOVE      PTCNOPND,PRDOPIND       * patient indicator for outpatient
+.
+          PACK      KEY10,PMHCLDOC,SP70
+          PACK      KEY22,PRPRCODE,KEY10,OBACOMP,PRDOPIND
+          CALL      RDPRDO1
+          BRANCH    OVRCD,HICC0040
+          MATCH     SP70,PRDOPROV
+          GOTO      HICC0040 IF EQUAL
+.
+          MOVE      PRDOPROV,OTMAPROV    * use the actual doctor seen
+          GOTO      HICC0100
+.
+HICC0040  MATCH     SP70,OTMAPROV        * Check for provider
+          GOTO      HICC9000 IF EQUAL
+.
+HICC0100  MATCH     SP70,PRPRPYEE        * check if payee prov is blank
+          IF        @EQUAL
+            MOVE      OTMAPROV,PRPRPYEE  * use service provider as the payee
+          ENDIF
+.
+.         Make sure we have item that haven't been batched
+.
+          PACK      KEY10,DOBAOUTN,SP70
+          CALL      RSOTBIT1
+HICC0200  CALL      RKOTBIT1
+          BRANCH    OVRCD,HICC9100
+          MATCH     OTBIVISN,DOBAOUTN
+          GOTO      HICC9100 IF NOT EQUAL    * not item to print
+          REP       " 0",OTBISTAT
+          MATCH     "0",OTBISTAT
+          GOTO      HICC0200 IF NOT EQUAL    * Batched already
+.
+.         Check if HIC Claim already been batched
+.
+          MOVE      SP70,CLMNNUMB
+          MOVE      OBAOUTNO,HCCLVISN
+          PACK      KEY16,HCCLVISN,Z70
+          CALL      RSHCCLM2
+          CALL      RPHCCLM2
+          BRANCH    OVRCD,HICC0900
+          MATCH     HCCLVISN,DOBAOUTN    * same visit number?
+          GOTO      HICC0900 IF NOT EQUAL
+.
+          MATCH     " 0",HCCLSTAT
+          GOTO      HICC0900 IF NOT EQUAL
+.
+          PACK      SAVKEY28,HCCLPMCI,HCCLPYEE,HCCLPSRV   * save the variables
+.
+.         Claim already exists.
+.         If status is Printed - remove all items claimed previously and
+.         use same claim and batch number
+.
+HICC0800  MOVE      HCCLCLMN,CLMNNUMB    * save the current claim no 
+          MOVE      HCCLBTCH,CLMNBTCH    * save the current batch no
+.
+          MOVE      CLMNNUMB,KEY8
+          CALL      DEHCCLM1             * remove claim record
+.
+          CALL      RITM0000             * remove all current items (hiccitaf)
+.
+          PACK      KEY28,PRPRPMCI,PRPRPYEE,OTMAPROV   * save the variables
+          MATCH     SAVKEY28,KEY28
+          CALL      FBTC0000 IF NOT EQUAL              * fix batch count
+          GOTO      HICC1000
+.
+HICC0900  CALL      CLMN0000             * Generate next claim number
+          CALL      BTCH0000             * Generate next batch number
+.
+.         Read through outbitaf file and posts all items to hicclmaf & hicbtcaf
+.
+HICC1000  MOVE      ZERO,HCCLCAMN        * total amount claimed
+          PACK      KEY10,DOBAOUTN,SP70
+          CALL      RSOTBIT1
+HICC1100  CALL      RKOTBIT1
+          BRANCH    OVRCD,HICC6000
+.
+          MATCH     OTBIVISN,DOBAOUTN
+          GOTO      HICC6000 IF NOT EQUAL
+          REP       " 0",OTBISTAT
+          MATCH     "0",OTBISTAT 
+          GOTO      HICC1100 IF NOT EQUAL   * batched already
+.
+          PACK      KEY22,OTBIIFLG,OTBIITMN,OTBISUBN,OTBIDATE
+          CALL      RDPRIT1                 * read the item file
+          COMPARE   ZERO,OVRCD
+          GOTO      HICC1300 IF EQUAL
+.
+          CALL      RPPRIT1                 * get the previous record on the
+          BRANCH    OVRCD,HICC1200            item file
+.
+          MATCH     DPRITFLG,OTBIIFLG       * see if we have the item type
+          GOTO      HICC1200 IF NOT EQUAL
+.
+          MATCH     PRITITMN,OTBIITMN       * see if we have the same item
+          GOTO      HICC1200 IF NOT EQUAL
+.
+          MATCH     PRITSUBN,OTBISUBN       * see if we have the same sub-item
+          GOTO      HICC1300 IF EQUAL
+.
+.------ assume no set code, and not a fixed charged item -------
+.
+HICC1200  MOVE      TWO,PRITFIXD        * not fixed charged
+          MOVE      ZERO,PRITSFEE
+.
+HICC1300  MOVE      PRITSFEE,TEMPTOTV
+          MOVE      PRITSFEE,TEMPAMNT
+          MOVE      PRITDESC,HCCIIDES       * Item description
+          CALL      GETAJ000                * get the adjusted amount
+.
+          MOVE      TEMPAMNT,FORM8P4
+          ASSIGN    (.85*FORM8P4),FORM12P2 * get 85% of item amount
+          MOVE      FORM12P2,ROUND15
+          CALL      ROUNDUP5
+          ASSIGN    (FORM0P2+FORM12P2),FORM12P2
+          MOVE      FORM12P2,TEMPAMNT
+.
+          MOVE      TEMPAMNT,HCCICAMT
+          ADD       TEMPAMNT,HCCLCAMN       * accummulate total amount claimed
+          MOVE      ZERO,HCCIREJA           * rejected amount
+          MOVE      ZERO,HCCIWOFF
+          MOVE      ZERO,HCCITRIN
+.
+.------ write item transaction file to Item Claim file ------
+.
+          MOVE      CLMNNUMB,HCCICLMN
+          MOVE      OBAOUTNO,HCCIVISN
+          MOVE      OTBIITMC,HCCITRAN
+          MOVE      PRPRPMCI,HCCIPMCI
+          MOVE      PRPRPYEE,HCCIPYEE
+          MOVE      OTMAPROV,HCCIPSRV
+          MOVE      CLMNBTCH,HCCIBTCH
+.
+          MOVE      OTBIIFLG,HCCIIFLG
+          MOVE      OTBIITMN,HCCIITMN
+          MOVE      OTBISUBN,HCCISUBN
+          MOVE      OTBIPUSE,HCCIPUSE
+          MOVE      OTBIDATE,HCCIIDAT
+          MOVE      ZERO,HCCIADJM
+          MOVE      ZERO,HCCIRCVA
+          UNPACK    SP70,HCCIADJD,HCCIADJR,HCCIIPOS
+          UNPACK    SP70,HCCIREJR,HCCIREJD,HCCIRWOF,HCCIWOFD,HCCITRND
+
+          PACK      HCCICDAT,CCC,CYY,CMM,CDD
+          REP       " 0",HCCICDAT
+          CLOCK     TIME,HCCICTIM
+          MOVE      USERID,HCCICUID
+          UNPACK    SP70,HCCIUDAT,HCCIUTIM,HCCIUUID,HCCIRDAT
+.
+          PACK      HCCISPAR,SP70
+.
+HICC1400  PACK      KEY18,HCCICLMN,HCCIVISN,HCCITRAN,SP70
+          CALL      RAHCCIT1                  * Read item claim file
+          BRANCH    OVRCD,HICC2000     
+          MOVE      ZERO,FORM2
+          MOVE      HCCITRAN,FORM2
+          ADD       ONE,FORM2
+          MOVE      FORM2,HCCITRAN
+          GOTO      HICC1400
+.
+HICC2000  CALL      WRHCCIT1
+.
+          ADD       ONE,FORM2A
+          GOTO      HICC1100
+.
+.         Write to claim header file file
+.
+HICC6000  COMPARE   ZERO,FORM2A
+          GOTO      HICC9100 IF EQUAL
+.
+          MOVE      CLMNNUMB,HCCLCLMN
+          MOVE      " 0",HCCLSTAT             * Claim printed
+          MOVE      CLMNBTCH,HCCLBTCH
+          MOVE      OBAOUTNO,HCCLVISN
+          MOVE      TWO,HCCLVTYP             * Outpatient
+          MOVE      OBAURNO,HCCLURNO
+          MOVE      PRPRPMCI,HCCLPMCI
+          MOVE      PRPRPYEE,HCCLPYEE
+          MOVE      OTMAPROV,HCCLPSRV
+.
+          PACK      HCCLDATE,CCC,CYY,CMM,CDD
+          REP       " 0",HCCLDATE
+          UNPACK    SP70,HCCLMPRA,HCCLSITE,HCCLADOC,HCCLCLID,HCCLCTYP
+          MOVE      OTMAMPRC,HCCLMPRA
+          MOVE      OBASITE,HCCLSITE
+          PACK      HCCLADOC,OBADOCT,SP70
+          MOVE      OBACTYP,HCCLCTYP
+          MOVE      OBACLIN,HCCLCLID
+          MOVE      PTCNOPND,HCCLPIND       * patient indicator for outpatient
+          MOVE      ZERO,HCCLMITM
+          IF        FORM2A<>1
+            MOVE      ONE,HCCLMITM          * more than one item for this claim
+          ENDIF
+.
+          MOVE      SP70,HCCLSENT
+          MOVE      SP70,HCCLRECP
+          MOVE      SP70,HCCLPBAT
+          MOVE      SP70,HCCLNBAT
+.
+          MOVE      ZERO,HCCLRCVA
+          MOVE      ZERO,HCCLREJA
+          MOVE      ZERO,HCCLADJM
+          MOVE      ZERO,HCCLWOFF
+          MOVE      ZERO,HCCLTRIN
+.
+          MOVE      SP70,HCCLPNUM
+          PACK      HCCLCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",HCCLCDAT
+          CLOCK     TIME,HCCLCTIM
+          MOVE      USERID,HCCLCUID
+          MOVE      "00",HCCLVPOS
+.
+          UNPACK    SP70,HCCLUDAT,HCCLUTIM,HCCLUUID
+          PACK      HCCLSPAR,SP70
+.
+          PACK      KEY8,CLMNNUMB
+          CALL      RAHCCLM1
+          IF        OVRCD=1
+            CALL      WRHCCLM1
+          ENDIF
+          GOTO      HICC9999
+.
+HICC9000  MOVE      ONE,EXIT         * Claim already batched
+          GOTO      HICC9999
+.
+HICC9100  MOVE      TWO,EXIT         * No item to print
+          GOTO      HICC9999
+.
+HICC9999  RETURN
+.
+.**********************************************************************
+.*                                GETAJ000                            *
+.*      Routine to get an adjusted invoice amount if appropriate      *
+.**********************************************************************
+GETAJ000  BRANCH    PRITFIXD,GETAJ999       * fixed charge item
+.
+.         If an exception charge applies, just use that charge
+.
+          CALL      ISEXC000                * exception charge apply?
+          IF        EXIT = 1
+            IF        PRITKEYI = 0
+              MOVE      PREXCHRG,TEMPAMNT   * use this charge instead
+            ENDIF
+            GOTO      GETAJ999              * don't apply doctor percentage
+          ENDIF
+.
+GETAJ999  MOVE      ZERO,EXIT
+          RETURN
++
+.***************************************************************************
+.*                              ISEXC000               Called by: HICC0000 *
+.*                    Check for an exception charge                        *
+.***************************************************************************
+ISEXC000  PACK      KEY25,OBACOMP,OTBIIFLG,OTBIITMN,OTBISUBN,OTBIDATE
+          CALL      RDPREX1
+          IF        OVRCD = 0
+            MOVE      ONE,EXIT                   * exception charge applies
+            GOTO      ISEXC999
+          ENDIF
+.
+ISEXC100  CALL      RPPREX1
+          BRANCH    OVRCD,ISEXC800
+.
+          MATCH     OBACOMP,PREXCLM              * same claim code ?
+          GOTO      ISEXC800 IF NOT EQUAL        * no
+.
+          MATCH     OTBIIFLG,DPREXFLG            * same item type ?
+          GOTO      ISEXC800 IF NOT EQUAL        * no
+.
+          MATCH     OTBIITMN,PREXITMN            * same item number ?
+          GOTO      ISEXC800 IF NOT EQUAL        * no
+.
+          MATCH     OTBISUBN,PREXSUBN            * same item number ?
+          GOTO      ISEXC800 IF NOT EQUAL        * no
+.
+          MATCH     PREXDAT1,OTBIDATE            * service date < start date ?
+          GOTO      ISEXC100 IF LESS             * yes, try another record
+.
+          MATCH     SP8,PREXDAT2                 * do we have an ending date ?
+          IF        !@EQUAL
+            MATCH     OTBIDATE,PREXDAT2          * ending date < service date ?
+            GOTO      ISEXC800 IF LESS           * yes
+          ENDIF
+.
+          MOVE      ONE,EXIT                     * exception charge applies
+          GOTO      ISEXC999
+.
+ISEXC800  MOVE      ZERO,EXIT                    * no exception charging
+ISEXC999  RETURN
+.
+.***************************************************************************
+.*                              RITM0000                                   *
+.*           Remove all current items already claimed (but not batched)    *
+.***************************************************************************
+RITM0000  PACK      KEY18,CLMNNUMB,SP70
+          CALL      RSHCCIT1
+          CALL      RKHCCIT1
+          BRANCH    OVRCD,RITM9999
+          MATCH     CLMNNUMB,HCCICLMN            * Same claim number
+          GOTO      RITM9999 IF NOT EQUAL
+.
+          PACK      KEY18,HCCICLMN,HCCIVISN,HCCITRAN
+          CALL      DEHCCIT1
+          GOTO      RITM0000
+.
+RITM9999  RETURN
++
+.***************************************************************************
+.*                              CLMN0000                                   *
+.*              Get next claim number                                      *
+.***************************************************************************
+CLMN0000  MOVE      ZERO,FORM8
+          READ      CONTROLF,HUND03;*44,PTCNCLMN
+          MATCH     SP70,PTCNCLMN
+          GOTO      CLMN1000 IF EQUAL
+          MATCH     "00000000",PTCNCLMN
+          GOTO      CLMN1000 IF EQUAL
+.
+          MOVE      PTCNCLMN,FORM8
+          COMPARE   ZERO,FORM8
+          GOTO      CLMN2000 IF NOT EQUAL
+.
+CLMN1000  MOVE      "1",FORM8
+.
+CLMN2000  MOVE      PTCNCLMN,FORM8
+          MOVE      FORM8,CLMNNUMB       * save claim number
+          MOVE      FORM8,KEY8
+          CALL      RDHCCLM1
+          IF        OVRCD=0
+            ADD       ONE,FORM8
+            MOVE      FORM8,PTCNCLMN
+            GOTO      CLMN2000           * already exist
+          ENDIF
+.
+          ADD       ONE,FORM8
+          MOVE      FORM8,PTCNCLMN
+          WRITAB    CONTROLF,HUND03;*44,PTCNCLMN
+.
+CLMN9999  RETURN
++
+.***************************************************************************
+.*                              FBTC0000                                   *
+.*              Fixe batch count file                                      *
+.***************************************************************************
+FBTC0000  MOVE      PRPRPMCI,HCBCPMCI
+          MOVE      PRPRPYEE,HCBCPYEE
+          MOVE      OTMAPROV,HCBCPSRV
+.
+.         Reduce the batch count for the old MCI/Payee/Provider
+.
+          PACK      KEY33,SAVKEY28,Z70
+          CALL      RSHCBCN1
+          CALL      RPHCBCN1
+          BRANCH    OVRCD,FBTC2000
+.
+          PACK      SKEY28,HCBCPMCI,HCBCPYEE,HCBCPSRV
+          MATCH     SAVKEY28,SKEY28
+          GOTO      FBTC2000 IF NOT EQUAL
+.
+          MATCH     "1",HCBCSTAT
+          GOTO      FBTC2000 IF EQUAL        * Batch already completed
+.
+          COMPARE   ZERO,HCBCBCNT
+          GOTO      FBTC2000 IF EQUAL
+          SUB       ONE,HCBCBCNT             * reduce batch counter
+          CALL      UPHCBCN1
+.
+FBTC2000  CALL      BTCH0000                 * Get new batch number
+FBTC9999  RETURN
++
+.***************************************************************************
+.*                              BTCH0000                                   *
+.*              Get next Batch number                                      *
+.***************************************************************************
+BTCH0000  MOVE      PRPRPMCI,HCBCPMCI
+          MOVE      PRPRPYEE,HCBCPYEE
+          MOVE      OTMAPROV,HCBCPSRV
+          MOVE      ZERO,NEXTFLAG
+.
+          PACK      KEY28,HCBCPMCI,HCBCPYEE,HCBCPSRV
+          PACK      KEY33,HCBCPMCI,HCBCPYEE,HCBCPSRV,Z70
+          CALL      RSHCBCN1
+          CALL      RPHCBCN1
+          BRANCH    OVRCD,BTCH3000
+.
+          PACK      SKEY28,HCBCPMCI,HCBCPYEE,HCBCPSRV
+          MATCH     KEY28,SKEY28
+          GOTO      BTCH3000 IF NOT EQUAL
+.
+BTCH2000  MATCH     "1",HCBCSTAT
+          GOTO      BTCH3000 IF EQUAL          * Completed
+          COMPARE   PTCNMCLM,HCBCBCNT
+          GOTO      BTCH3000 IF NOT LESS       * reach maximum claims perbatch
+.
+          MOVE      HCBCBTCH,CLMNBTCH
+          ADD       ONE,HCBCBCNT            
+          COMPARE   HCBCBCNT,PTCNMCLM
+          GOTO      BTCH2100 IF NOT EQUAL
+          MOVE      "1",HCBCSTAT               * Claim number reached max
+.
+BTCH2100  PACK      KEY8,CCC,CYY,CMM,CDD
+          REP       " 0",KEY8
+          MOVE      KEY8,HCBCUDAT             * date updated
+          CLOCK     TIME,HCBCUTIM             * time updated
+          MOVE      USERID,HCBCUUID           * web user id
+          CALL      UPHCBCN1                  * Update batch status
+          GOTO      BTCH9999
+.
+BTCH3000  BRANCH    NEXTFLAG,BTCH5000
+          READ      CONTROLF,HUND03;*52,PTCNBTCH
+          MATCH     SP70,PTCNBTCH
+          GOTO      BTCH4000 IF EQUAL
+          MATCH     "00000000",PTCNBTCH
+          GOTO      BTCH4200 IF NOT EQUAL
+.
+BTCH4000  MOVE      "A0001",PTCNBTCH
+.
+BTCH4200  CALL      CBAT0000             * Check if batch number had been used
+          BRANCH    EXIT,BTCH5000        * yes, get next batch number
+.
+          MOVE      PRPRPMCI,HCBCPMCI
+          MOVE      PRPRPYEE,HCBCPYEE
+          MOVE      OTMAPROV,HCBCPSRV
+          REP       " 0",PTCNBTCH
+          MOVE      PTCNBTCH,CLMNBTCH       * save claim number
+.
+          PACK      KEY33,HCBCPMCI,HCBCPYEE,HCBCPSRV,CLMNBTCH
+          CALL      RDHCBCN1
+          IF        OVRCD=0
+            MOVE      ONE,NEXTFLAG
+            GOTO      BTCH2000
+          ENDIF
+.
+          MOVE      ZERO,NEXTFLAG
+          UNPACK    KEY33,HCBCPMCI,HCBCPYEE,HCBCPSRV
+          MOVE      PTCNBTCH,HCBCBTCH
+          MOVE      ONE,HCBCBCNT            * set claim counter to one
+          MOVE      "0",HCBCSTAT            * current 
+.
+          PACK      KEY8,CCC,CYY,CMM,CDD
+          REP       " 0",KEY8
+          MOVE      KEY8,HCBCCDAT             * date created
+          CLOCK     TIME,HCBCCTIM             * time created
+          MOVE      USERID,HCBCCUID           * web user id
+          UNPACK    SP70,HCBCUDAT,HCBCUTIM,HCBCUUID
+          MOVE      SP70,HCBCSPAR
+          CALL      WRHCBCN1
+.
+.         Generate the next batch number - 1 Alpha 4 Numeric
+.
+BTCH5000  UNPACK    PTCNBTCH,KEY1,KEY4
+          TYPE      KEY4
+          GOTO      BTCH7000 IF EQUAL
+          MOVE      "0000",KEY4
+.
+BTCH7000  MOVE      ZERO,FORM4
+          MOVE      KEY4,FORM4
+.
+          COMPARE   "9999",FORM4
+          GOTO      BTCH8000 IF NOT EQUAL
+.
+          MATCH     "Z",KEY1
+          IF        !@EQUAL
+            REP       "ABBCCDDEEFFGGHHIIJJKKLLMMNNOOPPQQRRSSTTUUVVWWXXYYZ",KEY1
+            MOVE      "0000",FORM4
+            GOTO      BTCH8000
+          ELSE
+            MOVE      "A0001",PTCNBTCH       * back to start again
+            GOTO      BTCH9000
+          ENDIF
+.
+BTCH8000  ADD       ONE,FORM4
+          MOVE      FORM4,KEY4
+          REP       " 0",KEY4
+          PACK      PTCNBTCH,KEY1,KEY4
+.
+BTCH9000  BRANCH    NEXTFLAG,BTCH4200
+          WRITAB    CONTROLF,HUND03;*52,PTCNBTCH
+.
+BTCH9999  RETURN
++
+.------------------------------------------------------------
+.         Check if batch number had been used
+.------------------------------------------------------------
+CBAT0000  MOVE      ZERO,EXIT
+          PACK      KEY33,PTCNBTCH,SP70
+          CALL      RSHCBCN2
+          CALL      RKHCBCN2
+          BRANCH    OVRCD,CBAT9999
+          MATCH     PTCNBTCH,HCBCBTCH
+          GOTO      CBAT9999 IF NOT EQUAL
+          MOVE      ONE,NEXTFLAG            * get next batch flag
+CBAT9000  MOVE      ONE,EXIT
+CBAT9999  RETURN
++
+.

@@ -1,0 +1,1822 @@
++
+.         OTAENVS.PBL
+.         -----------
+.
+.         This include controls the printing of invoices for Non-Inpat 
+.         (Outpat,AAE)
+.         All invoice layouts are controlled through this include, the
+.         code that is invoice layout dependent being located in the
+.         include PATINVTn, where "n" if the invoice layout or PATINVnn
+.
+.         MODIFICATIONS:
+.
+.         V11.02.01 03/03/2022  J.Tan           TSK 0902652
+.                   Mod for Patient Invoice new functionality (PTCNPPIN=1)
+.         V11.00.01 02/04/2020  J.Tan             TSK 0868813
+.                   Changed PKNAME to DIM80
+.         V10.14.01 21/03/2019  J.Tan            TSK 0857392
+.                   Changed RCP Transaction count from DIM3 to DIM5
+.         V10.13.02 19/09/2018  J.Tan        TSK 0863727
+.                   Added Restrictive Override code
+.         V10.13.01 21/08/2017  J.Tan        TSK 0859742
+.                   Added ECLIPSE new fields from aaedtr
+.         V10.12.01 27/04/2018  J.Tan          Task 0845996
+.                   Mod to update CMDEUDAT,CMDEUTIM and CMDEUUID
+.         V10.07.03 21/12/2015  J.Tan        CAR 0303942
+.                   Added ATDTPCOD - Payment code
+.         V10.07.02 04/12/2015  J.Tan        CAR 324305
+.                   Fixed deleting invoice pending
+.         V10.07.01 29/10/2015  Ebon Clements  CAR 268970
+.                   Change to use OUTCLIFD index 1 instead of index 2
+.         V10.06.00 09/09/2015  J.Tan        CAR 317216
+.                   Due to same labels(SINVH00 SINVT00)used in OUTINVS  AAEINVS
+.                   OTAENVS is created to be used in COMWEB70 (Print Invoice)
+.
+.******************************************************************************
+.        This subroutine does the actual printing of an invoice.
+.        We are only interested in invoices that have a non-zero
+.        gross total.
+.******************************************************************************
+OTIV0000 CALL      OINVH000                 * check for template header
+         BRANCH    EXIT,OTIV9999
+         CALL      OINVT000                 * check for template tail
+         BRANCH    EXIT,OTIV9999
+.
+         IF        OTCNPZIN <> ONE
+           COMPARE   ZERO,GROSSTOT
+           GOTO      EDSPINVE IF EQUAL
+         ENDIF
+.
+          CALL      GETOUTX
+.
+.        Print the invoice. This is the entry point that is used for the
+.        batches of invoices from IBAOUT20.
+.
+OTIV1000  MOVE      THREE,PROGFLAG
+          MOVE      ZERO,INVPRTD
+          MOVE      ZERO,GROSSTOT
+          MOVE      ZERO,NETTOT
+          MOVE      ZERO,TOTGST
+.
+          LOAD      IPASS,NUMINVS,ZERO,ONE   * set the pass indicator
+          LOAD      PINVTYP,NUMINVS,ZERO,TWO * 1st invoice will be patient
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          IF        IBCNMHOS=1
+            OPEN      PMSVX1A1,"pmsvx1af"
+            MOVE      SP70,PMVXMHOS
+            PACK      KEY8,OTNUMB
+            CALL      RDPMVX11
+            OPEN      PATHSPA1,"pathspaf"
+            MOVE      SP10,PTHSTFEE
+            MOVE      PMVXMHOS,KEY3
+            CALL      RDPTHSP1
+          ENDIF
+.
+.        Get the patients name
+.
+OTIV2000  CALL      GNAM0000
+.
+.        Get any pending cash receipts
+.
+          CALL      GCAS0000
+.
+         MATCH      "1",PTCNPPIN
+         GOTO       OTIV2800 IF EQUAL          * Using new Patient Invoice
+.
+.        We now check for a special case. If we are printing split invoices
+.        and there is no cash, and no patient portion, then only print the
+.        second invoice.
+.
+          IF        CSAMT = 0.00 & IPASS = 1
+            MOVE      ONE,PROGFLAG           * calculate invoice flag
+            CALL      OUTTBI
+            IF        GROSSTOT = 0.00
+              MOVE      TWO,IPASS            * start with pass 2 (rebate port.)
+              MOVE      ONE,PINVTYP          * insurance invoice
+            ENDIF
+            MOVE      THREE,PROGFLAG         * print invoice flag
+          ENDIF
+.
+OTIV2800  MOVE      OBAOUTNO,KEY8            * Make sure we read the visit file
+          CALL      RDVISA1
+.
+.        Get the next invoice number and write a zero invoice record
+.
+          MOVE      PVISITE,KEY6
+          CALL      RDSITA1
+.
+          OPEN      PATIRNG1,"patirnge"
+          OPEN      PATINVR1,"patinvrf"
+.
+OTIV3000  MOVE      OSTIRNG,KEY3
+          CALL      TRIRNG1
+          BRANCH    OVRCD,ERRIRNGE,ERNGFULL
+.
+          MOVE      IRNEXT,CNEXTINV
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+          COMPARE   ZERO,OVRCD
+          GOTO      OTIV3000 IF EQUAL
+.
+          DISPLAY   *P1:24,*EL,*V2LON:
+                    "*** Generating Invoice ",CNEXTINV," ***";
+.
+          CALL      OZER0000
+.
+          UNPACK    OBADATE WITH CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPDATE,A8DATE
+          MOVE      CPCDATE,A10DATE
+.
+          MOVE      SP8,D8DATE
+          CALL      SETUPIV       * Set up any special varaibles
+.
+.        Set the claim type indicator if this is a claim
+.
+          MOVE      ZERO,CLAIM
+          PACK      KEY5,ANSC,ANSL,OBACOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD OF OTIV4400
+.
+.        Check the indicators for a W, M, or V (these are the claims)
+.
+          MOVE      ZERO,FORM2
+OTIV4000  ADD       ONE,FORM2
+          COMPARE   SIX,FORM2
+          GOTO      OTIV4400 IF NOT LESS
+.
+          LOAD      ANS USING FORM2 OF TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5
+.
+          MATCH     ANSW,ANS
+          GOTO      OTIV4200 IF EQUAL
+          MATCH     ANSM,ANS
+          GOTO      OTIV4200 IF EQUAL
+          MATCH     ANSV,ANS
+          GOTO      OTIV4200 IF EQUAL
+          MATCH     ANSD,ANS
+          GOTO      OTIV4200 IF EQUAL
+          GOTO      OTIV4000
+.
+.        We have a claim
+.
+OTIV4200  REP       "W1M2V3D4",ANS
+          MOVE      ANS,CLAIM
+.
+.        Set up the person responsible for the account
+.
+OTIV4400  RESET     PGNAME
+          MOVE      PGNAME,ANS
+          PACK      DIM8 WITH SP1,PTITL,SP1,ANS,DOT
+.
+OTIV4600  CMATCH    SP1,DIM8
+          GOTO      OTIV4800 IF NOT EQUAL
+          BUMP      DIM8
+          GOTO      OTIV4600 IF NOT EOS
+.
+OTIV4800  PACK      PFNAME WITH DIM8,PTMASNAM
+          REP       ", ",PFNAME
+          MOVE      PFNAME,PKNAME
+          MOVE      PSUBRB,PKSUBR
+          MOVE      PADD1,PKADD1
+          MOVE      PADD2,PKADD2
+          MOVE      PADD4,PKADD4
+          MOVE      PPOST,PKPOST
+          MOVE      SP10,PKRELP
+.
+          COMPARE   "22",PTCNINVL
+          GOTO      OTIV5000 IF NOT EQUAL       * Not Johns Hopkins invoice
+.
+          CALL      JHPRO000                    * Set default PRFA name
+          MOVE      PFNAME,PKNAME
+.
+          MATCH     "PRFA",EXPPAYER
+          GOTO      OTIV5000 IF EQUAL
+          MATCH     SP70,EXPPAYER
+          GOTO      OTIV5000 IF EQUAL
+.
+          PACK      KEY14,EXPPAYER,ZERO8,SP70
+          CALL      RDFUND1
+          IF        OVRCD=0
+            PACK      PKNAME,HFNAME,SP70
+            PACK      PKADD1,HFADD1,SP70
+            PACK      PKADD2,HFADD2,SP70
+            PACK      PKSUBR,HFADD3,SP70
+            PACK      PKADD4,HFADD4,SP70
+            PACK      PKPOST,HFPCODE,SP70
+            GOTO      OTIV6000
+          ENDIF
+.
+OTIV5000  MOVE      OBAOUTNO,AADMNO
+          MOVE      AADMNO,KEY8
+.
+          OPEN      PATRE1A1,"patre1af"
+          CALL      RDRESP1
+          BRANCH    OVRCD OF OTIV7000
+.
+          COMPARE   "22",PTCNINVL
+          GOTO      OTIV5200 IF NOT EQUAL
+          MATCH     "SELF",PKRELP
+          GOTO      OTIV7000 IF EQUAL
+.
+.---- P.R.A. Record exists, so use it.
+.
+OTIV5200  MATCH     "1",PTCNDEES             * using deceased PRFA indicator
+          GOTO      OTIV5800 IF NOT EQUAL    * no
+.
+          CMATCH    "$",PKNAME
+          IF        @EQUAL
+            STRIP     PTCNDDES
+            MOVE      PTCNDDES,PFNAME
+            UNPACK    PKNAME,DIM2,KEY78      * ignore "$ "
+            PACK      PFNAME,PFNAME,SP1,KEY78,SP30
+            GOTO      OTIV7000
+          ENDIF
+.
+OTIV5800  COMPARE   ONE,PTCNPAOF             * using 'parent of'?
+          GOTO      OTIV6000 IF NOT EQUAL    * no
+.
+.---- If first character of PKNAME is "@" then replace with "Parent of"
+.
+          CMATCH    "@",PKNAME
+          IF        @EQUAL 
+            MOVE      "Parent of ",PFNAME
+            UNPACK    PKNAME,DIM2,KEY78      * ignore "@ "
+            PACK      PFNAME,PFNAME,KEY78,SP30
+            GOTO      OTIV7000
+          ENDIF
+.
+OTIV6000  PACK      PFNAME,PKNAME,SP30
+.
+OTIV7000  CALL      PRTIH000
+          BRANCH    EXIT,OTIV2000
+.
+OTIV9999  RETURN
+.
+.******************************************************************************
+.        Print the invoice heading section for Outpatient
+.******************************************************************************
+PRTIH000  MOVE      OBAOUTNO,PINVADM
+          MOVE      OBAURNO,PINVUR
+          MOVE      TWO,PINVSYS
+          MOVE      OBASITE,PINVSITE
+          MOVE      CNEXTINV,SAVINVNO
+.
+          MOVE      PFUNDH,AFUNDH
+          MOVE      PFNDTB,AFNDTB
+          MOVE      PFNDMM,AFNDMM
+          MOVE      PFNDMM,PMVXFNDM
+          MOVE      OBADATE,ADATE
+          CALL      HEAD
+.
+.        Generate the body and tail of the invoice
+.
+          CALL      OUTTBI
+.
+.        Update the invoice record with the appropriate details
+.
+          MOVE      SAVINVNO,KEY8
+          CALL      RDINV1
+.
+          MOVE      OBAOUTNO,PINVADM
+          MOVE      OBAURNO,PINVUR
+          MOVE      PTMASNAM,PINALPHA
+          MOVE      GROSSTOT,PINVAMT
+          ADD       TOTGST,PINVAMT
+          MOVE      TOTGST,PTINGSTA       * GST Amount
+          MOVE      TOTDISC,PTINDISC
+          MOVE      ROUNDAMT,PTINROUN
+          MOVE      ZERO,PINVREB
+          MOVE      TWO,PINVSYS
+          MOVE      OBASITE,PINVSITE
+.
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT             * date updated
+          CLOCK     TIME,PTINUTIM             * time updated
+          MOVE      USERID,PTINUUID           * web user id
+.
+          MOVE      OBACOMP,PINVCLM
+          CALL      UPINV1
+          PROC      FLAGDEBT                * set outstanding debt indicator
+.
+          IF        CFEETYP=9
+            CALL      UPIP0000              * Update Insurance Provider for JH
+          ENDIF
+.
+.         CCPS EDI Extract                                            *I-103368
+          CALL      ECPS0000                * extract Invoice data for CCPS
+.
+.       Do Cash updates, and then remove the patient from the list
+.       of patient who will still have invoices pending. Then print invoice.
+.
+          CALL      CSHU0000
+          MOVE      OBAOUTNO,KEY8
+          CALL      DIPE0000
+.
+          DISPLAY   *P1:24,*EL:
+                    "*** Invoice Generation Completed ***",*W,*P1:24,*EL;
+          CALL      CLSPRINT
+.
+          MATCH     "1",PTCNPPIN
+          GOTO      PRTIH900 IF EQUAL          * Using new Patient Invoice
+.
+.         If we are generating multiple invoices, check if we need to generate
+.         another invoice.
+.
+          BRANCH    IPASS,PRTIH200,PRTIH900
+          GOTO      PRTIH900
+.
+.         We have generated the first invoice. Now time to generate the second
+.
+PRTIH200  MOVE      TWO,IPASS                * second pass
+          MOVE      ONE,PINVTYP              * insurance invoice
+          MOVE      ZERO,GROSSTOT
+          MOVE      ZERO,NETTOT
+          MOVE      ZERO,TOTGST
+.
+.         Check if we need to print a form feed between invoices
+.
+          BRANCH    CINVFF,PRTIH400
+          GOTO      PRTIH800
+.
+PRTIH400  PRINT     *F;                      * formfeed between invoices
+PRTIH800  MOVE      ONE,EXIT
+          GOTO      PRTIH999
+.
+PRTIH900  MOVE      ZERO,EXIT
+PRTIH999  RETURN
++
+.******************************************************************************
+.        Invoice is for zero amount, and for zero bed days
+.******************************************************************************
+EDSPINVE  MOVE      "No Invoice details to be printed. ",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          RETURN
+.
+.         Invalid invoice range in the control file
+.
+ERRIRNGE  MOVE      "Invalid Invoice Range in Controlf file. ",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          RETURN
+.
+.         No more invoices available in invoice range
+.
+ERNGFULL  MOVE       "Next Invoice Number Outside of Valid Range. ",WEBTITLE
+          CALL       WEBERR00
+          MOVE       ONE,EXIT
+          RETURN
+.
+.         Subroutine to get the next transaction number
+.
+NXTTRAN0  MOVE      OBAOUTNO,TADMNO
+          MOVE      OBAOUTNO,KEY8
+          CALL      TRVISA1
+          MOVE      PVITRAN,OTTRANS
+          RETURN
+.
+.*************************************************************************** 
+.* GCAS0000    Subroutine to get the total cash amount currently entered   *
+.*************************************************************************** 
+GCAS0000  OPEN      COMDEPA2,"comdepaf"
+          OPEN      RCPDTEA1,"rcpdteaf"
+          OPEN      RCPDTEA6,"rcpdteaf"
+          OPEN      RCPBNKA1,"rcpbnkaf"
+          MOVE      ZERO,CSAMT
+          MOVE      ZERO,CASHFLAG
+          MOVE      OBAOUTNO,AADMNO
+          MOVE      AADMNO,DOBAOUTN
+          MOVE      AADMNO,DAADMNO
+          MOVE      "0",CMDESTAT
+          PACK      KEY26,AADMNO,CMDESTAT,SP70
+          CALL      RSCMDEP2
+GCAS1000  CALL      RKCMDEP2
+          BRANCH    OVRCD,GCAS2000
+.
+          MATCH     DOBAOUTN,CMDEADMN
+          GOTO      GCAS2000 IF NOT EQUAL
+          MATCH     "0",CMDESTAT
+          GOTO      GCAS2000 IF NOT EQUAL
+.
+          PACK      KEY17,CMDERECN,CMDETCNT
+          CALL      RDRCDTE1
+          BRANCH    OVRCD,GCAS1000
+.
+          ADD       RCDTAMNT,CSAMT
+          UNPACK    CMDETDAT,XCENT,XYEAR,XMON,XDAY
+          MOVE      XDAY,CSDAY
+          MOVE      XMON,CSMON
+          MOVE      XYEAR,CSYEAR
+          MOVE      XCENT,CSCENT
+          MOVE      CMDERECN,CSREPNO
+          GOTO      GCAS1000
+.
+GCAS2000  COMPARE   ZERO,CSAMT
+          GOTO      GCAS3000 IF EQUAL
+          MOVE      ONE,CASHFLAG
+.
+.         Check for any non-banked deposits
+.
+GCAS3000  MOVE      ZERO,NBNKAMNT
+          PACK      KEY25,AADMNO,SP70
+          CALL      RSRCDTE6
+GCAS4000  CALL      RKRCDTE6
+          BRANCH    OVRCD,GCAS9999
+.
+          MATCH     DAADMNO,RCDTVIST
+          GOTO      GCAS9999 IF NOT EQUAL
+.
+          MATCH     SP10,RCDTINVN          * Invoice number must be blank
+          GOTO      GCAS4000 IF NOT EQUAL
+          MATCH     SP10,RCDTRELD
+          GOTO      GCAS4000 IF NOT EQUAL   * has been released
+.
+          PACK      KEY12,RCDTRECN
+          CALL      RDRCBNK1
+          BRANCH    OVRCD,GCAS4000 
+          MATCH     "1",RCBNSTAT            * check if cancelled
+          GOTO      GCAS4000 IF EQUAL
+.
+          ADD       RCDTAMNT,NBNKAMNT
+          GOTO      GCAS4000
+.
+GCAS9999  RETURN
++
+.***************************************************************************
+.      Invoice was printed, so post any cash receipts to DTRAN and INVR files
+.***************************************************************************
+CSHU0000  OPEN      COMDEPA2,"comdepaf"
+          OPEN      RCPDTEA1,"rcpdteaf"
+          OPEN      RCPBDTA1,"rcpbdtaf"
+          MOVE      OBAOUTNO,AADMNO
+          MOVE      AADMNO,DOBAOUTN
+.
+CSHU1000  MOVE      "0",CMDESTAT
+          PACK      KEY26,DOBAOUTN,CMDESTAT,SP70
+          CALL      RSCMDEP2
+          CALL      RKCMDEP2
+          BRANCH    OVRCD,CSHU3000
+.
+          MATCH     DOBAOUTN,CMDEADMN
+          GOTO      CSHU3000 IF NOT EQUAL
+.
+          MATCH     "0",CMDESTAT              * Check for deposit status
+          GOTO      CSHU3000 IF NOT EQUAL
+.
+          MOVE      ZERO,RCDTAMNT
+          PACK      KEY17,CMDERECN,CMDETCNT
+          CALL      RDRCDTE1
+          IF        OVRCD=0
+            PACK      RCDTINVN,SP4,PINVNO
+            PACK      RCDTUDAT,CCC,CYY,CMM,CDD
+            REP       " 0",RCDTUDAT           * date updated
+            CLOCK     TIME,RCDTUTIM           * time updated
+            MOVE      USERID,RCDTUUID         * web user id
+            CALL      UPRCDTE1
+          ENDIF
+.
+          MOVE      RCDTAMNT,OTPATAMT
+          MOVE      CMDERECN TO OTRECEPT
+.
+          MOVE      PINVADM,OTNUMB
+          MOVE      PINVNO,OTINVNO
+.
+          CALL      NXTTRAN0                * Get the next transaction number
+.
+          MOVE      TWO,OTRECTYP            *** RECORD TYPE CASH
+          MOVE      ONE,OTINVPRT            *** SET AS ALREADY PRINTED
+          MOVE      CMDETDAT,OTDDATE
+          MOVE      "PY",OTTYPE
+          MOVE      SP30,OTITEMNO
+          MOVE      SP3,OTMISGRP
+          MOVE      ZERO,OTDTGSTA           * GST Applicable
+          MOVE      ZERO,OTDTGSTM           * GST Amount
+          MOVE      SP20,OTDTGSTC           * GST Code
+          MOVE      "1",OTPAYTYP       ***** set up cash Payment 
+.
+          MOVE      SP30,OTDDESC
+          MOVE      "PATIENT",OTDDESC
+          MULT      SEQ,OTPATAMT            **** MAKE IT NEGATIVE
+          MOVE      OTPATAMT,OTPATPOR       * Patient portion
+          MOVE      ZERO,OTREBPOR           * Rebate portion
+          PACK      OTDTEFFD,PINVDTE
+          REP       " 0",OTDTEFFD
+          MOVE      SP70,OTDTPCOD
+.
+.         Read the first record of Bank details file to get the payment type
+.         ie. Cash, Cheque
+.
+          PACK      KEY15,RCDTRECN,SP70
+          CALL      RSRCBDT1
+          CALL      RKRCBDT1
+          IF        OVRCD=0
+            MATCH     RCDTRECN,RCBDRECN      * Same receipt number?
+            IF        @EQUAL
+              MOVE      RCBDPCOD,OTDTPCOD
+            ENDIF
+          ENDIF
+.
+.         Post this cash
+.
+          MOVE      ZERO,OTSERVS
+          MOVE      SP20,OTSPARE
+          PACK      KEY22 WITH OTNUMB,OTINVNO,OTTRANS
+          CALL      WRDTRO1
+.
+          MOVE      "1",CMDESTAT            * set Deposit status to 'Applied'
+          PACK      CMDEAINV,SP4,OTINVNO,SP70
+.         PACK      CMDEREFD,PINVDTE
+          PACK      CMDEREFD,CCC,CYY,CMM,CDD,SP70    * Current date           
+          REP       " 0",CMDEREFD           * Date deposit applied            
+          CALL      IBACLOCK
+          MOVE      CTIMEIS,CMDEREFT        * Time invoice is written to
+.
+          PACK      CMDEUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",CMDEUDAT           * date updated
+          CLOCK     TIME,CMDEUTIM           * time updated
+          MOVE      USERID,CMDEUUID         * web user id
+          CALL      UPCMDEP2
+.
+          OPEN      PATINVR1,"patinvrf"
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+          ADD       OTPATAMT,PINVPATA
+.
+.         Check if the invoice now balances
+.
+          MOVE      PINVAMT,TOTAMT       * Invoice amount +
+          ADD       PINVPATA,TOTAMT      * Patient payments +
+          ADD       PINVHFDA,TOTAMT      * H.F payments +
+          ADD       PINVOTHA,TOTAMT      * Other payments +
+          ADD       PINVJOUR,TOTAMT      * Journals = amount outstanding
+.
+          MOVE      "99999999",PINVBLCD  * Assume it doesn't balance
+.
+          COMPARE   ZERO,TOTAMT          * Does it balance ?
+          GOTO      CSHU2000 IF NOT EQUAL
+.
+.         Invoice is now balanced. Record the date that this occured
+.
+          PACK      PINVBLCD,CCC,CYY,CMM,CDD
+          REP       " 0",PINVBLCD
+.
+CSHU2000  PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT             * date updated
+          CLOCK     TIME,PTINUTIM             * time updated
+          MOVE      USERID,PTINUUID           * web user id
+.
+          CALL      UPINV1
+          PROC      FLAGDEBT                * set outstanding debt indicator
+.
+          OPEN      PMSVX1A1,"pmsvx1af"
+          MOVE      SP70,PMVXMHOS
+          PACK      KEY8,OTNUMB
+          CALL      RDPMVX11
+.
+          MOVE      ANSB,FINTYPE
+          PACK      FINCODE WITH ANSA,SP20
+.         PACK      FINDATE,CCC,CYY,CMM,CDD
+          MOVE      PINVDTE,FINDATE
+          REP       " 0",FINDATE
+          MOVE      RCDTAMNT,FINAMT
+          MOVE      TWO,FINSYS
+          MOVE      OBASITE,FINSITE
+          MOVE      ZERO,FGSTFLAG
+          MOVE      PMVXMHOS,FINHOSP
+          CALL      PATCALF
+.
+          GOTO      CSHU1000
+.
+.         Check for any non banked deposits (unreleased cash)
+.
+CSHU3000  MOVE      ZERO,NBNKAMNT
+          PACK      KEY25,DOBAOUTN,SP70
+          CALL      RSRCDTE6
+CSHU3200  CALL      RKRCDTE6
+          BRANCH    OVRCD,CSHU4000
+.
+          MATCH     DOBAOUTN,RCDTVIST
+          GOTO      CSHU4000 IF NOT EQUAL
+.
+          MATCH     SP10,RCDTINVN          * Invoice number must be blank
+          GOTO      CSHU3200 IF NOT EQUAL
+          MATCH     SP10,RCDTRELD
+          GOTO      CSHU3200 IF NOT EQUAL   * has been released
+.
+          PACK      KEY12,RCDTRECN
+          CALL      RDRCBNK1
+          BRANCH    OVRCD,CSHU3200
+          MATCH     "1",RCBNSTAT            * check if cancelled
+          GOTO      CSHU3200 IF EQUAL
+.
+          ADD       RCDTAMNT,NBNKAMNT
+          PACK      RCDTINVN,SP4,CNEXTINV   * store the invoice number
+          PACK      RCDTUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",RCDTUDAT           * date updated
+          CLOCK     TIME,RCDTUTIM           * time updated
+          MOVE      USERID,RCDTUUID         * web user id
+          CALL      UPRCDTE6
+          GOTO      CSHU3200
+.
+CSHU4000  OPEN      PATINVR1,"patinvrf"
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+          BRANCH    OVRCD,CSHU9999
+          MOVE      NBNKAMNT,PINVPCSH       * pending cash
+          MULT      "-1",PINVPCSH
+.
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT             * date updated
+          CLOCK     TIME,PTINUTIM             * time updated
+          MOVE      USERID,PTINUUID           * web user id
+.
+          CALL      UPINV1
+          PROC      FLAGDEBT                * set outstanding debt indicator
+CSHU9999  RETURN
++
+.****************************************************************************
+.         Subroutine to remove an admisssion number from the file of
+.         patients who still have invoices pending.
+.****************************************************************************
+DIPE0000  COMPARE   ZERO,PTCNIPEN
+          RETURN    IF NOT EQUAL
+. 
+          OPEN      PATIPEN1,"patipenf"
+          CALL      RDIPEN1
+.
+          COMPARE   ZERO,OVRCD
+          CALL      DEIPEN1 IF EQUAL
+.
+          RETURN
++
+.***************************************************************************
+.         Subroutine to write a zero record to the invoice file
+.***************************************************************************
+OZER0000  CALL      CLPATINV                * clear Invoice variables
+.
+          MOVE      CNEXTINV,KEY8
+          MOVE      CNEXTINV,PINVNO
+.
+          PACK      PINVDTE WITH CCC,CYY,CMM,CDD
+          REP       " 0",PINVDTE
+...       MOVE      ZERO,PINVUR
+          MOVE      TWO,PINVSYS
+.
+          MOVE      OBASITE,PINVSITE
+.
+...       MOVE      "99999999",PINVBLCD
+...       MOVE      "0",PTINCRST
+.
+          CALL      RDINV1
+          COMPARE   ZERO,OVRCD
+          GOTO      OZER9999 IF EQUAL
+.
+          PACK      PTINCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINCDAT             * date created
+          CLOCK     TIME,PTINCTIM             * time created
+          MOVE      USERID,PTINCUID           * web user id
+          CALL      WRINV1
+.
+OZER9999  RETURN
++
+.****************************************************************************
+.  OINVH000 - Set up invoice header for stationery templating
+.****************************************************************************
+OINVH000  OPEN      IBATMHA1,"ibatmhaf"
+          OPEN      IBATDET1,"ibatmdaf"
+.
+          MOVE      OTCNOTIH,KEY6
+          CALL      RDIBTH1                   * read header detail file
+          BRANCH    OVRCD,OINVH900
+.
+          PACK      KEY12,OTCNOTIH,SP6        * position on details file
+          CALL      RSIBDET1
+          CALL      RKIBDET1
+          BRANCH    OVRCD,OINVH900
+.
+          MATCH     OTCNOTIH,IBDTSCOD         * match stationery codes
+          GOTO      OINVH950 IF EQUAL
+.
+.------ stationery code not on file ------
+.
+OINVH900  MOVE      "User Defined Stationery Code not on File. ",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+.
+          MOVE      ONE,EXIT
+          GOTO      OINVH999
+.
+OINVH950  MOVE      ZERO,EXIT
+OINVH999  RETURN
++
+.****************************************************************************
+.  OINVT000 - Set up invoice tail for stationery templating
+.****************************************************************************
+OINVT000  OPEN      IBATMHA1,"ibatmhaf"
+          OPEN      IBATDET1,"ibatmdaf"
+.
+          MOVE      OTCNOTIT,KEY6
+          CALL      RDIBTH1                   * read header detail file
+          BRANCH    OVRCD,OINVT900
+.
+          PACK      KEY12,OTCNOTIT,SP6        * position on details file
+          CALL      RSIBDET1
+          CALL      RKIBDET1
+          BRANCH    OVRCD,OINVT900
+.
+          MATCH     OTCNOTIT,IBDTSCOD         * match stationery codes
+          GOTO      OINVT950 IF EQUAL
+.
+.------ stationery code not on file ------
+.
+OINVT900  MOVE       "User Defined Stationery Code not on File. ",WEBTITLE
+          CALL       WEBERR00
+          MOVE       ONE,EXIT
+          MOVE      ONE,EXIT
+          GOTO      OINVT999
+.
+OINVT950  MOVE      ZERO,EXIT
+OINVT999  RETURN
++
+.------------------------------------------------------------
+.                            ECPS0000
+.                     write Invoice data for CCPS Extract
+.------------------------------------------------------------
+ECPS0000  MOVE      ZERO,EXIT
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,HUND03;*218,PTCNUCCP
+.
+          MATCH     "1",PTCNUCCP            * "1" is "Using CCPS EDI extract"
+          GOTO      CCPS9999 IF NOT EQUAL
+.
+          OPEN      PATEDTA1,"patedtaf"
+....      OPEN      PATVISA1,"patvisaf"
+....      OPEN      PATFX1A1,"patfx1af"
+....      OPEN      VISPAYA1,"vispayaf"
+          PACK      KEY8,OBAOUTNO,SP8
+.
+.                                           * initialise "patedtaf"
+ECPS1000  MOVE      ZERO,PTETFLAG           * 0 = EDI not sent
+          MOVE      PTETFLAG,DPTETFLG
+          MOVE      "CCPS  ",PTETPAYC
+          MOVE      OBAOUTNO,PTETADMN
+          MOVE      PINVNO,PTETINVN
+          UNPACK    SP30,PTETBATN,PTETPBAT,PTETNBAT
+          MOVE      PINVUR,PTETURNO
+          MOVE      PINVDTE,PTETINDT
+          MOVE      "0",PTETINTY            * 0 = Medical only, 1 = Claim
+          MOVE      "0",PTETEXCL            * 0 = not excluded
+          MOVE      " 0",PTETCCST           * 0 = not sent
+          MOVE      PINVAMT,PTETINAM
+          MOVE      PINVSYS,PTETISYS
+          UNPACK    SP70,PTETRCAL,PTETSPAR
+.
+          PACK      KEY14,OBAOUTNO,SP10
+          CALL      RSVSPAY1
+ECPS2000  CALL      RKVSPAY1
+          BRANCH    OVRCD,ECPS9999
+.
+          MATCH     VSPAVISN,KEY8
+          GOTO      ECPS9999 IF NOT EQUAL
+.
+          PACK      KEY6,VSPAPAYC
+          CALL      RDPTFX11
+          BRANCH    OVRCD,ECPS2000
+.
+          COMPARE   ZERO,PTFXEXTR           * is Expected Payor HF for EDI ?
+          GOTO      ECPS2000 IF EQUAL       * no, get next one
+.
+          MOVE      "1",PTETINTY            * set Invoice Type to "Claim"
+          GOTO      ECPS5000
+.
+.         Write CCPS EDI Summary record to "patedtaf"
+.
+ECPS5000  PACK      KEY26,DPTETFLG,PTETADMN,PTETINVN,SP30
+          CALL      RAPTEDT1
+          IF        OVRCD = 1
+            CALL      WRPTEDT1
+          ENDIF
+.
+ECPS9999  RETURN
+.
+.------------------------------------------------------------
+.         Set up JH PRFA name
+.------------------------------------------------------------
+JHPRO000  STRIP     PTITL
+          STRIP     PGNAME
+.
+          MOVE      SP70,PFNAME
+          CLEAR     PFNAME
+          APPEND    PTITL,PFNAME
+          APPEND    SP1,PFNAME
+          APPEND    PGNAME,PFNAME
+          APPEND    SP1,PFNAME
+          APPEND    PTMASNAM,PFNAME
+          APPEND    SP70,PFNAME
+          RESET     PFNAME
+JHPRO999  RETURN
+.
+.------------------------------------------------------------
+.         Update Insurance Provider for JH
+.------------------------------------------------------------
+UPIP0000  OPEN      PATIPRA1,"patipraf"
+          MOVE      PINVADM,KEY8
+          PACK      KEY19,KEY8,SP70
+          CALL      RSPTIPA1
+UPIP1000  CALL      RKPTIPA1
+          BRANCH    OVRCD,UPIP9999
+.
+          MATCH     KEY8,PTIRVISN
+          GOTO      UPIP9999 IF NOT EQUAL
+.
+          MATCH     SP70,PTIRINVN
+          GOTO      UPIP9999 IF NOT EQUAL
+.
+.         set invoice number to insurance providers
+.
+          MOVE      PINVNO,PTIRINVN
+          PACK      KEY19,PTIRVISN,PTIRINVN,PTIRCOUN,SP70
+          CALL      RAPTIPA1
+          COMPARE   ZERO,OVRCD
+          GOTO      UPIP1000 IF EQUAL
+.
+          PACK      KEY19,PTIRVISN,PTIRINVN,PTIRCOUN,SP70
+          CALL      WRPTIPA1
+.
+          MOVE      SP70,PTIRINVN
+          PACK      KEY19,PTIRVISN,PTIRINVN,PTIRCOUN,SP70
+          CALL      RDPTIPA1                        * reposition
+.
+          GOTO      UPIP1000
+.
+UPIP9999  RETURN
++
+.******************************************************************************
+. subroutine does the actual printing of an invoice. We are
+.        only interested in invoices that have a non-zero gross total.
+.******************************************************************************
+AEIV0000 CALL      EINVH000                 * check for template header
+         BRANCH    EXIT,AEIV9999
+         CALL      EINVT000                 * check for template tail
+         BRANCH    EXIT,AEIV9999
+.
+          COMPARE   ZERO,GROSSTOT
+          GOTO      EDSPINVE IF EQUAL
+          MATCH     "EMRWEB04",PRGID
+          IF        !@EQUAL
+            DISPLAY   *P1:6,*EF;
+          ENDIF
+.
+.        Print the invoice. This is the entry point that is used for the
+.        batches of invoices from IBAOUT20.
+.
+AEIV1000  MOVE      THREE,PROGFLAG
+          MOVE      ZERO,INVPRTD
+          MOVE      ZERO,GROSSTOT
+          MOVE      ZERO,NETTOT
+.
+          LOAD      IPASS,NUMINVS,ZERO,ONE   * set the pass indicator
+          LOAD      PINVTYP,NUMINVS,ZERO,TWO * 1st invoice will be patient
+.
+.        Get the patients name
+.
+AEIV2000  CALL      GETPNAM
+.
+.        Get any pending cash receipts
+.
+          CALL      ECSH0000
+.
+.        We now check for a special case. If we are printing split invoices
+.        and there is no cash, and no patient portion, then only print the
+.        second invoice.
+.
+          IF        CSAMT = 0.00 & IPASS = 1
+            MOVE      ONE,PROGFLAG           * calculate invoice flag
+            CALL      AAETBI
+            IF        GROSSTOT = 0.00
+              MOVE      TWO,IPASS            * start with pass 2 (rebate port.)
+              MOVE      ONE,PINVTYP          * insurance invoice
+            ENDIF
+            MOVE      THREE,PROGFLAG         * print invoice flag
+          ENDIF
+.
+.        Get the next invoice number and write a zero invoice record
+.
+          OPEN      PATINVR1,"patinvrf"
+          OPEN      PATIRNG1,"patirnge"
+.
+AEIV3000  MOVE      CINVRAE,KEY3
+          CALL      TRIRNG1
+          BRANCH    OVRCD,ERRIRNGE,ERNGFULL
+.
+          MOVE      IRNEXT,CNEXTINV
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+          COMPARE   ZERO,OVRCD
+          GOTO      AEIV3000 IF EQUAL
+.
+          MATCH     "EMRWEB04",PRGID
+          IF        !@EQUAL
+            DISPLAY   *P1:24,*EL,*P23:24,*V2LON:
+                      "*** Generating Invoice ",CNEXTINV," ***";
+          ENDIF
+.
+          CALL      EZER0000
+.
+.        Open spool file for invoice
+.
+          MATCH     "EMRWEB04",PRGID
+          IF        !@EQUAL
+            CALL      OPNPRINT
+          ENDIF
+.
+          UNPACK    ADADATE,CCENT,CYEAR,CMON,CDAY
+          PACK      A10DATE,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR
+.
+          COMPARE   ONE,HSTANDM
+          GOTO      AEIV4000 IF EQUAL
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          IF        IBCNMHOS=1
+            OPEN      PMSVX1A1,"pmsvx1af"
+            MOVE      SP70,PMVXMHOS
+            PACK      KEY8,ADANUMB,SP10
+            CALL      RDPMVX11
+            OPEN      PATHSPA1,"pathspaf"
+            MOVE      SP70,PTHSTFEE
+            PACK      KEY3,PMVXMHOS,SP10
+            CALL      RDPTHSP1
+          ENDIF
+.
+          MOVE      ADANUMB,KEY8
+          CALL      RDDISA1
+          BRANCH    OVRCD,AEIV4000
+.
+          UNPACK    ADSDATE,CCENT1,CYEAR1,CMON1,CDAY1
+          PACK      D10DATE,CDAY1,SLASH,CMON1,SLASH,CCENT1,CYEAR1
+          GOTO      AEIV4100
+.
+AEIV4000   MOVE      SP10,D10DATE
+.
+AEIV4100  CALL      SETUPIV       * Set up any special varaibles
+.
+.         Set the claim type indicator if this is a claim
+.
+          MOVE      ZERO,CLAIM
+          PACK      KEY5,CODECL,ADACOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD,AEIV5000
+.
+.         Check the indicators for a W, M, or V (these are the claims)
+.
+          MOVE      ZERO,FORM2
+AEIV4400  ADD       ONE,FORM2
+          COMPARE   SIX,FORM2
+          GOTO      AEIV5000 IF NOT LESS
+.
+          LOAD      ANS,FORM2,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5
+.
+          MATCH     ANSW,ANS
+          GOTO      AEIV4600 IF EQUAL
+          MATCH     ANSM,ANS
+          GOTO      AEIV4600 IF EQUAL
+          MATCH     ANSV,ANS
+          GOTO      AEIV4600 IF EQUAL
+          MATCH     ANSD,ANS
+          GOTO      AEIV4600 IF EQUAL
+          GOTO      AEIV4400
+.
+.         We have a claim
+.
+AEIV4600  REP       "W1M2V3D4",ANS
+          MOVE      ANS,CLAIM
+.
+.         Set up the person resp for account
+.
+AEIV5000  RESET     PGNAME
+          MOVE      PGNAME,ANS
+          PACK      DIM8,SP1,PTITL,SP1,ANS,DOT
+.
+AEIV5200  CMATCH    SP1,DIM8
+          GOTO      AEIV5400 IF NOT EQUAL
+          BUMP      DIM8
+          GOTO      AEIV5200 IF NOT EOS
+.
+AEIV5400  PACK      PFNAME,DIM8,PTMASNAM
+          REP       ", ",PFNAME
+          MOVE      PFNAME,PKNAME
+          MOVE      PSUBRB,PKSUBR
+          MOVE      PADD1,PKADD1
+          MOVE      PADD2,PKADD2
+          MOVE      PPOST,PKPOST
+          MOVE      SP10,PKRELP
+.
+          OPEN      PATRE1A1,"patre1af"
+          MOVE      AADMNO,KEY8
+          CALL      RDRESP1
+          BRANCH    OVRCD,AEIV7000
+.
+          MATCH     SP70,PKNAME
+          IF        @EQUAL|@EOS
+            PACK      PFNAME,DIM8,PTMASNAM
+            REP       ", ",PFNAME
+            MOVE      PFNAME,PKNAME
+            MOVE      PSUBRB,PKSUBR
+            MOVE      PADD1,PKADD1
+            MOVE      PADD2,PKADD2
+            MOVE      PPOST,PKPOST
+            MOVE      SP10,PKRELP
+            GOTO      AEIV7000
+          ENDIF
+.
+.---- P.R.A. Record exists, so use it.
+.
+          MATCH     "1",PTCNDEES             * using deceased PRFA indicator
+          GOTO      AEIV6000 IF NOT EQUAL    * no
+.
+          CMATCH    "$",PKNAME
+          IF        @EQUAL
+            STRIP     PTCNDDES
+            MOVE      PTCNDDES,PFNAME
+            UNPACK    PKNAME,DIM2,KEY78      * ignore "$ "
+            PACK      PFNAME,PFNAME,SP1,KEY78,SP30
+            GOTO      AEIV7000
+          ENDIF
+.
+AEIV6000  COMPARE   ONE,PTCNPAOF             * using 'parent of'?
+          GOTO      AEIV6200 IF NOT EQUAL    * no
+.
+.---- If first character of PKNAME is "@" then replace with "Parent of"
+.
+          CMATCH    "@",PKNAME
+          IF        @EQUAL
+            MOVE      "Parent of ",PFNAME
+            UNPACK    PKNAME,DIM2,KEY78      * ignore "@ "
+            PACK      PFNAME,PFNAME,KEY78,SP30
+            GOTO      AEIV7000
+          ENDIF
+.
+AEIV6200  PACK      PFNAME,PKNAME,SP30
+.
+AEIV7000  MOVE      ADANUMB,PINVADM
+          MOVE      ADAURNO,PINVUR
+          MOVE      PFUNDH,AFUNDH
+          MOVE      PFNDTB,AFNDTB
+          MOVE      PFNDMM,AFNDMM
+          MOVE      PFNDMM,PMVXFNDM
+          MOVE      ADADATE,ADATE
+          MOVE      SP10,DDATE
+.
+          OPEN      EMRVISA1,"emrvisaf"
+          MOVE      ATNUMB,KEY8
+          CALL      RDEMVIS1
+          IF        OVRCD=0
+            MOVE      EMVIDATE,ADATE
+            MOVE      EMVIDDAT,DDATE
+          ENDIF
+.
+          MOVE      SP70,DPROV
+          OPEN      PATDO1A1,"patdo1af"
+          MOVE      ADADOCT,KEY6
+          CALL      RDDOCT1
+.
+          MATCH     "1",EMCNGINV            * Group invoice by Service Doctor
+          GOTO      AEIV8000 IF NOT EQUAL
+.
+          MOVE      SERVDOCT,KEY10
+          MATCH     SP70,SERVDOCT
+          GOTO      AEIV7200 IF EQUAL
+          MATCH     "ALL",SERVDOCT
+          GOTO      AEIV7400 IF NOT EQUAL
+.
+AEIV7200  CALL      CFDOC0000           * Get first doctor
+.         MOVE      KEY10,SERVDOCT
+.
+AEIV7400  OPEN      PMSHCPA1,"pmshcpaf"
+          CALL      RDPMHCP1
+          IF        OVRCD<>1
+            MOVE      PMHCTITL,DTITL
+            MOVE      PMHCGNAM,DGNAME
+            MOVE      PMHCSNAM,DSNAME
+            MOVE      PMHCPRV1,DPROV
+          ENDIF
+.
+AEIV8000  MOVE      ONE,PINVSYS
+          MOVE      SP6,PINVSITE
+          MOVE      CNEXTINV,SAVINVNO
+          CALL      HEAD
+.
+.        Generate the body and tail of the invoice
+.
+          CALL      AAETBI
+.
+.        Update the invoice record with the appropriate details
+.
+          UNPACK    PINVDTE,CCENT,CYEAR,CMON,CDAY    * Save invoice date
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+.
+          PACK      PINVDTE,CCENT,CYEAR,CMON,CDAY    * Restore invoice date
+          MOVE      ADANUMB,PINVADM
+          MOVE      ADAURNO,PINVUR
+          MOVE      PTMASNAM,PINALPHA
+          MOVE      GROSSTOT,PINVAMT
+          MOVE      HFMISC,PINVREB
+          MOVE      ZERO,PTINGSTA
+          MOVE      ONE,PINVSYS
+          MOVE      SP6,PINVSITE
+.
+.         Check if we are using Aust.GST
+.
+          IF        IBCNUGST=2
+            ADD       TOTGST,PINVAMT
+            MOVE      TOTGST,PTINGSTA      * GST amount
+          ENDIF
+.
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT             * date updated
+          CLOCK     TIME,PTINUTIM             * time updated
+          MOVE      USERID,PTINUUID           * web user id
+.
+          MOVE      ADACOMP,PINVCLM
+          CALL      UPINV1
+          PROC      FLAGDEBT                * set outstanding debt indicator
+.
+.       Do Cash updates, and then remove the patient from the list
+.       of patient who will still have invoices pending. Then print invoice.
+.
+          CALL      AEPS0000
+          MOVE      ADANUMB,KEY8
+          CALL      DIPE0000
+.
+          MATCH     "EMRWEB04",PRGID
+          IF        !@EQUAL
+            DISPLAY   *P1:24,*EL,*P23:24,*V2LON:
+                      "*** Invoice Generation Completed ***",*W,*P1:24,*EL;
+            CALL      CLSPRINT
+          ENDIF
+.
+         MATCH      "1",PTCNPPIN
+         GOTO       AEIV9999 IF EQUAL        * Using new Patient Invoice
+.
+.         If we are generating multiple invoices, check if we need to generate
+.         another invoice.
+.
+          BRANCH    IPASS,AEIV9000,AEIV9999
+          GOTO      AEIV9999
+.
+.         We have generated the first invoice. Now time to generate the second
+.
+AEIV9000  MOVE      TWO,IPASS                * second pass
+          MOVE      ONE,PINVTYP              * insurance invoice
+          MOVE      ZERO,GROSSTOT
+          MOVE      ZERO,NETTOT
+.
+.         Check if we need to print a form feed between invoices
+.
+          BRANCH    CINVFF,AEIV9100
+          GOTO      AEIV2000
+.
+AEIV9100  PRINT     *F;                      * formfeed between invoices
+          GOTO      AEIV2000
+.
+AEIV9999  RETURN
++
+.***************************************************************************
+.         Subroutine to get the next transaction number
+.***************************************************************************
+NXTTRANE  MOVE      ADANUMB,TADMNO
+          MOVE      ADANUMB,KEY8
+          CALL      TRVISA1
+          MOVE      PVITRAN,ATTRANS
+          RETURN
++
+.***************************************************************************
+.* ECSH0000     Subroutine to get the total cash amount currently entered  *
+.***************************************************************************
+ECSH0000  OPEN      COMDEPA1,"comdepaf"
+          OPEN      COMDEPA2,"comdepaf"
+          OPEN      COMDEPA3,"comdepaf"
+          OPEN      RCPDTEA1,"rcpdteaf"
+          OPEN      RCPDTEA5,"rcpdteaf"
+          OPEN      RCPBNKA1,"rcpbnkaf"
+          OPEN      RCPREGA1,"rcpregaf"
+          MOVE      ZERO,CSAMT
+          MOVE      ZERO,CASHFLAG
+          MOVE      ZERO,FORM1
+.
+.         Get all banked deposits for this patients
+.
+          MOVE      ADANUMB,AADMNO
+          MOVE      AADMNO,DAADMNO
+.
+          PACK      KEY25,ADAURNO,SP70
+          CALL      RSRCDTE5
+ECSH2000  CALL      RKRCDTE5
+          BRANCH    OVRCD,ECSH5000
+          MATCH     ADAURNO,RCDTURNO
+          GOTO      ECSH5000 IF NOT EQUAL       * Different U/R
+.
+          MATCH     DAADMNO,RCDTVIST
+          GOTO      ECSH4000 IF EQUAL           * same visit number
+          MATCH     SP70,RCDTVIST
+          GOTO      ECSH2000 IF NOT EQUAL
+.
+          MOVE      RCDTREGI,KEY3
+          CALL      RDREGA1
+          BRANCH    OVRCD,ECSH2000
+          COMPARE   "90",REGIBACD
+          GOTO      ECSH2000 IF NOT EQUAL      * Not EMR Deposit register
+.
+ECSH4000  PACK      KEY17,RCDTRECN,RCDTTCNT
+          CALL      RDCMDEP1
+          BRANCH    OVRCD,ECSH2000             * not released
+          MATCH     "0",CMDESTAT               * Check for Held deposit
+          GOTO      ECSH2000 IF NOT EQUAL
+.
+          ADD       RCDTAMNT,CSAMT
+          UNPACK    CMDETDAT,XCENT,XYEAR,XMON,XDAY
+          MOVE      XCENT,CSCENT
+          MOVE      XYEAR,CSYEAR
+          MOVE      XMON,CSMON
+          MOVE      XDAY,CSDAY
+          GOTO      ECSH2000
+.
+ECSH5000  COMPARE   ZERO,CSAMT
+          GOTO      ECSH5200 IF EQUAL
+          MOVE      ONE,CASHFLAG
+.
+.         Check for any non-banked deposits
+.         and any EMR deposit with no visit number allocated
+.
+ECSH5200  MOVE      ZERO,FORM1
+          MOVE      ZERO,NBNKAMNT
+          PACK      KEY25,ADAURNO,SP70
+          CALL      RSRCDTE5
+ECSH6000  CALL      RKRCDTE5
+          BRANCH    OVRCD,ECSH9000
+          MATCH     ADAURNO,RCDTURNO
+          GOTO      ECSH9000 IF NOT EQUAL       * Different U/R
+.
+          PACK      KEY17,RCDTRECN,RCDTTCNT
+          CALL      RDCMDEP1
+          COMPARE   ZERO,OVRCD
+          GOTO      ECSH6000 IF EQUAL           * has been released
+.
+          MATCH     DAADMNO,RCDTVIST
+          GOTO      ECSH7000 IF EQUAL           * same visit number
+.
+          MATCH     SP70,RCDTVIST
+          GOTO      ECSH6000 IF NOT EQUAL
+.
+          MOVE      RCDTREGI,KEY3
+          CALL      RDREGA1
+          BRANCH    OVRCD,ECSH6000
+          COMPARE   "90",REGIBACD
+          GOTO      ECSH6000 IF NOT EQUAL      * Not EMR Deposit register
+.
+ECSH7000  MATCH     SP10,RCDTINVN              * Invoice number must be blank
+          GOTO      ECSH6000 IF NOT EQUAL
+          MATCH     SP10,RCDTRELD
+          GOTO      ECSH6000 IF NOT EQUAL       * has been released
+.
+          PACK      KEY12,RCDTRECN
+          CALL      RDRCBNK1
+          BRANCH    OVRCD,ECSH6000
+          MATCH     "1",RCBNSTAT               * check if cancelled
+          GOTO      ECSH6000 IF EQUAL
+.
+          ADD       RCDTAMNT,NBNKAMNT
+          GOTO      ECSH6000
+.
+ECSH9000  RETURN
++
+.***************************************************************************
+.      Invoice was printed, so post any cash receipts to DTRAN and INVR files
+.***************************************************************************
+AEPS0000  OPEN      COMDEPA1,"comdepaf"
+          OPEN      COMDEPA2,"comdepaf"
+          OPEN      RCPDTEA1,"rcpdteaf"
+          OPEN      RCPDTEA5,"rcpdteaf"
+          OPEN      RCPBDTA1,"rcpbdtaf"
+          OPEN      RCPREGA1,"rcpregaf"
+          MOVE      ADANUMB,AADMNO
+          MOVE      AADMNO,DAADMNO
+.
+.         Get cash that have been released for this admission
+.         and any EMR deposit has been released with no visit number
+.
+          PACK      KEY25,ADAURNO,SP70
+          CALL      RSRCDTE5
+AEPS1000  CALL      RKRCDTE5
+          BRANCH    OVRCD,AEPS7000
+          MATCH     ADAURNO,RCDTURNO
+          GOTO      AEPS7000 IF NOT EQUAL
+.
+          PACK      KEY17,RCDTRECN,RCDTTCNT
+          CALL      RDCMDEP1
+          BRANCH    OVRCD,AEPS1000            * Not released yet
+          MATCH     "0",CMDESTAT              * Check for Held deposit
+          GOTO      AEPS1000 IF NOT EQUAL
+.
+          MATCH     DAADMNO,RCDTVIST
+          GOTO      AEPS2000 IF EQUAL     * same visit number
+.
+          MATCH     SP70,RCDTVIST
+          GOTO      AEPS1000 IF NOT EQUAL
+          MOVE      RCDTREGI,KEY3
+          CALL      RDREGA1
+          BRANCH    OVRCD,AEPS1000
+          COMPARE   "90",REGIBACD
+          GOTO      AEPS1000 IF NOT EQUAL      * Not EMR Deposit register
+.
+AEPS2000  MATCH     SP70,RCDTVIST
+          IF        @EQUAL
+            MOVE      DAADMNO,RCDTVIST
+          ENDIF
+          PACK      RCDTINVN,SP4,PINVNO
+          PACK      RCDTUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",RCDTUDAT           * date updated
+          CLOCK     TIME,RCDTUTIM           * time updated
+          MOVE      USERID,RCDTUUID         * web user id
+          CALL      UPRCDTE5
+.
+          MOVE      RCDTAMNT,ATPATAMT
+          MOVE      CMDERECN,ATRECEPT
+.
+          MOVE      PINVADM,ATNUMB
+          MOVE      PINVNO,ATINVNO
+.
+          MOVE      TWO,ATRECTYP            *** RECORD TYPE CASH
+          MOVE      ONE,ATINVPRT            *** SET AS ALREADY PRINTED
+          MOVE      CMDETDAT,ATDDATE
+          MOVE      "PY",ATTYPE
+          MOVE      SP30,ATITEMNO
+          MOVE      SP3,ATMISGRP
+          MOVE      ONE,ATPAYTYP       ***** set up Payment TYPE
+.
+          MOVE      SP30,ATDDESC
+          MOVE      "PATIENT",ATDDESC
+          MULT      SEQ,ATPATAMT            **** MAKE IT NEGATIVE
+          MOVE      ATPATAMT,ATPATPOR
+          MOVE      ZERO,ATREBPOR
+          PACK      ATDTEFFD,PINVDTE
+          REP       " 0",ATDTEFFD
+          MOVE      SP70,ATDTBTCH
+          MOVE      SP70,ATDTSUBN
+          MOVE      SP70,ATDTEDAD
+          MOVE      SP70,ATDTSVTM
+          MOVE      ZERO,ATSPARE1
+          MOVE      ZERO,ATSPARE2
+          MOVE      SP70,ATSPARE
+          MOVE      SP70,ATDTCRST
+          MOVE      ZERO,ATDTSCHF
+          MOVE      SP70,ATDTRBRS
+          MOVE      SP70,ATDTPCOD
+          PACK      ATDTACOI,SP70       * After Care Override Indicator
+          PACK      ATDTDSOV,SP70       * Duplicate Service Override
+          PACK      ATDTSTXT,SP70       * Service Text
+          PACK      ATDTLSPN,SP70       * Location Specific Practice No(LSPN)
+          PACK      ATDTMPOV,SP70       * Multi Procedure Override
+          PACK      ATDTNMPT,SP70       * Number of Patients Seen
+          PACK      ATDTSDCD,SP70       * Self Deem Code (Cat Sd)
+          PACK      ATDTTDUR,SP70       * Time Duration (Mins)
+          PACK      ATDTROVR,SP70       * Restricted Override Code (Cat Ro)
+.
+.         Post this cash
+.
+AEPS4000  CALL      NXTTRANE                * Get the next transaction number
+.
+          PACK      KEY22,ATNUMB,ATINVNO,ATTRANS
+          CALL      RDADTRE1
+          COMPARE   ZERO,OVRCD
+          GOTO      AEPS4000 IF EQUAL         * already exist
+.
+.         Read the first record of Bank details file to get the payment type
+.         ie. Cash, Cheque
+.
+          PACK      KEY15,RCDTRECN,SP70
+          CALL      RSRCBDT1
+          CALL      RKRCBDT1
+          IF        OVRCD=0
+            MATCH     RCDTRECN,RCBDRECN      * Same receipt number?
+            IF        @EQUAL
+              MOVE      RCBDPCOD,ATDTPCOD
+            ENDIF
+          ENDIF
+.
+          CALL      WRDTRE1
+.
+          MOVE      "1",CMDESTAT            * set Deposit status to 'Applied'
+          PACK      CMDEAINV,SP4,ATINVNO,SP70
+.         PACK      CMDEREFD,PINVDTE
+          PACK      CMDEREFD,CCC,CYY,CMM,CDD,SP70    * set to current date
+          REP       " 0",CMDEREFD           * Date deposit applied
+          CALL      IBACLOCK
+          MOVE      CTIMEIS,CMDEREFT        * Time invoice is written to
+          CALL      UPCMDEP1
+.
+          OPEN      PATINVR1,"patinvrf"
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+          ADD       ATPATAMT,PINVPATA
+.
+.         Check if the invoice now balances
+.
+          MOVE      PINVAMT,TOTAMT       * Invoice amount +
+          ADD       PINVPATA,TOTAMT      * Patient payments +
+          ADD       PINVHFDA,TOTAMT      * H.F payments +
+          ADD       PINVOTHA,TOTAMT      * Other payments +
+          ADD       PINVJOUR,TOTAMT      * Journals = amount outstanding
+.
+          MOVE      "99999999",PINVBLCD  * Assume it doesn't balance
+.
+          COMPARE   ZERO,TOTAMT          * Does it balance ?
+          GOTO      AEPS6000 IF NOT EQUAL
+.
+.         Invoice is now balanced. Record the date that this occured
+.
+          PACK      PINVBLCD,CCC,CYY,CMM,CDD
+          REP       " 0",PINVBLCD
+.
+AEPS6000  PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT             * date updated
+          CLOCK     TIME,PTINUTIM             * time updated
+          MOVE      USERID,PTINUUID           * web user id
+.
+          CALL      UPINV1
+          PROC      FLAGDEBT                * set outstanding debt indicator
+.
+          MOVE      ANSB,FINTYPE
+          PACK      FINCODE,ANSA,SP20
+          MOVE      RCDTAMNT,FINAMT
+.         PACK      FINDATE,CCC,CYY,CMM,CDD
+          MOVE      PINVDTE,FINDATE
+          REP       " 0",FINDATE
+          MOVE      ONE,FINSYS
+          MOVE      SP6,FINSITE
+          MOVE      ZERO,FGSTFLAG
+.
+          MOVE      SP70,FINHOSP
+          OPEN      EMRVISA1,"emrvisaf"
+          OPEN      EMRSITA1,"emrsitaf"
+          MOVE      ATNUMB,KEY8
+          CALL      RDEMVIS1
+          IF        OVRCD=0
+            MOVE      EMVISITE,KEY3
+            CALL      RDEMSIT1
+            IF        OVRCD=0
+              MOVE      EMSTHSNO,FINHOSP
+            ENDIF
+          ENDIF
+          CALL      PATCALF
+          GOTO      AEPS1000
+.
+.         Check for any non banked deposits (unreleased cash)
+.
+AEPS7000  MOVE      ZERO,NBNKAMNT
+          PACK      KEY25,ADAURNO,SP70
+          CALL      RSRCDTE5
+AEPS7200  CALL      RKRCDTE5
+          BRANCH    OVRCD,AEPS8000
+          MATCH     ADAURNO,RCDTURNO
+          GOTO      AEPS8000 IF NOT EQUAL
+.
+          PACK      KEY17,RCDTRECN,RCDTTCNT
+          CALL      RDCMDEP1
+          COMPARE   ZERO,OVRCD
+          GOTO      AEPS7200 IF EQUAL       * has been released
+.
+          MATCH     DAADMNO,RCDTVIST
+          GOTO      AEPS7400 IF EQUAL
+          MATCH     SP70,RCDTVIST
+          GOTO      AEPS7200 IF NOT EQUAL
+.
+          MOVE      RCDTREGI,KEY3
+          CALL      RDREGA1
+          BRANCH    OVRCD,AEPS7200
+          COMPARE   "90",REGIBACD
+          GOTO      AEPS7200 IF NOT EQUAL      * Not EMR Deposit register
+.
+AEPS7400  MATCH     SP10,RCDTINVN          * Invoice number must be blank
+          GOTO      AEPS7200 IF NOT EQUAL
+          MATCH     SP10,RCDTRELD
+          GOTO      AEPS7200 IF NOT EQUAL   * has been released
+.
+          PACK      KEY12,RCDTRECN
+          CALL      RDRCBNK1
+          BRANCH    OVRCD,AEPS7200
+          MATCH     "1",RCBNSTAT            * check if cancelled
+          GOTO      AEPS7200 IF EQUAL
+.
+          ADD       RCDTAMNT,NBNKAMNT
+          PACK      RCDTINVN,SP4,CNEXTINV   * store the invoice number
+          PACK      RCDTUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",RCDTUDAT           * date updated
+          CLOCK     TIME,RCDTUTIM           * time updated
+          MOVE      USERID,RCDTUUID         * web user id
+          CALL      UPRCDTE5
+          GOTO      AEPS7200
+.
+AEPS8000  OPEN      PATINVR1,"patinvrf"
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+          BRANCH    OVRCD,AEPS9999
+          MOVE      NBNKAMNT,PINVPCSH       * pending cash
+          MULT      "-1",PINVPCSH
+.
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT             * date updated
+          CLOCK     TIME,PTINUTIM             * time updated
+          MOVE      USERID,PTINUUID           * web user id
+.
+          CALL      UPINV1
+          PROC      FLAGDEBT                * set outstanding debt indicator
+.
+AEPS9999  RETURN
++
+.***************************************************************************
+.         Subroutine to write a zero record to the invoice file
+.***************************************************************************
+EZER0000  CALL      CLPATINV                * clear Invoice variables
+.
+          MOVE      CNEXTINV,KEY8
+          MOVE      CNEXTINV,PINVNO
+.
+          PACK      PINVDTE,CCC,CYY,CMM,CDD
+          REP       " 0",PINVDTE
+...       MOVE      ZERO,PINVUR
+          MOVE      ONE,PINVSYS
+.
+...       MOVE      "99999999",PINVBLCD
+...       MOVE      "0",PTINCRST
+.
+          CALL      RDINV1
+          COMPARE   ZERO,OVRCD
+          GOTO      EZER9999 IF EQUAL
+.
+          PACK      PTINCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINCDAT             * date created
+          CLOCK     TIME,PTINCTIM             * time created
+          MOVE      USERID,PTINCUID           * web user id
+          CALL      WRINV1
+.
+EZER9999  RETURN
++
+.***************************************************************************
+.       (for JH - Title Surname Given-names)
+.***************************************************************************
+GNAM0000  CLEAR     PNAME
+          REP       ", ",PTITL
+          REP       ", ",PGNAME
+          REP       ", ",PSNAME
+          REP       ", ",PTMASNAM
+          RESET     PGNAME
+          RESET     PSNAME
+          RESET     PTMASNAM
+.
+          PACK      DIM6 WITH PTITL,SP2
+.
+.       Get the first non-blank character of the title
+.
+GNAM1000  CMATCH    SP1,DIM6
+          GOTO      GNAM1200 IF NOT EQUAL
+          BUMP      DIM6
+          GOTO      GNAM1000 IF NOT EOS
+.
+.       No title, name will be Given-names Surname
+.
+          IF        CFEETYP <> 9
+            APPEND    PGNAME,PNAME     * original
+          ELSE
+            APPEND    PTMASNAM,PNAME     * Singapore
+          ENDIF
+          GOTO      GNAM1800
+.
+.       Check for last non-blank in title, and append Given names there
+.
+GNAM1200   APPEND    DIM6,PNAME
+GNAM1400  CMATCH    SP1,PNAME
+          GOTO      GNAM1600 IF NOT EQUAL
+          BUMP      PNAME,-1
+          GOTO      GNAM1400 IF NOT EOS
+.
+.       Append given name at this point or Surname for JH
+.
+GNAM1600  APPEND    SP1,PNAME
+          IF        CFEETYP <> 9
+            APPEND    PGNAME,PNAME     * original
+          ELSE
+            APPEND    PTMASNAM,PNAME     * Singapore
+          ENDIF
+.
+.       Search for last non-blank in given names to append surname there
+.
+GNAM1800  CMATCH    SP1,PNAME
+          GOTO      GNAM1900 IF NOT EQUAL
+          BUMP      PNAME,-1
+          GOTO      GNAM1800 IF NOT EOS
+.
+.       No given name or title. Name will be just Surname
+.
+          CLEAR     PNAME
+          IF        CFEETYP <> 9
+            APPEND    PTMASNAM,PNAME     * original
+          ELSE
+            APPEND    PGNAME,PNAME     * Singapore
+          ENDIF
+          GOTO      GNAM2000
+.
+.       Append surname at this point or given name for JH
+.
+GNAM1900  APPEND    SP1,PNAME
+          IF        CFEETYP <> 9
+            APPEND    PTMASNAM,PNAME     * original
+          ELSE
+            APPEND    PGNAME,PNAME     * Singapore
+          ENDIF
+.
+.       Append spaces to make sure there are no characters leftover from
+.       previous names.
+.
+GNAM2000  APPEND    SP30,PNAME
+          APPEND    SP30,PNAME
+          RESET     PNAME
+GNAM9999  RETURN
++
+.***************************************************************************
+.* GETOUTX     Subroutine to get Outpatient Extra Information              *
+.***************************************************************************
+GETOUTX   MOVE       SP30,OCADESC
+.
+          PACK      KEY20,PVISITE,PVIDOCT,PVIDATE
+          CALL      RDCLIA1
+          IF        OVRCD = 1
+            CALL      RDPCLIA1
+            IF        OVRCD = 0
+              MATCH     PVISITE,OCASITE
+              IF        !@EQUAL
+                MOVE      ONE,OVRCD
+              ELSE
+                MATCH     PVIDOCT,OCACLIN
+                IF        !@EQUAL
+                  MOVE      ONE,OVRCD
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+          IF        OVRCD = 1
+            MOVE      "Unknown clinic",OCADESC
+            PACK      OCADESC,OCADESC,SP30
+            GOTO      GETOUTX9
+          ENDIF
+.
+GETOUTX9  RETURN
++
+.****************************************************************************
+.  EINVH000 - Set up invoice header for stationery templating
+.****************************************************************************
+EINVH000  OPEN      IBATMHA1,"ibatmhaf"
+          OPEN      IBATDET1,"ibatmdaf"
+.
+          MOVE      AECNAEIH,KEY6
+          CALL      RDIBTH1                   * read header detail file
+          BRANCH    OVRCD,EINVH900
+.
+          PACK      KEY12,AECNAEIH,SP6        * position on details file
+          CALL      RSIBDET1
+          CALL      RKIBDET1
+          BRANCH    OVRCD,EINVH900
+.
+          MATCH     AECNAEIH,IBDTSCOD         * match stationery codes
+          GOTO      EINVH950 IF EQUAL
+.
+.------ stationery code not on file ------
+.
+EINVH900  DISPLAY   *P1:24,*EL,*B:
+                    "User Defined Stationery Code not on File. ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+          GOTO      EINVH999
+.
+EINVH950  MOVE      ZERO,EXIT
+EINVH999  RETURN
++
+.****************************************************************************
+.  EINVT000 - Set up invoice tail for stationery templating
+.****************************************************************************
+EINVT000  OPEN      IBATMHA1,"ibatmhaf"
+          OPEN      IBATDET1,"ibatmdaf"
+.
+          MOVE      AECNAEIT,KEY6
+          CALL      RDIBTH1                   * read header detail file
+          BRANCH    OVRCD,EINVT900
+.
+          PACK      KEY12,AECNAEIT,SP6        * position on details file
+          CALL      RSIBDET1
+          CALL      RKIBDET1
+          BRANCH    OVRCD,EINVT900
+.
+          MATCH     AECNAEIT,IBDTSCOD         * match stationery codes
+          GOTO      EINVT950 IF EQUAL
+.
+.------ stationery code not on file ------
+.
+EINVT900  DISPLAY   *P1:24,*EL,*B:
+                    "User Defined Stationery Code not on File. ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+          GOTO      EINVT999
+.
+EINVT950  MOVE      ZERO,EXIT
+EINVT999  RETURN
++
+.****************************************************************************
+.  IINVH000 - Set up invoice header for stationery templating
+.****************************************************************************
+IINVH000  OPEN      IBATMHA1,"ibatmhaf"
+          OPEN      IBATDET1,"ibatmdaf"
+.
+          MOVE      PTCNPAIH,KEY6
+          CALL      RDIBTH1                   * read header detail file
+          BRANCH    OVRCD,IINVH900
+.
+          PACK      KEY12,PTCNPAIH,SP6        * position on details file
+          CALL      RSIBDET1
+          CALL      RKIBDET1
+          BRANCH    OVRCD,IINVH900
+.
+          MATCH     PTCNPAIH,IBDTSCOD         * match stationery codes
+          GOTO      IINVH950 IF EQUAL
+.
+.------ stationery code not on file ------
+.
+IINVH900  DISPLAY   *P1:24,*EL,*B:
+                    "User Defined Stationery Code not on File. ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+          GOTO      IINVH999
+.
+IINVH950  MOVE      ZERO,EXIT
+IINVH999  RETURN
++
+.****************************************************************************
+.  IINVT000 - Set up invoice tail for stationery templating
+.****************************************************************************
+IINVT000  OPEN      IBATMHA1,"ibatmhaf"
+          OPEN      IBATDET1,"ibatmdaf"
+.
+          READ      CONTROLF,NINTY8;*136,PTCNPAIH,*142,PTCNPAIT
+          MOVE      PTCNPAIT,KEY6
+          CALL      RDIBTH1                   * read header detail file
+          BRANCH    OVRCD,IINVT900
+.
+          PACK      KEY12,PTCNPAIT,SP6        * position on details file
+          CALL      RSIBDET1
+          CALL      RKIBDET1
+          BRANCH    OVRCD,IINVT900
+.
+          MATCH     PTCNPAIT,IBDTSCOD         * match stationery codes
+          GOTO      IINVT950 IF EQUAL
+.
+.------ stationery code not on file ------
+.
+IINVT900  DISPLAY   *P1:24,*EL,*B:
+                    "User Defined Stationery Code not on File. ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+          GOTO      IINVT999
+.
+IINVT950  MOVE      ZERO,EXIT
+IINVT999  RETURN
++
+.******************************************************************************
+SINVH000  BRANCH    PVITYPE,SINVH100,SINVH200
+.
+          CALL      IINVH000         * Inpatient
+          GOTO      SINVH999
+.
+SINVH100  CALL      EINVH000         * Emergency
+          GOTO      SINVH999
+.
+SINVH200  CALL      OINVH000         * Outpatient
+          GOTO      SINVH999
+.
+SINVH999  RETURN
++
+.******************************************************************************
+SINVT000  BRANCH    PVITYPE,SINVT100,SINVT200
+.
+          CALL      IINVT000          * Inpatient
+          GOTO      SINVT999
+.
+SINVT100  CALL      EINVT000          * Emergency
+          GOTO      SINVT999
+.
+SINVT200  CALL      OINVT000          * Outpatient
+          GOTO      SINVT999
+.
+SINVT999  RETURN
++

@@ -1,0 +1,137 @@
+.************************************************************************
+.*  Procedure: DGCLICOH  -  Send Cancel Discharge O/P Booking Details   *
+.*                                                                      *
+.*  Author   : Steve Armstrong  05/12/2012                              *
+.*                                                                      *
+.*  Requires : PATMA1FD (Patient Master & Extension)                    *
+.*             PMSPX2FD (Patient Master Extn.2)                         *
+.*             OUTBOAFD (Outpatients Clinic Session Booking)            *
+.*             OUTBB1FD (Outpatients Clinic Session Booking Table 2)    *
+.*                                                                      *
+.*  Requirement removed (V9.02.01)                                      *
+.*             PATCGPFD (Registered GP/Practice Changes)                *
+.*             PATNIDFD (Patient National ID Number)                    *
+.*             NHIMASFD (NZ Health Interface)                           *
+.*             PMIGTNID.PBL (Get the National ID Number)                *
+.*                                                                      *
+.*  Mods     :                                                          *
+.*                                                                      *
+.*  V11.00.01 06/11/2020  Davin             TSK 0890602                 *
+.*            Allow broadcast of A13 from HL7RECVR when ptcngosm=1      *
+.************************************************************************
+.*  V10.15.01 13/11/2019  Davin             TSK 0861253                 *
+.*            Added OUTTHIFD/CLOUTTHI/outthiaf for telehealth fields    *
+.************************************************************************
+.*  V10.03.02 06/06/2013  Steve Armstrong   CAR 268961                  *
+.*            Mods to populate H7CIRTAG & H7CISTAG                      *
+.*  V10.03.01 17/04/2013  Davin S          CAR 280425                   *
+.*            Changed IBCNUCIS - value 1 or greater will write trigger  *
+.*  V10.03.00  05/12/2012  Steve Armstrong   CAR 267173                 *
+.*             Created Include.                                         *
+.************************************************************************
+          DEFPROC   DGCLICOH
+.
+          INC       HL7CISFD/INC
+          INC       OUTCANFD/INC
+          INC       OUTRSHFD/INC
+          INC       OUTQUEFD/INC
+          INC       OUTTHIFD/INC
+          INC       PMSQPTFD/INC
+.
+CISMFLAG  FORM      1             * CIS message flag
+.                                    0 = don't send HL7 CIS message
+.                                    1 = send HL7 CIS message
+MESSAGID  DIM       20
+.
+DGCLI000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*133,IBCNUCIS
+          READ      CONTROLF,THIRTY2;*140,OTCNA13M
+          READ      CONTROLF,HUND28;*207,PTCNGOSM
+.                                    
+          MOVE      ZERO,CISMFLAG                * set default interface flag
+          MATCH     "1",IBCNUCIS                 * using CIS interface ?
+          IF        !@LESS
+            COMPARE   ONE,OTCNA13M               * yes - sending A13 ?
+            IF        @EQUAL
+              MOVE      ONE,CISMFLAG             * yes- set flag for CIS message
+            ENDIF   
+          ENDIF
+.   
+          COMPARE   ONE,CISMFLAG                 * sending message ?
+          GOTO      DGCLI999 IF NOT EQUAL        * no
+.
+          MATCH     "HL7RECVR",PRGID             * trigger from receiver ?
+          GOTO      DGCLI500 IF NOT EQUAL        * no - continue
+.
+          MATCH     "1",PTCNGOSM                 * allow broadcast ?
+          GOTO      DGCLI999 IF NOT EQUAL        * no - finished
+.
+.         We are sending IBA Proprietary and/or CIS HL7 messages, so
+.         first open the relevant holding tables
+.         
+DGCLI500  OPEN      HL7CISA1,"hl7cisaf"
+          OPEN      PMSQPTA1,"pmsqptaf"
+          OPEN      OUTQUEA1,"outqueaf"
+          OPEN      OUTTHIA1,"outthiaf"
+.
+          CALL      DGMESSID                     * get the unique message id
+.
+.         Write a record to pmsqptaf (holding patient details)
+.
+          MOVE      MESSAGID,PMQPMESI
+          MOVE      SP8,PMQPOURN
+          PACK      PMQPSPAR,SP30,SP30,SP20
+          CALL      WRPMQPT1
+.         
+.         Write a record to outqueaf (holding visit details)
+.
+          IF        OBAOUTNO = 0
+            CALL      CLOUTTHI
+          ELSE
+            PACK      KEY8,OBAOUTNO,SP70         * Outpatient Telehealth Info
+            CALL      RDOTTHI1
+            IF        OVRCD=1
+              CALL      CLOUTTHI
+            ENDIF
+          ENDIF
+.
+          CALL      CLOUTCAN
+          CALL      CLOUTRSH
+          MOVE      MESSAGID,OTQUMESG            
+          MOVE      SP20,OTQUSPAR
+          CALL      WROTQUE1
+.
+          MOVE      "A13",H7CIMETP
+          MOVE      HL7TRGID,H7CITRID
+          MOVE      HL7INCLD,H7CIINCL
+            MATCH     "HL7REGEN",PRGID
+            IF        @EQUAL
+              MOVE      HL7RCTAG,H7CIRTAG
+              MOVE      HL7SFTAG,H7CISTAG
+            ELSE
+              MOVE      SP20,H7CIRTAG
+              MOVE      SP3,H7CISTAG
+            ENDIF
+          CALL      WRCIS000                     * write hl7cisaf record
+.
+          CLOSE     HL7CISA1
+          CLOSE     PMSQPTA1
+          CLOSE     OUTQUEA1
+          CLOSE     OUTTHIA1
+.
+DGCLI999  GOTO      DGCLIEND                * end procedure
+.
+.      I/O's go in here
+.
+          INC       BRHLCOMN
+          INC       CLOUTTHI
+          INC       CLOUTCAN
+          INC       CLOUTRSH
+.
+          INC       HL7CISIO/INC
+          INC       IBAOVRIO/INC
+          INC       OUTQUEIO/INC
+          INC       OUTTHIIO/INC
+          INC       PMSQPTIO/INC
+.
+DGCLIEND  ENDPROC

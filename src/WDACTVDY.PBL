@@ -1,0 +1,288 @@
+.****************************************************************************
+.* Include Name    : WDACTVDY.PBL                                           *
+.*                                                                          *
+.* Function        : Calculate the number of days the ward/bed was active   *  
+.*                   for a given date range                                 *
+.*                                                                          *
+.* Author          : Steve Armstrong         13/12/1995                     *
+.*                                                                          *
+.* Requires        : Valid read on ward file record                         *
+.*                   ACTVFDTE  - Start Date of period  (CCYYMMDD)           *
+.*                   ACTVTDTE  - End Date of period    (CCYYMMDD)           *
+.*                   WDACTVVR - variables include                           *
+.*                   CALCDAYS                                               *
+.*                   DATECONV                                               *
+.*                   PATWBHA1 open                                          *
+.*                   ACTVWFLG - calculate active weekend bed days flag      *
+.*                                  0 = yes , 1 = no                        *
+.*                   ACTVPHL1, ACTVPHL2, ACTVPHL3, ACTVPHL4, ACTVPHL5       *
+.*                     - These are public holiday dates used for BIL66      *
+.*                                                                          *
+.* Returns         : ACTVDAYS - Number of days ward was active in period.   *
+.*                   ACTVBDAY - Number of active bed days for ward or bed in*
+.*                              period.                                     *
+.*                   ACTVWDAY - Weekend Active Bed Days                     *
+.*                   ACTVRTYP - Room type                                   *
+.*                   ACTVBCHG - Number of Beds Change Flag  (Ward Only)     *
+.*                                 0 = No change in period                  *
+.*                                 1 = Change in period                     *
+.*                   TOTBED - total beds in ward as at ACTVTDTE. (Ward Only)*
+.****************************************************************************
+.
+          DEFPROC   WDACTVDY
+.
+ACTVEDAT  FORM      8
+ACTVFLAG  FORM      1                            * finished flag
+.                                                   0 = not finished
+.                                                   1 = finished
+ACTVSDAT  FORM      8
+ACTVSTRT  DIM       8                            * start date (CCYYMMDD)
+SAVDATE   DIM       8
+SAVFLAG   FORM      1
+SAVBDNUM  FORM      3
+WORKDATE  DIM       8
+WORKDAYS  FORM      5
+.
+          MOVE      ZERO,TOTBED                  * initialise bed count
+          MOVE      ZERO,ACTVDAYS                * initialise active day count
+          MOVE      ZERO,ACTVBDAY                * initialise bed day count
+          MOVE      ZERO,ACTVWDAY                * initialise weekend day count
+          MOVE      ZERO,ACTVFLAG                * initialise end flag
+          MOVE      ZERO,ACTVBCHG                * initialise bed no. change
+          MOVE      ZERO,SAVFLAG                 * initialise saved flag
+          MOVE      ACTVFDTE,ACTVSTRT            * load start date
+.
+          PACK      KEY14,WWARD,WBED,ACTVSTRT
+          CALL      RDPTWBH1                     * record on file for first day
+.                                                  of period ?
+          IF        OVRCD = 1
+            CALL      RKPTWBH1                   * no - get next record
+            BRANCH    OVRCD,WDACTV80             * eof - no records on file
+.
+            MATCH     WWARD,WBHWARD              * same ward still ?
+            GOTO      WDACTV80 IF NOT EQUAL      * no - no records on file
+.
+            MATCH     WBED,WBHBED                * same bed record ?
+            GOTO      WDACTV80 IF NOT EQUAL      * no - no records on file
+          ENDIF
+          MOVE      ACTVSTRT,CDYSFDTE            * set fromdate to start date
+.
+.         A valid record has been found for the ward in the date range selected
+.
+WDACTV10  MATCH     WBHDATE,ACTVTDTE             * eff. date > end date ?
+          IF        @LESS
+            MOVE      ACTVTDTE,CDYSTDTE          * yes - set todate to end date
+            MOVE      ONE,ACTVFLAG               * set end flag to finished
+          ELSE
+            IF        @EQUAL
+              MOVE      ONE,ACTVFLAG             * set end flag to finished
+            ENDIF
+            MOVE      WBHDATE,CDYSTDTE           * set to date to eff. date
+          ENDIF
+.
+          BRANCH    WBHACTV,WDACTV20             * yes - ward inactive
+.
+.         Ward was active so calculate active days
+.
+          CALL      CALCDAYS                     * get diff in days
+          ADD       CDYSDAYS,ACTVDAYS            * load no. of days active
+          MATCH     SP3,WBED                     * ward header record ?
+          IF        @EQUAL
+            MOVE      WBHNOCC,TOTBED             * load beds in ward
+            ASSIGN    (ACTVBDAY + (CDYSDAYS * WBHNOCC)),ACTVBDAY    * yes
+            IF        ACTVWFLG = 0
+              CALL      WKEND000                 * get # of weekend days
+              ASSIGN    (ACTVWDAY + (WORKDAYS * WBHNOCC)),ACTVWDAY
+            ENDIF
+          ELSE
+            ASSIGN    (ACTVBDAY + CDYSDAYS),ACTVBDAY                * no
+            IF        ACTVWFLG = 0
+              CALL      WKEND000                 * get # of weekend days
+              ASSIGN    (ACTVWDAY + WORKDAYS),ACTVWDAY
+            ENDIF
+          ENDIF
+.
+.         See if there is a change in the number of beds during the period
+.
+          MATCH     SP3,WBED                     * ward header record ?
+          GOTO      WDACTV20 IF NOT EQUAL        * no
+.
+          IF        SAVFLAG = 1
+            COMPARE   SAVBDNUM,TOTBED            * yes - no. of beds changed ?
+            IF        !@EQUAL
+              MOVE      ONE,ACTVBCHG             * yes - set flag
+            ENDIF
+          ENDIF
+          MOVE      ONE,SAVFLAG                  * set saved bed no. flag
+          MOVE      TOTBED,SAVBDNUM              * save new bed number
+.
+WDACTV20  IF        ACTVFLAG = 1
+            MOVE      WBHRTYP,ACTVRTYP           * load room type
+            GOTO      WDACTV99                   * finished
+          ENDIF
+.
+          MOVE      WBHDATE,SAVDATE              * save eff. date
+.
+          CALL      RKPTWBH1                     * read next record
+          IF        OVRCD = 1
+            MOVE      ONE,ACTVFLAG               * eof - finished
+            GOTO      WDACTV50
+          ENDIF
+.
+          MATCH     WWARD,WBHWARD                * same ward still ?
+          IF        !@EQUAL
+            MOVE      ONE,ACTVFLAG               * no - finished
+            GOTO      WDACTV50
+          ENDIF
+.
+          MATCH     WBED,WBHBED                  * still ward only record ?
+          IF        !@EQUAL
+            MOVE      ONE,ACTVFLAG               * no - finished
+          ENDIF
+.
+.         Get the date for the day after the current "Last effective date"
+.         as this will be needed as the next start date, if the next
+.         record is a valid active record
+.
+WDACTV50  UNPACK    SAVDATE,CCENT,CYEAR,CMON,CDAY
+          MOVE      CCENT,CC                     * load parameters for DMYCON
+          MOVE      CYEAR,YY
+          MOVE      CMON,MM
+          MOVE      CDAY,DD
+          CALL      DMYCON                       * get julian day
+.
+          ADD       ONE,JULDAY                   * increment julian day by one
+.
+          MOVE      JULDAY,JWKDAY                * load parameters for JULCON
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON                       * get new date
+          PACK      CDYSFDTE,CC,YY,MM,DD         * load new start date
+          REP       " 0",CDYSFDTE
+.
+          BRANCH    ACTVFLAG,WDACTV70            * finished
+          GOTO      WDACTV10                     * validate record
+.
+WDACTV70  MOVE      CDYSFDTE,ACTVSTRT            * set start date
+.
+.         Either the "Last effective date" was < the period end date, or
+.         no records were found in the ward/bed history file for the selected 
+.         date range, so get the current status from the ward/bed file.  If
+.         the ward is active and there were no records found, then the number
+.         of active days is set to the total number of days in the period.  If
+.         the ward is inactive and there were no records found, the
+.         number of days will remain at zero.  If the ward is active and
+.         there were records found, then the total number of days is updated.
+.         If the ward is inactive and there were records found, then the 
+.         total will remain the same.
+.
+WDACTV80  BRANCH    WACTIVE,WDACTV99             * ward inactive
+.
+          MOVE      ACTVSTRT,CDYSFDTE            * load start of period 
+          MOVE      ACTVTDTE,CDYSTDTE            * load end of period as to date
+          CALL      CALCDAYS                     * get diff in days
+          ADD       CDYSDAYS,ACTVDAYS            * load no. of days active
+          MOVE      WOCCBED,TOTBED               * load beds in ward
+          MATCH     SP3,WBED
+          IF        @EQUAL
+            ASSIGN    (ACTVBDAY + (CDYSDAYS * WOCCBED)),ACTVBDAY
+            IF        ACTVWFLG = 0
+              CALL      WKEND000                 * get # of weekend days
+              ASSIGN    (ACTVWDAY + (WORKDAYS * WOCCBED)),ACTVWDAY
+            ENDIF
+          ELSE
+            ASSIGN    (ACTVBDAY + CDYSDAYS),ACTVBDAY
+            IF        ACTVWFLG = 0
+              CALL      WKEND000                 * get # of weekend days
+              ASSIGN    (ACTVWDAY + WORKDAYS),ACTVWDAY
+            ENDIF
+          ENDIF
+          MOVE      WRTYPE,ACTVRTYP              * load room type
+.
+          MATCH     SP3,WBED                     * ward header record ?
+          GOTO      WDACTV99 IF NOT EQUAL        * no - finished
+.
+          IF        SAVFLAG = 1
+            COMPARE   SAVBDNUM,TOTBED            * yes - no. of beds changed ?
+            IF        !@EQUAL
+              MOVE      ONE,ACTVBCHG             * yes - set flag
+            ENDIF
+          ENDIF
+          GOTO      WDACTV99
++
+.****************************************************************************
+.*                              WKEND000                                    *
+.*           Get the number of weekend days in date range                   *
+.* Requires: CDYSTDTE - start date                                          *
+.*           CDYSTDTE - end date                                            *
+.* Returns:  ACTVWDAY - number of weekend days in date range                *
+.****************************************************************************
+.
+WKEND000  MOVE      ZERO,WORKDAYS                * initialise day count
+          MOVE      CDYSFDTE,ACTVSDAT            * load start date
+          MOVE      CDYSFDTE,WORKDATE            * load working date
+          MOVE      CDYSTDTE,ACTVEDAT            * load end date
+.
+.         Loop through date range and update total of weekend days found
+.
+          WHILE     ACTVSDAT <= ACTVEDAT
+            UNPACK    ACTVSDAT,CCENT,CYEAR,CMON,CDAY
+            CALL      DATECONV                   * convert date to day number
+            BRANCH    EXIT,WKEND999              * year not set up in patyear
+.
+.           See if the date is a weekend day
+.
+            IF        WEEKDAY = 6 | WEEKDAY = 7
+              ADD       ONE,WORKDAYS             * weekend day so update total
+            ELSE
+              MATCH     WORKDATE,ACTVPHL1
+              IF        @EQUAL
+                ADD       ONE,WORKDAYS
+              ELSE
+                MATCH     WORKDATE,ACTVPHL2
+                IF        @EQUAL
+                  ADD       ONE,WORKDAYS
+                ELSE
+                  MATCH     WORKDATE,ACTVPHL3
+                  IF        @EQUAL
+                    ADD       ONE,WORKDAYS
+                  ELSE
+                    MATCH     WORKDATE,ACTVPHL4
+                    IF        @EQUAL
+                      ADD       ONE,WORKDAYS
+                    ELSE
+                      MATCH     WORKDATE,ACTVPHL4
+                      IF        @EQUAL
+                        ADD       ONE,WORKDAYS
+                      ENDIF
+                    ENDIF
+                  ENDIF
+                ENDIF
+              ENDIF
+            ENDIF
+.
+.           Get next day's date
+.
+            MOVE      ACTVSDAT,WORKDATE
+            UNPACK    WORKDATE,CCENT,CYEAR,CMON,CDAY
+            MOVE      CCENT,CC
+            MOVE      CYEAR,YY
+            MOVE      CMON,MM
+            MOVE      CDAY,DD
+            CALL      DMYCON
+.
+            ADD       ONE,JULDAY
+            MOVE      JULDAY,JWKDAY
+            MOVE      JULYR,JWKYER
+            MOVE      JULCC,JWKCC
+            CALL      JULCON
+.
+            PACK      WORKDATE,CC,YY,MM,DD
+            REP       " 0",WORKDATE
+            MOVE      WORKDATE,ACTVSDAT
+          DO
+.
+WKEND999  RETURN
+.
+WDACTV99  ENDPROC
++

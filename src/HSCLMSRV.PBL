@@ -1,0 +1,118 @@
+.***************************************************************************
+.*                               HSCLMSRV.PBL   (HosClaims)                *
+.*        Loop through the batch header file and check if any batches      *
+.*        that have been "extracted" have now been "sent", OR if any       *
+.*        "sent" files have now been "acknowledged".                       *
+.*                                                                         *
+.* Requires  :   Parameters read - PTCNEDIO                                *
+.*               Open files      - PATEBHA1, PATEBHA2, PATEDSA1, PATEDSA3  *
+.*                                                                         *
+.* Date      :   07/04/2004                                                *
+.* Author    :   Steve Armstrong                                           *
+.* Mods      :                                                             *
+.*        V9.09.01 15/11/2007  Steve Armstrong   CAR 154963                *
+.*                 Changed to use STCOUNTR (FORM2) instead of COUNTER      *
+.*                 FORM3) for looping.                                     *
+.***************************************************************************
+.
+HSCLMSRV  DISPLAY   *P1:24,*EL,"Checking and updating claim statuses... ";
+.
+          MOVE      ZERO,STCOUNTR
+          WHILE     STCOUNTR < 2
+            PACK      KEY10,STCOUNTR,SP10
+            CALL      RSPTEBH2                   * position in file
+HSCLM050    CALL      RKPTEBH2                   * read next record
+            BRANCH    OVRCD,HSCLM500             * eof - finished
+.
+            COMPARE   STCOUNTR,PTEHFLAG          * same status still ?
+            GOTO      HSCLM500 IF NOT EQUAL      * no - finished
+.
+.           Check that there is an extract filename present
+.
+            MATCH     PTEHEFNM,SP20              * blank extract name ?
+            GOTO      HSCLM050 IF EQUAL          * yes - ignore
+.
+.           Look in each of the inbound messenger directories (sent,ack & nack)
+.           to see if the extract file is present.  If found, then update the
+.           status of the batch according to which directory it was found in.
+.
+            MOVE      ZERO,FORM2
+HSCLM100    COMPARE   THREE,FORM2                * checked in nack directory ?
+            GOTO      HSCLM050 IF EQUAL          * yes - no status change
+.                                                        so get next record
+.
+            ADD       ONE,FORM2
+            LOAD      PATHDESC,FORM2,OUTPATH1:   * "sent"
+                                     OUTPATH2:   * "ack"
+                                     OUTPATH3    * "nack"
+            STRIP     PATHDESC
+.
+.           Load up the batch file name and path
+.
+            MOVE      PTCNEDIO,EXTRNAME
+            STRIP     EXTRNAME
+            ENDSET    EXTRNAME
+            APPEND    PATHDESC,EXTRNAME
+            APPEND    SLASH,EXTRNAME
+            APPEND    PTEHEFNM,EXTRNAME
+            RESET     EXTRNAME
+            STRIP     EXTRNAME
+            ENDSET    EXTRNAME
+            APPEND    ".txt",EXTRNAME
+            RESET     EXTRNAME
+.
+.           Check if the file exists in the corresponding directory
+.
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO             * set trap
+            OPEN      EXTRFILE,EXTRNAME
+            TRAPCLR   IO
+            BRANCH    OVRCD,HSCLM100             * trap sprung
+.
+.           The file exists, so update the status of the batch
+.           according to which directory it was found in:
+.                1 = found in "Sent"
+.                2 = found in "Ack"
+.                3 = found in "Nack"
+.
+            MOVE      PTEHBTHN,KEY8
+            CALL      RDPTEBH1                   * read record using index 1
+            BRANCH    OVRCD,HSCLM050             * not found - shouldn't happen
+.
+            MOVE      FORM2,PTEHFLAG             * load status
+            CALL      UPPTEBH1                   * update record
+.
+            CALL      CLSTA000                   * update the patedsaf status
+            GOTO      HSCLM050                   * get next record
+.
+HSCLM500    ADD       ONE,STCOUNTR               * increment counter
+          DO
+.
+HSCLM999  RETURN
++
+.*****************************************************************************
+.*                                CLSTA000         Caled by: HSCLMSRV        *
+.*   Update the status of the corresponding patedsaf records for this batch. *
+.*****************************************************************************
+.
+CLSTA000  PACK      KEY24,PTEHBTHN,SP30
+          CALL      RSPTEDS3                     * position on batch
+CLSTA050  CALL      RKPTEDS3                     * read next record
+          BRANCH    OVRCD,CLSTA999               * eof - finished
+.
+          MATCH     PTEHBTHN,PTESBATN            * same batch still ?
+          GOTO      CLSTA999 IF NOT EQUAL        * yes
+.
+.         A record for the current batch has been found, so update the status
+.         accordingly.
+.
+          PACK      KEY32,PTESFLAG,PTESHFND,PTESADMN,PTESINVN,PTESBATN
+          CALL      RDPTEDS1                     * record on file ?
+          BRANCH    OVRCD,CLSTA050               * no - shouldn't happen
+.
+          ASSIGN    (PTEHFLAG+2),PTESFLAG        * set status
+          CALL      UPPTEDS1                     * update record
+          GOTO      CLSTA050                     * get next record
+.
+CLSTA999  RETURN
++

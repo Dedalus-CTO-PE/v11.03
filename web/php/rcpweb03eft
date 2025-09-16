@@ -1,0 +1,169 @@
+#!/usr/bin/php
+<?php
+
+  /* 
+     rcpweb03eft
+     This is the command that connects to a pc-eftpos terminal client,
+     issues a payment request, and records the responses in the file
+     identified in argument 1
+ 
+     The message format used are based on PC-EFTOS document:
+     "PC-EFTPOS TCP/IP Interface Funtional Specification rel 1.30 July 2012"
+
+   v10.03.00 2012.12.18 Peter Mc    CAR 274932
+                        Original 
+  */
+
+  if (isset($_SERVER['HTTP_HOST']))
+  {
+    echo " <br />This page cannot be selected from a browser! ";
+    exit;
+  }
+ 
+  if ($argc < 2) exit;  // not enough arguments, abort immediately.
+
+  $ftxt = $argv[1];  // text file where the output goes
+
+
+  $pathinfo = pathinfo($ftxt);
+  $flog = ""; 
+  if (strlen($pathinfo['dirname']) > 0)
+    $flog .= $pathinfo['dirname']."/";
+  $basename = $pathinfo['basename'];  
+
+  if (strlen($pathinfo['extension']) < strlen($pathinfo['basename']))
+    $basename = substr($basename,0,-strlen($pathinfo['extension']));
+  $flog .= $basename."log";
+
+  if ($argc < 5)
+  {
+    writeTxt("Tx failed: missing amount, pinpad address or port number");
+    exit;
+  }
+
+  $ppamnt = $argv[2];  // amount in cents
+  $ppaddr = $argv[3];  // address of pc-eftpos client 
+  $ppport = $argv[4];  // and port to connect to
+  $mask   = $argv[5];  // eligible accounts chq,sav,cr
+
+
+  //writeTxt("Contacting pin pad...");
+
+  /* Create a TCP/IP socket. */
+  if (($socket = @socket_create(AF_INET, SOCK_STREAM, SOL_TCP)) === false)
+  {
+    writeTxt("Tx failed: reason: " . socket_strerror(socket_last_error()) );
+    exit;
+  }
+
+
+  if (($result = @socket_connect($socket, $ppaddr, $ppport)) === false)
+  {
+    writeTxt("Tx failed: reason: " . socket_strerror(socket_last_error($socket)) );
+    exit;
+  }
+
+  // send tx request 
+  $req = buildReq($ppamnt,$mask);
+  writeLog("send ".$req);
+
+  socket_write($socket,$req,strlen($req));
+
+  while (true)
+  {
+
+    $replyhdr  = socket_read($socket, 6);
+    if ($replyhdr === false) terminate($socket);
+
+    $len = substr($replyhdr,1,4) - 6;
+    $replyType = substr($replyhdr,5,1);
+
+    $replymsg = socket_read($socket,$len);
+    if ($replymsg === false) terminate($socket);
+
+    writeLog($replyhdr.$replymsg);
+
+    processReply($replyType,$len,$replymsg);
+
+    if ($replyType == "M") break;
+
+  }
+
+  socket_close($socket);
+
+
+function buildReq($ppamnt,$mask)
+{
+  $blanks = "";
+  for ($i = 0; $i < 40; $i++) $blanks .= "     ";
+  $cash  = "000000000"; // no cash advance 
+  $cents = sprintf("%09d",$ppamnt);
+  $fill1 = substr($blanks,0,22); 
+  $fill2 = substr($blanks,0,66); 
+  $req = "#0170M000P".$cash.$cents.$fill1."00".$fill2."00".$fill2;
+  $req = substr($req,0,158); // trim before PAD length in case I can't count
+
+  // the Purchase Analysis date is a group of following tags
+  $padlen = "009";
+  $las    = "LAS003$mask";  // Limited Acount Selection 
+
+  $req .= $padlen.$las;
+
+  return $req;
+}
+
+function processReply($replyType,$len,$replymsg)
+{
+  switch ($replyType)
+  {
+  case "M":  // transaction message 
+    $rc   = substr($replymsg,1,1);
+    $resp = substr($replymsg,4,20); 
+    $rcpt = substr($replymsg,83,6);  //Stan field 
+    $ref  = substr($replymsg,64,16);
+    $msg  = "Tx ".$resp; 
+    if ($rc == "1")            
+      $msg .= " auth=$rcpt";
+    writeTxt($msg);
+    break;  
+
+  case "S": // display event 
+    writeTxt(trim(substr($replymsg,5,40)));  
+    break;
+   
+  default:
+      writeTxt($replymsg);
+  }  
+}  
+
+function writeLog($msg)
+{
+  global $flog;
+
+  $fl = fopen($flog,"a");
+  fwrite($fl,$msg."\n");
+  fclose($fl);
+}
+
+function writeTxt($msg)
+{
+  global $ftxt;
+
+  $ft = fopen($ftxt,"a");
+  fwrite($ft,$msg."\n");
+  fclose($ft);
+  writeLog($msg);
+}
+
+function terminate($socket)
+{
+  $err = spcket_strerror(socket_last_error($socket));
+  if ($err == "Success") $err = "No response from pinpad";
+  $msg = "Tx failed: $err";
+  socket_close($socket);
+  writeLog("Program terminated by socket error");
+  writeTxt($msg);
+  exit;
+}
+  
+?>

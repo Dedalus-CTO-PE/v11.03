@@ -1,0 +1,4271 @@
+.******************************************************************************
+.* System         : Emergency/Private Practice                                *
+.* Program        : IBAEMR04.PBL                                              *
+.* Name           : Eclipse PCS (Store & Forward Claims Extract)              *
+.******************************************************************************
+.* Date           : 28/08/2018                                                *
+.* Author         : Steve Armstrong                                           *
+.* Function       : Extract Eclipse PCS (Store & Forward) Claims              *
+.*                  Loops through emrectaf table and loads any unextracted    *
+.*                  records into a temporary table from which they are then   *
+.*                  displayed to the user.  The user can select which records *
+.*                  to extract, then proceed with the extraction.             *
+.*                                                                            *
+.* Modifications  :                                                           *
+.*        V11.01.02 31/05/2021  Peter Vela       TSK 0906538                  *
+.*                  Fixed read of emrectaf in PROC0000                        *
+.*        V11.01.01 16/04/2021  Peter Vela       TSK 0899765                  *
+.*                  Added Linked Practice provider numbers at WVCH4000        *
+.*        V10.14.02 20/03/2019  J.Tan            TSK 0857392                  *
+.*                  Changed RCP Transaction count from DIM3 to DIM5           *
+.*        V10.14.01 19/02/2019  Peter Vela       TSK 0870678                  *
+.*                  Fixed Provider Number validation VPRN0000                 *
+.*                  LARY0000 missing                                          *
+.*                  22/01/2019  Steve Armstrong  TSK 0867807                  *
+.*                  Mods to source ReferralOverrideTypeCde (VCHSEG03) from    *
+.*                  prihreff.prhrrovr instead of pridtraf.prdtrovr.           *
+.******************************************************************************
+.*        V10.13.02 23/11/2018  Peter Vela       TSK 0863035                  *
+.*                  Added FieldQuantity (SRVSEG07)                            *
+.*                  22/10/2018  Steve Armstrong  TSK 0863035                  *
+.*                  - Mods to send PayeeProviderNum (CLMSEG23) for Private    *
+.*                    Practice invoices, based on the primary provider for    *
+.*                    the practice instead of the practice provider number.   *
+.*                  - Fixed WLOD0000 to include LISTRTYP & LISTFLAG.          *
+.*                  - Fixed issue with loading of Hospital Provider No where  *
+.*                    CAPPRVNO was being used for multi hospital instead of   *
+.*                    single hospital (and vica versa).                       *
+.*                  - Mods to cater for multiple vouchers/invoice.            *
+.*                  - Mods to only load ED procedures (ATRECTYP = 5).         *
+.*                  - Mods to check if ReferralOverrideTypeCde (VCHSEG03) is  *
+.*                    populated, before performing validations based on other *
+.*                    fields.                                                 *
+.*                  - Mods to default ReferralOverrideTypeCde (VCHSEG03) to   *
+.*                    "E" for ED records, only where there are no referral    *
+.*                    details.                                                *
+.*        V10.13.01 22/10/2018  Steve Armstrong  TSK 0863035                  *
+.*                  - Fixed loading of TimeOfService (VCHSEG02) to only use   *
+.*                    the first 5 characters of the field (HH:MM).            *
+.*                  - Removed mandatory requirement for ClaimantAddressLine2  *
+.*                    (CLMSEG07).                                             *
+.*                  - Removed default "N" setting of                          *
+.*                    MultipleProcedureOverrideInd (SRVSEG12) - now only set  *
+.*                    to "Y" when value is "1".                               *
+.*        V10.13.00 28/08/2018  Steve Armstrong  TSK 0859742                  *
+.*                  Program created based on IBAPRI07 and modified for PCS    *
+.*                  (Store & Forward) Extract.                                *
+.******************************************************************************
+
+          INC       STD001FD
+.
+          INC       AAEDTRFD/INC
+          INC       EMRECTFD/INC
+          INC       EMRECAFD/INC
+          INC       EMRIBHFD/INC
+          INC       EMRSITFD/INC
+          INC       EMRVISFD/INC
+          INC       IBACONFD/INC
+          INC       IBASEQFD/INC
+          INC       PMSCLTFD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATCRTFD/INC
+          INC       PATHSPFD/INC
+          INC       PATINVFD/INC
+          INC       PATMA1FD/INC
+          INC       PMSHCPFD/INC
+          INC       PMSHCLFD/INC
+          INC       PMSPX2FD/INC
+          INC       PRIDOCFD/INC
+          INC       PRIDTRFD/INC
+          INC       PRIHDBFD/INC
+          INC       PRIHREFD/INC
+          INC       PRIINVFD/INC
+          INC       PRIPRAFD/INC
+          INC       RCPDTEFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+          INC       WEBSECFD/INC
+.
+EXTFILE1  FILE      ASCII,FIXED=256
+.
+.
+.         Temporary File Definitions
+.         --------------------------
+.
+.         Unsorted Invoice Listing for Eclipse Extract
+.
+LSTTEMP1  IFILE SQL, FIXED=48, KEY="U1-8,9-16"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+LISTUNIQ  DIM       8           8           1       Unique Identifier
+LISTINVN  DIM       8           8           9       Invoice Number
+LISTURNO  DIM       8           8          17       U/R Number
+LISTDATE  DIM       8           8          25       Invoice Date (ccyymmdd)
+LISTAMNT  FORM      12.2        8          33       Outstanding Invoice Amount
+LISTFLAG  FORM      1           2          41       Extract Flag
+.                                                     0 = Extract
+.                                                     1 = Don't extract
+LISTHOSP  DIM       3           3          43       Hospital Code
+LISTRTYP  FORM      1           2          46       Record Type
+.                                                     1 = Emergency
+.                                                     2 = Private Practice
+.End of Record                             48
+.
+.
+.         Visit Deposits
+.
+DEPTEMP2  IFILE SQL, FIXED=17, KEY="U1-8"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+VDEPINVN  DIM       8           8           1       Invoice Number
+VDEPAMNT  FORM      12.2        8           9       Deposit Amount
+.
+.End of Record                             17
+.
+.
+.         Sorted Invoice Listing for Extraction
+.         - will contain a record for each pridtraf/aaedtref item record for
+.           the single invoice being processed, sorted by the service date,
+.           which represents a Voucher
+.
+SRTTEMP3  IFILE SQL, FIXED=15, KEY="U1-8,9-14"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+SORTSDAT  DIM       8            8          1       Item Service Date (ccyymmdd)
+SORTTRAN  DIM       6            6          9       Transaction Number
+.                                                      (pridtraf.prdttran)
+.                                                      (aaedtref.attrans)
+. End of Record                            15
+.
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+BATCHNUM  DIM       8
+CALLPOSN  FORM      1
+CLMARRAY  FORM      1[3]          * claim type array
+.                                     0 = No capability
+.                                     1 = Capability
+.                                     element 1 = AG
+.                                     element 2 = SC
+.                                     element 3 = MB
+CMDLINE   DIM       100
+COUNTER   FORM      2
+CURRDATE  DIM       8             * Current date (ccyymmdd)
+.
+DATEVAR1  DATE      8
+DATEVAR2  DATE      8
+DIGIT01   FORM      1             * Medicare Number digit variables
+DIGIT02   FORM      1
+DIGIT03   FORM      1
+DIGIT04   FORM      1
+DIGIT05   FORM      1
+DIGIT06   FORM      1
+DIGIT07   FORM      1
+DIGIT08   FORM      1
+DIGIT09   FORM      1
+DIGNUM01  DIM       1
+DIGNUM02  DIM       1
+DIGNUM03  DIM       1
+DIGNUM04  DIM       1
+DIGNUM05  DIM       1
+DIGNUM06  DIM       1
+DIGNUM07  DIM       1
+DIGNUM08  DIM       1
+DIGNUM09  DIM       1
+DIM2A     DIM       2
+DIM2B     DIM       2
+DIM4      DIM       4
+DIM5      DIM       5
+DIM6      DIM       6
+DIM6A     DIM       6
+DIM6B     DIM       6
+DIM7      DIM       7
+DIM8      DIM       8
+DIM8A     DIM       8
+DIM8B     DIM       8
+DIM9      DIM       9
+DIM10     DIM       10
+DIM15     DIM       15
+DPAMOUNT  FORM      12.2
+.
+ERRCT     FORM      6             * Error counter
+ERRFLG    FORM      1             * Error flag
+ERRMSG    DIM       90            * Error message
+.
+FIELD     FORM      2
+FIELDCNT  FORM      1
+FIELDESC  DIM       23
+FILENAME  DIM       8
+FIRSTREC  FORM      1             * first record flag
+.                                     0 = no
+.                                     1 = yes
+FLAGDIM3  DIM       3
+FORM12P2  FORM      12.2
+FORM3     FORM      3
+FORM5     FORM      5
+FORM8     FORM      8
+FORMTOT   FORM      3
+.
+HOSPCODE  DIM       3
+.
+INCLFLAG  FORM      1             * include flag
+.                                     0 = include all
+.                                     1 = exclude all
+ITMCOUNT  FORM      2             * item count
+.
+LISTARRY  DIM       54[60]
+LONGFNAM  DIM       10
+LSTCOUNT  FORM      2
+.
+PLVCARRY  DIM       1[22]         * PLV character array
+PLVNARRY  FORM      2[22]         * PLV numeric array
+PROVARRY  DIM       1[8]          * provider number character array
+PRVNARRY  FORM      2[7]          * provider number numeric array
+PROVFLAG  FORM      1             * provider flag
+.                                      1 = Hospital Facility
+.                                      4 = Doctor Provider
+.
+RECCNT    FORM      6
+.
+SAVBTHN   DIM       8
+SAVEHOSP  DIM       3
+SAVESDAT  DIM       8
+SAVKEY30  DIM       30
+SAVPRVBN  DIM       8
+SAVELVIS  DIM       8
+SEGFIELD  DIM       2
+SEGMTYPE  DIM       3
+SERVTXT1  DIM       50
+SERVTXT2  DIM       50
+.
+TEMPFILA  DIM       8
+TEMPFILB  DIM       8
+TEMPFILC  DIM       8
+TMPKEY    DIM       16[17]
+TOTAMTCT  FORM      12.2
+.
+VALDFLG   FORM      1             * Validation flag
+VCHCOUNT  FORM      2
+.
+WRTCT     FORM      6             * Write counter
+.
+. PROGRAM CONSTANTS
+. -----------------
+ALPTOBLK  INIT      "' - A B C D E F G H I J K L M N O P Q R S T U V W X Y Z "
+.
+CATic     INIT      "ic"
+CATro     INIT      "ro"
+CATRF     INIT      "RF"
+CATst     INIT      "st"
+CATSd     INIT      "Sd"
+CATta     INIT      "ta"
+CODEAG    INIT      "AG"
+CODESC    INIT      "SC"
+CODEMB    INIT      "MB"
+CODEMO    INIT      "MO"
+.
+ERASE     INIT      "iserase "
+.
+ISBUILD   INIT      "isbuild "
+.
+PIPE      INIT      "|"
+.
+TILDA01   INIT      "~"
+TILDA40   INIT      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+TXT       INIT      ".txt"
+.
+UKEYA     INIT      " 48 U1-8,9-16"
+UKEYB     INIT      " 17 U1-8"
+UKEYC     INIT      " 15 U1-8,9-14"
+.
+. ----- Eclipse Data Variables -----
+.
+. HDR segment       Len    Pos
+.-------------      ---    ---
+.~        DIM       1      1
+.HDR      DIM       3      2
+HDRSEG01  DIM       8      5     * Batch Number
+HDRSEG02  DIM       8      13    * Location Id
+HDRSEG03  DIM       10     21    * Certificate Id
+HDRSEG04  DIM       60     31    * Sender Id
+HDRSEG05  DIM       1      91    * Test/Production Flag (T/P)
+. End of Segment           93
+.
+. CLM segment       Len    Pos
+.-------------      ---    ---
+.~        DIM       1      1
+.CLM      DIM       3      2
+CLMSEG01  DIM       1      5     * AccountPaidInd
+CLMSEG02  DIM       9      6     * AccountReferenceId
+CLMSEG03  DIM      30     15     * BankAccountName
+CLMSEG04  DIM       9     45     * BankAccountNum
+CLMSEG05  DIM       6     54     * BSBCode
+CLMSEG06  DIM      40     60     * ClaimantAddressLine1
+CLMSEG07  DIM      40    100     * ClaimantAddressLine2
+CLMSEG08  DIM      40    140     * ClaimantAddressLocality
+CLMSEG09  DIM       4    180     * ClaimantAddressPostcode
+CLMSEG10  DIM       8    184     * ClaimantDateOfBirth
+CLMSEG11  DIM      40    192     * ClaimantFamilyName
+CLMSEG12  DIM      40    232     * ClaimantFirstName
+CLMSEG13  DIM      10    272     * ClaimantMedicareCardNum
+CLMSEG14  DIM       1    282     * ClaimantReferenceNum
+CLMSEG15  DIM       1    283     * ClaimSubmissionAuthorised
+CLMSEG16  DIM      10    284     * ContactPhoneNum
+CLMSEG17  DIM       8    294     * DateOfLodgement
+CLMSEG18  DIM       8    302     * PatientDateOfBirth
+CLMSEG19  DIM      40    310     * PatientFamilyName
+CLMSEG20  DIM      40    350     * PatientFirstName
+CLMSEG21  DIM      10    390     * PatientMedicareCardNum
+CLMSEG22  DIM       1    400     * PatientReferenceNum
+CLMSEG23  DIM       8    401     * PayeeProviderNum
+CLMSEG24  DIM       8    409     * ServicingProviderNum
+CLMSEG25  DIM       6    417     * TimeOfLodgement
+CLMSEG26  DIM      24    423     * TransactionId
+CLMSEG27  DIM      1     447     * Module Emergency (1) or Private Practice (2)
+. End of Segment         448
+.
+.
+. VCH segment       Len    Pos
+.-------------      ---    ---
+.~        DIM       1      1
+.VCH      DIM       3      2
+VCHSEG01  DIM       8      5     * DateOfService
+VCHSEG02  DIM       4     13     * TimeOfService
+VCHSEG03  DIM       1     17     * ReferralOverrideTypeCde
+VCHSEG04  DIM       8     18     * ReferringProviderNum/RequestingProviderNum
+VCHSEG05  DIM       8     26     * ReferralIssueDate/RequestIssueDate
+VCHSEG06  DIM       1     34     * ReferralPeriodTypeCde
+VCHSEG07  DIM       1     35     * RequestTypeCde
+. End of Segment          36
+.
+.
+. SRV segment       Len    Pos
+.-------------      ---    ---
+.~        DIM       1      1
+.SRV      DIM       3      2
+SRVSEG01  DIM      12      5     * AccessionDateTime
+SRVSEG02  DIM       1     17     * AfterCareOverrideInd
+SRVSEG03  DIM      12     18     * CollectionDateTime
+SRVSEG04  DIM       7     30     * ChargeAmount
+SRVSEG05  DIM       1     37     * DuplicateServiceOverrideInd
+SRVSEG06  DIM       5     38     * EquipmentId
+SRVSEG07  DIM       2     43     * FieldQuantity
+SRVSEG08  DIM       1     45     * HospitalInd
+SRVSEG09  DIM       5     46     * ItemNum
+SRVSEG10  DIM       5     51     * SCPId
+SRVSEG11  DIM       6     56     * LSPNum
+SRVSEG12  DIM       1     62     * MultipleProcedureOverrideInd
+SRVSEG13  DIM       2     63     * NoOfPatientsSeen
+SRVSEG14  DIM       7     65     * PatientContribAmt
+SRVSEG15  DIM       2     72     * RestrictiveOverrideCde
+SRVSEG16  DIM       1     74     * Rule3ExemptInd
+SRVSEG17  DIM       1     75     * S4B3ExemptInd
+SRVSEG18  DIM       2     76     * SelfDeemedCde
+SRVSEG19  DIM      50     78     * ServiceText
+SRVSEG20  DIM       3    128     * TimeDuration
+. End of Segment         131
+.
+.
+.
+PRGID     INIT      "IBAEMR04"
+PRGNAM    INIT      "Eclipse PCS (Store and Forward) Extract"
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                   MAIN0000                                 *
+.*                                 Main Module                                *
+.******************************************************************************
+.
+MAIN0000  CALL      INIT0000                * Initialise variables & open files
+          CALL      CTMP0000                * Create tempfiles
+.
+MAIN0500  CALL      GHSP0000                * get hospital code
+          BRANCH    EXIT,MAIN9999           * nothing/exitchar entered
+.
+MAIN1500  CALL      OPTN0000                * Choose main option
+          BRANCH    EXIT,MAIN8000           * exit selected
+          BRANCH    COPTION,MAIN2000        * S&F Extract
+.
+MAIN2000  CALL      HEAD0000                * Print report header
+          CALL      CLER0000                * clear temp file records
+          CALL      RERR0000                * reset any error records
+          CALL      LOAD0000                * load emrectaf records to temp file
+          CALL      DCLM0000                * display waiting records
+          BRANCH    EXIT,MAIN8000           * cancel selected
+.
+          CALL      VALD0000                * Validate the tempfile
+          CALL      QUES0000                * Extract question
+          BRANCH    EXIT,MAIN8000
+.
+          CALL      WRIT0000                * Write to the files
+.
+MAIN8000  CALL      TAIL0000                * Print report tail
+.
+MAIN9000  CALL      KILL0000                * Kill tempfile
+.
+MAIN9999  CHAIN     PGM
++
+.******************************************************************************
+.*                                  INIT0000              Called by: MAIN0000 *
+.*                       Initialise Variable & Open Files                     *
+.******************************************************************************
+.
+INIT0000  CALL      DISPHEAD                * Display screen heading
+.
+          DISPLAY   *P56:24,"Opening controlf"
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"aaedtref"
+          OPEN      AAEDTRE1,"aaedtref"
+          OPEN      AAEDTRE4,"aaedtref"
+.
+          DISPLAY   *P64:24,"emrecaaf"
+          OPEN      EMRECAA1,"emrecaaf"
+.
+          DISPLAY   *P64:24,"emrectaf"
+          OPEN      EMRECTA1,"emrectaf"
+.
+          DISPLAY   *P64:24,"emribhaf"
+          OPEN      EMRIBHA1,"emribhaf"
+.
+          DISPLAY   *P64:24,"emrsitaf"
+          OPEN      EMRSITA1,"emrsitaf"
+.
+          DISPLAY   *P64:24,"emrvisaf"
+          OPEN      EMRVISA1,"emrvisaf"
+.
+          DISPLAY   *P64:24,"patcodes"
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patcrtaf"
+          OPEN      PATCRTA1,"patcrtaf"
+.
+          DISPLAY   *P64:24,"pathspaf"
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P64:24,"patinvrf"
+          OPEN      PATINVR1,"patinvrf"
+.
+          DISPLAY   *P64:24,"patma1af"
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"pmshcpaf"
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          DISPLAY   *P64:24,"pmshclaf"
+          OPEN      PMSHCLA1,"pmshclaf"
+.
+          DISPLAY   *P64:24,"pmspx2af"
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          DISPLAY   *P64:24,"pridoctf"
+          OPEN      PRIDOCT1,"pridoctf"
+.
+          DISPLAY   *P64:24,"pridtraf"
+          OPEN      PRIDTRA1,"pridtraf"
+          OPEN      PRIDTRA4,"pridtraf"
+.
+          DISPLAY   *P64:24,"pmscltaf"
+          OPEN      PMSCLTA1,"pmscltaf"
+.
+          DISPLAY   *P64:24,"prihdbtf"
+          OPEN      PRIHDBT2,"prihdbtf"
+.
+          DISPLAY   *P64:24,"prihreff"
+          OPEN      PRIHREF1,"prihreff"
+.
+          DISPLAY   *P64:24,"priinvof"
+          OPEN      PRIINVO1,"priinvof"
+.
+          DISPLAY   *P64:24,"pripracf"
+          OPEN      PRIPRAC1,"pripracf"
+.
+          DISPLAY   *P64:24,"rcpdteaf"
+          OPEN      RCPDTEA3,"rcpdteaf"
+.
+          DISPLAY   *P64:24,"websecaf"
+          OPEN      WEBSECA3,"websecaf"
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,TEN;*79,CAPPRVNO
+          READ      CONTROLF,HUND10;*115,PTCNUEDI,*116,PTCNEDIH
+          READ      CONTROLF,HUND14;*145,PTCNCLID
+          READ      CONTROLF,HUND24;*222,PTCNUESF
+          READ      CONTROLF,HUND27;*1,PTCNESFO,*121,PTCNUTPS
+.
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          CLOCK     TIME,CTIMEIS
+.
+          MOVE      ONE,VALDFLG                  * set validation flag
+.
+          CALL      LARY0000                     * load PLV arrays
+.
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                  OPTN0000              Called by: MAIN0000 *
+.*                                Select Option                               *
+.******************************************************************************
+.
+OPTN0000  HLINE     *G37,2,63,80
+          DISPLAY   *P40:4,*EF:
+                    *P1:6,*V2LON,"0",*HOFF," = Exit":
+                    *P1:7,*V2LON,"1",*HOFF," = Create PCS (Store & Forward) ":
+                    "Extract ":
+                    *P1:9,"Select Option : ";
+.
+OPTN1000  KEYIN     *P17:9,*V2LON,COPTION;
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes - finished
+.
+          BRANCH    COPTION,OPTN2000             * PCS extract
+.
+          BEEP
+          GOTO      OPTN1000
+.
+OPTN2000  COMPARE   ONE,PTCNUEDI
+          IF        !@EQUAL
+            MOVE      "GEN.11-Hospital not using the EDI Module",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      OPTN9500
+          ENDIF
+.
+          MATCH     "1",PTCNUESF
+          IF        !@EQUAL
+            MOVE      "GEN.12-PCS Claiming not available",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      OPTN9500
+          ENDIF
+.
+          MATCH     SP70,PTCNESFO
+          IF        @EQUAL
+            MOVE      "GEN.13-Eclipse PCS Outbound Path blank",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      OPTN9500
+          ENDIF
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                                 GHSP0000        Called by: MAIN0000       *
+.*               Get the user to keyin a hospital code                       *
+.* Returns: EXIT   0 = Valid Hospital selected                               *
+.*                 1 = nothing, exitchar or spaces input                     *
+.*          HOSPCODE - 3 character hospital code                             *
+.*****************************************************************************
+.
+GHSP0000  HLINE     *G37,2,63,80
+          MOVE      FOUR,EVERT
+          MOVE      TEN2,ECOL
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND
+          MOVE      ZERO,CKYIMODE
+.
+          DISPLAY   *P1:3,*EF,*P1:4,"Hospital :":
+                    *P1:24,"(",*V2LON,EXITCHAR,*HOFF," to exit)"
+          CALL      PATHSPKY
+          BRANCH    EXIT,GHSP8000:               * nothing input
+                         GHSP9100:               * exitchar input
+                         GHSP8000                * spaces input
+.
+.         Valid hospital entered
+.
+          DISPLAY   *P16:4,PTHSNAME;
+          GOTO      GHSP9000
+.
+GHSP8000  DISPLAY   *P16:4,*V2LON,"All"
+.
+GHSP9000  MOVE      KEY3,HOSPCODE
+          MOVE      ZERO,EXIT
+          GOTO      GHSP9999
+.
+GHSP9100  MOVE      ONE,EXIT
+.
+GHSP9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000              Called by: MAIN0000 *
+.*                             Print Report Header                            *
+.******************************************************************************
+.
+HEAD0000  CALL      HEAD132
+.
+          PRINT     *N,*1,"PCS"
+.
+          CALL      UND132
+          PRINT     *1,PIPE,*3,"Invoice",*12,PIPE,*14,"U/R No.",*23,PIPE:
+                    *25,"Item",*35,PIPE,*37,"Error",*132,PIPE
+          CALL      UND132
+          MOVE      EIGHT,CLNO
+.
+HEAD9000  MOVE      ZERO,EXIT
+.
+HEAD9999  RETURN
++
+.******************************************************************************
+.*                                  VALD0000              Called by: MAIN0000 *
+.*                   Validate the invoice records on the temp file            *
+.******************************************************************************
+.
+.         Initialise counters
+.
+VALD0000  MOVE      ZERO,RECCNT                  * init. invoice record count
+          MOVE      ZERO,ERRCT                   * init. error count
+.
+          CALL      GDEP0000                     * get invoice deposits
+.
+          MOVE      ZERO,TOTAMTCT                * clear total amount counter
+          MOVE      ZERO,WRTCT
+          DISPLAY   *P1:24,*EL,"Validating : ";
+.
+          MOVE      SP20,KEY16
+          CALL      RSTEMP1                      * position at start of file
+VALD0500  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,VALD9999               * eof - finished
+.
+          BRANCH    LISTFLAG,VALD0500            * excluded from extract
+.
+          MOVE      ZERO,ERRFLG                  * initialise error flag
+          ADD       ONE,RECCNT                   * incr. invoice record count
+.
+.         Get the original emrectaf record
+.
+          PACK      KEY30,LISTHOSP,SP1,ZERO,LISTRTYP,LISTUNIQ,LISTINVN,SP30
+          CALL      RDEMECT1                     * record on file ?
+          IF        OVRCD = 1
+            MOVE      "GEN.1-Matching emrectaf record not found",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VALD0500
+          ENDIF
+.
+          MOVE      LISTURNO,KEY8
+          CALL      RDMAST1                      * pmi master record found ?
+          IF        OVRCD = 1
+            MOVE      "GEN.7-Missing patma1af record",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VALD9000
+          ENDIF
+.
+          MOVE      LISTURNO,KEY8
+          CALL      RDPMPX21                     * pmi extension found ?
+          IF        OVRCD = 1
+            MOVE      "GEN.8-Missing pmspx2af record",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VALD9000
+          ENDIF
+.
+          IF        LISTRTYP = 2
+            MOVE      LISTUNIQ,KEY8
+            CALL      RDPRHD2                      * header record on file ?
+            IF        OVRCD = 1
+              MOVE      "GEN.2-Missing prihdbtf record",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      VALD9000
+            ENDIF
+          ENDIF
+.
+.         Now get the first pridtraf/aaedtref record for the invoice
+.
+          MATCH     "1",EMECMODL                 * ED record ?
+          GOTO      VALD3000 IF NOT EQUAL        * no - PRI record
+.
+.         ED Record
+.
+          PACK      KEY23,LISTINVN,SP70
+          CALL      RDSDTRE4                     * position before invoice
+VALD1500  CALL      RDKDTRE4                     * read next record
+          BRANCH    OVRCD,VALD8000               * eof - finished
+.
+          MATCH     LISTINVN,ATINVNO             * same invoice still ?
+          GOTO      VALD8000 IF NOT EQUAL        * no - finished
+.
+          IF        ATRECTYP <> 5
+            GOTO      VALD1500
+          ENDIF
+.
+          MOVE      LISTUNIQ,FORM8
+          COMPARE   FORM8,ATNUMB                 * same visit ?
+          IF        !@EQUAL
+            MOVE      "GEN.17-Visit inconsistency for aaedtref record",ERRMSG
+            MOVE      ATITEMNO,DIM9
+            CALL      PERR0000
+            GOTO      VALD1500
+          ENDIF
+.
+.         Get the corresponding emrvisaf and emrsitaf records
+.
+          MOVE      LISTUNIQ,KEY8
+          CALL      RDEMVIS1                     * visit record on file ?
+          IF        OVRCD = 1
+            MOVE      "GEN.18-Visit record not on file",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VALD0500
+          ENDIF
+.
+          MOVE      EMVISITE,KEY3
+          CALL      RDEMSIT1                     * site record on file ?
+          IF        OVRCD = 1
+            MOVE      "GEN.19-Site record not on file",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VALD0500
+          ENDIF
+.
+          MOVE      EMECINVN,KEY8
+          CALL      RDINV1                     * ED invoice on file ?
+          IF        OVRCD = 1
+            MOVE      "GEN.20-Emergency invoice ",ERRMSG
+            ENDSET    ERRMSG
+            SQUEEZE   KEY8
+            APPEND    KEY8,ERRMSG
+            APPEND    " not on file",ERRMSG
+            RESET     ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VALD0500
+          ENDIF
+.
+          GOTO      VALD4000                     * process record
+.
+.         PRI Record
+.
+VALD3000  PACK      KEY22,LISTINVN,SP30
+          CALL      RSPRDT4                      * position before invoice
+VALD3500  CALL      RKPRDT4                      * read next record
+          BRANCH    OVRCD,VALD8000               * eof - finished
+.
+          MATCH     LISTINVN,PRDTINVN            * same invoice still ?
+          GOTO      VALD8000 IF NOT EQUAL        * no - finished
+.
+          COMPARE   ONE,PRDTRTYP                 * item record ?
+          GOTO      VALD3500 IF NOT EQUAL        * no - ignore record
+.
+.         Get the corresponding prihreff record now that we have the patient
+.         indicator
+.
+          PACK      KEY27,PRDTUNIQ,PRDTPRAC,PRDTDOCT,PRDTCODE
+          CALL      RDPRHR1
+          IF        OVRCD = 1
+            MOVE      "GEN.3-Missing prihreff record",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VALD9000
+          ENDIF
+.
+          MOVE      EMECINVN,KEY8
+          CALL      RDPRIN1
+          IF        OVRCD = 1
+            MOVE      "GEN.21-Private Practice invoice ",ERRMSG
+            ENDSET    ERRMSG
+            SQUEEZE   KEY8
+            APPEND    KEY8,ERRMSG
+            APPEND    " not on file",ERRMSG
+            RESET     ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VALD0500
+          ENDIF
+.
+.         Process the record for the claim
+.
+VALD4000  DISPLAY   *P15:24,*V2LON,LISTINVN,SP2,LISTUNIQ;
+.
+          IF        RECCNT = 1
+            CALL      WHDR0000                   * write header details
+          ENDIF
+.
+          CALL      CLPMSCLT                     * yes - clear claimant details
+          PACK      KEY9,EMECMODL,EMECINVN
+          CALL      RDPMCLT1                     * claimant details on file ?
+.
+          CALL      WCLM0000                     * write claim details
+.
+          CALL      CLRB0000                     * clear sort tempfile
+          CALL      LODS0000                     * load sort tempfile
+.
+.         Process all the service items for the current invoice and write
+.         the relevant voucher and service segment records
+.
+          CALL      PITM0000
+.
+          CALL      WTLR0000                     * write trailer record
+          GOTO      VALD9000
+.
+.         There were no PCS charges to be processed
+.
+VALD8000  MOVE      "GEN.4-No billing transactions for invoice ",ERRMSG
+          ENDSET    ERRMSG
+          APPEND    LISTINVN,ERRMSG
+          RESET     ERRMSG
+          MOVE      SP9,DIM9
+          CALL      PERR0000
+.
+.         Check if there were any errors associated with processing
+.         the emrectaf record
+.
+VALD9000  COMPARE   ONE,ERRFLG                   * any errors ?
+          IF        @EQUAL
+            MOVE      ONE,EMECFLAG               * yes
+            CALL      UPEMECT1                   * update error flag
+          ENDIF
+.
+          GOTO      VALD0500                     * get next temp record
+.
+VALD9999  RETURN
++
+.******************************************************************************
+.*                                  QUES0000              Called by: MAIN0000 *
+.*                              Extract Question                              *
+.******************************************************************************
+.
+QUES0000  DISPLAY   *P1:19,*EF:
+                    *P1:20,*EF,"Total Records Read     : ",*V2LON,RECCNT,*HOFF:
+                    *P1:21,"Total Number of Errors : ",*V2LON,ERRCT,*HOFF;
+.
+          COMPARE   ZERO,RECCNT
+          GOTO      QUES1000 IF NOT EQUAL   * No data found
+.
+          DISPLAY   *P1:24,*EL,*B,"No data found. Extract not created.  ";
+          CALL      HITENTER
+          GOTO      QUES9500
+.
+QUES1000  COMPARE   ZERO,ERRCT
+          IF        !@EQUAL
+            DISPLAY   *P1:24,*EL,*B,"Errors found.  ";
+            CALL      HITENTER
+            GOTO      QUES3000
+          ENDIF
+.
+          GOTO      QUES9000                     * no errors - extract
+.
+.         Not doing extraction, reset status of records back to "0"
+.
+QUES3000  CALL      RERR0000
+          GOTO      QUES9500
+.
+QUES9000  MOVE      ZERO,EXIT
+          GOTO      QUES9999
+.
+QUES9500  MOVE      ONE,EXIT
+.
+QUES9999  RETURN
++
+.******************************************************************************
+.*                                  PITM0000              Called by: VALD0000 *
+.*         Process the current invoice transaction items and write   WRIT0000 *
+.*         the relevant voucher (VCH) and service item (SRV) segment records. *
+.******************************************************************************
+.
+PITM0000  MOVE      SP10,SAVESDAT                * initialise save variables
+          MOVE      ZERO,VCHCOUNT                * initialise voucher count
+.
+          MOVE      SP20,KEY14
+          CALL      RSTEMP3                      * pos'n at start of temp file
+PITM0500  CALL      RKTEMP3                      * read next record
+          BRANCH    OVRCD,PITM9999               * eof - finished
+.
+.         Read the corresponding dtr record
+.
+          PACK      KEY22,LISTUNIQ,LISTINVN,SORTTRAN
+          IF        LISTRTYP = 1
+            CALL      RDDTRE1
+          ELSE
+            CALL      RDPRDT1
+          ENDIF
+          IF        OVRCD = 1
+            MOVE      "GEN.14-Transaction Record not found",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ENDIF
+.
+          MATCH     SAVESDAT,SORTSDAT            * same service date still ?
+          GOTO      PITM5000 IF EQUAL            * yes - same voucher
+.
+.         The Service Date has changed, so we need to create a new
+.         voucher segment
+.
+          MOVE      SORTSDAT,SAVESDAT            * save new Service Date
+          CALL      WVCH0000
+.
+          MOVE      ZERO,ITMCOUNT                * init. item count
+.
+.         Create an SRV segment for a dtr item record.
+.
+PITM5000  CALL      WSRV0000
+.
+          GOTO      PITM0500                     * get the next record (item)
+.
+PITM9999  RETURN
++
+.******************************************************************************
+.*                                  WRIT0000              Called by: MAIN0000 *
+.*                   Extract the invoice records on the temp file             *
+.******************************************************************************
+.
+WRIT0000  MOVE      ZERO,VALDFLG                 * set flag for writing
+          CALL      TFILENAM                     * get new extract file name
+          MOVE      TFILNAME,FILENAME
+.
+.         Initialise counters
+.
+          MOVE      ZERO,RECCNT                  * init. invoice record count
+          MOVE      ZERO,ERRCT                   * init. error count
+.
+          CALL      PREP0000                     * prepare extract file
+.
+          CALL      GDEP0000                     * get invoice deposits
+.
+          MOVE      ZERO,TOTAMTCT                * clear total amount counter
+          MOVE      ZERO,WRTCT
+          DISPLAY   *P1:24,*EL,"Writing : ";
+.
+          MOVE      SP20,KEY16
+          CALL      RSTEMP1                      * position at start of file
+WRIT0500  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,WRIT9000               * eof - finished
+.
+          BRANCH    LISTFLAG,WRIT0500            * excluded from extract
+.
+          MOVE      ZERO,ERRFLG                  * initialise error flag
+          ADD       ONE,RECCNT                   * incr. invoice record count
+.
+          PACK      KEY30,LISTHOSP,SP1,ZERO,LISTRTYP,LISTUNIQ,LISTINVN,SP30
+          CALL      RDEMECT1                     * record on file ?
+          BRANCH    OVRCD,WRIT0500               * no - ignore invoice
+.
+          MOVE      LISTURNO,KEY8
+          CALL      RDMAST1                      * pmi master record found ?
+          BRANCH    OVRCD,WRIT0500               * no - ignore invoice
+.
+          MOVE      LISTURNO,KEY8
+          CALL      RDPMPX21                     * pmi extension found ?
+          BRANCH    OVRCD,WRIT0500               * no - ignore invoice
+.
+          IF        LISTRTYP = 2
+            MOVE      LISTUNIQ,KEY8
+            CALL      RDPRHD2                    * header record on file ?
+            BRANCH    OVRCD,WRIT0500             * no - ignore invoice
+          ENDIF
+.
+.         Now get the first dtr record for the invoice
+.
+          MATCH     "1",EMECMODL                 * ED record ?
+          GOTO      WRIT3000 IF NOT EQUAL        * no - PRI record
+.
+.         ED Record
+.
+          PACK      KEY23,LISTINVN,SP70
+          CALL      RDSDTRE4                     * position before invoice
+WRIT1500  CALL      RDKDTRE4                     * read next record
+          BRANCH    OVRCD,WRIT8000               * eof - finished
+.
+          MATCH     LISTINVN,ATINVNO             * same invoice still ?
+          GOTO      WRIT8000 IF NOT EQUAL        * no - finished
+.
+          IF        ATRECTYP <> 5
+            GOTO      WRIT1500
+          ENDIF
+.
+          MOVE      LISTUNIQ,FORM8
+          COMPARE   FORM8,ATNUMB                 * same visit ?
+          GOTO      WRIT1500 IF NOT EQUAL
+.
+.         Get the corresponding emrvisaf and emrsitaf records
+.
+          MOVE      LISTUNIQ,KEY8
+          CALL      RDEMVIS1                     * visit record on file ?
+          BRANCH    OVRCD,WRIT0500               * no - get next invoice
+.
+          MOVE      EMVISITE,KEY3
+          CALL      RDEMSIT1                     * site record on file ?
+          BRANCH    OVRCD,WRIT0500               * no - get next invoice
+.
+          MOVE      EMECINVN,KEY8
+          CALL      RDINV1                       * ED invoice on file ?
+          BRANCH    OVRCD,WRIT0500               * no - get next invoice
+.
+          GOTO      WRIT4000                     * process record
+.
+.         PRI Record
+.
+WRIT3000  PACK      KEY22,LISTINVN,SP30
+          CALL      RSPRDT4                      * position before invoice
+WRIT3500  CALL      RKPRDT4                      * read next record
+          BRANCH    OVRCD,WRIT8000               * eof - finished
+.
+          MATCH     LISTINVN,PRDTINVN            * same invoice still ?
+          GOTO      WRIT8000 IF NOT EQUAL        * no - finished
+.
+          COMPARE   ONE,PRDTRTYP                 * item record ?
+          GOTO      WRIT3500 IF NOT EQUAL        * no - ignore record
+.
+.         Get the corresponding prihreff record now that we have the patient
+.         indicator
+.
+          PACK      KEY27,PRDTUNIQ,PRDTPRAC,PRDTDOCT,PRDTCODE
+          CALL      RDPRHR1                      * referral record on file ?
+          BRANCH    OVRCD,WRIT0500               * no - get next invoice
+.
+          MOVE      EMECINVN,KEY8
+          CALL      RDPRIN1                      * invoice record on file ?
+          BRANCH    OVRCD,WRIT0500               * no - get next invoice
+.
+.         Process the record for the claim
+.
+WRIT4000  DISPLAY   *P15:24,*V2LON,LISTINVN,SP2,LISTUNIQ;
+          ADD       ONE,WRTCT                    * increment records extracted
+.
+          IF        RECCNT = 1
+            CALL      WHDR0000                   * write header details
+          ENDIF
+.
+          CALL      CLPMSCLT                     * clear claimant details
+          PACK      KEY9,EMECMODL,EMECINVN
+          CALL      RDPMCLT1                     * claimant details on file ?
+.
+          CALL      WCLM0000                     * write claim details
+.
+          CALL      CLRB0000                     * clear sort tempfile
+          CALL      LODS0000                     * load sort tempfile
+.
+.         Process all the service items for the current invoice and write
+.         the relevant voucher and service segment records
+.
+WRIT5000  CALL      PITM0000
+.
+WRIT8000  CALL      WTLR0000                     * write trailer record
+.
+          CALL      PROC0000                     * update emrectaf records
+.
+.         A claim has been successfully extracted, so write the claim
+.         details to the report without any error details
+.
+          COMPARE   "55",CLNO                    * page full ?
+          CALL      HEAD0000 IF NOT LESS         * yes
+.
+          PACK      ERRMSG,SP70,SP70
+          PRINT     *1,PIPE,*3,LISTINVN,*12,PIPE,*14,PURNO,*23,PIPE:
+                    *25,DIM9,*35,PIPE,*37,ERRMSG,*132,PIPE
+          ADD       ONE,CLNO
+.
+          GOTO      WRIT0500
+.
+.         Update batch and move extract file
+.
+WRIT9000  CALL      UPBT0000
+.
+          DISPLAY   *P1:20,*EF,"Total records read      : ",*V2LON,RECCNT,*HOFF:
+                    *P1:21,"Total records extracted : ",*V2LON,WRTCT,*HOFF:
+                    *P1:22,*EF,"Processing Extract file : ",*V2LON,*+,LONGFNAM:
+                    *-,TXT,*HOFF:
+                    *P1:24,*HOFF,*B,"Extract finished.  ";
+          CALL      HITENTER
+.
+WRIT9999  RETURN
++
+.******************************************************************************
+.*                                  UPBT0000              Called by: WRIT0000 *
+.*        Update batch totals and move extract file to outbound directory     *
+.******************************************************************************
+.
+UPBT0000  MOVE      SAVBTHN,KEY8
+          CALL      RDEMIBH1
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Error updating emribhaf record.  ";
+            CALL      HITENTER
+            GOTO      UPBT1000
+          ENDIF
+.
+          MOVE      TOTAMTCT,EMIBBHTL            * update batch total
+          MOVE      HDRSEG02,EMIBLOCN            * update location
+          MOVE      HDRSEG04,EMIBSNID            * update sender id
+          CALL      UPEMIBH1
+.
+.         Move extract file to output path
+.
+UPBT1000  MOVE      ZERO,HLEF
+          CALL      GETSCR00
+          STRIP     PTCNESFO
+          CLEAR     CMDLINE
+          APPEND    "mv ",CMDLINE
+          APPEND    FILENAME,CMDLINE
+          APPEND    TXT,CMDLINE
+          APPEND    SP1,CMDLINE
+          APPEND    PTCNESFO,CMDLINE
+          APPEND    LONGFNAM,CMDLINE
+          APPEND    TXT,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          CALL      PUTSCR00
+.
+          MATCH     "0       ",TASKID
+          IF        !@EQUAL
+            MOVE      "GEN.10-Unable to move extract file",ERRMSG
+            ENDSET    ERRMSG
+            APPEND    LONGFNAM,ERRMSG
+            RESET     ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ENDIF
+.
+UPBT9999  RETURN
++
+.******************************************************************************
+.*                                  PROC0000              Called by: WRIT0000 *
+.*    Check if re-submission, Update records in emrectaf accordingly          *
+.******************************************************************************
+.
+PROC0000  MOVE      SP10,SAVPRVBN
+.
+          MOVE      SAVBTHN,EMECBATN             * load the batch number
+          MOVE      TWO,EMECFLAG                 * update status to "extracted"
+          MOVE      LISTAMNT,EMECAMTC            * load claim amount
+          CALL      UPEMECT1                     * update record
+.
+.         Write a record to the claims audit/history table for this claim
+.
+          MOVE      EMECINVN,EMEAINVN
+          CALL      IBACLOCK
+          PACK      EMEADATE,CCC,CYY,CMM,CDD
+          REP       " 0",EMEADATE
+          MOVE      CTIMEIS,EMEATIME
+          MOVE      SAVBTHN,EMEABATN
+          MOVE      TWO,EMEASTAT
+          MOVE      " 0",EMEATYPE
+          MOVE      EMIBOPER,EMEAOPER
+          MOVE      SP30,EMEATRID
+          MOVE      SP10,EMEAEROR
+          PACK      EMEAEROT,SP70,SP30
+          MOVE      EMECMODL,EMEAMODL
+          MOVE      SP70,EMEASPAR
+          CALL      WREMECA1
+.
+.         Check if this claim was the result of a resubmission
+.
+          MATCH     SP8,EMECPBAT                 * blank previous batch ?
+          GOTO      PROC9999 IF EQUAL            * yes - not a resubmission
+.
+.         Update the next batch number in the original source claim for this
+.         resubmission
+.
+          MOVE      EMECPBAT,SAVPRVBN            * save previous batch number
+          PACK      KEY30,EMECHOSP,SP1,FIVE,EMECMODL,EMECUNIQ,EMECINVN,SAVPRVBN
+          CALL      RDEMECT1
+          BRANCH    OVRCD,PROC9999
+.
+          MOVE      SAVBTHN,EMECNBAT
+          CALL      UPEMECT1
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                                  PREP0000       Called by: WRIT0000       *
+.*               Prep extract file and get next batch number                 *
+.* Returns: SAVBTHN - saved batch number                                     *
+.*****************************************************************************
+.
+.         Get the next batch number
+.
+PREP0000  MOVE      "128",PRXCODE                * System Lock Sector 128
+          CALL      GETSLK00                     * Get System Lock-Sector 128
+.
+          READ      CONTROLF,HUND28;*14,PTCNPCBC
+          MOVE      PTCNPCBC,DIM8
+          RJUSTIFY  DIM8
+          MOVE      DIM8,FORM8
+.
+          COMPARE   "99999999",FORM8
+          IF        @EQUAL
+            MOVE      ZERO,FORM8                 * Initialise the batch number
+          ENDIF
+.
+          ADD       ONE,FORM8                    * Increment next batch number
+          MOVE      FORM8,PTCNPCBC
+          WRITAB    CONTROLF,HUND28;*14,PTCNPCBC
+.
+          CALL      RELSLK00                    * Release System Lock-Sector 128
+.
+          MOVE      FORM8,SAVBTHN
+          MOVE      SAVBTHN,BATCHNUM
+          REP       " 0",BATCHNUM
+.
+.         If multi-hospital is turned on, use the hospital prefix if not
+.         blank, otherwise use the default prefix parameter.
+.
+          COMPARE   ONE,IBCNMHOS                 * using multi-hospital ?
+          GOTO      PREP1000 IF NOT EQUAL        * no
+.
+          MATCH     SP3,HOSPCODE                 * blank hospital code ?
+          GOTO      PREP1000 IF EQUAL            * yes - use default parameter
+.
+          MATCH     SP2,PTHSEDIP                 * blank hospital prefix ?
+          GOTO      PREP1000 IF EQUAL            * yes - use default parameter
+.
+          PACK      LONGFNAM,PTHSEDIP,BATCHNUM   * use hospital specific prefix
+          GOTO      PREP2000
+.
+.         Use default parameter for hospital prefix
+.
+PREP1000  PACK      LONGFNAM,PTCNEDIH,BATCHNUM
+PREP2000  PREP      EXTFILE1,FILENAME
+.
+          MOVE      SAVBTHN,EMIBBTHN
+          MOVE      ZERO,EMIBBHTL
+          MOVE      RECCNT,EMIBTRIB
+          CALL      IBACLOCK
+          PACK      EMIBDTBC,CCC,CYY,CMM,CDD
+          REP       " 0",EMIBDTBC
+          MOVE      CTIMEIS,EMIBTMBC
+.
+          MOVE      SP10,EMIBOPER
+          PACK      KEY14,PASSCODE,SP20
+          CALL      RSWBSE3
+          CALL      RKWBSE3
+          IF        OVRCD = 0
+            MATCH     PASSCODE,WBSEPCD
+            IF        @EQUAL
+              MOVE      WBSEUID,EMIBOPER
+            ENDIF
+          ENDIF
+.
+          PACK      EMIBEFNM,LONGFNAM,SP20
+          MOVE      SP70,EMIBSPAR
+          CALL      WREMIBH1
+.
+PREP9999  RETURN
++
+.******************************************************************************
+.*                                  TAIL0000              Called by: MAIN0000 *
+.*                              Print Report Tail                             *
+.******************************************************************************
+.
+TAIL0000  CALL      UND132
+.
+          PRINT     *N,*1,"Total Records Read      : ",RECCNT:
+                    *N,*1,"Total Number of Errors  : ",ERRCT:
+                    *N,*N,*1,"Total Records Extracted : ",WRTCT
+.
+          IF        WRTCT =0
+            PRINT     *N,*1,"No Extract file created"
+            GOTO      TAIL2000
+          ENDIF
+          BRANCH    VALDFLG,TAIL9000
+.
+TAIL1000  PRINT     *N,*1,"Extract filename created : ",*+,LONGFNAM,*-,TXT
+.
+TAIL2000  PRINT     *N,"*** End of Report ***"
+.
+TAIL9000  MOVE      ZERO,EXIT
+.
+TAIL9999  RETURN
++
+.*****************************************************************************
+.*                             CTMP0000            Called by: MAIN0000       *
+.*                      Create temporary files                               *
+.*****************************************************************************
+.
+CTMP0000  CALL      TFILENAM                     * Generate temporary file names
+          MOVE      TFILNAME,TEMPFILA
+.
+          CALL      TFILENAM
+          MOVE      TFILNAME,TEMPFILB
+.
+          CALL      TFILENAM
+          MOVE      TFILNAME,TEMPFILC
+.
+          CALL      KILL0000
+.
+.         Create and open temp file 1
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILA,UKEYA
+          EXECUTE   CMDLINE,TASKID
+          OPEN      LSTTEMP1,TEMPFILA
+.
+.         Create and open temp file 2
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILB,UKEYB
+          EXECUTE   CMDLINE,TASKID
+          OPEN      DEPTEMP2,TEMPFILB
+.
+.         Create and open temp file 3
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILC,UKEYC
+          EXECUTE   CMDLINE,TASKID
+          OPEN      SRTTEMP3,TEMPFILC
+.
+CTMP9999  RETURN
++
+.*****************************************************************************
+.*                             KILL0000             Called by: MAIN0000      *
+.*                   erase temporary file                      CREA0000      *
+.*****************************************************************************
+.
+.         Remove temp file 1
+.
+KILL0000  CLOSE     LSTTEMP1                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILA       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+          CLOSE     DEPTEMP2                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILB       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+          CLOSE     SRTTEMP3                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILC       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILL9999  RETURN
++
+.*****************************************************************************
+.*                             CLER0000            Called by: MAIN0000       *
+.*               Clear all temporary table records for invoice listing       *
+.*****************************************************************************
+.
+.         Clear temp file 1
+.
+CLER0000  MOVE      SP20,KEY16
+          CALL      RSTEMP1                      * position at start of file
+          CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,CLER5000               * end of file - finished
+.
+          PACK      KEY16,LISTUNIQ,LISTINVN
+          CALL      DETEMP1                      * delete record
+          GOTO      CLER0000                     * get next record
+.
+.         Clear temp file 2
+.
+CLER5000  MOVE      SP8,KEY8
+          CALL      RSTEMP2                      * position at start of file
+          CALL      RKTEMP2                      * read next record
+          BRANCH    OVRCD,CLER9999               * end of file - finished
+.
+          MOVE      VDEPINVN,KEY8
+          CALL      DETEMP2                      * delete record
+          GOTO      CLER5000                     * get next record
+.
+CLER9999  RETURN
++
+.*****************************************************************************
+.*                                CLRB0000         Called by: VALD0000       *
+.*              Clear records for tempfile 3                  WRIT0000       *
+.*****************************************************************************
+.
+.         Clear temp file 3
+.
+CLRB0000  MOVE      SP20,KEY14
+          CALL      RSTEMP3                      * position at start of file
+          CALL      RKTEMP3                      * read next record
+          BRANCH    OVRCD,CLRB9999               * end of file - finished
+.
+          PACK      KEY14,SORTSDAT,SORTTRAN
+          CALL      DETEMP3                      * delete record
+          GOTO      CLRB0000                     * get next record
+.
+CLRB9999  RETURN
++
+.*****************************************************************************
+.*                              RERR0000           Called by: MAIN0000       *
+.*             Reset error records back to zero status (Not Sent)            *
+.*             just in case there were any problems with a previous          *
+.*             batch and the error records were not set back to zero.        *
+.*****************************************************************************
+.
+RERR0000  MOVE      HOSPCODE,SAVEHOSP            * initialise hospital
+          MOVE      ZERO,FIRSTREC                * initialise flag
+.
+          PACK      KEY30,HOSPCODE,SP1,ONE,SP30
+RERR0500  CALL      RSEMECT1                     * position in file
+          CALL      RKEMECT1                     * read next record
+          BRANCH    OVRCD,RERR9999               * eof - finished
+.
+          BRANCH    FIRSTREC,RERR1000            * not first record
+.
+          MATCH     SP3,HOSPCODE                 * all hospitals extract ?
+          GOTO      RERR0800 IF NOT EQUAL        * no
+.
+          MOVE      EMECHOSP,SAVEHOSP            * yes-load first hospital code
+.
+.         If this is the first record when using a blank hospital code,
+.         it may have a status of waiting, so we need to
+.         reposition on the first error record for the hospital, if
+.         one exists
+.
+          COMPARE   ZERO,EMECFLAG                * waiting record ?
+          GOTO      RERR0800 IF NOT EQUAL        * no
+.
+          PACK      KEY30,SAVEHOSP,SP1,ONE,SP30
+          GOTO      RERR0500
+.
+RERR0800  MOVE      ONE,FIRSTREC                 * set first flag to no
+.
+RERR1000  MATCH     SP3,HOSPCODE                 * all hospitals extract ?
+          GOTO      RERR5000 IF NOT EQUAL        * no
+.
+.         We are running an extract for all hospitals
+.
+          MATCH     SAVEHOSP,EMECHOSP            * same hospital still ?
+          IF        !@EQUAL
+            MOVE      EMECHOSP,SAVEHOSP          * no - save new hospital code
+            PACK      KEY30,EMECHOSP,SP1,ONE,SP30
+            GOTO      RERR0500
+          ENDIF
+.
+          COMPARE   ONE,EMECFLAG                 * error record still ?
+          GOTO      RERR4000 IF NOT EQUAL        * no - get next hospital
+.
+          GOTO      RERR8000
+.
+RERR4000  PACK      KEY30,EMECHOSP,TILDA40
+          GOTO      RERR0500
+.
+.         We are running an extract for a given hospital id
+.
+RERR5000  MATCH     HOSPCODE,EMECHOSP            * same hospital still ?
+          GOTO      RERR9999 IF NOT EQUAL        * no - finished
+.
+          COMPARE   ONE,EMECFLAG                 * error record still ?
+          GOTO      RERR9999 IF NOT EQUAL        * no - finished
+.
+.         Reset the record status to "Waiting"
+.
+RERR8000  PACK      SAVKEY30,EMECHOSP,EMECFLAG,EMECMODL,EMECUNIQ,EMECINVN:
+                             EMECBATN
+          MOVE      ZERO,EMECFLAG                * yes - reset flag to "0"
+          CALL      UPEMECT1                     * update record
+          MOVE      SAVKEY30,KEY30               * load key to reposition
+          GOTO      RERR0500                     * get next record
+.
+RERR9999  RETURN
++
+.*****************************************************************************
+.*                             LOAD0000               Called by: MAIN0000    *
+.*        Load all invoice records waiting to be extracted                   *
+.*****************************************************************************
+.
+LOAD0000  MATCH     "IBARSH",PGM                 * using web front-end ?
+          IF        @EQUAL
+            CALL      WLOD0000                   * yes - load list array
+            GOTO      LOAD9999
+          ENDIF
+.
+.         Program is running from the character system
+.
+          PACK      KEY30,HOSPCODE,SP1,ZERO,SP30
+LOAD0400  CALL      RSEMECT1                     * position in file
+LOAD0500  CALL      RKEMECT1                     * read next record
+          BRANCH    OVRCD,LOAD9999               * end of file
+.
+          MATCH     SP3,HOSPCODE                 * all hospitals ?
+          IF        !@EQUAL
+            MATCH     HOSPCODE,EMECHOSP          * no - same hospital still ?
+            GOTO      LOAD9999 IF NOT EQUAL      * no - finished
+          ENDIF
+.
+          COMPARE   ZERO,EMECFLAG                * waiting for extract still ?
+          IF        !@EQUAL
+            PACK      KEY30,EMECHOSP,TILDA40
+            GOTO      LOAD0400                   * get next record
+          ENDIF
+.
+.         A waiting record has been found, so get the invoice details
+.         and calculate the amount outstanding.
+.
+          MOVE      EMECINVN,KEY8
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            CALL      RDINV1                     * ED invoice on file ?
+            IF        OVRCD = 1
+              MOVE      "GEN.5-Emergency invoice ",ERRMSG
+              ENDSET    ERRMSG
+              SQUEEZE   KEY8
+              APPEND    KEY8,ERRMSG
+              APPEND    " not on file",ERRMSG
+              RESET     ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      LOAD0500
+            ENDIF
+          ELSE
+            CALL      RDPRIN1                    * PRI invoice on file ?
+            IF        OVRCD = 1
+              MOVE      "GEN.6-Private Practice invoice ",ERRMSG
+              ENDSET    ERRMSG
+              SQUEEZE   KEY8
+              APPEND    KEY8,ERRMSG
+              MOVE      " not on file",ERRMSG
+              RESET     ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      LOAD0500
+            ENDIF
+          ENDIF
+.
+.         Now get the relevant visit/referral details
+.
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            MOVE      EMECUNIQ,KEY8
+            CALL      RDEMVIS1
+            IF        OVRCD = 1
+              MOVE      "GEN.15-Emergency visit not on file",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      LOAD0500
+            ENDIF
+          ELSE
+            MOVE      EMECUNIQ,KEY8              * yes
+            CALL      RDPRHD2                    * header record on file ?
+            IF        OVRCD = 1
+              MOVE      "GEN.16-Private Practice referral not on file",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      LOAD0500
+            ENDIF
+          ENDIF
+.
+.         Make sure the invoice is not fully credited
+.
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            MATCH     "1",PTINCRST                 * ED fully credited ?
+            GOTO      LOAD9000 IF EQUAL            * yes - delete record
+          ELSE
+            MATCH     "1",PRINCNST                 * PRI fully credited ?
+            GOTO      LOAD9000 IF EQUAL            * yes - delete record
+          ENDIF
+.
+.         Calculate the oustanding amount for the invoice
+.
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            ASSIGN    (PINVAMT+PINVPATA+PINVHFDA+PINVOTHA+PINVJOUR+PINVREB),FORM12P2
+            IF        IBCNUGST=2
+              ADD       PTINGSTJ,FORM12P2
+            ENDIF
+          ELSE
+            ASSIGN    (PRINITOT+PRINPAMT+PRINHAMT+PRINIAMT+PRINMAMT+PRINVAMT+PRINOTHA+PRINJAMT+PRINCNTT),FORM12P2
+            IF        IBCNUGST=2
+              ADD       PRINGSTJ,FORM12P2
+            ENDIF
+          ENDIF
+.
+.>>>>>>>  Commented out below as the patient may have fully paid the invoice
+.         but be expecting a refund from Medicare
+.
+.         Ignore zero balance invoices
+.
+.         COMPARE   ZERO,FORM12P2                * zero balance invoice ?
+.         GOTO      LOAD9000 IF EQUAL            * yes - delete record
+.
+.         There is an amount outstanding for the invoice, so write
+.         the details away to the temp file
+.
+          MOVE      EMECUNIQ,LISTUNIQ
+          MOVE      EMECINVN,LISTINVN
+          MOVE      EMECURNO,LISTURNO
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            MOVE      PINVDTE,LISTDATE
+          ELSE
+            MOVE      PRINDATE,LISTDATE
+          ENDIF
+          MOVE      FORM12P2,LISTAMNT
+          MOVE      ZERO,LISTFLAG
+          MOVE      EMECHOSP,LISTHOSP
+          MOVE      EMECMODL,LISTRTYP
+          CALL      WRTEMP1                      * write temp file record
+.
+          GOTO      LOAD0500                     * get next record
+.
+.         The current record is not going to be extracted, so delete it
+.         and reposition in emrectaf
+.
+LOAD9000  PACK      SAVKEY30,EMECHOSP,EMECFLAG,EMECMODL,EMECUNIQ,EMECINVN:
+                             EMECBATN
+          MOVE      SAVKEY30,KEY30
+          CALL      DEEMECT1                 * delete cancelled/zero invoices
+          MOVE      SAVKEY30,KEY30
+          CALL      RSEMECT1
+          GOTO      LOAD0500
+.
+LOAD9999  RETURN
++
+.*****************************************************************************
+.*                             WLOD0000               Called by: LOAD0000    *
+.*      The extract is being run from the web front-end, so load the passed  *
+.*      array variables into the tempfile.                                   *
+.* Requires: an array occurrence for each claim to be extracted.  The array  *
+.*           has the following format:                                       *
+.*                    Hospital Id      - char(3)                             *
+.*                    Unique Id        - char(8)  right justified            *
+.*                    Invoice Number   - char(8)  right justified            *
+.*                    U/R Number       - char(8)  right justified            *
+.*                    Invoice Date     - char(8)  ccyymmdd                   *
+.*                    Outstanding Invoice Amount - char(15)                  *
+.*****************************************************************************
+.
+.         Clear list array
+.
+WLOD0000  MOVE      ZERO,LSTCOUNT
+          WHILE     LSTCOUNT < 50
+            ADD       ONE,LSTCOUNT
+            PACK      LISTARRY[LSTCOUNT],SP70
+          DO
+.
+.         Receive list array input from web front-end via keyin until
+.         a blank record is received (end of array) or limit is reached
+.
+          MOVE      ZERO,LSTCOUNT
+          WHILE     LSTCOUNT < 50
+            ADD       ONE,LSTCOUNT
+            KEYIN     LISTARRY[LSTCOUNT]
+            PACK      LISTARRY[LSTCOUNT],LISTARRY[LSTCOUNT],SP70
+            MATCH     SP70,LISTARRY[LSTCOUNT]    * last array record ?
+            GOTO      WLOD1000 IF EQUAL          * yes
+          DO
+.
+          ADD       ONE,LSTCOUNT            * only if array limit reached
+.
+.         Write each array record to the temp file
+.
+WLOD1000  WHILE     LSTCOUNT > 1
+            SUB       ONE,LSTCOUNT
+            UNPACK    LISTARRY[LSTCOUNT],LISTHOSP,LISTUNIQ,LISTINVN,LISTURNO:
+                                         LISTDATE,DIM15,DIM2A,DIM2B
+            MOVE      ZERO,LISTFLAG
+            MOVE      DIM15,LISTAMNT
+            PACK      DIM2A,DIM2A,SP70
+            RJUSTIFY  DIM2A
+            MOVE      DIM2A,LISTRTYP
+            PACK      DIM2B,DIM2B,SP70
+            RJUSTIFY  DIM2B
+            MOVE      DIM2B,LISTFLAG
+            CALL      WRTEMP1
+          DO
+.
+WLOD9999  RETURN
++
+.*****************************************************************************
+.*                             DCLM0000               Called by: MAIN0000    *
+.*               Display records waiting for extraction                      *
+.* Returns:  EXIT  0 = Process claim extract                                 *
+.*                 1 = Cancel selected                                       *
+.*****************************************************************************
+.
+DCLM0000  DISPLAY   *P54:5,*V2LON,"Outstanding":
+                    *P1:6,*EF,*ULON,"Item",*P6:6,"Invoice ",*P15:6,"Type":
+                    *P20:6,"Uniq. Id",*P29:6,"U/R No. ",*P38:6,"Invoice Date":
+                    *P51:6," Invoice Amount ",*P68:6,"Extract"
+.
+          MATCH     SP3,HOSPCODE
+          IF        !@EQUAL
+            DISPLAY   *P76:6,*V2LON,*ULON,"Hosp"
+          ENDIF
+.
+          MOVE      ONE,CPAGENO
+          MOVE      SIX,CVERT                    * Reset line number
+          MOVE      ZERO,FIELD                   * Reset record count
+.
+          MOVE      SP20,KEY16
+          CALL      RSTEMP1                      * position in file
+DCLM1000  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,DCLM5000               * end of file
+.
+          ADD       ONE,CVERT                    * increment line count
+.
+          COMPARE   TWENTY3,CVERT                * page full ?
+          GOTO      DCLM4000 IF NOT LESS         * yes
+.
+DCLM3000  ADD       ONE,FIELD                    * increment field count
+.
+          MATCH     SP8,LISTDATE                 * invoice date blank ?
+          IF        @EQUAL
+            MOVE      "Invoice   ",CPCDATE
+            MOVE      "  not found",DIM15
+          ELSE
+            UNPACK    LISTDATE,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE
+            MOVE      LISTAMNT,DIM15
+          ENDIF
+.
+.         Only display extract flag if record is NOT set for extraction
+.
+          MOVE      DYES,FLAGDIM3
+          LOAD      FLAGDIM3,LISTFLAG,DNO
+          PACK      FLAGDIM3,FLAGDIM3,SP1
+          IF        LISTRTYP = 1
+            MOVE      "EMR ",DIM4
+          ELSE
+            MOVE      "PRI ",DIM4
+          ENDIF
+.
+          IF        LISTFLAG = 1
+            DISPLAY   *P1:CVERT,*V2LON,*HON,FIELD,SP3:
+                      LISTINVN,SP1,DIM4,SP1,LISTUNIQ,SP1,LISTURNO,SP2:
+                      CPCDATE,SP3,DIM15,SP3,FLAGDIM3,SP4
+            MATCH     SP3,HOSPCODE
+            IF        !@EQUAL
+              DISPLAY   *P76:CVERT,*HON,LISTHOSP,SP1
+            ENDIF
+          ELSE
+            DISPLAY   *P1:CVERT,*V2LON,FIELD,*HOFF,*P6:CVERT,LISTINVN:
+                      *P15:CVERT,DIM4,*P20:CVERT,LISTUNIQ:
+                      *P29:CVERT,LISTURNO,*P39:CVERT,CPCDATE,*P52:CVERT,DIM15:
+                      *P70:CVERT,FLAGDIM3
+            MATCH     SP3,HOSPCODE
+            IF        !@EQUAL
+              DISPLAY   *P76:CVERT,LISTHOSP
+            ENDIF
+          ENDIF
+          PACK      TMPKEY[FIELD],LISTUNIQ,LISTINVN
+          GOTO      DCLM1000
+.
+.         new page needed
+.
+DCLM4000  BRANCH    CPAGENO,DCLM4500
+.
+.         in middle pages : Next & First options
+.
+DCLM4100  MOVE      "1",CALLPOSN                 * set call position
+          CALL      KEYC0000                     * keyin response
+          BRANCH    EXIT,DCLM9999:               * exit
+                         DCLM7000:               * next
+                         DCLM8000:               * previous
+                         DCLM6000:               * swap extract flag
+                         DCLM6500:               * include all
+                         DCLM6600                * exclude all
+          GOTO      DCLM9000                     * post
+.
+.         on first page : Next option
+.
+DCLM4500  MOVE      "2",CALLPOSN                 * set call position
+          CALL      KEYC0000                     * keyin response
+          BRANCH    EXIT,DCLM9999:               * exit
+                         DCLM7000:               * next
+                         DCLM5900:               * previous
+                         DCLM6000:               * swap extract flag
+                         DCLM6500:               * include all
+                         DCLM6600                * exclude all
+          GOTO      DCLM9000                     * post
+.
+.         end of data
+.
+DCLM5000  BRANCH    CPAGENO,DCLM5500
+.
+.         in middle pages : First option
+.
+DCLM5100  MOVE      "3",CALLPOSN                 * set call position
+          CALL      KEYC0000                     * keyin response
+          BRANCH    EXIT,DCLM9999:               * exit
+                         DCLM5900:               * next
+                         DCLM8000:               * prev
+                         DCLM6000:               * swap extract flag
+                         DCLM6500:               * include all
+                         DCLM6600                * exclude all
+          GOTO      DCLM9000                     * post
+.
+.         on first page : No options
+.
+DCLM5500  MOVE      "4",CALLPOSN                 * set call position
+          CALL      KEYC0000                     * keyin response
+          BRANCH    EXIT,DCLM9999:               * exit
+                         DCLM5900:               * next
+                         DCLM5900:               * previous
+                         DCLM6000:               * swap extract flag
+                         DCLM6500:               * include all
+                         DCLM6600                * exclude all
+          GOTO      DCLM9000                     * post
+.
+DCLM5900  BEEP
+DCLM5910  BRANCH    CALLPOSN,DCLM4100,DCLM4500,DCLM5100,DCLM5500
+.
+.         A valid selection has been made so swap the extract flag value
+.
+DCLM6000  MOVE      TMPKEY[FORM2],KEY16
+          CALL      RDTEMP1
+          BRANCH    OVRCD,DCLM0000
+.
+          IF        LISTFLAG = 0
+            MOVE      ONE,LISTFLAG
+          ELSE
+            MOVE      ZERO,LISTFLAG
+          ENDIF
+          CALL      UPTEMP1
+.
+.         Now redisplay the current screen again
+.
+          MOVE      TMPKEY[1],KEY16
+          CALL      RDTEMP1
+          BRANCH    OVRCD,DCLM0000
+.
+          MOVE      SEVEN,CVERT
+          DISPLAY   *P1:CVERT,*EF
+          MOVE      ZERO,FIELD
+          GOTO      DCLM3000
+.
+.         Set all records for extract
+.
+DCLM6500  MOVE      ZERO,INCLFLAG
+          GOTO      DCLM6700
+.
+.         Set all records to be excluded from extract
+.
+DCLM6600  MOVE      ONE,INCLFLAG
+DCLM6700  COMPARE   ZERO,FIELD                   * any records displayed ?
+          GOTO      DCLM0000 IF EQUAL            * no - finished
+.
+          CALL      RSET0000
+          MOVE      TMPKEY[1],KEY16
+          CALL      RDTEMP1                      * reread first record on screen
+          BRANCH    OVRCD,DCLM0000
+.
+          MOVE      SEVEN,CVERT
+          DISPLAY   *P1:CVERT,*EF
+          MOVE      ZERO,FIELD
+          GOTO      DCLM3000                     * redisplay list
+.
+.         next screen selected
+.
+DCLM7000  MOVE      SEVEN,CVERT
+          ADD       ONE,CPAGENO
+          DISPLAY   *P1:CVERT,*EF
+          MOVE      ZERO,FIELD
+          GOTO      DCLM3000
+.
+.         previous screen selected
+.
+DCLM8000  MOVE      TMPKEY[1],KEY16
+          CALL      RDTEMP1                      * reread first record on screen
+          MOVE      ZERO,FORM2                   * initialise count
+          WHILE     FORM2 <= 15
+            CALL      RPTEMP1                    * read previous record
+            BRANCH    OVRCD,DCLM0000             * start of file
+.
+            ADD       ONE,FORM2                  * increment count
+          DO
+.
+          MOVE      SEVEN,CVERT                  * reset line position
+          SUB       ONE,CPAGENO                  * decrement page number
+          MOVE      ZERO,FIELD                   * reset record counter
+          DISPLAY   *P1:CVERT,*EF
+          GOTO      DCLM3000
+.
+DCLM9000  MOVE      ZERO,CPAGENO                 * initialise print variables
+          MOVE      ZERO,CNOUNDLN
+          CALL      IBACLOCK                     * get current date/time
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          MOVE      ZERO,EXIT
+          GOTO      DCLM9999
+.
+DCLM9100  MOVE      ONE,EXIT
+.
+DCLM9999  RETURN
++
+.*****************************************************************************
+.*                             RSET0000            Called by: DCLM0000       *
+.*   Reset all records for either inclusion or exclusion as required         *
+.* Requires: INCLFLAG  0 = set all records for inclusion in extract          *
+.*                     1 = set all records for exclusion from extract        *
+.*****************************************************************************
+.
+RSET0000  MOVE      SP20,KEY16
+          CALL      RSTEMP1                      * position at start of file
+RSET0500  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,RSET9999               * end of file - finished
+.
+          MOVE      INCLFLAG,LISTFLAG            * set inclusion flag
+          CALL      UPTEMP1                      * update record
+          GOTO      RSET0500                     * get next record
+.
+RSET9999  RETURN
++
+.*****************************************************************************
+.*                  KEYC0000                    Called by : DCLM0000         *
+.*        Keyin response to prompt                                           *
+.*        Returns : EXIT = 0      Post entered                               *
+.*                  EXIT = 1      Exit entered                               *
+.*                  EXIT = 2      Next entered                               *
+.*                  EXIT = 3      Prev entered                               *
+.*                  EXIT = 4      Extract flag swapped                       *
+.*                  EXIT = 5      Include All                                *
+.*                  EXIT = 6      Exclude All                                *
+.*****************************************************************************
+.
+KEYC0000  DISPLAY   *P1:24,*EL,"Select Item, (",*V2LON,ANSI,*HOFF:
+                    ")nclude all, e(",*V2LON,ANSX,*HOFF,")clude all, (":
+                    *V2LON,ANSP,*HOFF,")ost, (",*V2LON,ANSC,*HOFF,")ancel";
+          MOVE      FIFTY8,CCOL
+          IF        CALLPOSN = 1 | CALLPOSN = 2
+            DISPLAY   ", (",*V2LON,ANSN,*HOFF,")ext";
+            ADD       EIGHT,CCOL
+          ENDIF
+          IF        CALLPOSN = 1 | CALLPOSN = 3
+            DISPLAY   ", p(",*V2LON,ANSR,*HOFF,")ev.";
+            ADD       NINE,CCOL
+          ENDIF
+.
+          DISPLAY   " :  ";
+          ADD       FOUR,CCOL
+.
+KEYC1000  KEYIN     *PCCOL:24,*V2LON,*JR,DIM2:
+                    *PCCOL:24,*DV,DIM2
+          PACK      DIM2,DIM2,SP2
+          UNPACK    DIM2,ANS,ANS
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSC,ANS                * cancel selected ?
+          GOTO      KEYC9100 IF EQUAL       * yes
+.
+          MATCH     ANSN,ANS                * next page selected ?
+          GOTO      KEYC9200 IF EQUAL       * yes
+.
+          MATCH     ANSR,ANS                * previous page selected ?
+          GOTO      KEYC9300 IF EQUAL       * yes
+.
+          MATCH     ANSP,ANS                * post selected ?
+          GOTO      KEYC9000 IF EQUAL       * yes
+.
+          MATCH     ANSI,ANS                * include all selected ?
+          GOTO      KEYC9500 IF EQUAL       * yes
+.
+          MATCH     ANSX,ANS                * exclude all selected ?
+          GOTO      KEYC9600 IF EQUAL       * yes
+.
+          TYPE      DIM2
+          GOTO      KEYC5000 IF EQUAL       * a number entered
+.
+KEYC1500  BEEP
+          GOTO      KEYC1000
+.
+.         number entered directly
+.
+KEYC5000  MOVE      DIM2,FORM2
+.
+          COMPARE   FORM2,ZERO              * number < 1 ?
+          GOTO      KEYC1500 IF NOT LESS    * yes - invalid
+.
+          COMPARE   FORM2,FIELD             * number in range ?
+          GOTO      KEYC1500 IF LESS        * no - too high
+.
+          GOTO      KEYC9400
+.
+KEYC9000  MOVE      ZERO,EXIT               * post
+          GOTO      KEYC9999
+.
+KEYC9100  MOVE      ONE,EXIT                * exit
+          GOTO      KEYC9999
+.
+KEYC9200  MOVE      TWO,EXIT                * next
+          GOTO      KEYC9999
+.
+KEYC9300  MOVE      THREE,EXIT              * previous
+          GOTO      KEYC9999
+.
+KEYC9400  MOVE      FOUR,EXIT               * swap extract flag
+          GOTO      KEYC9999
+.
+KEYC9500  MOVE      FIVE,EXIT               * include all
+          GOTO      KEYC9999
+.
+KEYC9600  MOVE      SIX,EXIT                * exclude all
+          GOTO      KEYC9999
+.
+KEYC9999  RETURN
++
+.******************************************************************************
+.*                             WHDR0000            Called by: WRIT0000        *
+.*                  Write the Header segment                  VALD0000        *
+.******************************************************************************
+.
+WHDR0000  MOVE      SAVBTHN,HDRSEG01             * load batch number
+          REP       " 0",HDRSEG01
+.
+.         Load the Location ID.
+.         If multi-hospital is turned on, use the hospital location if not
+.         blank, otherwise use the default location parameter.
+.
+          COMPARE   ONE,IBCNMHOS                 * using multi-hospital ?
+          GOTO      WHDR1000 IF NOT EQUAL        * no
+.
+          MATCH     SP3,LISTHOSP                 * blank hospital ?
+          GOTO      WHDR1000 IF EQUAL            * yes - default to parameter
+.
+          MOVE      LISTHOSP,KEY3
+          CALL      RDPTHSP1                     * hospital on file ?
+          BRANCH    OVRCD,WHDR1000               * no - default to parameter
+.
+          MATCH     SP8,PTHSLOCN                 * blank location for hosp. ?
+          GOTO      WHDR1000 IF EQUAL            * yes - default to parameter
+.
+          MOVE      PTHSLOCN,HDRSEG02            * set location id
+          GOTO      WHDR2000
+.
+.         Use the default location parameter
+.
+WHDR1000  MATCH     SP8,PTCNCLID
+          IF        @EQUAL
+            MOVE      "HDR.2.1-Current Location not set up",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ELSE
+            MOVE      PTCNCLID,HDRSEG02          * set location id
+          ENDIF
+.
+.         Get the certificate that covers today
+.
+WHDR2000  PACK      KEY16,HDRSEG02,CURRDATE
+          CALL      RDPTCTI1                     * record found for today ?
+          COMPARE   ZERO,OVRCD
+          GOTO      WHDR9000 IF EQUAL            * yes - use this certificate id
+.
+          CALL      RPPTCTI1                     * no - read previous record
+          IF        OVRCD = 0
+            MATCH     CURRDATE,PTCITDTE          * within date range ?
+            GOTO      WHDR9000 IF NOT LESS       * yes - use this certificate id
+          ENDIF
+.
+          MOVE      "HDR.3.1-Current Certificate not available",ERRMSG
+          MOVE      SP9,DIM9
+          CALL      PERR0000
+.
+WHDR9000  MATCH     SP10,PTCIIDEN
+          IF        @EQUAL
+            MOVE      "HDR.3.2-Certificate Identifier blank",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ELSE
+            MOVE      PTCIIDEN,HDRSEG03          * load certificate identifier
+          ENDIF
+.
+          MATCH     SP70,PTCISNID
+          IF        @EQUAL
+            MOVE      "HDR.4.1-Sender Id blank",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ELSE
+            MOVE      PTCISNID,HDRSEG04          * load sender id
+          ENDIF
+.
+.         Load the Test/Production flag for the claim based on the parameter
+.
+          MOVE      PTCNUTPS,HDRSEG05
+.
+          BRANCH    VALDFLG,WHDR9999             * validation only
+.
+          WRITE     EXTFILE1,SEQ;TILDA01,ANSH,ANSD,ANSR:
+                                 HDRSEG01,HDRSEG02,HDRSEG03,HDRSEG04,HDRSEG05
+.
+WHDR9999  RETURN
++
+.******************************************************************************
+.*                                  WCLM0000              Called by: VALD0000 *
+.*                            Write Claim Details                  & WRIT0000 *
+.******************************************************************************
+.
+WCLM0000  MOVE      SP70,CLMSEG01
+          MOVE      SP70,CLMSEG02
+          MOVE      SP70,CLMSEG03
+          MOVE      SP70,CLMSEG04
+          MOVE      SP70,CLMSEG05
+          MOVE      SP70,CLMSEG06
+          MOVE      SP70,CLMSEG07
+          MOVE      SP70,CLMSEG08
+          MOVE      SP70,CLMSEG09
+          MOVE      SP70,CLMSEG10
+          MOVE      SP70,CLMSEG11
+          MOVE      SP70,CLMSEG12
+          MOVE      SP70,CLMSEG13
+          MOVE      SP70,CLMSEG14
+          MOVE      SP70,CLMSEG15
+          MOVE      SP70,CLMSEG16
+          MOVE      SP70,CLMSEG17
+          MOVE      SP70,CLMSEG18
+          MOVE      SP70,CLMSEG19
+          MOVE      SP70,CLMSEG20
+          MOVE      SP70,CLMSEG21
+          MOVE      SP70,CLMSEG22
+          MOVE      SP70,CLMSEG23
+          MOVE      SP70,CLMSEG24
+          MOVE      SP70,CLMSEG25
+          MOVE      SP70,CLMSEG26
+.
+.         Load AccountPaidInd (CLMSEG01)
+.
+          MOVE      ANSN,CLMSEG01                * set default to "No"
+.
+.         Check if there is a deposit amount on the temp file
+.         for this invoice and if so, determine if it fully pays the invoice
+.         or not
+.
+          MOVE      EMECINVN,KEY8
+          CALL      RDTEMP2                      * deposit on file ?
+          BRANCH    OVRCD,WCLM0500               * no - use default
+.
+.         We have a deposit.
+.         If the deposit is equal to the total amount,
+.         then there is nothing for Medicare to pay for this item, so leave the
+.         field blank and simply delete the deposit record from the tempfile.
+.
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            COMPARE   PINVAMT,VDEPAMNT           * Fully paid ?
+          ELSE
+            COMPARE   PRINITOT,VDEPAMNT
+          ENDIF
+          IF        !@LESS
+            MOVE      ANSY,CLMSEG01              * yes
+          ENDIF
+.
+.         Load AccountReferenceId (CLMSEG02)
+.
+WCLM0500  MOVE      EMECINVN,CLMSEG02
+          SQUEEZE   CLMSEG02
+          PACK      CLMSEG02,CLMSEG02,SP10
+.
+.         EFT Bank details can only be sent where the AccountPaidInd
+.
+          MATCH     ANSY,CLMSEG01                * Account Paid ?
+          GOTO      WCLM0700 IF NOT EQUAL        * no
+.
+          MOVE      ZERO,FIELDCNT                * init. populated field count
+.
+.         Load BankAccountName (CLMSEG03)
+.
+          MATCH     SP30,PMCLBNAM                * blank field ?
+          IF        !@EQUAL
+            MOVE      PMCLBNAM,CLMSEG03          * no - load data
+            ADD       ONE,FIELDCNT               * incr. populated field count
+          ENDIF
+.
+.         Load BankAccountNum (CLMSEG04)
+.
+          MATCH     SP30,PMCLBACN                * blank field ?
+          IF        !@EQUAL
+            MOVE      PMCLBACN,CLMSEG04          * no - load data
+            ADD       ONE,FIELDCNT               * incr. populated field count
+          ENDIF
+.
+.         Load BSBCode (CLMSEG05)
+.
+          MATCH     SP6,PMCLBBSB                 * blank field ?
+          GOTO      WCLM0600 IF EQUAL            * yes
+.
+          MOVE      PMCLBBSB,CLMSEG05            * no - load data
+.
+.         Make sure BSB is numeric and six digits
+.
+          SQUEEZE   CLMSEG05
+          TYPE      CLMSEG05
+          IF        !@EQUAL
+            MOVE      "CLM.5.1-BSB not numeric",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      WCLM0600
+          ENDIF
+.
+          MOVELPTR  CLMSEG05,FORM1
+          IF        FORM1 <> 6
+            MOVE      "CLM.5.2-BSB not six digits",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      WCLM0600
+          ENDIF
+.
+          ADD       ONE,FIELDCNT                 * incr. populated field count
+.
+.         For fields BankAccountName, BankAccountNum or BSBCode,
+.         where any one field is populated, all others are mandatory.
+.
+WCLM0600  IF       FIELDCNT <> 0 & FIELDCNT <> 3
+            MOVE      "CLM.3.1-One or more EFT fields missing",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ENDIF
+.
+.         Load ClaimantAddressLine1 (CLMSEG06)
+.
+WCLM0700  MATCH     SP70,PMCLADD1
+          IF        !@EQUAL
+            PACK      CLMSEG06,PMCLADD1,SP70
+.
+.           Load ClaimantAddressLine2 (CLMSEG07) only if ClaimantAddressLine1
+.           is populated.
+.           Mandatory where ClaimantAddressLine1 is set.
+.
+            MATCH     SP70,PMCLADD2
+            IF        !@EQUAL
+              PACK      CLMSEG07,PMCLADD2,SP70
+            ENDIF
+.
+.           Load ClaimantAddressLocality (CLMSEG08).
+.           Mandatory where claimant address is being sent.
+.
+            MATCH     SP70,PMCLADD3
+            IF        !@EQUAL
+              PACK      CLMSEG08,PMCLADD3,SP70
+            ELSE
+              MOVE      "CLM.8.1-ClaimantAddressLocality must be populated",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+            ENDIF
+.
+.           Load ClaimantAddressPostcode (CLMSEG09)
+.           Mandatory where claimant address is being sent.
+.
+            MATCH     SP70,PMCLPOST
+            IF        !@EQUAL
+              PACK      CLMSEG09,PMCLPOST,SP70
+            ELSE
+              MOVE      "CLM.9.1-ClaimantAddressPostcode must be populated",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+            ENDIF
+          ENDIF
+.
+.         Load ClaimantDateOfBirth (CLMSEG10)
+.
+          MOVE      ZERO,FIELDCNT                * init. populated field count
+.
+          MATCH     SP70,PMCLCDOB                * blank DoB ?
+          GOTO      WCLM1000 IF EQUAL            * yes
+.
+.         Make sure the DOB is not in the future
+.
+          MATCH     PMCLCDOB,CURRDATE
+          IF        @LESS
+              MOVE      "CLM.10.1-ClaimantDateOfBirth cannot be in the future",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+          ELSE
+            UNPACK    PMCLCDOB,CCENT,CYEAR,CMON,CDAY
+            PACK      CLMSEG10,CDAY,CMON,CCENT,CYEAR
+            ADD       ONE,FIELDCNT               * incr. populated field count
+          ENDIF
+.
+.         Load ClaimantFamilyName (CLMSEG11)
+.
+WCLM1000  MATCH     SP70,PMCLSNAM
+          IF        !@EQUAL
+            PACK      CLMSEG11,PMCLSNAM,SP70
+            ADD       ONE,FIELDCNT               * incr. populated field count
+          ENDIF
+.
+.         Load ClaimantFirstName (CLMSEG12)
+.
+          MATCH     SP70,PMCLGNAM
+          IF        !@EQUAL
+            PACK      CLMSEG12,PMCLGNAM,SP70
+            ADD       ONE,FIELDCNT               * incr. populated field count
+          ENDIF
+.
+.         Load ClaimantMedicareCardNum (CLMSEG13)
+.
+          MATCH     SP70,PMCLMCNO
+          IF        !@EQUAL
+            PACK      CLMSEG13,PMCLMCNO,SP70
+            CALL      VMED0000                   * validate medicare card no.
+            ADD       ONE,FIELDCNT               * incr. populated field count
+          ENDIF
+.
+.         Load ClaimantReferenceNum (CLMSEG14)
+.
+          MATCH     SP70,PMCLCMRF
+          IF        !@EQUAL
+            SQUEEZE   PMCLCMRF
+            MOVE      PMCLCMRF,CLMSEG14
+            ADD       ONE,FIELDCNT               * incr. populated field count
+.
+            TYPE      CLMSEG14
+            IF        !@EQUAL
+              MOVE      "CLM.14.1-ClaimantReferenceNum must be numeric",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      WCLM2000
+            ENDIF
+.
+            MATCH     "0",CLMSEG14
+            IF        @EQUAL
+              MOVE      "CLM.14.2-ClaimantReferenceNum cannot be zero",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+            ENDIF
+          ENDIF
+.
+.         For fields ClaimantMedicareCardNum, ClaimantFamilyName,
+.         ClaimantFirstName, ClaimantDateOfBirth or ClaimantReferenceNum,
+.         where any one field is populated, all others are mandatory.
+.
+WCLM2000  IF       FIELDCNT <> 0 & FIELDCNT <> 5
+            MOVE      "CLM.10.2-One or more mandatory Claimant fields missing",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ENDIF
+.
+.         Load ClaimSubmissionAuthorised (CLMSEG15)
+.
+          MOVE      ANSY,CLMSEG15
+.
+.         Load ContactPhoneNum (CLMSEG16)
+.         Not populated for webPAS.
+.
+.         Load DateOfLodgement (CLMSEG17)
+.
+          UNPACK    CURRDATE,CCENT,CYEAR,CMON,CDAY
+          PACK      CLMSEG17,CDAY,CMON,CCENT,CYEAR
+.
+.         Load PatientDateOfBirth (CLMSEG18)
+.
+          UNPACK    PBDATE,CCENT,CYEAR,CMON,CDAY
+          PACK      CLMSEG18,CDAY,CMON,CCENT,CYEAR
+.
+.         Load PatientFamilyName (CLMSEG19)
+.
+          MOVE      PTMASNAM,CLMSEG19
+.
+.         Load PatientFirstName (CLMSEG20)
+.
+          MOVE      PMPXFNAM,CLMSEG20
+.
+.         Load PatientMedicareCardNum (CLMSEG21)
+.         Mandatory given that Patient Surname will always be populated.
+.
+          MATCH     SP10,PMEDI
+          IF        @EQUAL
+            MOVE      "CLM.21.1-PatientMedicareCardNum not populated",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ELSE
+            MOVE      PMEDI,CLMSEG21
+          ENDIF
+.
+.         Load PatientReferenceNum (CLMSEG22)
+.         Mandatory given that Patient Surname will always be populated.
+.
+          MATCH     SP2,PTMXMCCD
+          IF        @EQUAL
+            MOVE      "CLM.22.1-PatientReferenceNum not populated",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ELSE
+            SQUEEZE   PTMXMCCD
+            MOVE      PTMXMCCD,CLMSEG22
+          ENDIF
+.
+.         Load PayeeProviderNum (CLMSEG23)
+.
+          MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      EMSTPPRV,KEY8              * yes
+          ELSE
+            MOVE      PRHRPRAC,KEY6              * no - PRI
+            CALL      RDPRPR1                    * practice on file ?
+            BRANCH    OVRCD,WCLM2900             * no
+.
+            MATCH     SP10,PRPRPDOC              * primary doctor code blank?
+            GOTO      WCLM2900 IF EQUAL          * yes
+.
+            PACK      KEY22,PRHRPRAC,PRPRPDOC,PRHDCLAM,PRHRPIND
+            CALL      RDPRDO1
+            BRANCH    OVRCD,WCLM2900
+.
+            MOVE      PRDOPROV,KEY8
+          ENDIF
+.
+          MATCH     SP8,KEY8                     * payee provider blank ?
+          GOTO      WCLM3000 IF EQUAL            * yes
+.
+          MOVE      "CLM",SEGMTYPE
+          MOVE      "23",SEGFIELD
+          MOVE      "-PayeeProviderNum (",FIELDESC
+          MOVE      FOUR,PROVFLAG                * set flag to servicing doctor
+          MOVE      KEY8,DIM8
+          CALL      VPRN0000                     * valid provider ?
+          BRANCH    EXIT,WCLM3000                * no
+.
+          MOVE      KEY8,CLMSEG23
+          GOTO      WCLM3000
+.
+WCLM2900  MOVE      "CLM.23.1-PayeeProviderNum cannot be found",ERRMSG
+          MOVE      SP9,DIM9
+          CALL      PERR0000
+.
+.         Load ServicingProviderNum (CLMSEG24)
+.
+WCLM3000  MATCH     "1",EMECMODL                 * ED ?
+          IF        @EQUAL
+            MOVE      ATDTEDAD,KEY10             * yes
+          ELSE
+            MOVE      PRHRDOCT,KEY10             * no - PRI
+          ENDIF
+.
+          MATCH     SP10,KEY10                   * blank attending dr. code ?
+          IF        @EQUAL
+            MOVE      "CLM.24.1-ServicingProviderNum not populated",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      WCLM8000
+          ENDIF
+.
+          CALL      RDPMHCP1                     * HCP on file ?
+          BRANCH    OVRCD,WCLM4900               * no
+.
+          MATCH     SP10,PMHCPRV1                * blank provider number ?
+          GOTO      WCLM4900 IF EQUAL            * yes
+.
+          MOVE      "CLM",SEGMTYPE
+          MOVE      "24",SEGFIELD
+          MOVE      "-ServicingProviderNum (",FIELDESC
+          MOVE      FOUR,PROVFLAG                * set flag to servicing doctor
+          MOVE      PMHCPRV1,DIM8
+          CALL      VPRN0000                     * valid provider ?
+          BRANCH    EXIT,WCLM8000                * no
+.
+          MOVE      PMHCPRV1,CLMSEG24            * yes - load data
+          GOTO      WCLM5000
+.
+WCLM4900  MOVE      "CLM.24.2-ServicingProviderNum cannot be found",ERRMSG
+          MOVE      SP9,DIM9
+          CALL      PERR0000
+.
+.         Make sure that the PayeeProviderNum (if populated) is not the
+.         same as the ServiceProviderNum and if it is, then clear the 
+.         PayeeProviderNum
+.
+WCLM5000  MATCH     CLMSEG23,CLMSEG24
+          IF        @EQUAL
+            MOVE      SP8,CLMSEG23
+          ENDIF
+.
+.         Load TimeOfLodgement (CLMSEG25)
+.
+WCLM8000  MOVE      CTIMEIS,DIM8
+          REP       " 0",DIM8
+          REP       ": ",DIM8
+          SQUEEZE   DIM8
+          MOVE      DIM8,CLMSEG25
+.
+.         Load TransactionId (CLMSEG26)
+.
+          MOVE      EMECTRID,CLMSEG26
+.
+.         Load the Emergency/Private Practice Flag (CLMSEG27)
+.
+          MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      "1",CLMSEG27               * yes
+          ELSE
+            MOVE      "2",CLMSEG27               * no - Private Practice
+          ENDIF
+.
+WCLM9000  BRANCH    VALDFLG,WCLM9999             * validation only
+.
+          WRITE     EXTFILE1,SEQ;TILDA01,ANSC,ANSL,ANSM:
+                                 CLMSEG01,CLMSEG02,CLMSEG03,CLMSEG04,CLMSEG05:
+                                 CLMSEG06,CLMSEG07,CLMSEG08,CLMSEG09,CLMSEG10:
+                                 CLMSEG11,CLMSEG12,CLMSEG13,CLMSEG14,CLMSEG15:
+                                 CLMSEG16,CLMSEG17,CLMSEG18,CLMSEG19,CLMSEG20:
+                                 CLMSEG21,CLMSEG22,CLMSEG23,CLMSEG24,CLMSEG25:
+                                 CLMSEG26,CLMSEG27
+.
+WCLM9999  RETURN
++
+.******************************************************************************
+.*                                  WVCH0000              Called by: VALD0000 *
+.*                            Write Voucher Details                & WRIT0000 *
+.******************************************************************************
+.
+.         There should be a maximum of 16 vouchers in total for an invoice
+.
+WVCH0000  ADD       ONE,VCHCOUNT                 * increment voucher count
+          IF        VCHCOUNT > 16
+            MOVE      "GEN.22-Too many vouchers for claim",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ENDIF
+.
+          MOVE      SP70,VCHSEG01
+          MOVE      SP70,VCHSEG02
+          MOVE      SP70,VCHSEG03
+          MOVE      SP70,VCHSEG04
+          MOVE      SP70,VCHSEG05
+          MOVE      SP70,VCHSEG06
+          MOVE      SP70,VCHSEG07
+.
+          MOVE      SP70,SERVTXT1
+          MOVE      SP70,SERVTXT2
+.
+.         Load DateOfService (VCHSEG01)
+.
+          MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      ATDDATE,DIM8B              * yes
+          ELSE
+            MOVE      PRDTSDAT,DIM8B             * no - PRI
+          ENDIF
+.
+.         Check that the DateOfService is not in the future.
+.
+          MATCH     DIM8B,CURRDATE
+          IF        @LESS
+            MOVE      "VCH.1.1-DateOfService cannot be a future date",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      WVCH3000
+          ENDIF
+.
+.         Check that the DateOfService is not prior to PatientDateOfBirth.
+.
+          MATCH     PBDATE,DIM8B
+          IF        @LESS
+            MOVE      "VCH.1.2-DateOfService prior to date of birth",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      WVCH3000
+          ENDIF
+.
+.         Cannot be more than 2 years prior to date of transmission.
+.
+          UNPACK    DIM8B,CCENT,CYEAR,CMON,CDAY
+.
+          MOVE      DIM8B,DATEVAR1
+          MOVE      CURRDATE,DATEVAR2
+          DAYSEP    DATEVAR1,DATEVAR2,FORM5
+          IF        FORM5 > 729
+            MOVE      "VCH.1.3-DateOfService too old",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      WVCH3000
+          ENDIF
+.
+          PACK      VCHSEG01,CDAY,CMON,CCENT,CYEAR
+.
+.         Load TimeOfService (VCHSEG02)
+.
+WVCH2000  MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      ATDTSVTM,DIM5              * yes
+          ELSE
+            MOVE      PRDTSTIM,DIM5              * no - PRI
+          ENDIF
+.
+          MATCH     SP5,DIM5                     * blank field ?
+          GOTO      WVCH3000 IF EQUAL            * yes
+.
+          REP       " 0",DIM5                    * no - format time
+          REP       ": ",DIM5
+          SQUEEZE   DIM5
+          MOVE      DIM5,VCHSEG02
+.
+.         Load ReferralOverrideTypeCde (VCHSEG03)
+.         Note: For ED records, we need to set this field after populating
+.               referral details, as it is only hard-coded to "E", when
+.               there are no referral details recorded.
+.
+          MOVE      ZERO,FIELDCNT                * init. populated field count
+.
+WVCH3000  MATCH     "2",EMECMODL                 * PRI record ?
+          IF        @EQUAL
+            MATCH     SP3,PRHRROVR               * yes
+            GOTO      WVCH4000 IF EQUAL
+.
+            PACK      KEY5,CATro,PRHRROVR
+            CALL      RDCODE1
+            BRANCH    OVRCD,WVCH4000
+.
+            MATCH     ANSE,THCSCOD
+            GOTO      WVCH3500 IF EQUAL
+.
+            MATCH     ANSH,THCSCOD
+            GOTO      WVCH3500 IF EQUAL
+.
+            MATCH     ANSL,THCSCOD
+            GOTO      WVCH3500 IF EQUAL
+.
+            MATCH     ANSN,THCSCOD
+            GOTO      WVCH3500 IF EQUAL
+.
+            MOVE      "VCH.3.1-ReferralOverrideTypeCde value is invalid",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      WVCH4000
+.
+WVCH3500    MOVE      THCSCOD,VCHSEG03
+          ENDIF
+.
+.         Load ReferringProviderNum (VCHSEG04)
+.
+WVCH4000  MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      EMVIREFD,KEY10             * yes
+            GOTO      WVCH4100
+          ELSE
+            MOVE      PRHRREFD,KEY10             * no - PRI
+            GOTO      WVCH4200
+          ENDIF
+.
+WVCH4100  MATCH     SP10,KEY10                   * blank referring doctor ?
+          GOTO      WVCH5000 IF EQUAL            * yes
+.
+          PACK      KEY20,KEY10,SP70 
+          CALL      RSPMHCL1
+WVCH4110  CALL      RKPMHCL1
+          BRANCH    OVRCD,WVCH4150
+.
+          MATCH     KEY10,PMHLHCPC
+          GOTO      WVCH4150 IF NOT EQUAL
+.
+          MATCH     SP70,PMHLPRV1
+          GOTO      WVCH4110 IF EQUAL
+.
+          MOVE      "VCH",SEGMTYPE
+          MOVE      " 4",SEGFIELD
+          MOVE      "-ReferringProviderNum (",FIELDESC
+          MOVE      FOUR,PROVFLAG                * set flag to servicing doctor
+          MOVE      PMHLPRV1,DIM8
+          CALL      VPRN0000                     * valid provider ?
+          BRANCH    EXIT,WVCH5000                * no
+.
+          MOVE      PMHLPRV1,VCHSEG04            * yes
+          ADD       ONE,FIELDCNT                 * incr. populated field count
+.
+          GOTO      WVCH4300
+.
+WVCH4150  PACK      KEY10,EMVIREFD,SP70
+          CALL      RDPMHCP1                     * referring dr on file ?
+          BRANCH    OVRCD,WVCH4900               * no
+.
+          MATCH     SP10,PMHCPRV1                * blank provider number ?
+          GOTO      WVCH4900 IF EQUAL
+.
+          MOVE      "VCH",SEGMTYPE
+          MOVE      " 4",SEGFIELD
+          MOVE      "-ReferringProviderNum (",FIELDESC
+          MOVE      FOUR,PROVFLAG                * set flag to servicing doctor
+          MOVE      PMHCPRV1,DIM8
+          CALL      VPRN0000                     * valid provider ?
+          BRANCH    EXIT,WVCH5000                * no
+.
+          MOVE      PMHCPRV1,VCHSEG04            * yes
+          ADD       ONE,FIELDCNT                 * incr. populated field count
+.
+          GOTO      WVCH4300
+.
+WVCH4200  MATCH     SP10,KEY10                   * blank referring doctor ?
+          GOTO      WVCH5000 IF EQUAL            * yes
+.
+          PACK      KEY20,PRHRREFD,PRHRHCPP,SP70
+          CALL      RDPMHCL1
+          BRANCH    OVRCD,WVCH4250
+.
+          MATCH     SP70,PMHLPRV1
+          GOTO      WVCH4250 IF EQUAL
+.
+          MOVE      "VCH",SEGMTYPE
+          MOVE      " 4",SEGFIELD
+          MOVE      "-ReferringProviderNum (",FIELDESC
+          MOVE      FOUR,PROVFLAG                * set flag to servicing doctor
+          MOVE      PMHLPRV1,DIM8
+          CALL      VPRN0000                     * valid provider ?
+          BRANCH    EXIT,WVCH5000                * no
+.
+          MOVE      PMHLPRV1,VCHSEG04            * yes
+          ADD       ONE,FIELDCNT                 * incr. populated field count
+.
+          GOTO      WVCH4300
+.
+WVCH4250  PACK      KEY10,PRHRREFD,SP70
+          CALL      RDPMHCP1                     * referring dr on file ?
+          BRANCH    OVRCD,WVCH4900               * no
+.
+          MATCH     SP10,PMHCPRV1                * blank provider number ?
+          GOTO      WVCH4900 IF EQUAL
+.
+          MOVE      "VCH",SEGMTYPE
+          MOVE      " 4",SEGFIELD
+          MOVE      "-ReferringProviderNum (",FIELDESC
+          MOVE      FOUR,PROVFLAG                * set flag to servicing doctor
+          MOVE      PMHCPRV1,DIM8
+          CALL      VPRN0000                     * valid provider ?
+          BRANCH    EXIT,WVCH5000                * no
+.
+          MOVE      PMHCPRV1,VCHSEG04            * yes
+          ADD       ONE,FIELDCNT                 * incr. populated field count
+.
+          GOTO      WVCH4300
+.
+.         ReferralOverrideTypeCde can only be set with ReferringProviderNum when
+.         the former is set to "N" or not set at all
+.
+WVCH4300  MATCH     SP1,VCHSEG03
+          IF        !@EQUAL
+            MATCH     ANSN,VCHSEG03
+            IF        !@EQUAL
+              MOVE      "VCH.4.3-ReferralOverrideTypeCde can only be N when ReferringProviderNum is populated",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      WVCH5100
+            ENDIF
+          ENDIF
+.
+.         ServicingProviderNum (CLMSEG24) cannot have the same first 6 digits
+.         as the ReferringProviderNum (VCHSEG04)
+.
+          MOVE      VCHSEG04,DIM6A
+          MOVE      CLMSEG24,DIM6B
+          MATCH     DIM6A,DIM6B
+          IF        @EQUAL
+            MOVE      "VCH.4.2-ReferringProviderNum has same six digits as ServicingProviderNum",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ENDIF
+          GOTO      WVCH5000
+.
+WVCH4900  MOVE      "VCH.4.1-ReferringProviderNum cannot be found",ERRMSG
+          MOVE      SP9,DIM9
+          CALL      PERR0000
+.
+.         Load ReferralIssueDate (VCHSEG05)
+.
+WVCH5000  MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MATCH     SP8,EMVIREDT
+            IF        !@EQUAL
+              UNPACK    EMVIREDT,CCENT,CYEAR,CMON,CDAY
+              MOVE      EMVIREDT,DIM8A
+              PACK      VCHSEG05,CDAY,CMON,CCENT,CYEAR
+            ENDIF
+          ELSE
+            MATCH     SP8,PRHRRDAT
+            IF        !@EQUAL
+              UNPACK    PRHRRDAT,CCENT,CYEAR,CMON,CDAY
+              MOVE      PRHRRDAT,DIM8A
+              PACK      VCHSEG05,CDAY,CMON,CCENT,CYEAR
+            ENDIF
+          ENDIF
+.
+          MATCH     SP8,VCHSEG05                 * field populated ?
+          GOTO      WVCH5100 IF EQUAL            * no
+.
+          ADD       ONE,FIELDCNT                 * incr. populated field count
+.
+.         ReferralOverrideTypeCde can only be set with ReferralIssueDate when
+.         the former is set to "N" or not set at all
+.
+          MATCH     SP1,VCHSEG03
+          IF        !@EQUAL
+            MATCH     ANSN,VCHSEG03
+            IF        !@EQUAL
+              MOVE      "VCH.5.1-ReferralOverrideTypeCde can only be N when ReferralIssueDate is populated",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      WVCH5100
+            ENDIF
+          ENDIF
+.
+.         Where ReferralOverrideTypeCde (VCHSEG03) is blank and
+.         ReferralIssueDate (VCHSEG05) is populated, then DateOfService
+.         (VCHSEG01) must not be less than the ReferralIssueDate.
+.
+          MATCH     SP1,VCHSEG03
+          GOTO      WVCH5100 IF NOT EQUAL
+.
+          MATCH     DIM8A,DIM8B
+          IF        @LESS
+            MOVE      "VCH.5.2-DateOfService less than ReferralIssueDate",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ENDIF
+.
+.         Load ReferralPeriodTypeCde (VCHSEG06)
+.
+WVCH5100  MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      EMVIREFP,KEY3              * yes
+          ELSE
+            MOVE      PRHRRFPD,KEY3              * no - PRI
+          ENDIF
+.
+          MATCH     SP3,KEY3                     * blank field ?
+          GOTO      WVCH6000 IF EQUAL            * yes
+.
+          PACK      KEY5,ANSR,ANSF,KEY3
+          CALL      RDCODE1                      * referral period code on file?
+          BRANCH    OVRCD,WVCH6000               * no
+.
+          MATCH     SP1,TCINDC1                  * Indicator 1 set ?
+          GOTO      WVCH6000 IF EQUAL            * no
+.
+          MATCH     ANSI,TCINDC1                 * Indefinite ?
+          GOTO      WVCH5900 IF EQUAL            * yes - valid
+.
+          MATCH     ANSN,TCINDC1                 * Non-Standard ?
+          GOTO      WVCH5900 IF EQUAL            * yes - valid
+.
+          MATCH     ANSS,TCINDC1                 * Standard ?
+          GOTO      WVCH5900 IF EQUAL            * yes - valid
+.
+          MOVE      "VCH.6.2-ReferralPeriodTypeCde not valid",ERRMSG
+          MOVE      SP9,DIM9
+          CALL      PERR0000
+          GOTO      WVCH9000
+.
+WVCH5900  MOVE      TCINDC1,VCHSEG06
+.
+WVCH6000  MATCH     SP1,VCHSEG06                 * blank value ?
+          IF        !@EQUAL
+            ADD       ONE,FIELDCNT               * incr. populated field count
+            GOTO      WVCH6100
+          ENDIF
+.
+.         If ReferralProviderNum and ReferralIssueDate are both populated,
+.         then ReferralPeriodTypeCde is mandatory
+.
+          MATCH     SP8,VCHSEG04
+          IF        !@EQUAL
+            MATCH     SP8,VCHSEG05
+            IF        !@EQUAL
+              MOVE      "VCH.6.1-ReferralPeriodTypeCde mandatory",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      WVCH9000
+            ENDIF
+          ENDIF
+.
+.         Check if referral details have been input for ED and if not, then we
+.         need to set ReferralOverrideTypeCde to "E"
+.
+WVCH6100  MATCH     "1",EMECMODL
+          IF        @EQUAL
+            IF        FIELDCNT = 0
+              MOVE      ANSE,VCHSEG03
+              GOTO      WVCH9000
+            ENDIF
+          ENDIF
+.
+          MATCH     SP8,VCHSEG06                 * blank ReferralPeriodTypeCde ?
+          GOTO      WVCH9000 IF EQUAL            * yes
+.
+.         ReferralOverrideTypeCde can only be set with ReferralPeriodTypeCde
+.         when the former is set to "N" or not set at all
+.
+          MATCH     SP1,VCHSEG03
+          IF        !@EQUAL
+            MATCH     ANSN,VCHSEG03
+            IF        !@EQUAL
+              MOVE      "VCH.6.3-ReferralOverrideTypeCde can only be N when ReferralPeriodTypeCde is populated",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      WVCH9000
+            ENDIF
+          ENDIF
+.
+          MATCH     ANSN,VCHSEG06                * ReferralPeriodTypeCde "No"?
+          GOTO      WVCH9000 IF NOT EQUAL        * no
+.
+.         If ReferralPeriodTypeCde is set to "N", then we need to load
+.         the period into the ServiceText (SRVSEG19) field
+.
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            MOVE      EMVIREPM,KEY2
+          ELSE
+            MOVE      PRHRRPER,KEY2
+          ENDIF
+.
+          MATCH     SP2,KEY2
+          IF        !@EQUAL
+            SQUEEZE   KEY2
+            MOVE      "Period = ",SERVTXT1
+            ENDSET    SERVTXT1
+            APPEND    KEY2,SERVTXT1
+            APPEND    " months",SERVTXT1
+            APPEND    SP70,SERVTXT1
+            RESET     SERVTXT1
+          ENDIF
+.
+.         Load RequestTypeCde (VCHSEG07)
+.         Not populated for webPAS (Pathology and Radiology only)
+.
+WVCH9000  BRANCH    VALDFLG,WVCH9999             * validation only
+.
+          WRITE     EXTFILE1,SEQ;TILDA01,ANSV,ANSC,ANSH:
+                                 VCHSEG01,VCHSEG02,VCHSEG03,VCHSEG04,VCHSEG05:
+                                 VCHSEG06,VCHSEG07
+.
+WVCH9999  RETURN
++
+.******************************************************************************
+.*                                  LODS0000              Called by: VALD0000 *
+.*                 Load the sorted tempfile with all the items       WRIT0000 *
+.*                 for the invoice being processed.
+.******************************************************************************
+.
+LODS0000  GOTO      LODS0500                     * first dtr rec for processing
+.
+.         Get the next aaedtref/pridtraf record for processing
+.
+LODS0050  MATCH     "1",EMECMODL                 * ED record ?
+          GOTO      LODS0200 IF NOT EQUAL        * no - PRI record
+.
+.         ED Record
+.
+LODS0100  CALL      RDKDTRE4                     * read next record
+          BRANCH    OVRCD,LODS9999               * eof - finished
+.
+          MATCH     LISTINVN,ATINVNO             * same invoice still ?
+          GOTO      LODS9999 IF NOT EQUAL        * no - finished
+.
+          IF        ATRECTYP <> 5
+            GOTO      LODS0100                   * not a procedure
+          ENDIF
+.
+          MOVE      LISTUNIQ,FORM8
+          COMPARE   FORM8,ATNUMB                 * same visit ?
+          IF        !@EQUAL
+            MOVE      "GEN.17-Visit inconsistency for aaedtref record",ERRMSG
+            MOVE      ATITEMNO,DIM9
+            CALL      PERR0000
+            GOTO      LODS0100
+          ENDIF
+.
+          GOTO      LODS0500
+.
+.         PRI Record
+.
+LODS0200  CALL      RKPRDT4                      * read next record
+          BRANCH    OVRCD,LODS9999               * eof - finished
+.
+          MATCH     LISTINVN,PRDTINVN            * same invoice still ?
+          GOTO      LODS9999 IF NOT EQUAL        * no - finished
+.
+          COMPARE   ONE,PRDTRTYP                 * item record ?
+          GOTO      LODS0200 IF NOT EQUAL        * no - ignore record
+.
+.         We have found a valid item record so load the temp file fields.
+.
+LODS0500  MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      ATDDATE,SORTSDAT           * yes
+            MOVE      ATTRANS,SORTTRAN
+          ELSE
+            MOVE      PRDTSDAT,SORTSDAT          * no - PRI
+            MOVE      PRDTTRAN,SORTTRAN
+          ENDIF
+.
+          PACK      KEY14,SORTSDAT,SORTTRAN
+          CALL      RATEMP3
+          IF        OVRCD = 1
+            CALL      WRTEMP3
+          ENDIF
+.
+          GOTO      LODS0050                     * get next ...dtraf record
+.
+LODS9999  RETURN
++
+.******************************************************************************
+.*                                  WSRV0000              Called by: VALD0000 *
+.*                            Write Service Details                & WRIT0000 *
+.******************************************************************************
+.
+WSRV0000  ADD       ONE,ITMCOUNT                 * increment item count
+.
+          IF        ITMCOUNT > 14
+            MOVE      "GEN.9-Too many items to claim - process manually or split invoice",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+            GOTO      WSRV9999
+          ENDIF
+.
+WSRV0500  MOVE      SP70,SRVSEG01                * Initialise all segment fields
+          MOVE      SP70,SRVSEG02
+          MOVE      SP70,SRVSEG03
+          MOVE      SP70,SRVSEG04
+          MOVE      SP70,SRVSEG05
+          MOVE      SP70,SRVSEG06
+          MOVE      SP70,SRVSEG07
+          MOVE      SP70,SRVSEG08
+          MOVE      SP70,SRVSEG09
+          MOVE      SP70,SRVSEG10
+          MOVE      SP70,SRVSEG11
+          MOVE      SP70,SRVSEG12
+          MOVE      SP70,SRVSEG13
+          MOVE      SP70,SRVSEG14
+          MOVE      SP70,SRVSEG15
+          MOVE      SP70,SRVSEG16
+          MOVE      SP70,SRVSEG17
+          MOVE      SP70,SRVSEG18
+          MOVE      SP70,SRVSEG19
+          MOVE      SP70,SRVSEG20
+.
+          REP       " 0",SRVSEG04                * zero fill numeric field
+.
+.         Load AccessionDateTime (SRVSEG01)
+.         Not applicable to webPAS - only relates to pathology services.
+.
+.         Load AfterCareOverrideInd (SRVSEG02)
+.
+          MOVE      ANSN,SRVSEG02                * set to default value "N"
+          MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MATCH     "1",ATDTACOI               * yes
+            IF        @EQUAL
+              MOVE      ANSY,SRVSEG02
+            ENDIF
+          ELSE
+            MATCH     "1",PRDTACOI               * no - Private Practice
+            IF        @EQUAL
+              MOVE      ANSY,SRVSEG02
+            ENDIF
+          ENDIF
+.
+.         Load CollectionDateTime (SRVSEG03)
+.         Not applicable to webPAS - only relates to pathology services.
+.
+.         Load ChargeAmount (SRVSEG04)
+.
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            ADD       ATPATAMT,TOTAMTCT          * increm. total amount counter
+            MOVE      ATPATAMT,KEY15
+          ELSE
+            ADD       PRDTAMNT,TOTAMTCT          * increm. total amount counter
+            MOVE      PRDTAMNT,KEY15
+          ENDIF
+          REP       ". ",KEY15
+          SQUEEZE   KEY15
+          RJUSTIFY  KEY15
+          REP       " 0",KEY15
+          UNPACK    KEY15,KEY8,SRVSEG04
+.
+          MATCH     "0000100",SRVSEG04
+          IF        @LESS
+            MOVE      "SRV.4.1-ChargeAmount is less than 100",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+.         Load DuplicateServiceOverrideInd (SRVSEG05)
+.
+WSRV2000  MOVE      ANSN,SRVSEG05                * set to default value of "N"
+          MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MATCH     "1",ATDTDSOV               * yes
+            IF        @EQUAL
+              MOVE      ANSY,SRVSEG05
+            ENDIF
+          ELSE
+            MATCH     "1",PRDTDSOV               * no - PRI
+            IF        @EQUAL
+              MOVE      ANSY,SRVSEG05
+            ENDIF
+          ENDIF
+.
+.         If the value is "Y", then DateOfService (VCHSEG02) must be populated
+.
+          MATCH     ANSY,SRVSEG05
+          GOTO      WSRV2100 IF NOT EQUAL
+.
+          MATCH     SP4,VCHSEG02
+          IF        @EQUAL
+            MOVE      "SRV.5.1-DuplicateServiceOverrideInd value requires DateofService to be populated",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+.>>>>>    Note: If set to "Y", reason for override is expected to be captured
+.               in ServiceText
+.
+.         Load EquipmentId (SRVSEG06)
+.         Not required/applicable to webPAS.
+.
+.         Load FieldQuantity (SRVSEG07)
+.
+WSRV2100  
+.
+.         Below code was added to pass NOI test only, but has been 
+.         saved just in case it is required in the future
+.
+.         MOVE      SP70,SRVSEG07
+.         MATCH     "1",EMECMODL
+.         IF        @EQUAL
+.           IF        ATSERVS > 1
+.             MOVE      ATSERVS,SRVSEG07
+.           ENDIF
+.         ELSE
+.           IF        PRDTSERV > 1
+.             MOVE      PRDTSERV,DIM5
+.             LJUSTIFY  DIM5
+.             MOVE      DIM5,SRVSEG07
+.             RJUSTIFY  SRVSEG07
+.           ENDIF
+.         ENDIF 
+.
+.         Load HospitalInd (SRVSEG08)
+.
+          MOVE      ANSN,SRVSEG08
+          MATCH     "2",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MATCH     "1",PRDTHOSI               * no - PRI record
+            IF        @EQUAL
+              MOVE       ANSY,SRVSEG08
+            ENDIF
+          ENDIF
+.
+.         If the HospitalInd is set to "Y", then we need to send the hospital
+.         provider number in the ServiceText (SRVSEG19) field.
+.
+          MATCH     ANSY,SRVSEG08
+          GOTO      WSRV2500 IF NOT EQUAL
+.
+          IF        IBCNMHOS = 1
+            MOVE      PTHSAPPR,KEY8
+          ELSE
+            MOVE      CAPPRVNO,KEY8
+          ENDIF
+.
+          MATCH     SP8,KEY8
+          IF        @EQUAL
+            MOVE      "SRV.19.1-Hospital Approval number not found",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+            GOTO      WSRV2500
+          ENDIF
+.
+.         A hospital provider number has been found, so validate it
+.
+          MOVE      "SRV",SEGMTYPE
+          MOVE      " 8",SEGFIELD
+          MOVE      "-Hospital provider no (",FIELDESC
+          MOVE      ONE,PROVFLAG                 * set flag to hospital
+          MOVE      KEY8,DIM8
+          CALL      VPRN0000                     * valid provider ?
+          BRANCH    EXIT,WSRV2500                * no
+.
+.         We have a valid hospital provider number, so load the service
+.         text field for use in SRVSEG19
+.
+          MOVE      "Hospital Provider Number - ",SERVTXT2
+          ENDSET    SERVTXT2
+          APPEND    KEY8,SERVTXT2
+          APPEND    SP70,SERVTXT2
+          RESET     SERVTXT2
+.
+.         ItemNum (SRVSEG09)
+.
+WSRV2500  MATCH     "1",EMECMODL                 * ED Record ?
+          IF        @EQUAL
+            MOVE      ATITEMNO,KEY9              * yes
+          ELSE
+            MOVE      PRDTITMN,KEY9              * no - PRI
+          ENDIF
+          STRIP     KEY9
+          MOVELPTR  KEY9,FORM1
+          IF        FORM1 > 5
+            MOVE      "SRV.9.1-ItemNum is too long",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ELSE
+            PACK      SRVSEG09,KEY9,SP10
+          ENDIF
+.
+.         Load SCPId (SRVSEG10)
+.         Not required/applicable to webPAS.
+.
+.         Load LSPNum (SRVSEG11)
+.
+          MOVE      SP6,KEY6
+          MATCH     "1",EMECMODL                 * ED Record ?
+          IF        @EQUAL
+            MATCH     SP6,ATDTLSPN
+            IF        !@EQUAL
+              MOVE      ATDTLSPN,KEY6            * yes
+            ENDIF
+          ELSE
+            MATCH     SP6,PRDTLSPN
+            IF        !@EQUAL
+              MOVE      PRDTLSPN,KEY6            * no - PRI
+            ENDIF
+          ENDIF
+.
+          MATCH     SP6,KEY6                     * blank LSPN ?
+          GOTO      WSRV2600 IF EQUAL            * yes
+.
+          MOVE      KEY6,SRVSEG11                * no
+          RJUSTIFY  SRVSEG11
+          REP       " 0",SRVSEG11
+.
+          MATCH     "000000",SRVSEG11
+          IF        @EQUAL
+            MOVE      "SRV.11.1-LSPNum cannot be zeroes",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+.         Load MultipleProcedureOverrideInd (SRVSEG12)
+.
+WSRV2600  MATCH     "1",EMECMODL                 * ED Record ?
+          IF        @EQUAL
+            MATCH     "1",ATDTMPOV               * yes
+            IF        @EQUAL
+              MOVE      ANSY,SRVSEG12
+            ENDIF
+          ELSE
+            MATCH     "1",PRDTMPOV               * no - PRI
+            IF        @EQUAL
+              MOVE      ANSY,SRVSEG12
+            ENDIF
+          ENDIF
+.
+.>>>>>    Note: If set to "Y", reason for override is expected to be captured
+.               in ServiceText
+.
+.         Load NoOfPatientsSeen (SRVSEG13)
+.
+WSRV2700  MOVE      SP2,KEY2
+          MATCH     "1",EMECMODL                 * ED Record ?
+          IF        @EQUAL
+            MATCH     SP70,ATDTNMPT              * yes
+            IF        !@EQUAL
+              MOVE      ATDTNMPT,KEY2
+            ENDIF
+          ELSE
+            MATCH     SP70,PRDTNMPT              * no - PRI
+            IF        !@EQUAL
+              MOVE      PRDTNMPT,KEY2
+            ENDIF
+          ENDIF
+.
+          MATCH     SP2,KEY2                     * blank field ?
+          GOTO      WSRV2800 IF EQUAL            * yes
+.
+.         Make sure that MultipleProcedureOverrideInd is not populated
+.
+          MATCH     ANSY,SRVSEG12
+          IF        @EQUAL
+            MOVE      "SRV.12.1-MultipleProcedureOverrideInd cannot be populated when NoOfPatientsSeen is also populated",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+.         Make sure that ReferringProviderNum is not populated
+.
+          MATCH     SP8,VCHSEG04
+          IF        !@EQUAL
+            MOVE      "SRV.12.2-ReferringProviderNum cannot be populated when NoOfPatientsSeen is also populated",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+.         Make sure that ReferralIssueDate is not populated
+.
+          MATCH     SP8,VCHSEG05
+          IF        !@EQUAL
+            MOVE      "SRV.12.3-ReferralIssueDate cannot be populated when NoOfPatientsSeen is also populated",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+.         Make sure that ReferralPeriodTypeCde is not populated
+.
+          MATCH     SP1,VCHSEG06
+          IF        !@EQUAL
+            MOVE      "SRV.12.4-ReferralPeriodTypeCde cannot be populated when NoOfPatientsSeen is also populated",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+          MOVE      KEY2,SRVSEG13
+          RJUSTIFY  SRVSEG13
+          REP       " 0",SRVSEG13
+.
+.         Load PatientContribAmt (SRVSEG14)
+.
+WSRV2800  MATCH     ANSN,CLMSEG01
+          GOTO      WSRV3000 IF NOT EQUAL
+.
+.         Check if there is a deposit amount on the temp file
+.         for this invoice and if so, allocate as much of the amount
+.         as possible against the service item we are currently processing.
+.
+          MOVE      EMECINVN,KEY8
+          CALL      RDTEMP2                      * deposit on file ?
+          IF        OVRCD = 1
+            REP       " 0",SRVSEG14              * no - set field as zero
+            GOTO      WSRV3000
+          ENDIF
+.
+.         We have a deposit.
+.         If the deposit is equal to the total amount,
+.         then there is nothing for Medicare to pay for this item, so leave the
+.         field blank and simply delete the deposit record from the tempfile.
+.
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            COMPARE   ATPATAMT,VDEPAMNT          * Medicare to pay ?
+          ELSE
+            COMPARE   PRDTAMNT,VDEPAMNT          * Medicare to pay ?
+          ENDIF
+          IF        @EQUAL
+            MOVE      EMECINVN,KEY8              * no - leave field blank
+            CALL      DETEMP2
+            GOTO      WSRV3000
+          ENDIF
+.
+.         If the deposit is greater than the total amount,
+.         then there is nothing for Medicare to pay for this item, so leave the
+.         field blank and simply update the deposit record with the remaining
+.         balance.
+.
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            COMPARE   VDEPAMNT,ATPATAMT          * Medicare to pay ?
+          ELSE
+            COMPARE   VDEPAMNT,PRDTAMNT          * Medicare to pay ?
+          ENDIF
+          IF        @LESS
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              ASSIGN    (VDEPAMNT-ATPATAMT),VDEPAMNT
+            ELSE
+              ASSIGN    (VDEPAMNT-PRDTAMNT),VDEPAMNT
+            ENDIF
+            CALL      UPTEMP2
+            GOTO      WSRV3000
+          ELSE
+.
+.           The deposit is less than the total charge, so we need to use the
+.           full deposit amount as the Patient Contribution Amount
+.
+            MOVE      VDEPAMNT,KEY15
+            MOVE      EMECINVN,KEY8
+            CALL      DETEMP2
+          ENDIF
+.
+WSRV2900  REP       ". ",KEY15
+          SQUEEZE   KEY15
+          RJUSTIFY  KEY15
+          REP       " 0",KEY15
+          UNPACK    KEY15,KEY8,SRVSEG14
+.
+.         Load RestrictiveOverrideCde (SRVSEG15)
+.
+WSRV3000  MATCH     "1",EMECMODL
+          IF        @EQUAL
+            MOVE      ATDTROVR,KEY3
+          ELSE
+            MOVE      PRDTROVC,KEY3
+          ENDIF
+.
+          MATCH     SP3,KEY3                     * blank field ?
+          GOTO      WSRV5000 IF EQUAL            * yes
+.
+          MOVE      CATro,KEY2
+          REP       "rR",KEY2
+          PACK      KEY5,KEY2,KEY3
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,WSRV5000               * no
+.
+          MATCH     SP6,PTCDASC1                 * blank associated field 1
+          GOTO      WSRV5000 IF EQUAL            * yes
+.
+          MATCH     "SP",PTCDASC1                * separate sites ?
+          GOTO      WSRV4000 IF EQUAL            * yes - valid code
+.
+          MATCH     "NR",PTCDASC1                * not related ?
+          GOTO      WSRV4000 IF EQUAL            * yes - valid code
+.
+          MATCH     "NC",PTCDASC1                * not for comparison ?
+          GOTO      WSRV4000 IF EQUAL            * yes - valid code
+.
+          MOVE      "SRV.15.1-RestrictiveOverrideCde not valid",ERRMSG
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            MOVE      ATITEMNO,DIM9
+          ELSE
+            MOVE      PRDTITMN,DIM9
+          ENDIF
+          CALL      PERR0000
+.
+          GOTO      WSRV5000
+.
+WSRV4000  MOVE      PTCDASC1,SRVSEG15
+.
+.         Load Rule3ExemptInd (SRVSEG16)
+.         Not required/applicable to webPAS.
+.
+.         Load S4b3ExemptInd (SRVSEG17)
+.         Not required/applicable to webPAS.
+.
+.         Load SelfDeemedCode (SRVSEG18)
+.
+WSRV5000  MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      ATDTSDCD,KEY3              * yes
+          ELSE
+            PACK      KEY3,PRDTSDCD,SP3
+.>>>>>>     MOVE      PRDTSDCD,KEY3              * no - PRI
+.           Needs to be resolved - is it 2 characters or 3?
+          ENDIF
+.
+          MATCH     SP3,KEY3                     * blank code ?
+          GOTO      WSRV7000 IF EQUAL            * yes
+.
+          PACK      KEY5,CATSd,KEY3
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,WSRV7000               * no
+.
+          MATCH     SP4,THCSCOD                  * blank HDP Default ?
+          GOTO      WSRV7000 IF EQUAL            * yes
+.
+          MATCH     "SD",THCSCOD                 * self deemed ?
+          GOTO      WSRV6000 IF EQUAL            * yes - valid code
+.
+          MATCH     "SS",THCSCOD                 * substituted service ?
+          GOTO      WSRV6000 IF EQUAL            * yes - valid code
+.
+          MATCH     "N ",THCSCOD                 * not self deemed ?
+          GOTO      WSRV6000 IF EQUAL            * yes - valid code
+.
+          MOVE      "SRV.18.1-SelfDeemedCode not valid",ERRMSG
+          MATCH     "1",EMECMODL
+          IF        @EQUAL
+            MOVE      ATITEMNO,DIM9
+          ELSE
+            MOVE      PRDTITMN,DIM9
+          ENDIF
+          CALL      PERR0000
+.
+          GOTO      WSRV7000
+.
+.         Make sure that ReferralOverrideTypeCde is set to "N" or spaces where
+.         SelfDeemedCode is populated
+.
+WSRV6000  MATCH     SP1,VCHSEG03
+          IF        !@EQUAL
+            MATCH     ANSN,VCHSEG03                * blank field ?
+            IF        !@EQUAL
+              MOVE      "SRV.18.2-SelfDeemedCode not valid unless ReferralOverrideTypeCde set to N",ERRMSG
+              MATCH     "1",EMECMODL
+              IF        @EQUAL
+                MOVE      ATITEMNO,DIM9
+              ELSE
+                MOVE      PRDTITMN,DIM9
+              ENDIF
+              CALL      PERR0000
+            ENDIF
+          ENDIF
+.
+.         Make sure that NoOfPatientsSeen is not populated
+.
+          MATCH     SP2,SRVSEG13                * blank field ?
+          IF        !@EQUAL
+            MOVE      "SRV.18.3-SelfDeemedCode cannot be populated when NoOfPatientsSeen is populated",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+          MOVE      THCSCOD,SRVSEG18
+.
+.         If the value is "SS" (Substituted Service), then voucher Referral
+.         details must be present
+.
+          MATCH     "SS",SRVSEG18
+          GOTO      WSRV7000 IF NOT EQUAL
+.
+          MATCH     SP1,VCHSEG06
+          IF        @EQUAL
+            MOVE      "SRV.18.4-SelfDeemedCode cannot be populated without voucher referral details",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+.         Load ServiceText (SRVSEG19)
+.
+.>>>>>>>  ServiceText is supposed to be populated if HospitalInd = "Y".
+.         Glenn said use CAPPRVNO or PTHSAPPR for Hospital Approval No.
+.         Multiple fields require information to also be provided in this
+.         field, so concatenate data or put it against different items 
+.         where multiple items (SRV segments) are being sent for the same
+.         visit.
+.>>>>>    Need to validate if this is going to work the way it's currently
+.         coded ???
+.
+WSRV7000  MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      ATDTSTXT,SRVSEG19          * yes
+          ELSE
+            MOVE      PRDTSTXT,SRVSEG19          * no - PRI
+          ENDIF
+.
+          MATCH     SP70,SRVSEG19                * blank ServiceText ?
+          GOTO      WSRV8000 IF NOT EQUAL        * no
+.
+.         There is no comment for this dtr record, so see if there are
+.         any other comments that we can load.
+.         If the HospitalInd (SRVSEG08) is "Y", then we need to put the
+.         Hospital Approval Number into the Service text.
+.
+          MATCH     ANSY,SRVSEG08
+          IF        @EQUAL
+            MATCH     SP70,SERVTXT2
+            IF        !@EQUAL
+              MOVE      SERVTXT2,SRVSEG19
+              MOVE      SP70,SERVTXT2
+              GOTO      WSRV8000
+            ENDIF
+          ENDIF
+.
+.>>>>> ServiceText can be used by at least 3 other fields for different puposes,
+.      How are we going to handle this?????
+.
+          MATCH     SP70,SERVTXT1
+          IF        !@EQUAL
+            MOVE      SERVTXT1,SRVSEG19
+          ENDIF
+.
+.         If DuplicateServiceOverrideInd (SRVSEG05) is set to "Y", then
+.         either ServiceText (SRVSEG19) or TimeOfService (VCHSEG02) must
+.         be populated.
+.
+WSRV8000  MATCH     ANSY,SRVSEG05
+          GOTO      WSRV8500 IF NOT EQUAL
+.
+          MATCH     SP70,SRVSEG19
+          GOTO      WSRV8500 IF NOT EQUAL
+.
+          MATCH     SP4,VCHSEG02
+          IF        @EQUAL
+            MOVE      "SRV.19.2-DuplicateServiceOverrideInd requires ServiceText or TimeOfService to be populated",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+.         Load TimeDuration (SRVSEG20)
+.
+WSRV8500  MATCH     "1",EMECMODL                 * ED record ?
+          IF        @EQUAL
+            MOVE      ATDTTDUR,KEY3
+          ELSE
+            MOVE      PRDTTDUR,KEY3
+          ENDIF
+.
+          MATCH     SP3,KEY3                     * blank duration ?
+          GOTO      WSRV9000 IF EQUAL            * yes - no further validation
+.
+          MOVE      ZERO,FORM3
+          MOVE      KEY3,SRVSEG20
+.
+          RJUSTIFY  SRVSEG20
+          REP       " 0",SRVSEG20
+.
+          TYPE      SRVSEG20
+          IF        !@EQUAL
+            MOVE      "SRV.20.1-TimeDuration not numeric",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+            GOTO      WSRV8800
+          ENDIF
+.
+          MOVE      SRVSEG20,FORM3
+          COMPARE   ZERO,FORM3
+          IF        @EQUAL
+            MOVE      "SRV.20.2-TimeDuration cannot be zero",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+            GOTO      WSRV8800
+          ENDIF
+.
+.         Non-zero value, so must be a value divisible by 15
+.
+          IF        (FORM3%15) <> 0
+            MOVE      "SRV.20.3-TimeDuration not a fifteen minute interval",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+.         Make sure that NoOfPatientsSeen is not populated
+.
+WSRV8800  MATCH     SP2,SRVSEG13
+          IF        !@EQUAL
+            MOVE      "SRV.20.4-TimeDuration cannot be populated when NoOfPatientsSeen is populated",ERRMSG
+            MATCH     "1",EMECMODL
+            IF        @EQUAL
+              MOVE      ATITEMNO,DIM9
+            ELSE
+              MOVE      PRDTITMN,DIM9
+            ENDIF
+            CALL      PERR0000
+          ENDIF
+.
+WSRV9000  BRANCH    VALDFLG,WSRV9999             * validation only
+.
+          WRITE     EXTFILE1,SEQ;TILDA01,ANSS,ANSR,ANSV:
+                                 SRVSEG01,SRVSEG02,SRVSEG03,SRVSEG04,SRVSEG05:
+                                 SRVSEG06,SRVSEG07,SRVSEG08,SRVSEG09,SRVSEG10:
+                                 SRVSEG11,SRVSEG12,SRVSEG13,SRVSEG14,SRVSEG15:
+                                 SRVSEG16,SRVSEG17,SRVSEG18,SRVSEG19,SRVSEG20
+.
+WSRV9999  RETURN
++
+.******************************************************************************
+.*                                  WTLR0000              Called by: WRIT0000 *
+.*                           Write Trailer                                    *
+.******************************************************************************
+.
+WTLR0000  BRANCH    VALDFLG,WTLR9999             * validation only
+.
+          WRITE     EXTFILE1,SEQ;TILDA01,ANST,ANSL,ANSR
+.
+WTLR9999  RETURN
++
+.*****************************************************************************
+.*                                  PERR0000              Called by: Lots    *
+.*                             Print Error Message                           *
+.* Requires: ERRMSG - error description                                      *
+.*           INVNO  - invoice number                                         *
+.*           DIM9   - Item number from prdtitmn                              *
+.*           Valid read on prihreff record for invoice                       *
+.*****************************************************************************
+.
+PERR0000  COMPARE   ONE,VALDFLG                  * validation ?
+          GOTO      PERR9999 IF NOT EQUAL        * no - finished
+.
+          COMPARE   "55",CLNO                    * page full ?
+          CALL      HEAD0000 IF NOT LESS         * yes
+.
+          PACK      ERRMSG,ERRMSG,SP70,SP70
+          PRINT     *1,PIPE,*3,LISTINVN,*12,PIPE,*14,PURNO,*23,PIPE:
+                    *25,DIM9,*35,PIPE,*37,ERRMSG,*132,PIPE
+          ADD       ONE,CLNO
+.
+          MOVE      ONE,ERRFLG                   * set error flag
+          ADD       ONE,ERRCT                    * incr. error counter
+.
+PERR9999  RETURN
++
+.*****************************************************************************
+.*                             VPRN0000            Called by: WCID0000       *
+.*                Validate the provider no                    SATR0000       *
+.* Requires: DIM8 - Provider  number                          SDTR0000       *
+.*           PROVFLAG - Type of provider                      WCER0000       *
+.*                          1 = Hospital facility                            *
+.*                          4 = Servicing Doctor                             *
+.*           PLVCARRY - PLV character array                                  *
+.*           PLVNARRY - PLV numeric array                                    *
+.*           SEGMTYPE - Segment type e.g. CLM                                *
+.*           SEGFIELD - Segment field number                                 *
+.*           FIELDESC - Field Description                                    *
+.* Returns:  EXIT   0 = valid provider no                                    *
+.*                  1 = invalid provider no                                  *
+.*****************************************************************************
+.
+.         Validate the provider number.
+.         First make sure it is 8 characters in length.
+.
+VPRN0000  STRIP     DIM8
+          MOVELPTR  DIM8,FORM1
+          IF        FORM1 <> 8
+            SQUEEZE   SEGFIELD
+            PACK      ERRMSG,SEGMTYPE,DOT,SEGFIELD
+            ENDSET    ERRMSG
+            APPEND    FIELDESC,ERRMSG
+            APPEND    DIM8,ERRMSG
+            APPEND    ") is incorrect length",ERRMSG
+            RESET     ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VPRN9100
+          ENDIF
+.
+.         Check that the first 6 characters are numeric for a doctor provider,
+.
+          COMPARE   FOUR,PROVFLAG
+          GOTO      VPRN0500 IF NOT EQUAL
+.
+          UNPACK    DIM8,DIM6,DIM2
+          TYPE      DIM6
+          IF        !@EQUAL
+            PACK      ERRMSG,SEGMTYPE,DOT,SEGFIELD
+            ENDSET    ERRMSG
+            APPEND    FIELDESC,ERRMSG
+            APPEND    DIM8,ERRMSG
+            APPEND    ") does not have 6 digits",ERRMSG
+            RESET     ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VPRN9100
+          ENDIF
+          GOTO      VPRN0600
+.
+VPRN0500  UNPACK    DIM8,DIM7,DIM1
+          TYPE      DIM7
+          IF        !@EQUAL
+            PACK      ERRMSG,SEGMTYPE,DOT,SEGFIELD
+            ENDSET    ERRMSG
+            APPEND    "-Hospital provider no. (",ERRMSG
+            APPEND    DIM8,ERRMSG
+            APPEND    ") does not have 7 digits",ERRMSG
+            RESET     ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VPRN9100
+          ENDIF
+.
+.         Validate the check digit.
+.         The algorithm used for the Provider Check Digit is:
+.                   (digit 1 * 3) +
+.                   (digit 2 * 5) +
+.                   (digit 3 * 8) +
+.                   (digit 4 * 4) +
+.                   (digit 5 * 2) +
+.                   (digit 6) +
+.                   (PLV * 6)
+.                   Divide the result by 11
+.
+.         The Practice Location Character (PLV) indicates the order of the
+.         practices that a provider has been registered at. Each Practice
+.         Location Character is allocated a Practice Location Value (PLV) that
+.         is used in the Provider Check Digit Routine.  The values are below:
+.
+.                   Character  Value  Character  Value  
+.                       0        0        G        16 
+.                       1        1        H        17 
+.                       2        2        J        18 
+.                       3        3        K        19 
+.                       4        4        L        20 
+.                       5        5        M        21 
+.                       6        6        N        22 
+.                       7        7        P        23 
+.                       8        8        Q        24 
+.                       9        9        R        25 
+.                       A        10       T        26 
+.                       B        11       U        27 
+.                       C        12       V        28 
+.                       D        13       W        29 
+.                       E        14       X        30 
+.                       F        15       Y        31 
+.
+.         The remainder is allocated an alpha that is the provider check digit
+.         (See table below for details). 
+.               Remainder  Check-digit  
+.                   0          Y  
+.                   1          X  
+.                   2          W  
+.                   3          T  
+.                   4          L  
+.                   5          K  
+.                   6          J  
+.                   7          H  
+.                   8          F  
+.                   9          B  
+.                  10          A  
+.
+.         Calculate the Practice Location Character (PLV).
+.         If the seventh character in the provider number is a numeric, then
+.         the PLV will equal the value of the seventh character.
+.         If the seventh character in the provider number is not numeric, then
+.         determine the PLV based on the table above.
+.
+VPRN0600  UNPACK    DIM8,PROVARRY[1],PROVARRY[2],PROVARRY[3],PROVARRY[4]:
+                         PROVARRY[5],PROVARRY[6],PROVARRY[7],PROVARRY[8]  
+.
+          MOVE      ZERO,FORM1
+          WHILE     FORM1 < 7
+            ADD       ONE,FORM1
+            MOVE      PROVARRY[FORM1],PRVNARRY[FORM1]
+          DO
+.
+          TYPE      PROVARRY[7]                  * seventh char. numeric ?
+          GOTO      VPRN0700 IF EQUAL            * yes
+.
+          MOVE      ZERO,FORM2
+          WHILE     FORM2 < 22
+            ADD       ONE,FORM2
+            MATCH     PROVARRY[7],PLVCARRY[FORM2] * 7th character match ?
+            IF        @EQUAL
+              MOVE      PLVNARRY[FORM2],PRVNARRY[7]  * yes - load value
+              GOTO      VPRN0700
+            ENDIF
+          DO
+.
+VPRN0700  MOVE      ZERO,FORM4                   * initialise total
+          MOVE      ONE,COUNTER                  * initialise counter
+          WHILE     COUNTER < 8
+            MOVE      PRVNARRY[COUNTER],FORM2
+            BRANCH    COUNTER,VPRN1000:
+                              VPRN2000:
+                              VPRN3000:
+                              VPRN4000:
+                              VPRN5000:
+                              VPRN6000:
+                              VPRN7000
+.
+VPRN1000    ASSIGN    ((FORM2*3) + FORM4),FORM4
+            GOTO      VPRN8000
+.
+VPRN2000    ASSIGN    ((FORM2*5) + FORM4),FORM4
+            GOTO      VPRN8000
+.
+VPRN3000    ASSIGN    ((FORM2*8) + FORM4),FORM4
+            GOTO      VPRN8000
+.
+VPRN4000    ASSIGN    ((FORM2*4) + FORM4),FORM4
+            GOTO      VPRN8000
+.
+VPRN5000    ASSIGN    ((FORM2*2) + FORM4),FORM4
+            GOTO      VPRN8000
+.
+VPRN6000    ASSIGN    (FORM2 + FORM4),FORM4
+            GOTO      VPRN8000
+.
+VPRN7000    ASSIGN    ((FORM2*6) + FORM4),FORM4
+.
+VPRN8000    ADD       ONE,COUNTER                * increment FP counter
+          DO
+.
+          ASSIGN    (FORM4%11),FORM2             * remainder when divided by 11
+          MOVE      ANSY,ANS                     * set default check digit
+          LOAD      ANS,FORM2,ANSX,ANSW,ANST,ANSL,ANSK,ANSJ,ANSH,ANSF,ANSB,ANSA
+.
+          MATCH     ANS,PROVARRY[8]
+          IF        !@EQUAL
+            PACK      ERRMSG,SEGMTYPE,DOT,SEGFIELD
+            ENDSET    ERRMSG
+            IF        PROVFLAG = 1
+              APPEND    "-Hospital provider no. (",ERRMSG
+            ELSE
+              APPEND    FIELDESC,ERRMSG
+            ENDIF
+            APPEND    DIM8,ERRMSG
+            APPEND    ") ",ERRMSG
+            APPEND    "check digit is not valid",ERRMSG
+            RESET     ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+            GOTO      VPRN9100
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      VPRN9999
+.
+VPRN9100  MOVE      ONE,EXIT
+.
+VPRN9999  RETURN
++
+.*****************************************************************************
+.*                               GDEP0000          Called by: VALD0000       *
+.*               Get any deposits for invoices being extracted               *
+.*               and load them into a temp file                              *
+.*****************************************************************************
+.
+GDEP0000  DISPLAY   *P1:24,*EL,"Loading Deposits : ";
+.
+          MOVE      SP20,KEY16
+          CALL      RSTEMP1                      * position at start of file
+GDEP0500  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,GDEP9999               * eof - finished
+.
+          DISPLAY   *P20:24,*EL,*V2LON,LISTINVN;
+.
+          BRANCH    LISTFLAG,GDEP0500            * excluded from extract
+.
+          MOVE      ZERO,DPAMOUNT                * initialise deposit amount
+.
+          MOVE      LISTINVN,KEY12
+          SQUEEZE   KEY12
+          RJUSTIFY  KEY12
+          PACK      KEY29,KEY12,SP30
+          CALL      RSRCDTE3                     * position before invoice
+GDEP1500  CALL      RKRCDTE3                     * read next record
+          BRANCH    OVRCD,GDEP5000               * eof - finished
+.
+          MATCH     KEY12,RCDTINVN               * same invoice still ?
+          GOTO      GDEP5000 IF NOT EQUAL        * no - finished
+.
+          ADD       RCDTAMNT,DPAMOUNT            * increment deposit amount
+          GOTO      GDEP1500                     * get next record
+.
+GDEP5000  COMPARE   ZERO,DPAMOUNT                * any deposit for invoice ?
+          GOTO      GDEP0500 IF EQUAL            * no - get next invoice
+.
+.         We have a deposit for this invoice, so write the amount
+.         to 
+.
+          MOVE      LISTINVN,VDEPINVN            * load variables
+          MOVE      DPAMOUNT,VDEPAMNT
+          MOVE      LISTINVN,KEY8
+          CALL      RATEMP2
+          IF        OVRCD = 1
+            CALL      WRTEMP2                    * write record
+          ENDIF
+.
+          GOTO      GDEP0500                     * get next invoice
+.
+GDEP9999  RETURN
++
+.*****************************************************************************
+.*                              VMED0000               Called by: WCLM0000   *
+.*              Validate the Medicare Number                                 *
+.* Requires:  CLMSEG13 - Medicare Number                                     *
+.*****************************************************************************
+.
+VMED0000  UNPACK    CLMSEG13,DIGNUM01,DIGNUM02,DIGNUM03,DIGNUM04:
+                             DIGNUM05,DIGNUM06,DIGNUM07,DIGNUM08:
+                             DIGNUM09
+.
+          MOVE      DIGNUM01,DIGIT01             * convert to numeric variables
+          MOVE      DIGNUM02,DIGIT02
+          MOVE      DIGNUM03,DIGIT03
+          MOVE      DIGNUM04,DIGIT04
+          MOVE      DIGNUM05,DIGIT05
+          MOVE      DIGNUM06,DIGIT06
+          MOVE      DIGNUM07,DIGIT07
+          MOVE      DIGNUM08,DIGIT08
+          MOVE      DIGNUM09,DIGIT09
+.
+.         The first digit must be in the range 2 - 6, unless we are using the
+.         test value of 123123123.
+.
+          IF        DIGIT01 < 2 | DIGIT01 > 6
+            MATCH     "123123123",CLMSEG13
+            IF        !@EQUAL
+              MOVE      "CLM.13.1-Medicare Number first digit not valid",ERRMSG
+              MOVE      SP9,DIM9
+              CALL      PERR0000
+              GOTO      VMED9999
+            ENDIF
+          ENDIF
+.
+          MOVE      DIGIT01,FORMTOT
+          ASSIGN    ((DIGIT02*3)+FORMTOT),FORMTOT
+          ASSIGN    ((DIGIT03*7)+FORMTOT),FORMTOT
+          ASSIGN    ((DIGIT04*9)+FORMTOT),FORMTOT
+          ASSIGN    (DIGIT05+FORMTOT),FORMTOT
+          ASSIGN    ((DIGIT06*3)+FORMTOT),FORMTOT
+          ASSIGN    ((DIGIT07*7)+FORMTOT),FORMTOT
+          ASSIGN    ((DIGIT08*9)+FORMTOT),FORMTOT
+          ASSIGN    (FORMTOT%10),FORMTOT
+.
+          COMPARE   DIGIT09,FORMTOT
+          IF        !@EQUAL
+            MOVE      "CLM.13.2-Medicare Number not valid",ERRMSG
+            MOVE      SP9,DIM9
+            CALL      PERR0000
+          ENDIF
+.
+VMED9999  RETURN
++
+.*****************************************************************************
+.*                               LARY0000          Called by: INIT0000       *
+.*          Load the array variables for the provider number PLV's           *
+.*****************************************************************************
+.
+.         Load the characters used in the seventh position of the
+.         provider number
+.
+LARY0000  MOVE      ANSA,PLVCARRY[1]
+          MOVE      ANSB,PLVCARRY[2]
+          MOVE      ANSC,PLVCARRY[3]
+          MOVE      ANSD,PLVCARRY[4]
+          MOVE      ANSE,PLVCARRY[5]
+          MOVE      ANSF,PLVCARRY[6]
+          MOVE      ANSG,PLVCARRY[7]
+          MOVE      ANSH,PLVCARRY[8]
+          MOVE      ANSJ,PLVCARRY[9]
+          MOVE      ANSK,PLVCARRY[10]
+          MOVE      ANSL,PLVCARRY[11]
+          MOVE      ANSM,PLVCARRY[12]
+          MOVE      ANSN,PLVCARRY[13]
+          MOVE      ANSP,PLVCARRY[14]
+          MOVE      ANSQ,PLVCARRY[15]
+          MOVE      ANSR,PLVCARRY[16]
+          MOVE      ANST,PLVCARRY[17]
+          MOVE      ANSU,PLVCARRY[18]
+          MOVE      ANSV,PLVCARRY[19]
+          MOVE      ANSW,PLVCARRY[20]
+          MOVE      ANSX,PLVCARRY[21]
+          MOVE      ANSY,PLVCARRY[22]
+.
+.         Load the corresponding numbers associated with the characters
+.         used in the seventh position of the provider number
+.
+          MOVE      TEN,PLVNARRY[1]
+          MOVE      TEN1,PLVNARRY[2]
+          MOVE      TEN2,PLVNARRY[3]
+          MOVE      TEN3,PLVNARRY[4]
+          MOVE      TEN4,PLVNARRY[5]
+          MOVE      TEN5,PLVNARRY[6]
+          MOVE      TEN6,PLVNARRY[7]
+          MOVE      TEN7,PLVNARRY[8]
+          MOVE      TEN8,PLVNARRY[9]
+          MOVE      TEN9,PLVNARRY[10]
+          MOVE      TWENTY,PLVNARRY[11]
+          MOVE      TWENTY1,PLVNARRY[12]
+          MOVE      TWENTY2,PLVNARRY[13]
+          MOVE      TWENTY3,PLVNARRY[14]
+          MOVE      TWENTY4,PLVNARRY[15]
+          MOVE      TWENTY5,PLVNARRY[16]
+          MOVE      TWENTY6,PLVNARRY[17]
+          MOVE      TWENTY7,PLVNARRY[18]
+          MOVE      TWENTY8,PLVNARRY[19]
+          MOVE      TWENTY9,PLVNARRY[20]
+          MOVE      THIRTY,PLVNARRY[21]
+          MOVE      THIRTY1,PLVNARRY[22]
+.
+LARY9999  RETURN
++
+.*****************************************************************************
+.*        IO ROUTINES FOR TEMPORARY FILE                                     *
+.*****************************************************************************
+.
+.         First tempfile routines
+.
+RSTEMP1   READ      LSTTEMP1,KEY16;;
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          READ      LSTTEMP1,KEY16;LISTUNIQ,LISTINVN,LISTURNO,LISTDATE:
+                                   LISTAMNT,LISTFLAG,LISTHOSP,LISTRTYP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    LSTTEMP1;LISTUNIQ,LISTINVN,LISTURNO,LISTDATE,LISTAMNT:
+                             LISTFLAG,LISTHOSP,LISTRTYP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMP1   MOVE      ZERO,OVRCD
+          READKP    LSTTEMP1;LISTUNIQ,LISTINVN,LISTURNO,LISTDATE,LISTAMNT:
+                             LISTFLAG,LISTHOSP,LISTRTYP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPTEMP1   UPDATE    LSTTEMP1;LISTUNIQ,LISTINVN,LISTURNO,LISTDATE,LISTAMNT:
+                             LISTFLAG,LISTHOSP,LISTRTYP
+          RETURN
+.
+WRTEMP1   WRITE     LSTTEMP1,KEY16;LISTUNIQ,LISTINVN,LISTURNO,LISTDATE:
+                                   LISTAMNT,LISTFLAG,LISTHOSP,LISTRTYP
+          RETURN
+.
+DETEMP1   DELETE    LSTTEMP1,KEY16
+          RETURN
+.
+.         Second tempfile routines
+.
+RATEMP2   MOVE      ZERO,OVRCD
+          READ      DEPTEMP2,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP2   READ      DEPTEMP2,KEY8;;
+          RETURN
+.
+RDTEMP2   MOVE      ZERO,OVRCD
+          READ      DEPTEMP2,KEY8;VDEPINVN,VDEPAMNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          READKS    DEPTEMP2;VDEPINVN,VDEPAMNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMP2   MOVE      ZERO,OVRCD
+          READKP    DEPTEMP2;VDEPINVN,VDEPAMNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPTEMP2   UPDATE    DEPTEMP2;VDEPINVN,VDEPAMNT
+          RETURN
+.
+WRTEMP2   WRITE     DEPTEMP2,KEY8;VDEPINVN,VDEPAMNT
+          RETURN
+.
+DETEMP2   DELETE    DEPTEMP2,KEY8
+          RETURN
+.
+.         Third tempfile routines
+.
+RATEMP3   MOVE      ZERO,OVRCD
+          READ      SRTTEMP3,KEY14;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP3   READ      SRTTEMP3,KEY14;;
+          RETURN
+.
+RDTEMP3   MOVE      ZERO,OVRCD
+          READ      SRTTEMP3,KEY14;SORTSDAT,SORTTRAN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP3   MOVE      ZERO,OVRCD
+          READKS    SRTTEMP3;SORTSDAT,SORTTRAN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMP3   MOVE      ZERO,OVRCD
+          READKP    SRTTEMP3;SORTSDAT,SORTTRAN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPTEMP3   UPDATE    SRTTEMP3;SORTSDAT,SORTTRAN
+          RETURN
+.
+WRTEMP3   WRITE     SRTTEMP3,KEY14;SORTSDAT,SORTTRAN
+          RETURN
+.
+DETEMP3   DELETE    SRTTEMP3,KEY14
+          RETURN
++
+.*****************************************************************************
+.         I/O Routines
+.*****************************************************************************
+.
+          INC       STD001IO
+.
+          INC       CLPMSCLT
+          INC       PATHSPKY
+          INC       TFILENAM
+.
+          INC       AAEDTRIO/INC
+          INC       EMRECTIO/INC
+          INC       EMRECAIO/INC
+          INC       EMRIBHIO/INC
+          INC       EMRSITIO/INC
+          INC       EMRVISIO/INC
+          INC       IBASEQIO/INC
+          INC       PMSCLTIO/INC
+          INC       PATCODIO/INC
+          INC       PATCRTIO/INC
+          INC       PATHSPIO/INC
+          INC       PATINVIO/INC
+          INC       PATMA1IO/INC
+          INC       PMSHCPIO/INC
+          INC       PMSHCLIO/INC
+          INC       PMSPX2IO/INC
+          INC       PRIDOCIO/INC
+          INC       PRIDTRIO/INC
+          INC       PRIHDBIO/INC
+          INC       PRIHREIO/INC
+          INC       PRIINVIO/INC
+          INC       PRIPRAIO/INC
+          INC       RCPDTEIO/INC
+          INC       WEBERRIO/INC
+          INC       WEBSECIO/INC
+

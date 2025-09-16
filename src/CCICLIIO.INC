@@ -1,0 +1,50 @@
+
+.
+.            INCLUDE NAME : CCICLIIO.INC
+.
+.            FILE I/O REQUESTS FOR SITE FILE FOR CCI SYSTEM
+.
+.OVRCD       FORM        1                0=NOT OVER
+.                                         1=OVER
+.KEY12       DIM        12                KEY FOR CCIUTLL1
+.
+.
+.
+RACCCLI1  MOVE        ZERO,OVRCD
+          RESET       KEY12
+          READ        CCICLIA1,KEY12;ANS
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+RSCCCLI1  RESET       KEY12
+          READ        CCICLIA1,KEY12;;
+          RETURN
+.
+RDCCCLI1  MOVE        ZERO,OVRCD
+          RESET       KEY12
+          READ        CCICLIA1,KEY12;CCCLSITE,CCCLCTYP,CCCLSPAR
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+RKCCCLI1  MOVE        ZERO,OVRCD
+          READKS      CCICLIA1;CCCLSITE,CCCLCTYP,CCCLSPAR
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+RPCCCLI1  MOVE        ZERO,OVRCD
+          READKP      CCICLIA1;CCCLSITE,CCCLCTYP,CCCLSPAR
+          GOTO        OVERCOND IF OVER
+          RETURN
+.
+WRCCCLI1  RESET       KEY12
+          WRITE       CCICLIA1,KEY12;CCCLSITE,CCCLCTYP,CCCLSPAR
+          RETURN
+.
+UPCCCLI1  UPDATE      CCICLIA1;CCCLSITE,CCCLCTYP,CCCLSPAR
+          RETURN
+.
+DECCCLI1  RESET       KEY12
+          DELETE      CCICLIA1,KEY12
+          RETURN
+.
+.

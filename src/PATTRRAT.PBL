@@ -1,0 +1,834 @@
+. *****************************************************************************
+. * Filename      : PATTRRAT.PBL                                              *
+. * System        : Patient management system                                 *
+. * Function      : Calculate the rate for a given date for an inpatient      *
+. *                 NOTE: THIS DOES NOT UPDATE THE TRANSFER FILE              *
+. * Includes req. : PATTRDAT/INC   Data variables required for this include   *
+. * Parameters    : PATMI1FD record                                           *
+. *                 PATDSCFD record if discharged                             *
+. *                 PVIRESI  - resident status                                *
+. *                 NEWTATYP - admission type to be charged                   *
+. *                 NEWTDEPT - department to be charged                       *
+. *                 NEWTWARD - ward code to be charged                        *
+. *                 NEWTBTYP - bed type to be charged                         *
+. *                 NEWTCHST - chargeable status (for PATRATE1)               *
+. *                 NEWTDATE - Date to calculate rate for (CCYYMMDD)          *
+. * Returns       : EXIT     - 0 means rate calculated                        *
+. *                          - 1 means invalid rate                           *
+. *                 NEWTPPOR - Patient portion of new rate                    *
+. *                 NEWTRPOR - Rebate portion of new rate                     *
+. *                 NEWTXTRA - Extra charge for new rate                      *
+. *                 NEWTBEND - End day range for the rate                     *
+. *                                                                           *
+. * Modifications : 
+. *        V9.08.01 06/10/2006 J.Tan  CAR 119972                              *
+. *                 Mods CFEETYP=5 for NZ Private                             *
+. *        V9.04.01 03/08/05 J.Tan    CAR 62750                               * 
+. *                 Removed redefined amount variables                        * 
+.                   08/10/1998  Glenn Berry      5.07 changes
+.******************************************************************************
+. *                 Alter files to use admission type instead of Category AC  *
+. *                 PATWLRA1, PATBCHA1 and OUTBCHA1 affected                  *
+. *                 16/03/92 J.Tan   SRF 113516                               *
+. *                 Fixed setting the TMOVE at the end of the record          *
+. *                 06/08/1992    Justin Coates  (HONG KONG changes)          *
+. *                 Added CFEETYP = 5 - Hong Kong Charging                    *
+. *                 15/10/1992    Graeme Williams                             *
+. *                 Altered file design for the Hong Kong charging file       *
+. *                 11/12/1992    Graeme Williams          SRF 118836         *
+. *                 Fix bug when returning the patient on the day of leave    *
+. *                 on or after the stepdown date for PATBCHFD charging.      *
+. *                 12/03/1993  Steve Armstrong                               *
+. *                 Removed TRNSPAR which has been replaced by PTTREPNO       *
+. *                 15/12/1993  Paul Howells            mta                   *
+. *                 added routine to calculate new bed fee for mta            *
+. *                 05/10/1995  MATT                                          *
+. *                 Changed CONTROLF Def to SFILE                             *
+. *****************************************************************************
+          DEFPROC   PATTRRAT
+.
+          INC       PATBFEFD/INC             * bed fee file
+          INC       PATRATFD/INC             * modbury rates file
+          INC       PATNZRFD/INC             * new zealand rates file
+          INC       PATWLRFD/INC             * wellington rates file
+          INC       OUTBCHFD/INC             * board charging file (daycases)
+          INC       PATBCHFD/INC             * board charging file (inpatients)
+          INC       PATTRNFD/INC             * bed transfer file
+          INC       PATCALAG/INC             * variables for CALCAGE routine
+          INC       PATSCFFD/INC             * MTA bed fee file
+.
+.         Local and save variables required by this routine
+.
+BJDAY     FORM      3
+.
+CALDAYS   FORM      5
+CDLSTEP   FORM      1
+CDYSDAYS  FORM      6
+CDYSFDTE  DIM       8
+CDYSTDTE  DIM       8
+CDYSYEAR  FORM      2
+CFEETYP   FORM      1
+CHARGED   FORM      3
+CJDAY     FORM      3
+ IFGE     $$VER,7
+CONTROLF  SFILE    ASCII, FIXED=256
+ XIF
+ IFEQ     $$VER,6
+CONTROLF  FILE     ASCII, FIXED=256
+ XIF
+CUTDATE   DIM       8
+.
+DAYCHRGD  FORM      3
+DAYMONTH  DIM       4
+.
+ENDAGE    FORM      3
+ENDDATE   DIM       8
+.
+FRMYEAR   FORM      4
+FROMDATE  DIM       8
+FULYEAR   DIM       4
+.
+NBRDAYS   FORM      4
+NEWDATE   DIM       8
+.
+OLDWARD   DIM       3
+OLDBED    DIM       3
+OLDATYP   DIM       3
+OLDBTYP   DIM       3
+OLDADOC   DIM       6
+OLDDATE   DIM       8
+OLDTIME   DIM       8
+OLDCHST   DIM       3
+OLDBEND   FORM      3
+OLDDISC   FORM      6.2
+OLDALLW   FORM      6.2
+OLDDEPT   DIM       3
+OLDRATF   FORM      6.2
+OLDEPNO   FORM      2
+.
+PTCNBCUT  DIM       4
+TODATE    DIM       8
+WDATE1    DIM       8
+WDATE2    DIM       8
+ZED20     INIT      "zzzzzzzzzzzzzzzzzzzz"
+.
+. *****************************************************************************
+. * TRRAT000 : Mainline code for this procedure                               *
+. *****************************************************************************
+.
+TRRAT000  CALL      INITL000                 * initialise
+.
+          BRANCH    CFEETYP,TRRAT100,TRRAT200,TRRAT300,TRRAT400,TRRAT500:
+                            TRRAT600,TRRAT999
+.
+.         Charging using the PATBFEE1 file
+.
+          CALL      CHBFE000
+          GOTO      TRRAT999
+.
+.         Charging using the PATRATE1 file
+.
+TRRAT100  CALL      CHRAT000
+          GOTO      TRRAT999
+.
+.         Charging using the PATNZRA1 file
+.
+TRRAT200  CALL      CHNZR000
+          GOTO      TRRAT999
+.
+.         Charging using the PATWLRA1 file
+.
+TRRAT300  CALL      CHWLR000
+          GOTO      TRRAT999
+.
+.         Charging using the PATBCHA1 file
+.
+TRRAT400  CALL      CHBCH000
+          GOTO      TRRAT999
+.
+.         Charging using the NZPBFEA1 file
+.
+TRRAT500  CALL      CHNZP000
+          GOTO      TRRAT999
+.
+.         Charging using the PATSCFA1 file
+.
+TRRAT600  CALL      CHSCF000
+          GOTO      TRRAT999
+.
+TRRAT999  GOTO      ENDTRRAT
+.
+. *****************************************************************************
+. * INITL000 : Initialise                                                     *
+. *****************************************************************************
+.
+INITL000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,TEN9;*212,CFEETYP
+          READ      CONTROLF,TWENTY;*199,PTCNBCUT
+          READ      CONTROLF,FIFTY9;*1,CDLSTEP
+          CLOSE     CONTROLF
+.
+INITL999  RETURN
+.
+. *****************************************************************************
+. * CHBFE000 : Use the PATBFEFD file to determine the charge                  *
+. *****************************************************************************
+.
+CHBFE000  MOVE      ZERO,EXIT
+CHBFE999  RETURN
+.
+. *****************************************************************************
+. * CHRAT000 : Use the PATRATFD file to determine the charge                  *
+. *****************************************************************************
+.
+CHRAT000  OPEN      PATRATE1,"patratef"
+.
+          PACK      KEY12,ACLAIM,NEWTATYP,ACLSS,NEWTCHST
+          CALL      RDRATE1
+          BRANCH    OVRCD,CHRAT900
+.
+          MOVE      RCPDAY,NEWTPPOR
+          MOVE      ZERO,NEWTRPOR
+          MOVE      RCEDAY,NEWTXTRA
+          MOVE      "999",NEWTBEND
+          MOVE      ZERO,EXIT
+          GOTO      CHRAT999
+.
+.         No rate
+.
+CHRAT900  MOVE      ONE,EXIT
+.
+CHRAT999  CLOSE     PATRATE1
+          RETURN
+.
+. *****************************************************************************
+. * CHNZR000 : Use the PATNZRFD file to determine the charge                  *
+. *****************************************************************************
+.
+CHNZR000  OPEN      PATNZRA1,"patnzraf"
+.
+.         We need the doctor type for this charging system
+.
+          MOVE      SP3,DRTYPE
+          MOVE      ADOCTA,KEY6
+          CALL      RDDOCT1
+.
+          PACK      KEY9,PVIRESI,ACLAIM,DRTYPE
+          CALL      RDNZRA1
+          BRANCH    OVRCD,CHNZR900
+.
+          MOVE      NZRCPDAY,NEWTPPOR
+          MOVE      ZERO,NEWTRPOR
+          MOVE      NZRCEDAY,NEWTXTRA
+          MOVE      "999",NEWTBEND
+          MOVE      ZERO,EXIT
+          GOTO      CHNZR999
+.
+.         No record on file, use a rate of zero
+.
+CHNZR900  MOVE      ZERO,NEWTPPOR
+          MOVE      ZERO,NEWTRPOR
+          MOVE      ZERO,NEWTXTRA
+          MOVE      "999",NEWTBEND
+          MOVE      ZERO,EXIT
+.
+CHNZR999  CLOSE     PATNZRA1
+          RETURN
+.
+. *****************************************************************************
+. * CHWLR000 : Use the PATWLRFD file to determine the charge                  *
+. *****************************************************************************
+.
+CHWLR000  OPEN      PATWLRA1,"patwlraf"
+.
+          PACK      KEY12,PVIRESI,ACLAIM,NEWTWARD,NEWTATYP
+          CALL      RDPTWLR1                  * direct read
+          BRANCH    OVRCD,CHWLR900
+.
+          MOVE      PTWRPDAY,NEWTPPOR
+          MOVE      ZERO,NEWTRPOR
+          MOVE      PTWREDAY,NEWTXTRA
+          MOVE      "999",NEWTBEND
+          MOVE      ZERO,EXIT
+          GOTO      CHWLR999
+.
+.         No record on file, use a rate of zero
+.
+CHWLR900  MOVE      ZERO,NEWTPPOR
+          MOVE      ZERO,NEWTRPOR
+          MOVE      ZERO,NEWTXTRA
+          MOVE      "999",NEWTBEND
+          MOVE      ZERO,EXIT
+.
+CHWLR999  CLOSE     PATWLRA1
+          RETURN
+.
+. *****************************************************************************
+. * CHBCH000 : Use the PATBCHFD file to determine the charge                  *
+. *****************************************************************************
+.
+.         Firstly, if this is a daycase patient, we will be using the
+.         outpatient board charging file for the charges
+.
+CHBCH000  COMPARE   THREE,ASTAT              * discharged patient ?
+          GOTO      CHBCH100 IF NOT EQUAL    * not discharged -> not a daycase
+.
+          MATCH     ADATE,DDATE              * daycase patient ?
+          GOTO      CHBCH100 IF NOT EQUAL    * no
+.
+.         Charge as an outpatient
+.
+          OPEN      OUTBCHA1,"outbchaf"
+          CALL      DYRAT000                 * calculate day rate
+          CLOSE     OUTBCHA1
+.
+          MOVE      OTBCPPOR,NEWTPPOR
+          MOVE      OTBCBPOR,NEWTRPOR
+          MOVE      ZERO,NEWTXTRA
+          MOVE      "999",NEWTBEND
+          MOVE      ZERO,EXIT
+          GOTO      CHBCH999
+.
+.         Non-daycase charging
+.
+CHBCH100  OPEN      PATBCHA1,"patbchaf"
+.
+.         To calculate the correct rate, we first need to determine the number
+.         of days the patient has been charged this year.
+.
+          CALL      BCHDY000                 * get the number of days charged
+.
+          PACK      KEY15,ACLAIM,AFUNDH,NEWTATYP,DAYCHRGD
+          CALL      RSPTBCH1
+          CALL      RKPTBCH1
+          BRANCH    OVRCD,CHBCH900
+.
+          MATCH     PTBCCLM,ACLAIM           * correct claim code ?
+          GOTO      CHBCH900 IF NOT EQUAL    * no, no charge
+.
+          MATCH     PTBCBRD,AFUNDH           * correct board (health fund) ?
+          GOTO      CHBCH900 IF NOT EQUAL    * no, no charge
+.
+          MATCH     PTBCDEPT,NEWTATYP        * correct department ?
+          GOTO      CHBCH900 IF NOT EQUAL    * no, no charge
+.
+          MOVE      PTBCPPOR,NEWTPPOR
+          MOVE      PTBCBPOR,NEWTRPOR
+          MOVE      ZERO,NEWTXTRA
+          MOVE      PTBCENDD,NEWTBEND
+          MOVE      ZERO,EXIT
+          GOTO      CHBCH999
+.
+.         No charge on file. Assume zero rate
+.
+CHBCH900  MOVE      ZERO,NEWTPPOR
+          MOVE      ZERO,NEWTRPOR
+          MOVE      ZERO,NEWTXTRA
+          MOVE      "999",NEWTBEND
+          MOVE      ZERO,EXIT
+.
+CHBCH999  RETURN
+.
+. *****************************************************************************
+. * DYRAT000 : Determine daycase rate                                         *
+. *****************************************************************************
+.
+DYRAT000  PACK      AGEDATE,DDATE     * date for age
+          CALL      CALCAGE                  * calculate age
+.
+          PACK      KEY18,ACLAIM,AFUNDH,NEWTATYP,PSAGEYRS,SP20
+          CALL      RSOTBCH1
+          CALL      RKOTBCH1
+          BRANCH    OVRCD,DYRAT900           * no record -> no rate
+.
+          MATCH     OTBCCLM,ACLAIM           * correct code ?
+          GOTO      DYRAT900 IF NOT EQUAL    * no -> no rate
+.
+          MATCH     OTBCBRD,AFUNDH           * correct code ?
+          GOTO      DYRAT900 IF NOT EQUAL    * no -> no rate
+.
+          MATCH     OTBCDEPT,NEWTATYP        * correct code ?
+          GOTO      DYRAT900 IF NOT EQUAL    * no -> no rate
+.
+          MOVE      OTBCAGEG,ENDAGE          * save the ending age in age group
+.
+.         Get the rate for the number of visits
+.
+          PACK      KEY18,ACLAIM,AFUNDH,NEWTATYP,ENDAGE,PTMIPVIS
+          CALL      RSOTBCH1
+          CALL      RKOTBCH1
+          BRANCH    OVRCD,DYRAT900           * no record -> no rate
+.
+          MATCH     OTBCCLM,ACLAIM           * correct code ?
+          GOTO      DYRAT900 IF NOT EQUAL    * no -> no rate
+.
+          MATCH     OTBCBRD,AFUNDH           * correct code ?
+          GOTO      DYRAT900 IF NOT EQUAL    * no -> no rate
+.
+          MATCH     OTBCDEPT,NEWTATYP        * correct code ?
+          GOTO      DYRAT900 IF NOT EQUAL    * no -> no rate
+.
+          COMPARE   OTBCAGEG,ENDAGE          * correct age group ?
+          GOTO      DYRAT900 IF NOT EQUAL    * no -> no rate
+.
+.         We have the rate
+.
+          GOTO      DYRAT999
+.
+.         No rate on file
+.
+DYRAT900  MOVE      ZERO,OTBCPPOR            * no patient portion
+          MOVE      ZERO,OTBCBPOR            * no board portion
+.
+DYRAT999  RETURN
+.
+. *****************************************************************************
+. * BCHDY000 : Calculate the number of days already charged                   *
+. *****************************************************************************
+.
+BCHDY000  OPEN      PATTRAN2,"pattranf"
+.
+.         Check for a special case. If the date is question is the cut-off
+.         date, the number of days charged will be zero
+.
+          MOVE      ZERO,DAYCHRGD            * reset days charged
+.
+          UNPACK    NEWTDATE,CCENT,CYEAR,DAYMONTH
+.
+          MATCH     DAYMONTH,PTCNBCUT        * date is the cut-off date ?
+          GOTO      CUTOF999 IF EQUAL        * yes, return zero days
+.
+.         Lopo through the transfer file and process each record.
+.
+          MOVE      ADYHOSP,DAYCHRGD         * initialise number of days
+          MOVE      SP8,OLDDATE              * initialise saved date
+.
+          PACK      KEY30,AADMNO,SP30
+          CALL      RDSTRAN2
+BCHDY100  CALL      RDKTRAN2                 * get the next record
+          BRANCH    OVRCD,BCHDY500           * no more records
+.
+          COMPARE   TADMN,AADMNO             * correct patient ?
+          GOTO      BCHDY500 IF NOT EQUAL    * no, no more records
+.
+          PACK      NEWDATE,TDATE    * set up full date
+.
+          MATCH     NEWDATE,NEWTDATE         * passed required date ?
+          GOTO      BCHDY500 IF LESS         * yes, finished.
+.
+.         Process this transfer file record
+.
+          CALL      STEPD000
+          GOTO      BCHDY100
+.
+.         Check if we have a saved date (should only occur if date is the
+.         admission date)
+.
+BCHDY500  MATCH     SP8,OLDDATE              * do we have a saved date
+          GOTO      BCHDY999 IF EQUAL        * no date, have days charged
+.
+          MOVE      SP1,TMOVE
+          LOAD      TMOVE,ASTAT,ANSC,ANSC,ANSC,ANSR
+.
+          UNPACK    NEWTDATE,TDATE   * ending date of range
+          CALL      STEPD000                 * check for a stepdown
+.
+          UNPACK    NEWTDATE,XDATE
+          MATCH     XDATE,TDATE              * has a stepdown occurred ?
+          GOTO      BCHDY500 IF NOT EQUAL    * yes, look for any more
+.
+.         We now have the number of days charged this year
+.
+BCHDY999  RETURN
+.
+. *****************************************************************************
+. * STEPD000 : check for board charging stepdowns                             *
+. *****************************************************************************
+.
+STEPD000  CMATCH    ANSA,TMOVE               * Admission record ?
+          GOTO      STEPD100 IF EQUAL        * yes, initialise patient
+.
+          CMATCH    ANSR,TMOVE               * Return from leave record ?
+          GOTO      STEPD200 IF EQUAL        * yes, save return details
+.
+          GOTO      STEPD300                 * check for stepdowns
+.
+. ------- Admission record for patient -------
+.
+STEPD100  CALL      SAVET000                 * save transfer details
+          GOTO      STEPD999                 * finished processing
+.
+. ------- Return from leave record -------
+.
+STEPD200  CALL      LVECU000                 * check for cut-off while on leave
+          CALL      SAVET000                 * save transfer details
+          GOTO      STEPD999                 * finished processing
+.
+. ------- Change, Leave or Discharge record. Look for stepdowns -------
+.
+STEPD300  PACK      NEWDATE,TDATE            * convert to CCYYMMDD format
+          REP       " 0",NEWDATE
+.
+          MATCH     NEWDATE,OLDDATE          * new date same as old date ?
+          GOTO      STEPD400 IF EQUAL        * yes, no need to do anything
+.
+          CALL      CUTOF000                 * process the cut-off date
+.
+          CALL      NEEDS000                 * need a stepdown ?
+          BRANCH    EXIT,STEPD800            * no.
+.
+          CALL      NEWTR000                 * "insert" a new transfer record
+          GOTO      STEPD800
+.
+. ------- Two records with the same date. Sace the most recent details -------
+.
+STEPD400  CALL      SAVET000                 * save transfer details
+          GOTO      STEPD999                 * finished processing
+.
+. ------- Remember the current record for next time routine is called -------
+.
+STEPD800  CALL      CNTCH000                 * count the number of charged days
+          CALL      SAVET000                 * save transfer details
+          GOTO      STEPD999
+.
+STEPD999  RETURN
+.
+. *****************************************************************************
+. * SAVET000    : Save transfer details                                       *
+. *****************************************************************************
+.
+SAVET000  MOVE      TWARD,OLDWARD
+          MOVE      TBED,OLDBED
+          MOVE      TATYPE,OLDATYP
+          MOVE      TRBTYP,OLDBTYP
+          MOVE      TADOCT,OLDADOC
+          PACK      OLDDATE,TDATE
+          REP       " 0",OLDDATE
+          MOVE      TTIME,OLDTIME
+          MOVE      TCHSTAT,OLDCHST
+          MOVE      TRBEND,OLDBEND
+          MOVE      TDISC,OLDDISC
+          MOVE      TALLW,OLDALLW
+          MOVE      TDEPT,OLDDEPT
+          MOVE      PTTREPNO,OLDEPNO
+.
+          MOVE      TRATEF,OLDRATF
+.
+SAVET999  RETURN
+.
+. *****************************************************************************
+. * CNTCH000    : Count the number of charged days, and add to DAYCHRGD       *
+. *****************************************************************************
+.
+CNTCH000  COMPARE   "0.00",OLDRATF
+          GOTO      CNTCH999 IF EQUAL
+.
+.         Calculate the number days at this rate
+.
+          MOVE      OLDDATE,CDYSFDTE
+          MOVE      ENDDATE,CDYSTDTE
+.
+          CALL      CALCDAYS
+          SUB       ONE,CDYSDAYS             * we want the difference in dates
+.
+.         Increment the number of days charged this year
+.
+          ADD       CDYSDAYS,DAYCHRGD
+.
+CNTCH999  RETURN
+.
+. *****************************************************************************
+. * CUTOF000    : Process the cutoff date                                     *
+. *****************************************************************************
+.
+.         This code assumes that the cut-off date will be the from date. The
+.         rest of the routine should guarentee this by "inserting" a record
+.         on the cut off date if there was not one there already.
+.
+CUTOF000  UNPACK    OLDDATE,CYEAR,DAYMONTH
+.
+          MATCH     DAYMONTH,PTCNBCUT        * from date is the cut-off date ?
+          GOTO      CUTOF999 IF NOT EQUAL    * no.
+.
+          MOVE      ZERO,DAYCHRGD            * reset days charged
+.
+CUTOF999  RETURN
+.
+. *****************************************************************************
+. * LVECU000    : Check for the cut-off date while the patient was on leave   *
+. *****************************************************************************
+.
+LVECU000  PACK      NEWDATE,TDATE    * return from leave date
+.
+          MOVE      NEWDATE,ENDDATE          * set end of leave date
+          CALL      ATCUT000                 * check if passed cut-off date
+.
+          MATCH     NEWDATE,ENDDATE          * check if date was changed
+          GOTO      LVECU999 IF EQUAL        * no change -> didn't pass cut-off
+.
+          MOVE      ZERO,DAYCHRGD            * reset days charged
+.
+LVECU999  RETURN
+.
+. *****************************************************************************
+. * NEEDS000    : Need a stepdown between the OLD record and the current rec ?*
+. *****************************************************************************
+.
+NEEDS000  MOVE      NEWDATE,ENDDATE          * end date initially new tran date
+.
+          CALL      ATCUT000                 * check if we have reached cut-off
+.
+          CALL      BCHST000                 * check for stepdown in PATBCHA1
+.
+          MATCH     NEWDATE,ENDDATE          * check if end date was changed
+          GOTO      NEEDS900 IF EQUAL        * no change -> no stepdown
+.
+.         We need to "insert" a transfer file record
+.
+          MOVE      ZERO,EXIT                * stepdown required
+          GOTO      NEEDS999
+.
+.         No stepdown required
+.
+NEEDS900  MOVE      ONE,EXIT                 * no stepdown required
+.
+NEEDS999  RETURN
+.
+. *****************************************************************************
+. * ATCUT000    : Check if OLDDATE to ENDDATE goes passed PTCNBCUT            *
+. *****************************************************************************
+.
+ATCUT000  UNPACK    OLDDATE,FULYEAR,CMON,CDAY
+.
+          PACK      CUTDATE,FULYEAR,PTCNBCUT * first cut-off will be old year
+.
+.         Loop until the cut-off date is after the end date
+.
+ATCUT100  MATCH     CUTDATE,ENDDATE          * cut-off date after end date ?
+          GOTO      ATCUT999 IF LESS         * finished loop
+.
+.         The cut-off date is less than the end date. If the old date is less
+.         than the cut-off date, then the cut-off date is between the two dates
+.
+          MATCH     CUTDATE,OLDDATE          * old date less than cut-off date?
+          GOTO      ATCUT800 IF LESS         * yes, we need to insert a record
+.
+.         Old date is on or after cut-off date. Try the next years cut-off date
+.
+          UNPACK    CUTDATE,FULYEAR,CMON,CDAY
+          MOVE      FULYEAR,FRMYEAR
+.
+          ADD       ONE,FRMYEAR
+.
+          PACK      CUTDATE,FRMYEAR,PTCNBCUT
+          REP       " 0",CUTDATE
+          GOTO      ATCUT100
+.
+.         We need to insert a record at the cut-off date
+.
+ATCUT800  MOVE      CUTDATE,ENDDATE          * new end date
+.
+ATCUT999  RETURN
+.
+. *****************************************************************************
+. * BCHST000    : Check for a stepdown in the PATBCHA1 file                   *
+. *****************************************************************************
+.
+.         We are only counting days with a non-zero rate
+.
+BCHST000  COMPARE   "0.00",OLDRATF
+          GOTO      BCHST999 IF EQUAL
+.
+.         Calculate the number days at this rate
+.
+          MOVE      OLDDATE,CDYSFDTE
+          MOVE      ENDDATE,CDYSTDTE
+.
+          CALL      CALCDAYS
+          SUB       ONE,CDYSDAYS             * we want the difference in dates
+.
+.         Now calculate the total number of days charged so far this year
+.
+          MOVE      CDYSDAYS,CHARGED
+          ADD       DAYCHRGD,CHARGED
+.
+.         Check if we have passed the next stepdown
+.
+          COMPARE   CHARGED,OLDBEND          * passed stepdown ?
+          GOTO      BCHST999 IF NOT LESS     * no, no need to do anything
+.
+.         As a special case, for when this charging is first introduced,
+.         if the old number of days to be charged is zero, then assume no
+.         stepdown is needed.
+.
+          COMPARE   ZERO,OLDBEND
+          GOTO      BCHST999 IF EQUAL
+.
+.         Another special case. This is to allow for data corruption, and to
+.         stop the program from going into an infinite loop. If the DAYCHRGD is
+.         not less than OLDBEND, then the calculated date will be before the
+.         old date, resulting in an infinite loop. We over come this by the
+.         simple mechanism of assuming that the next record will be correct...
+.
+          COMPARE   OLDBEND,DAYCHRGD
+          GOTO      BCHST999 IF NOT LESS
+.
+.         We have stepped down. Calculate the day the stepdown occurs on
+.
+          UNPACK    OLDDATE,CCENT,CYEAR,CMON,CDAY
+          MOVE      CCENT,CC
+          MOVE      CYEAR,YY
+          MOVE      CMON,MM
+          MOVE      CDAY,DD
+          CALL      DMYCON                   * convert to a julian date
+.
+          ADD       OLDBEND,JULDAY           * add no. of days before stepdown
+          SUB       DAYCHRGD,JULDAY          * adjust for what is already done
+.
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON                   * convert back to a normal date
+.
+          PACK      CDYSTDTE,CC,YY,MM,DD     * new end date
+          REP       " 0",CDYSTDTE
+.
+          MATCH     CDYSTDTE,ENDDATE         * must be before current ENDDATE
+          GOTO      BCHST999 IF LESS
+.
+          MOVE      CDYSTDTE,ENDDATE         * new end date
+.
+BCHST999  RETURN
+.
+. *****************************************************************************
+. * NEWTR000    : "Insert" a new transfer file record                         *
+. *****************************************************************************
+.
+.         Check if this is the end date
+.
+NEWTR000  UNPACK    ENDDATE,CCENT,CYEAR,DAYMONTH
+.
+          MATCH     DAYMONTH,PTCNBCUT        * stepdown due to cut-off date ?
+          GOTO      NEWTR100 IF NOT EQUAL    * no, must be due to no. days
+.
+          MOVE      ZERO,OLDBEND             * new charge to start from day 1
+.
+.         Find the new charge
+.
+NEWTR100  PACK      KEY15,ACLAIM,AFUNDH,OLDATYP,OLDBEND
+          CALL      RSPTBCH1                 * position at old rate
+          CALL      RKPTBCH1                 * get the next record
+          BRANCH    OVRCD,NEWTR200           * missing record, no charge
+.
+          MATCH     PTBCCLM,ACLAIM           * correct claim code ?
+          GOTO      NEWTR200 IF NOT EQUAL    * no, no charge
+.
+          MATCH     PTBCBRD,AFUNDH           * correct board (health fund) ?
+          GOTO      NEWTR200 IF NOT EQUAL    * no, no charge
+.
+          MATCH     PTBCDEPT,OLDATYP         * correct department ?
+          GOTO      NEWTR200 IF NOT EQUAL    * no, no charge
+.
+          GOTO      NEWTR400
+.
+.         Missing charge. Assume zero rates
+.
+NEWTR200  MOVE      ZERO,PTBCPPOR            * no patient portion
+          MOVE      ZERO,PTBCBPOR            * no board portion
+          MOVE      ONE,PTBCNINV             * only one invoice to be generated
+          MOVE      "999",PTBCENDD           * ending day for this rate
+.
+.         Set up the new transfer file record
+.
+NEWTR400  MOVE      OLDWARD,TWARD            * same ward as previous record
+          MOVE      OLDBED,TBED              * same bed as previous record
+          UNPACK    ENDDATE,TDATE    * date for change of rate
+          MOVE      "01:00:00",TTIME         * time for change of rate
+          MOVE      ANSC,TMOVE               * record type = change of rate
+          MOVE      AURNO,TURNO              * U/R number
+          MOVE      AADMNO,TADMN             * admission number
+.
+          MOVE      PTBCPPOR,TRATEF          * patient portion of new rate
+          MOVE      PTBCBPOR,TRATEH          * rebate portion of new rate
+          MOVE      ZERO,TRATEG              * no government rate
+          MOVE      ZERO,TEXTRA              * no extra charge
+          MOVE      PTBCENDD,TRBEND          * next stepdown after this one
+.
+          IF        (CDLSTEP = 1)
+            IF        ( (OLDDISC+OLDALLW) > TRATEF )
+              MOVE      TRATEF,TDISC         * pat portion is max. discount
+              MOVE      ZERO,TALLW
+            ELSE
+              MOVE      OLDDISC,TDISC
+              MOVE      OLDALLW,TALLW
+            ENDIF
+          ELSE
+            MOVE      ZERO,TDISC
+            MOVE      ZERO,TALLW
+          ENDIF
+.
+          MOVE      OLDATYP,TATYPE           * same as previous record
+          MOVE      OLDADOC,TADOCT           * same as previous record
+          MOVE      OLDBTYP,TRBTYP           * same as previous record
+          MOVE      OLDCHST,TCHSTAT          * same as previous record
+          MOVE      OLDDEPT,TDEPT            * same as previous record
+          MOVE      SP3,PTTRLTYP             * patient is not on leave
+          MOVE      OLDEPNO,PTTREPNO         * same as previous record
+.
+.         Finally, reposition in the transfer file to make sure we will read
+.         the correct record on the next read
+.
+          PACK      KEY30,TADMN,TDATE,TTIME,TWARD,TBED,SP30
+          CALL      RDSTRAN2
+.
+NEWTR999  RETURN
+.
+.
+.*****************************************************************************
+.                   CHNZP000 
+.         Use the NZPBFEFD file to determine the charge
+.*****************************************************************************
+.
+CHNZP000  
+          RETURN
+.
+.*****************************************************************************
+.                   CHSCF000 
+.         Use the PATSCFFD file to determine the charge
+.*****************************************************************************
+CHSCF000
+          OPEN      PATSCFA1,"patscfaf"
+.
+          PACK      KEY6,ACLSS,NEWTBTYP
+          CALL      RDPTSCF1
+          BRANCH    OVRCD,CHSCF900 
+.
+          MOVE      PTSCRATE,NEWTPPOR
+          MOVE      ZERO,NEWTRPOR
+          MOVE      ZERO,NEWTBEND
+.
+          GOTO      CHSCF950
+.
+CHSCF900  MOVE      ONE,EXIT
+          GOTO      CHSCF9999
+.
+CHSCF950  MOVE      ZERO,EXIT
+          GOTO      CHSCF9999
+.
+CHSCF999  CLOSE     PATSCFA1 
+          RETURN
+.
+          INC       CALCAGE
+          INC       CALCDAYS
+          INC       PATBFEIO/INC
+          INC       PATRATIO/INC
+          INC       PATNZRIO/INC
+          INC       PATWLRIO/INC
+          INC       OUTBCHIO/INC
+          INC       PATBCHIO/INC
+          INC       PATTRNIO/INC
+          INC       PATSCFIO/INC             
+          INC       IBAOVRIO/INC
+.
+ENDTRRAT  ENDPROC
+.

@@ -1,0 +1,418 @@
+.************************************************************************
+.* #################################################################### *
+.* # ANY CHANGES MADE TO THIS ROUTINE SHOULD ALSO BE MADE TO IBAFMS74 # *
+.* #################################################################### *
+.*                                                                      *
+.*                      FMSSBAUT                                        *
+.*   This include processes a submission to be authorized. It creates   *
+.*   the general Ledger batch and writes records to the journal posting *
+.*   details file. Requires the journal master file to have been read.  *
+.*                                                                      *
+.*   Required includes  : IBABATFD & IO                                 *
+.*                        FMSBCFFD & IO                                 *
+.*                        FMSJPDFD & IO                                 *
+.*                        a routine to calculate debit total            *
+.*                                                                      *
+.*   Required variables : REVFLAG    FORM       1                       *
+.*                        DIM8       DIM        8                       *
+.*                        DIMMON     DIM        2                       *
+.*                        DIMPERD    DIM        6                       *
+.*                        DIMYEAR    DIM        4                       *
+.*                        DOCREF     DIM        9 Document reference    *
+.*                        FORM12P2   FORM       12.2                    *
+.*                        FORMPERD   FORM       6                       *
+.*                        FILENAM3   DIM        8                       *
+.*                        JOURTYPE   DIM        1 Journal Type          *
+.*                        PERDNO     FORM       2                       *
+.*                        PERPERC    FORM       4.2                     *
+.*                        PERDNO     FORM       2 Period number         *
+.*                        WORKPERD   DIM        6                       *
+.*                        SUBTYPE    FORM       1 Submission type       *
+.*                                                0 = normal            *
+.*                                                1 = periodic          *
+.*                                                2 = reversal only     *
+.************************************************************************
+.********                                                               *
+.* NOTE :- For periodic submissions BCAMT must be set up in program     *
+.********                                                               *
+.                                                                       *
+. Mods : 01.03.91  Neeriem Dye                                          *
+.                  Stopped full read and write of sector 52 for next    *
+.                  batch number                                         *
+.                                                                       *
+.        08.10.91  Neeriem Dye                                          *
+.                  Set indicator BC1UTYPE to "0"                        *
+.                  srf 111010                                           *
+.                                                                       *
+.        17.07.92  Neeriem "I Hate Support" Dye (I.B.A.)
+.                  Check if batch already exists !! (Bloody Floater Code)
+.                  srf 115937
+.
+.        31.08.92  Neeriem "I Hate Support" Dye (I.B.A.)
+.                  Stop infinite loop in FMS70 (submit) if KEY12 is set
+.                  srf undesirable
+.
+.        18.08.93  S.Barcham                             
+.                  Fix write to FMJPDTOT
+.                  srf 124255
+.
+.************************************************************************
+.* SUB - Process Submitting for Authorization                           *
+.************************************************************************
+SUB0000   MOVE      ZERO,REVFLAG      * not reversing yet
+          COMPARE   "2",SUBTYPE       * reversal only
+          GOTO      SUB1000 IF NOT EQUAL
+          MOVE      ONE,REVFLAG
+.
+SUB1000   DISPLAY   *P1:24,*V2LON,*BLINKON,"*** Creating Batch ***",*EL; 
+          CALL      BTCH0000          * create a general ledger batch
+          BRANCH    EXIT,SUB9999
+          DISPLAY   *P1:24,*V2LON,*BLINKON,"***   Processing   ***",*EL; 
+          CALL      WPDT0000          * write entry to Posting details file
+.                                     * and update the journal master
+          DISPLAY   *P1:24,*EL
+          BRANCH    SUBTYPE,SUB2000
+          BRANCH    REVFLAG,SUB2000
+          MOVE      ONE,REVFLAG       * reversing!
+          BRANCH    FMJMREV,SUB1000   * go back and reverse if necessary
+.
+SUB2000   MOVE      ZERO,REVFLAG      * not reversing
+.
+SUB9999   RETURN 
+.*************************************************************************
+.* BTCH - Create General ledger batch       Called by SUB0000            *
+.*************************************************************************
+BTCH0000  
+. --- Create the file ---
+          CALL      RDFMCOCJ           * get next batch code
+          MATCH     "00000",FMBCJBAT
+          GOTO      BTCH0000 IF EQUAL  * must not be zero
+.
+          PACK      KEY5,FMBCJBAT,SP70
+          CALL      RDFMBC1            * check if batch exists
+          COMPARE   ONE,OVRCD
+          GOTO      BTCH0000 IF NOT EQUAL
+.
+          CLEAR     FILENAM3
+          APPEND    "bch",FILENAM3
+          APPEND    FMBCJBAT,FILENAM3
+          APPEND    SP10,FILENAM3
+          RESET     FILENAM3
+          REP       " 0",FILENAM3
+          PREP      BATFILE,FILENAM3
+. --- Do Header Sectors first ---
+. 
+. --- Set up null feilds
+.
+          UNPACK    SP70,BC0DIM2,BC0DIM6,BC1PAYT,BC1RESP
+          MOVE      ZERO,BC0NXTSW
+          MOVE      ZERO,BC0BTCHT
+          MOVE      ZERO,BC0SUPBC
+          MOVE      ZERO,BC0SPLTK
+          MOVE      ZERO,BC0SPLTP
+          MOVE      ZERO,BC0SPSEC
+          MOVE      ZERO,BC0DISC 
+.
+. --- Set up header values ---
+          MOVE      ONE,BC0ONE
+          MOVE      TWO,BC0NXTSC
+          MOVE      FIVE,BC1STAT
+          MOVE      "HD",BC1HEAD
+          MOVE      FMBCJBAT,BC1BATCH
+          MOVE      ZERO,DEBTOT
+.          PROC      CDEB0000               * get debit total
+.          MOVE      DEBTOT,BC1KEYT
+.          MOVE      DEBTOT,BC1ACCT
+.          MATCH     FMJOPRE3,JOURTYPE      * periodic?
+.          GOTO      BTCH1000 IF NOT EQUAL  * no - good jump next bit
+.          MOVE      DEBTOT,FMJDTAMT
+.          PACK      FMJMPROF,FMJMPROF,SP10
+.          MATCH     SP4,FMJMPROF           * any budget profile
+.          GOTO      BTCH0500 IF EQUAL
+.          CALL      CAMT0000               * calculate by profile
+.          GOTO      BTCH0600
+.BTCH0500  CALL      NOPD0000               * calculate evenly
+.BTCH0600
+.          MOVE      BCAMT,BC1KEYT
+.          MOVE      BCAMT,BC1ACCT
+BTCH1000  MOVE      ONE,BC1NOTR
+          UNPACK    FMJMDENT,CCENT,CYEAR,CMON,CDAY
+          PACK      BC1DATE,CDAY,CMON,CCENT,CYEAR
+          REP       " 0",BC1DATE
+          MOVE      PASSCODE,BC1OPER
+          MOVE      FMJMLEDG,BC1LEDG
+          MOVE      "JA",BC1TRAN
+          PACK      FMJMPPOS,FMJMPPOS,SP10
+          PACK      FMJMRPOS,FMJMRPOS,SP10
+          MOVE      FMJMPPOS,DIM8
+          LOAD      DIM8,REVFLAG,FMJMRPOS,FMJMPPOS
+          UNPACK    DIM8,CCENT,CYEAR,CMON,CDAY
+          PACK      BC1BDATE,CDAY,CMON,CCENT,CYEAR
+          REP       " 0",BC1BDATE
+          MOVE      ZERO,BC1REORG
+          MOVE      ZERO,BC1DISS
+          MOVE      ZERO,BC1REST
+          MOVE      ZERO,BC1UTYPE
+.
+          CALL      WRBAT0                 * write sector 0 
+          CALL      WRBAT1                 * write sector 1
+.
+. Get period for bas codes
+.
+          MOVE      SP4,CURYEAR
+          MOVE      FMJMPPOS,WORKDATE
+          MOVE      FMJMLEDG,KEY2
+          CALL      RDFMLA1
+          BRANCH    OVRCD,BTCH2000
+.
+          CALL      CFYR0000
+.
+BTCH2000  CALL      PDTL0000               * process data for details sectors
+          CLOSE     BATFILE
+.
+BTCH9999  RETURN 
+.*************************************************************************
+.* PDTL - Process the detail sectors of the batch file   Called by BTCH  *
+.*************************************************************************
+PDTL0000  PACK      KEY10,FMJMJTY,FMJMJID,SP10
+          CALL      RSFMJD1
+          MOVE      ZERO,EXIT
+.
+PDTL1000  CALL      RKFMJD1               * read next transaction detail record
+          BRANCH    OVRCD,PDTL9000
+.
+          PACK      KEY7,FMJDJTY,FMJDJID
+          MATCH     KEY7,KEY10            * still on the right record
+          GOTO      PDTL9000 IF NOT EQUAL
+.
+. --- set up sector variables
+.
+          MOVE      FIVE,BCSTAT
+          MOVE      ZERO,BCINVT
+          MOVE      ZERO,BCDISC
+          MOVE      ZERO,BCCOMXA
+          UNPACK    SP70,BCPAYT,BCORD,BCACCTP,BCCHEQ,BCCOMX,BCCONT,BCDISCC
+          MATCH     "D",FMJDDRCR              * debit or credit?
+          GOTO      PDTL2000 IF EQUAL
+          BRANCH    REVFLAG,PDTL1200          * reversing it yet?
+          MOVE      "JC",BCTRAN               * credit
+          GOTO      PDTL3000
+.
+PDTL1200  MOVE      "JA",BCTRAN               * credit
+          GOTO      PDTL3000
+.
+PDTL2000  BRANCH    REVFLAG,PDTL2200          * reversing it yet?
+          MOVE      "JA",BCTRAN               * debit
+          GOTO      PDTL3000
+.
+PDTL2200  MOVE      "JC",BCTRAN               * debit
+          GOTO      PDTL3000
+.
+PDTL3000  MOVE      FMJMLEDG,BCLEDG
+          MOVE      FMJDACC,BCACCT
+          MOVE      FMJDDIS,BCDISS
+          MOVE      "00000",BCRED
+          MOVE      BC1BDATE,BCDATEE
+          MOVE      "00000000",BCDATCX
+          MOVE      BC1BATCH,BCBATCH
+          MOVE      FMJDRES,BCRESP
+.
+          MOVE      SP3,BCBASC
+          MATCH     IBCNBSFY,CURYEAR
+          GOTO      PDTL3500 IF LESS
+.
+          IF        IBCNUBAS=1
+            MOVE      FMJDBASC,BCBASC
+          ENDIF
+.
+PDTL3500  MOVE      FMJDDESC,BCTRAND
+          PACK      BCDATED,CDD,CMM,CCC,CYY
+          REP       " 0",BCDATED
+          UNPACK    SP70,BCCEORD,BCCELNE,BCCATA,BCCHQAC,BCCDESC,BCCSPAR
+          BRANCH    SUBTYPE,PDTL4000   * for periodic its a bit trickier 
+          MOVE      FMJDTAMT,BCAMT
+          GOTO      PDTL8000
+.
+PDTL4000  CALL      PERD0000
+.
+.         MATCH     SP4,FMJMPROF       * using a budget profile?
+.         CALL      CAMT0000 IF NOT EQUAL * calculate from budget profile
+.         MATCH     SP4,FMJMPROF       * using a budget profile?
+.         CALL      NOPD0000 IF EQUAL  * seperate equally into periods
+.
+PDTL8000  COMPARE   ZERO,BCAMT          * dont post a batch with zero amount
+          GOTO      PDTL1000 IF EQUAL
+          CALL      WRBATC
+          MATCH     "JA",BCTRAN
+          IF        @EQUAL
+            ADD       BCAMT,DEBTOT
+          ENDIF
+          ADD       ONE,BC0NXTSC
+          IF        SUBTYPE<>2
+            ADD       BCAMT,FMJDPAMT       * update amount processed
+          ENDIF
+          CALL      UPFMJD1
+          GOTO      PDTL1000
+.
+PDTL9000  COMPARE   TWO,BC0NXTSC        * no details sectors?
+          GOTO      PDTL9500 IF NOT EQUAL * update file if there is some
+          CLOSE     BATFILE             * delete file if none
+          CLEAR     CMDLINE
+          APPEND    "rm ",CMDLINE
+          APPEND    FILENAM3,CMDLINE
+          APPEND    ".txt",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          DISPLAY   *P1:24,*EL:
+                    "All transactions total zero. No batch created. ";
+          CALL      HITENTER  
+          MOVE      ONE,EXIT
+          GOTO      PDTL9999
+.
+PDTL9500  CALL      WRBATS0              * update next available sector variable
+          CALL      RDBAT1
+          MOVE      DEBTOT,BC1KEYT
+          MOVE      DEBTOT,BC1ACCT
+          MOVE      BC0NXTSC,BC1NOTR
+          SUB       TWO,BC1NOTR
+          CALL      WRBAT1
+.
+PDTL9999  RETURN 
+.*************************************************************************
+.* WPDT -- Write to posting details file          Called by SUB0000      *
+.*************************************************************************
+.--- set up variables
+.
+WPDT0000  MOVE      BC1BATCH,FMJPBAT      
+          MOVE      JOURTYPE,FMJPJTY
+          MOVE      FMJMJID,FMJPJID
+          MOVE      FMJMCPOS,FMJPCDAT
+          PACK      FMJPDAT,CCC,CYY,CMM,CDD
+          REP       " 0",FMJPDAT
+          MOVE      SP10,FMJPUDAT
+          MOVE      FMJMCASH,FMJPTYP
+          MOVE      REVFLAG,FMJPREV
+          MOVE      ZERO,FMJPAUTH
+          BRANCH    REVFLAG,WPDT0300
+          MOVE      FMJMPPOS,FMJPPDAT
+          GOTO      WPDT0400
+.
+WPDT0300  MOVE      FMJMRPOS,FMJPPDAT
+          MOVE      FMJMRPOS,FMJPCDAT
+.
+WPDT0400  MOVE      DEBTOT,FMJPDTOT
+.
+.         BRANCH    SUBTYPE,WPDT0500
+.         MOVE      DEBTOT,FMJPDTOT
+.         GOTO      WPDT0700
+.
+.WPDT0500  MOVE      BC1KEYT,FMJPDTOT
+.
+WPDT0700  PACK      KEY5,FMJPBAT,SP70
+          CALL      RAFMJP1                     * is it already there?
+          BRANCH    OVRCD,WPDT1000
+          CALL      UPFMJP1                     * yep - update
+          GOTO      WPDT2000
+.
+WPDT1000  CALL      WRFMJP1                     * no - then write
+.
+WPDT2000  MATCH     FMJOPRE1,JOURTYPE
+          GOTO      WPDT9999 IF NOT EQUAL
+.
+....      MOVE      KEY12,KEY7                 * get rid of this shit to stop
+....      CALL      RDFMJM1                    * infinite loop if KEY12 is set
+....      BRANCH    OVRCD,WPDT9999
+.
+          BRANCH    REVFLAG,WPDT3000           * reverse or normal batch
+          MOVE      FMJPPDAT,FMJMPDAT          * reverse - so set up reverse var
+          MOVE      FMJPBAT,FMJMPBAT
+          GOTO      WPDT4000
+.
+WPDT3000  MOVE      FMJPPDAT,FMJMRDAT          * normal so set up normal ones
+          MOVE      FMJPBAT,FMJMRBAT
+.
+WPDT4000  CALL      UPFMJM1                    * update file
+.          
+WPDT9999  RETURN 
+.************************************************************************
+.* CAMT - Calculate amount to be posted from budget profile             *
+.*                   called by : SUBM                                   *
+.************************************************************************
+.CAMT0000  PACK      FMJMPROF,FMJMPROF,SP10
+.          MATCH     FMJMPROF,SP4              * using a budget profile
+.          GOTO      CAMT9999 IF EQUAL         * no then get the outta here
+..
+.          MOVE      FMLALEDG,FMBPLEDG
+.          MOVE      FMLACYRR,FMBPYEAR
+.          MOVE      FMJMPROF,FMBPCODE
+.          PACK      KEY9,FMBPLEDG,FMBPYEAR,FMBPCODE
+.          CALL      RDFMBP1                   * read budget profile
+.          BRANCH    OVRCD,CAMT9999
+..
+.          LOAD      PERPERC,PERDNO,FMBPPC1,FMBPPC2,FMBPPC3,FMBPPC4,FMBPPC5:
+.                                  FMBPPC6,FMBPPC7,FMBPPC8,FMBPPC9,FMBPPC10:
+.                                  FMBPPC11,FMBPPC12,FMBPPC13
+..
+.          MOVE      FMJDTAMT,BCAMT
+.          DIV       "100",BCAMT
+.          MULT      PERPERC,BCAMT
+.          GOTO      CAMT9999    
+..
+.CAMT9999  RETURN
+..************************************************************************
+..* NOPD - Calculate the number of periods on this journal               *
+..*                   called by : AUTH0000                               *
+..************************************************************************
+.NOPD0000  MOVE      ONE,IDAY
+.          MOVE      FMJMFPER,FORMPERD
+..
+.NOPD1000  MOVE      FORMPERD,WORKPERD
+.          MATCH     FMJMLPER,WORKPERD           * are they equal yet
+.          GOTO      NOPD8000 IF EQUAL
+.          ADD       ONE,FORMPERD
+.          ADD       ONE,IDAY
+.          MOVE      FORMPERD,WORKPERD
+.          UNPACK    WORKPERD,DIMYEAR,DIMMON
+.          MOVE      DIMMON,FORM2
+.          COMPARE   FORM2,NOPERDS    * past the number of periods
+.          GOTO      NOPD1000 IF NOT LESS
+.          ADD       "87",FORMPERD     * get to first period of next year
+.                                      * think about it - 13 + 88 = 101
+.          SUB       FMLAPERS,FORMPERD * correction for 13 period year
+.          MOVE      FORMPERD,WORKPERD
+.          UNPACK    WORKPERD,DIMYEAR,DIMMON
+.          MOVE      DIMMON,FORM2
+.          COMPARE   FORM2,ZERO    * past the number of periods
+.          GOTO      NOPD1000 IF NOT EQUAL
+.          ADD       ONE,FORMPERD
+.          GOTO      NOPD1000
+..
+.NOPD8000  MOVE      FMJDTAMT,FORM12P2
+.          DIV       IDAY,FORM12P2
+.          MOVE      FORM12P2,BCAMT
+.          ASSIGN    IDAY-ONE,F2
+.          ASSIGN    BCAMT*F2,F12P2
+.          IF        F12P2=FMJDPAMT
+.            ASSIGN    FMJDTAMT-FMJDPAMT,FORM12P2
+.            MOVE      FORM12P2,BCAMT
+.          ENDIF
+.
+.NOPD9999  RETURN
+.************************************************************************
+.* PERD - Move in the period amount                                     *
+.*                   called by : AUTH0000                               *
+.************************************************************************
+.
+PERD0000  MOVE      ZERO,FMJTAMT
+          PACK      KEY16,FMJDJTY,FMJDJID,DIMPERD,FMJDLNO,SP70
+          CALL      RDFMJT1
+.
+          MOVE      FMJTAMT,BCAMT
+          IF        BCAMT<0
+            MOVE      "JC",BCTRAN
+            MULT      SEQ,BCAMT
+          ELSE
+            MOVE      "JA",BCTRAN
+          ENDIF
+PERD9999  RETURN

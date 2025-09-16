@@ -1,0 +1,46 @@
+create table hl7p6aaf
+(
+  hl6arsid    varchar2(64) default ' ' not null,
+  hl6avrid    varchar2(10) default ' ' not null,
+  hl6acnt1    varchar2(4) default ' ' not null,
+  hl6acnt2    varchar2(4) default ' ' not null,
+  hl6atsys    varchar2(50) default ' ' not null,
+  hl6atval    varchar2(200) default ' ' not null,
+  hl6atuse    varchar2(50) default ' ' not null,
+  hl6atran    varchar2(50) default ' ' not null,
+  hl6atstr    varchar2(40) default ' ' not null,
+  hl6atend    varchar2(40) default ' ' not null,
+  hl6atsy2    varchar2(50) default ' ' not null,
+  hl6atva2    varchar2(200) default ' ' not null,
+  hl6atus2    varchar2(50) default ' ' not null,
+  hl6atra2    varchar2(50) default ' ' not null,
+  hl6atst2    varchar2(40) default ' ' not null,
+  hl6aten2    varchar2(40) default ' ' not null,
+  hl6atsy3    varchar2(50) default ' ' not null,
+  hl6atva3    varchar2(200) default ' ' not null,
+  hl6atus3    varchar2(50) default ' ' not null,
+  hl6atra3    varchar2(50) default ' ' not null,
+  hl6atst3    varchar2(40) default ' ' not null,
+  hl6aten3    varchar2(40) default ' ' not null,
+  hl6aause    varchar2(50) default ' ' not null,
+  hl6aatyp    varchar2(50) default ' ' not null,
+  hl6aatxt    varchar2(200) default ' ' not null,
+  hl6aaln1    varchar2(200) default ' ' not null,
+  hl6aaln2    varchar2(200) default ' ' not null,
+  hl6aaln3    varchar2(200) default ' ' not null,
+  hl6aaln4    varchar2(200) default ' ' not null,
+  hl6aapos    varchar2(40) default ' ' not null,
+  hl6aacnt    varchar2(200) default ' ' not null,
+  hl6aastr    varchar2(40) default ' ' not null,
+  hl6aaend    varchar2(40) default ' ' not null,
+  hl6aspar    varchar2(100) default ' ' not null,
+  lf          varchar2(1) default ' ' not null,
+constraint hl7p6aa1 primary key( 
+hl6arsid,
+hl6avrid,
+hl6acnt1,
+hl6acnt2)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 

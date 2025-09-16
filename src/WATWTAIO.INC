@@ -1,0 +1,134 @@
+.******************************************************************************
+. WATWTAIO.INC
+. ------------
+. Filename       : watwtaaf
+. Description    : Waiting List movement analysis file
+. Programmer     : Bill Dew  06/06/1990
+. Ouput signals  : OVRCD   FORM 1  0=NOT OVER   1=OVER
+. KEY24          : WATWTAA1
+. KEY24          : WATWTAA2
+. KEY24          : WATWTAA3
+.******************************************************************************
+.
+. ------  I/O routines for 1st index ------
+.
+RAWTWTA1  MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      WATWTAA1,KEY24;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSWTWTA1  RESET     KEY24
+          READ      WATWTAA1,KEY24;;
+          RETURN
+.
+RDWTWTA1  MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      WATWTAA1,KEY24;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKWTWTA1  MOVE      ZERO,OVRCD
+          READKS    WATWTAA1;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPWTWTA1  MOVE      ZERO,OVRCD
+          READKP    WATWTAA1;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRWTWTA1  RESET     KEY24
+          WRITE     WATWTAA1,KEY24;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          RETURN
+.
+UPWTWTA1  
+          UPDATE    WATWTAA1;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          RETURN
+.
+DEWTWTA1  RESET     KEY24
+          DELETE    WATWTAA1,KEY24
+          RETURN
+.******************************************************************************
+.
+.    IO routines for 2nd index
+.
+RAWTWTA2  MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      WATWTAA2,KEY24;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSWTWTA2  RESET     KEY24
+          READ      WATWTAA2,KEY24;;
+          RETURN
+.
+RDWTWTA2  MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      WATWTAA2,KEY24;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKWTWTA2  MOVE      ZERO,OVRCD
+          READKS    WATWTAA2;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPWTWTA2  MOVE      ZERO,OVRCD
+          READKP    WATWTAA2;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.******************************************************************************
+.
+.    IO routines for 3rd index
+.
+RAWTWTA3  MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      WATWTAA3,KEY24;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSWTWTA3  RESET     KEY24
+          READ      WATWTAA3,KEY24;;
+          RETURN
+.
+RDWTWTA3  MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      WATWTAA3,KEY24;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKWTWTA3  MOVE      ZERO,OVRCD
+          READKS    WATWTAA3;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPWTWTA3  MOVE      ZERO,OVRCD
+          READKP    WATWTAA3;WTWTDATE,WTWTDOCT,WTWTUNIT,WTWTPROC:
+                    WTWTMEAN,WTWTMAX,WTWTHOSP,WTWTPAT,WTWTOTH,WTWTOPEN:
+                    WTWTADD,WTWTBOOK,WTWTADMT,WTWTDSCH,WTWTCANL,WTWTTDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.******************************************************************************

@@ -1,0 +1,388 @@
+.**************************************************************************
+.*  DGAAEEVN  :  Process an A&E/EMR event for a Datagate request          *
+.*               ~~~~~~~~                                                 *
+.*                                                                        *
+.*  Author    :  Steve Armstrong   (13/06/1997)                           *
+.*  Mods      :                                                           *
+.*        24/10/2003  Steve Armstrong   CAR 38016                         *
+.*                    Mods to write to EMR tables as well as AAE tables   *
+.*                    for Z04 messages.                                   *
+.*        02/07/1999  Steve Armstrong                                     *
+.*                    Mods to pad out ADASRC with spaces                  *
+.*        29/07/1997  Steve Armstrong                                     *
+.*                    Mods for validation of hospital                     *
+.*        23/06/1997  Steve Armstrong                                     *
+.*                    Mods to use health fund code for site               *
+.*                                                                        *
+.**************************************************************************
+.
+.         See if the A&E detail and discharge records already exist
+.
+DGAAEEVN  MOVE      ADANUMB,KEY8
+          CALL      RDDETA1                      * A&E detail record on file ?
+          MOVE      OVRCD,DETLFLAG
+          MOVE      OVRCD,DISCFLAG
+          IF        DETLFLAG = 0
+            CALL      RDDISA1                    * yes - disch. record on file ?
+            MOVE      OVRCD,DISCFLAG
+          ENDIF
+.
+.         See if an emrvisaf record exists (this will include discharge details)
+.
+          MOVE      ADANUMB,KEY8
+          CALL      RDEMVIS1                     * EMR visit record on file ?
+          MOVE      OVRCD,EVISFLAG
+.         
+          READ      DGATEOUT;EPISODE,RECFLAG,ADADATE,VISTIME,ADADOCT:
+                             ACCNUMB,REFREAS,HOSPCODE,CLINNAME,REFLDATE:
+                             ADASRC,ADSDISC,ADSDATE,DISTIME,ADACLASS
+.
+.         Make sure the doctor code is valid
+.
+          PACK      ADADOCT,ADADOCT,SP6
+          MATCH     SP6,ADADOCT                  * doctor code blank ?
+          IF        !@EQUAL
+            MOVE      ADADOCT,KEY6
+            CALL      RDDOCT1                    * doctor on file ?
+            IF        OVRCD = 1
+              MOVE      "03404",RPLYCODE         * no - return error
+              MOVE      "Doctor code not on file",RPLYDESC
+              GOTO      DGAAE900
+            ENDIF
+          ENDIF
+.
+.         Make sure that Hospital code is valid
+.
+          PACK      HOSPCODE,HOSPCODE,SP4
+          MATCH     SP4,HOSPCODE                 * hospital code blank ?
+          IF        !@EQUAL
+            MOVE      SP3,KEY3
+            CALL      RSPTHSP1                   * pos'n at start of hosp. file
+DGAAE050    CALL      RKPTHSP1                   * read next record
+            IF        OVRCD = 1
+              MOVE      "03409",RPLYCODE         * no - return error
+              MOVE      "Hospital code not on file",RPLYDESC
+              GOTO      DGAAE900
+            ELSE
+              MATCH     HOSPCODE,PTHSHDPC
+              GOTO      DGAAE050 IF NOT EQUAL
+            ENDIF
+          ENDIF
+.
+.         Make sure that referral source code is valid
+.
+          PACK      ADASRC,ADASRC,SP3
+          MATCH     SP3,ADASRC                   * referral source code blank ?
+          IF        !@EQUAL
+            PACK      KEY5,CATS,ADASRC
+            CALL      RDCODE1                    * no - code on file ?
+            IF        OVRCD = 1
+              MOVE      "03408",RPLYCODE         * no - return error
+              MOVE      "Referral Source code not on file",RPLYDESC
+              GOTO      DGAAE900
+            ENDIF
+          ENDIF
+.
+.         Make sure that discharge status code is valid
+.
+          PACK      ADSDISC,ADSDISC,SP3
+          MATCH     SP3,ADSDISC                  * discharge status code blank ?
+          IF        !@EQUAL
+            PACK      KEY5,CATED,ADSDISC
+            CALL      RDCODE1                    * no - code on file ?
+            IF        OVRCD = 1
+              MOVE      "03408",RPLYCODE         * no - return error
+              MOVE      "Discharge Status code not on file",RPLYDESC
+              GOTO      DGAAE900
+            ENDIF
+          ENDIF
+.
+.         Make sure that health specialty (department) code is valid
+.
+          PACK      ADACLASS,ADACLASS,SP3
+          MATCH     SP3,ADACLASS                 * department code blank ?
+          IF        !@EQUAL
+            PACK      KEY5,CATA,ADACLASS
+            CALL      RDCODE1                    * no - code on file ?
+            IF        OVRCD = 1
+              MOVE      "03408",RPLYCODE         * no - return error
+              MOVE      "Department code not on file",RPLYDESC
+              GOTO      DGAAE900
+            ENDIF
+          ENDIF
+.
+.         Make sure that the record type flag is valid
+.
+          MATCH     ANSN,RECFLAG
+          IF        !@EQUAL
+            MATCH     ANSC,RECFLAG
+            IF        !@EQUAL
+              MOVE      "03407",RPLYCODE
+              MOVE      "Invalid Record Type Flag",RPLYDESC
+              GOTO      DGAAE900
+            ENDIF
+          ENDIF
+.
+.         Set up A&E times
+.
+          PACK      ADATIME,VISTIME              * event time
+          PACK      ADSTIME,DISTIME              * discharge time
+. 
+.         Check if this is a new AAE record or an update
+.
+          MOVE      RECFLAG,ANS
+          REP       "N0n0C1c1",ANS
+          MOVE      ANS,FORM1
+          BRANCH    FORM1,DGAAE100               * Update existing record
+.
+.         New Emergency Visit
+.
+          IF        DETLFLAG = 0 | DISCFLAG = 0
+            MOVE      "04121",RPLYCODE
+            MOVE      "Event number already exists",RPLYDESC
+            GOTO      DGAAE900
+          ENDIF
+.
+          IF        EVISFLAG = 0
+            MOVE      "04121",RPLYCODE
+            MOVE      "Event number already exists",RPLYDESC
+            GOTO      DGAAE900
+          ENDIF
+.
+.         Make sure that the visit record doesn't already exist
+.
+          MOVE      ADANUMB,KEY8
+          CALL      RDAVISA1
+          IF        OVRCD = 0
+            MOVE      "04121",RPLYCODE
+            MOVE      "Event number already exists",RPLYDESC
+            GOTO      DGAAE900
+          ENDIF
+.
+.         Set up a visit (patvisaf) record
+.
+          MOVE      PURNO,PVIURNO
+          MOVE      ADADATE,PVIDATE
+          MOVE      ONE,PVITYPE
+          MOVE      ADADOCT,PVIDOCT
+          MOVE      TWO,PVISTAT
+          MOVE      ONE,PVITRAN
+          MOVE      SP2,PVILOCK
+          MOVE      SP6,PVISITE
+          MOVE      SP3,PVIRESI
+          MOVE      SP1,PVIUNQE
+          MOVE      SP2,PVISYST
+          PACK      PVISPAR,SP10,SP3
+          MOVE      ADANUMB,KEY8
+          CALL      WRVISA1                      * write visit record
+.
+.         Set up a visit extension (pmsvx1af) record
+.
+          CALL      CLPMSVX1                     * clear table variables
+          MOVE      ADANUMB,PMVXVISN             * load visit number
+          MOVE      ADADATE,PMVXVSDT             * load visit date
+          MOVE      ADADOCT,PMVXDOCA             * load visit doctor
+          CALL      WRPMVX11                     * write record
+.
+.         Set up for aaede1af record
+.
+          MOVE      PURNO,ADAURNO
+          PACK      ADADIAG,REFREAS,SP30,SP30
+          MOVE      SP3,ADACOMP
+          MOVE      SP3,ADAINSUR
+          MOVE      SP3,ADAMODE
+          MOVE      SP1,ADAFILL
+          MOVE      SP5,ADASEEN
+          MOVE      ZERO,ADAADMIT
+          MOVE      SP2,ADALOCK
+          MOVE      ZERO,ADADURN
+          MOVE      SP20,ADAEMPL
+          PACK      ADAADD1,SP30,SP5
+          PACK      ADAADD2,SP30,SP5
+          PACK      ADASUBR,SP30,SP5
+          PACK      ADAADD4,SP30,SP5
+          MOVE      SP8,ADAPOST
+          MOVE      SP20,ADATELE
+          MOVE      SP20,ADACONT
+          MOVE      SP3,ADAUSR2
+          MOVE      SP3,ADAUSR3
+          MOVE      SP3,ADAUSR4
+          MOVE      SP3,ADAUSR5
+          MOVE      ZERO,ADAFIL2
+          MOVE      SP3,ADAWAIT
+          MOVE      SP8,ADASDTE
+          MOVE      SP3,ADAPREV
+          MOVE      SP6,AEDAFUND
+          MOVE      SP8,AEDATBLE
+          MOVE      SP2,AEDAPVIS
+          MOVE      SP8,AEDARFGP
+          MOVE      SP6,AEDAGPPC
+          MOVE      ZERO,AEDANPNA
+          MOVE      SP5,AEDATIAS
+          MOVE      SP5,AEDADTAT
+          MOVE      SP3,AEDATESI
+          MOVE      SP6,AEDAEMPL
+          MOVE      SP3,AEDARTAS
+          MOVE      SP3,AEDAINIT
+          MOVE      SP3,AEDAPLIN
+          MOVE      SP8,AEDADIAS
+          MOVE      SP8,AEDARNEN
+          MOVE      SP6,AEDACONS
+          MOVE      SP2,AEDAGPPT
+          MOVE      SP5,AEDAPRTM
+          MOVE      SP6,AEDARDOC
+          MOVE      SP3,ADAPRTY
+          MOVE      SP4,AEDAOPER
+          PACK      AEDASPAR,SP20,SP20
+.
+          MOVE      ADANUMB,KEY8
+          CALL      WRDETA1                      * write aaede1af record
+.
+.         Set up for emrvisaf record
+.
+          CALL      CLEMRVIS                     * clear emrvisaf variables
+          MOVE      ADANUMB,EMVIADMN             * set up emrvisaf variables
+          CALL      SEMR0000
+.
+.         Check to see if this record contains a discharge status,
+.         and if so, then write a discharge (aaedi1af) record
+.
+          MATCH     SP3,ADSDISC                  * discharge status blank ?
+          IF        !@EQUAL
+            CALL      DISCH000                   * no - write new record
+            MOVE      THREE,EMVISTAT             * set status to "discharged"
+          ELSE
+            MOVE      ONE,EMVISTAT               * set status to "current"
+          ENDIF
+.
+          CALL      WREMVIS1                     * write emrvisaf record
+.
+          GOTO      DGAAE800                     * send reply
+.
+.         Change A&E record
+.
+DGAAE100  IF        DETLFLAG = 1
+            MOVE      "04100",RPLYCODE
+            MOVE      "Event number does not exist",RPLYDESC
+            GOTO      DGAAE900
+          ENDIF
+.
+          IF        EVISFLAG = 1
+            MOVE      "04100",RPLYCODE
+            MOVE      "Event number does not exist",RPLYDESC
+            GOTO      DGAAE900
+          ENDIF
+.
+.         Update the visit file details
+.
+          MOVE      ADANUMB,KEY8
+          CALL      RDVISA1
+          IF        OVRCD = 0
+            MOVE      ADADATE,PVIDATE
+            MOVE      ADADOCT,PVIDOCT
+            CALL      UPVISA1
+          ENDIF
+.
+.         Update the visit extension file
+.
+          MOVE      ADANUMB,KEY8
+          CALL      RDPMVX11
+          IF        OVRCD = 0
+            MOVE      ADADATE,PMVXVSDT
+            MOVE      ADADOCT,PMVXDOCA
+            CALL      UPPMVX11
+          ENDIF
+.
+.         Update an existing A&E detail (aaede1af) record
+.
+          PACK      ADADIAG,REFREAS,SP30,SP30
+          CALL      UPDETA1                      * update detail record
+.
+.         Check if writing or updating (aaedi1af) discharge record
+.
+          IF        DISCFLAG = 1
+            MATCH     SP3,ADSDISC
+            CALL      DISCH000 IF NOT EQUAL      * write new discharge record
+          ELSE
+            CALL      UPDISA1                    * update discharge record
+          ENDIF
+.
+.         Update emrvisaf
+.
+          CALL      SEMR0000                     * update emrvisaf variables
+          MATCH     SP3,ADSDISC                  * discharge status blank ?
+          IF        !@EQUAL
+            MOVE      THREE,EMVISTAT             * no - set to "discharged"
+          ELSE
+            MOVE      ONE,EMVISTAT               * yes - set to "current"
+          ENDIF
+          CALL      UPEMVIS1
+.
+.     Send reply message as successful
+.     NB.  SP1 at end of reply has been added because the interpreter does
+.     not place a "|" after the last field, and Datagate requires this.  By
+.     putting an extra field on the end (which is blank), a "|" will then
+.     be added after the last field.
+.
+DGAAE800  MOVE      "00000",RPLYCODE        * successful message
+          MOVE      SP50,RPLYDESC           * clear error description
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                          RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                          DGMISC3,ADAURNO,ADANUMB,SP1
+          ADD       ONE,SUCCPROC            * increment # successful processed
+          GOTO      DGAAE9999
+.
+.         Send back error message
+.
+DGAAE900  PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                          RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                          DGMISC3,PURNO,ADANUMB,SP1
+          ADD       ONE,ERRRPROC
+.
+DGAAE999  RETURN
++
+.*****************************************************************************
+.*                            SEMR0000                                       *
+.*                Set up fields for emrvisaf record                          *
+.*****************************************************************************
+.
+SEMR0000  MOVE      PURNO,EMVIURNO               * load U/R number
+          MOVE      ADADATE,EMVIDATE             * load arrival date
+          MOVE      VISTIME,EMVITIME             * load arrival time
+          MOVE      ADADOCT,EMVIDOCT             * load attending doctor
+          MOVE      REFREAS,EMVICOM1             * load complaint line 1
+          MOVE      ADASRC,EMVISRCE              * load source of referral
+          MOVE      ADSDISC,EMVIDSTA             * load discharge status
+          MOVE      ADSDATE,EMVIDDAT             * load discharge date
+          MOVE      DISTIME,EMVIDTIM             * load discharge time
+          MOVE      ADACLASS,EMVICLAS            * load patient classification
+.
+SEMR9999  RETURN
++
+.*****************************************************************************
+.*                            DISCH000                                       *
+.*                Set up fields for new discharge record                     *
+.*****************************************************************************
+.
+DISCH000  PACK      ADSSSES,SP30,SP30
+          MOVE      SP7,ADSDIAG
+          MOVE      SP8,AEDSDCFT
+          MOVE      SP5,AEDSTCFT
+          MOVE      SP8,AEDSDDTA
+          MOVE      SP8,AEDSDCON
+          MOVE      SP5,AEDSTCON
+          MOVE      SP8,AEDSDADM
+          MOVE      SP5,AEDSTADM
+          MOVE      SP3,AEDSUSR6
+          MOVE      SP3,AEDSUSR7
+          MOVE      SP3,AEDSUSR8
+          MOVE      SP4,AEDSOPER
+          PACK      AEDSSPAR,SP20,SP30
+.
+          MOVE      ADANUMB,ADSNUMB
+          CALL      WRDISA1                 * write discharge record
+.
+DISCH999  RETURN
++

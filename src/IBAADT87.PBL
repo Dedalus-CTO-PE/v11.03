@@ -1,0 +1,948 @@
+.******************************************************************************
+.* System    :   Patient                                                      *
+.* Program   :   IBAADT87                                                     *
+.* Desc      :   Admitted Patients by Type of Care                            *
+.******************************************************************************
+.* Date      :   20/04/1999                                                   *
+.* Author    :   Jill Habasque                                                *
+.* Modifications                                                              *
+.* V10.04.01  15/06/2014 Jill Parkinson CAR 301639                            *
+.*            Mods to call KILL000 before exiting                             *
+.* V10.03.01  19/12/2012 Patrick Adair                             CAR 261630 *
+.*                       Removed port number from temp file name              *
+.*        V10.01.01 03/02/2011 Jill Parkinson CAR 233088                      *
+.*                  Added pmsvx1af                                            *
+.*   V9.09.01  27/02/2008  Mike Laming    CAR 151503                          *
+.*             Change to continuing processing if not Discharged at LINP2100  *
+.*   V9.04.01  30/06/2005  Ebon Clements  CAR 63712                           *
+.*             Added port number to temp file names                           *
+.*   V9.04.00  14/04/2005  Ebon Clements  CAR 60596                           *
+.*             Ported from R5.12                                              *
+.*   V5.10.01  03/03/2003  Steve Downing  CAR 20461                           *
+.*             Fixed to only use day file records if adm & dsch recs exist    *
+.*             Mods to re-enter date if financial year not found              *
+.******************************************************************************
+.*   V5.08.01  28/08/2000  Caleb Sharman                                      *
+.*             Changed Health Fund variables to be 8 chars                    *
+.*   5.07.01 :   02/11/1999  Andrew Peel  SRF 635041                          *
+.*               Fixed bed day calculation                                    *
+.******************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+.
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       PATCODFD/INC                 * codes file
+          INC       PATCONFD/INC                 * control file 
+          INC       PATDAYFD/INC                 * inpatient day file 
+          INC       PATDRGFD/INC                 * period date range file
+          INC       PATDSCFD/INC                 * discharge file
+          INC       PATTRNFD/INC                 * tran file
+          INC       PATMI1FD/INC                 * admissions file
+          INC       PMSVX1FD/INC                 * admissions file
+          INC       PATWR1FD/INC                 * ward file
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+. Tempfile for inpatients in period
+.
+WORK1     IFILE     SQL, FIXED=42, KEY="U1-8"
+.
+.Name     Type     Size    Physical   Start       Description
+.----     ----     ----    --------   -----       -----------
+XADMN     DIM       8         8         1         Admission number
+XADATE    DIM       8
+XDDATE    DIM       8
+XTDATE    DIM       8
+XACARE    DIM       3
+XBEDDY    DIM       6
+.End of Record                          42
+.
+WORK2     IFILE     SQL, FIXED=56, KEY="U1-3"
+.
+.Name     Type     Size    Physical   Start       Description
+.----     ----     ----    --------   -----       -----------
+XCODE     DIM       3         3         1         Acode (Cat CC)  
+XDESC     DIM      20        20         4         Description
+XNSEP     FORM      6         4        24         No. of Separations
+XSEPD     FORM      6         4        28         Separation Days
+XBEDD     FORM      6         4        32         Bed days
+XLEVD     FORM      6         4        36         Leave days
+XYTDNSP   FORM      6         4        40         YTD No. of Separations
+XYTDSEP   FORM      6         4        44         YTD Separation Days
+XYTDBED   FORM      6         4        48         YTD Bed Days
+XYTDLEV   FORM      6         4        52         YTD Leave Days
+.End of Record                         56
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+BEDDAYS   FORM      6        * Bed days
+BEDDAY    FORM      6
+.
+CALMON    DIM       2        * Calendar month
+CALYEAR   DIM       4        * Calendar year
+CDYSDAYS  FORM      6        * Calcdays
+CDYSFDTE  DIM       8        * Calcdays
+CDYSTDTE  DIM       8        * Calcdays
+CDYSYEAR  FORM      2        * Calcdays
+CMDLINE   DIM       30
+CURDATE   DIM       8        * Current date
+.
+DAYFLAG   FORM      1
+DIM4      DIM       4
+.
+ENDDTE    DIM       8        * Ending date
+.
+FINYR     DIM       1        * Processing YTD 1 = yes 0 = no
+FSDATE    DIM      10        * Formatted Start Date
+FENDDTE   DIM      10        * Formatted End Date
+FSTFINYR  DIM      10        * Formatted Start Financial Year
+.
+LVEDTE    DIM       8        * Leave date
+.
+RETDTE    DIM       8        * Return date
+.
+SAVADMN   FORM      8
+SAVWARD   DIM       3
+SDATE     DIM       8        * Start date
+SDAYMON   DIM       4
+SEPDAYS   FORM      6        * Separation days               
+STFINYR   DIM       8        * Start of financial year
+SYEAR     DIM       4
+.
+TEMPFIL1  DIM       8        * Temp file name WORK1
+TEMPFIL2  DIM       8        * Temp file name WORK2
+.
+TDAYMON   DIM       4
+TOTSEP    FORM      6        * total separation days
+TOTBED    FORM      6        * total bed days
+TOTLEV    FORM      6        * total leave days
+TYTDSEP   FORM      6        * total YTD separation days
+TYTDBED   FORM      6        * total YTD bed days
+TYTDLEV   FORM      6        * total YTD leave days
+TYEAR     DIM       4 
+YTDBED    FORM      6
+.
+CATCC     INIT      "CC"
+ZEROONE   INIT      "01"
+.
+PRGID     INIT      "IBAADT87"
+PRGNAM    INIT      "Admitted Patients by Type of Care"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialisation and open files
+          CALL      CREA0000               * create temporary files
+.
+ML0100    CALL      OPTN0000               * select options
+          BRANCH    EXIT,ML9999            * EXIT = 1 if 0 chosen in menu
+.
+ML0200    CALL      SDAT0000               * Enter the start date for the report
+          BRANCH    OVRCD,ML0100
+          CALL      EDAT0000               * Enter the end date
+          BRANCH    OVRCD,ML0200
+.
+ML1000    CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,ML2000:          * yes
+                          ML0200:          * no
+                          ML0100           * cancel
+.
+ML2000    CALL      YTDP0000               * Get year to date period
+          BRANCH    EXIT,ML0200            * Financial year not found
+          CALL      LICC0000               * Get list of care classes
+ML3000    CALL      LINP0000               * List inpatients in period
+          CALL      SEPD0000               * Calculate separation days
+          CALL      BEDD0000               * Calculate bed days
+          CALL      LEAW0000               * Calculate leave days
+.
+          MATCH     "1",FINYR
+          GOTO      ML5000 IF EQUAL
+.
+          MOVE      "1",FINYR              * Calculate YTD totals
+          MOVE      STFINYR,SDATE
+          GOTO      ML3000   
+.
+ML5000    CALL      PRNT0000               * print report
+.
+ML9999    CALL      KILL0000               * remove temp files
+          CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,"Opening cotrolf"
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"patdrgaf"
+          OPEN      PATDRGA1,"patdrgaf"
+          OPEN      PATDRGA3,"patdrgaf"
+.
+          DISPLAY   *P64:24,"patcodes"
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patdschf"
+          OPEN      PATDSCH1,"patdschf"
+          OPEN      PATDSCH2,"patdschf"
+.
+          DISPLAY   *P64:24,"patmi1af"
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"pattranf"
+          OPEN      PATTRAN1,"pattranf"
+          OPEN      PATTRAN2,"pattranf"
+.
+          READ      CONTROLF,TEN;*13,PTCNTLVE
+          READ      CONTROLF,TWENTY1;*205,PTCNUKEY
+.
+          DISPLAY   *P64:24,"patwr1af"
+          OPEN      PATWR1A1,"patwr1af"
+.
+          MOVE      ZERO,TOTSEP             * clear report totals
+          MOVE      ZERO,TOTBED
+          MOVE      ZERO,TOTLEV
+          MOVE      ZERO,TYTDSEP
+          MOVE      ZERO,TYTDBED
+          MOVE      ZERO,TYTDLEV
+          MOVE      "0",FINYR               * reset YTD flag
+.
+INIT9999  RETURN
++
+.**********************************************************************
+.*                         CREA0000                                   *
+.*                  Create Temporary Files                            *
+.**********************************************************************
+.
+CREA0000  CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TEMPFIL1
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TEMPFIL2
+.
+          CALL      KILL0000
+.
+          PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TEMPFIL1,CMDLINE
+          APPEND    " 42 u1-8",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      WORK1,TEMPFIL1
+.
+          PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TEMPFIL2,CMDLINE
+          APPEND    " 56 u1-3",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      WORK2,TEMPFIL2
+          RETURN
+.
+.
+.**********************************************************************
+.*                         KILL0000                                   *
+.*                  Remove Temporary Files                            *
+.**********************************************************************
+.
+KILL0000  CLOSE     WORK1    
+          PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TEMPFIL1,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          CLOSE     WORK2   
+          PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TEMPFIL2,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          RETURN
+.
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run clean up                           *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Print Report"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run clean-up
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.**************************************************************************
+.*                               SDAT0000              Called by: ML0000  *
+.*                     Enter the starting date                            *
+.**************************************************************************
+.
+SDAT0000  DISPLAY   *P1:4,*EF,"Starting Date : "
+          UNPACK    SP10,CCENT,CYEAR,CMON,CDAY
+          MOVE      TEN7,CCOL
+          MOVE      FOUR,CVERT
+          MOVE      ZERO,CCANLDTE
+          CALL      KEYDATE
+          BRANCH    OVRCD,SDAT9999               * nothing entered
+.
+          PACK      SDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",SDATE
+          PACK      CURDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURDATE
+.
+          UNPACK    SDATE,CCENT,CYEAR,CMON,CDAY  * format sdate for report
+          CALL      PACDATE
+          MOVE      CPCDATE,FSDATE
+.
+          MATCH     SDATE,CURDATE                * greater than current date?
+          GOTO      SDAT9999 IF NOT LESS
+.
+          DISPLAY   *P1:24,"Starting date cannot be in the future ";
+          CALL      HITENTER
+          GOTO      SDAT0000
+.
+SDAT9999  RETURN
++
+.**************************************************************************
+.*                               EDAT0000              Called by: ML0000  *
+.*                           Enter ending date                            *
+.**************************************************************************
+.
+EDAT0000  DISPLAY   *P1:6,*EF,"Ending Date   : "
+          UNPACK    SP10,CCENT,CYEAR,CMON,CDAY
+          MOVE      TEN7,CCOL
+          MOVE      SIX,CVERT
+          MOVE      ZERO,CCANLDTE
+          CALL      KEYDATE
+          BRANCH    OVRCD,EDAT9999               * nothing entered
+.
+          PACK      ENDDTE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",ENDDTE
+          PACK      CURDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURDATE
+.
+          MATCH     ENDDTE,CURDATE                * after current date?
+          GOTO      EDAT9000 IF LESS
+.
+          MATCH     ENDDTE,SDATE                  * after start date?
+          GOTO      EDAT9999 IF LESS
+.
+          DISPLAY   *P1:24,"Ending date must be greater than starting date ";
+          CALL      HITENTER
+          GOTO      EDAT0000
+.
+EDAT9000  DISPLAY   *P1:24,"Ending date cannot be in the future ";
+          CALL      HITENTER
+          GOTO      EDAT0000
+.
+EDAT9999  RETURN
++
+.**************************************************************************
+.*                               YTDP0000              Called by: ML0000  *
+.*                  Find the Year to date period                          *
+.**************************************************************************
+.
+YTDP0000  UNPACK    SDATE,CCENT,CYEAR,CMON,CDAY
+          PACK      CALYEAR,CCENT,CYEAR
+          PACK      CALMON,CMON
+.
+          PACK      KEY6,CALYEAR,CALMON          * Find the financial year
+          CALL      RDDRGA3                      * that the start date is in
+          BRANCH    OVRCD,YTDP9000
+.
+          PACK      KEY6,DRGYR,ZEROONE           * Find the first day of this
+          CALL      RDDRGA1                      * financial year
+          BRANCH    OVRCD,YTDP9000
+.
+          MOVE      DRGFDTE,STFINYR  
+          MOVE      ZERO,EXIT
+          GOTO      YTDP9999
+.
+YTDP9000  DISPLAY   *P1:24,*EL,"Financial year not found in period file ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+YTDP9999  RETURN
++
+.**************************************************************************
+.*                               LICC0000              Called by: ML0000  *
+.*                    Make a list of care classes                         *
+.**************************************************************************
+.
+LICC0000  PACK      KEY5,CATCC,SP5               * Category CC
+          CALL      RDSCODE1
+LICC1000  CALL      RDKCODE1
+          BRANCH    OVRCD,LICC9999
+.
+          MATCH     CATCC,TCODE                  * same category?
+          GOTO      LICC9999 IF NOT EQUAL
+.
+          MATCH     SP3,ACODE
+          GOTO      LICC1000 IF EQUAL
+.
+          MOVE      ACODE,XCODE
+          MOVE      TDESC,XDESC
+.
+          CALL      WRWORK2                      * write to temp file
+          GOTO      LICC1000
+.
+LICC9999  RETURN
++
+.**************************************************************************
+.*                               LINP0000              Called by: ML0000  *
+.*                    Make a list of inpatients during period             *
+.**************************************************************************
+.
+LINP0000  DISPLAY   *P40:24,*EL,*V2LON,"*** Creating List of Inpatients ***"
+          UNPACK    SDATE,DIM4,SDAYMON  
+          MOVE      DIM4,SYEAR                   * starting year
+.
+          UNPACK    ENDDTE,DIM4,TDAYMON
+          MOVE      DIM4,TYEAR                   * ending year
+.
+          PACK      CFNAME,FILDAYA1,SYEAR
+LINP1000  OPEN      PATDAYA1,CFNAME              * open patday file
+.
+          PACK      KEY12,SDAYMON,SP10
+          CALL      RSPTDAY1
+LINP1100  CALL      RKPTDAY1
+          BRANCH    OVRCD,LINP3000
+.
+          MATCH     TYEAR,SYEAR
+          GOTO      LINP2000 IF NOT EQUAL
+.
+          MATCH     PTDYDATE,TDAYMON
+          GOTO      LINP9999 IF LESS
+.
+LINP2000  MOVE      PTDYADMN,KEY8
+          CALL      RDWORK1                  * Check if already on file
+          COMPARE   ZERO,OVRCD
+          GOTO      LINP1100 IF EQUAL        * Already on file
+.
+          MOVE      PTDYADMN,KEY8
+          CALL      RDMISS1
+          BRANCH    OVRCD,LINP1100
+.
+          MOVE      AADMNO,XADMN
+          MOVE      ADATE,XADATE
+          MOVE      ACARE,XACARE
+.
+LINP2100  MOVE      PTDYADMN,KEY8
+          CALL      RDDSCH1
+...       BRANCH    OVRCD,LINP1100                                    *C-151503
+          IF        OVRCD = 1
+            MOVE      SP8,DDATE
+          ENDIF
+.
+          MOVE      DDATE,XDDATE
+.
+          PACK      KEY30,PTDYADMN,SP30
+          CALL      RDATRAN2
+LINP2200  CALL      RDKTRAN2
+          BRANCH    OVRCD,LINP2400
+.
+          MOVE      SP8,XTDATE
+          COMPARE   PTDYADMN,TADMN
+          GOTO      LINP2400 IF NOT EQUAL
+.
+          MATCH     ANSL,TMOVE
+          GOTO      LINP2200 IF NOT EQUAL
+.
+          MOVE      TDATE,XTDATE
+.
+LINP2400  MOVE      ADATE,CDYSFDTE
+          MOVE      DDATE,CDYSTDTE
+          MATCH     SP8,DDATE
+          IF        @EQUAL
+            MOVE      ENDDTE,CDYSTDTE
+          ENDIF
+          MATCH     DDATE,ENDDTE
+          IF        @LESS
+            MOVE      ENDDTE,CDYSTDTE
+          ENDIF
+          MATCH     ADATE,SDATE
+          GOTO      LINP2500 IF LESS
+          MOVE      SDATE,CDYSFDTE
+.
+LINP2500  DAYSEP    CDYSFDTE,CDYSTDTE,CDYSDAYS
+.
+          MATCH     DDATE,ENDDTE
+          GOTO      LINP2700 IF EQUAL
+          ADD       ONE,CDYSDAYS
+.
+LINP2700  MOVE      CDYSDAYS,XBEDDY
+          REP       " 0",XBEDDY
+.
+          MOVE      PTDYADMN,KEY8
+          CALL      WRWORK1                  * Write to temp file         
+          GOTO      LINP1100
+.
+LINP3000  MATCH     TYEAR,SYEAR              * start & finish in same year?
+          GOTO      LINP9999 IF NOT LESS
+.
+          MOVE      SYEAR,FORM4
+          ADD       ONE,FORM4
+          MOVE      FORM4,SYEAR
+          REP       " 0",SYEAR
+          MOVE      "0101",SDAYMON
+          GOTO      LINP1000
+.
+LINP9999  RETURN
++
+.**************************************************************************
+.*                               SEPD0000              Called by: ML0000  *
+.*                    Calculate separation days during period             *
+.**************************************************************************
+.
+SEPD0000  DISPLAY   *P40:24,*EL,*V2LON,"*** Calculating Separation Days ***"
+          MOVE      SP5,KEY3
+          CALL      RDSWORK2
+SEPD1000  CALL      RDKWORK2
+          BRANCH    OVRCD,SEPD9999
+.
+          MATCH     "1",FINYR
+          IF        @EQUAL
+            MOVE      ZERO,XYTDSEP               * processing YTD
+            MOVE      ZERO,XYTDNSP
+          ELSE
+            MOVE      ZERO,XSEPD                 * processing current period
+            MOVE      ZERO,XNSEP
+          ENDIF
+.
+          MOVE      ZERO,SEPDAYS
+          PACK      KEY16,SDATE,SP10             * read discharge file
+          CALL      RDSDSCH2
+SEPD2000  CALL      RDKDSCH2
+          BRANCH    OVRCD,SEPD8000
+.
+          MATCH     DDATE,ENDDTE                 * after end of period
+          GOTO      SEPD2000 IF LESS
+.
+          PACK      KEY8,DDADMNO                 * read admn record
+          CALL      RDMISS1
+          BRANCH    OVRCD,SEPD9000
+.
+          MATCH     DDADMNO,DAADMNO              * same patient
+          GOTO      SEPD9000 IF NOT EQUAL
+.
+.          COMPARE   ONE,ASTAT                   * Preadmitted ?
+.          GOTO      SEPD2000 IF EQUAL
+.
+          MATCH     ACARE,XCODE                  * different care class
+          GOTO      SEPD2000 IF NOT EQUAL
+.
+          MATCH     ADATE,DDATE                  * daycase patient
+          IF        @EQUAL
+            MATCH     "1",FINYR  
+            IF        @EQUAL
+              ADD       ONE,XYTDNSP
+              ADD       ONE,XYTDSEP
+              GOTO      SEPD2000
+            ELSE
+              ADD       ONE,XNSEP
+              ADD       ONE,XSEPD
+              GOTO      SEPD2000
+            ENDIF
+          ENDIF
+.          
+SEPD4000  MATCH     DDATE,SDATE                  * discharged on start date
+          GOTO      SEPD2000 IF EQUAL            * don't count as a separation
+.
+          MATCH     ADATE,SDATE                  * admitted during period?
+          GOTO      SEPD5000 IF LESS
+.
+          MOVE      SDATE,CDYSFDTE               * Start range date
+          GOTO      SEPD6000
+.
+SEPD5000  MOVE      ADATE,CDYSFDTE
+.
+SEPD6000  MOVE      DDATE,CDYSTDTE
+          DAYSEP    CDYSFDTE,CDYSTDTE,CDYSDAYS
+.
+SEPD7000  MOVE      CDYSDAYS,SEPDAYS
+          MATCH     "1",FINYR
+          IF        @EQUAL
+            ADD       SEPDAYS,XYTDSEP
+            ADD       ONE,XYTDNSP
+          ELSE
+            ADD       SEPDAYS,XSEPD
+            ADD       ONE,XNSEP
+          ENDIF
+.
+          GOTO      SEPD2000
+.
+SEPD8000  PACK      KEY3,XCODE
+          CALL      UPWORK2                      * update the temp file
+          GOTO      SEPD1000
+.
+SEPD9000  DISPLAY   *P1:24,*EL,"Admission ",*V2LON,DDADMNO:
+                    " missing admission record"
+          GOTO      SEPD2000
+.
+SEPD9999  RETURN
++
+.**************************************************************************
+.*                               BEDD0000              Called by: ML0000  *
+.*                      Calculate bed days during period                  *
+.**************************************************************************
+.
+BEDD0000  DISPLAY   *P40:24,*EL,*V2LON,"*** Calculating Bed Days ***"
+          MOVE      SP5,KEY3
+          CALL      RDSWORK2
+BEDD1000  CALL      RDKWORK2
+          BRANCH    OVRCD,BEDD9999
+.
+          MATCH     "1",FINYR
+          IF        @EQUAL
+            MOVE      ZERO,XYTDBED               * processing YTD
+          ELSE
+            MOVE      ZERO,XBEDD                 * processing current period
+          ENDIF
+          MOVE      ZERO,BEDDAYS
+          PACK      KEY8,SP10
+          CALL      RDSWORK1
+BEDD2000  CALL      RDKWORK1 
+          BRANCH    OVRCD,BEDD8000
+.
+          MOVE      SP8,DDATE
+          PACK      KEY8,XADMN
+          CALL      RDDSCH1
+          IF        OVRCD=1
+            MOVE      SP8,DDATE                  * Not discharged
+            GOTO      BEDD3000
+          ENDIF
+.
+          MATCH     DDADMNO,XADMN
+          IF        !@EQUAL
+            MOVE      SP8,DDATE                  * Not discharged
+            GOTO      BEDD3000
+          ENDIF
+.
+          MATCH     DDATE,SDATE                  * discharged on start date
+          GOTO      BEDD2000 IF NOT LESS         * don't count as a bed day
+.
+          MATCH     DDATE,ENDDTE                 * discharged during period
+          GOTO      BEDD2000 IF NOT LESS         * already counted in sep days
+.
+BEDD3000  PACK      KEY8,XADMN                   * read admn record
+          CALL      RDMISS1
+          BRANCH    OVRCD,BEDD9000
+.
+          MATCH     DAADMNO,XADMN                * same patient
+          GOTO      BEDD9000 IF NOT EQUAL
+.
+          COMPARE   ONE,ASTAT
+          GOTO      BEDD2000 IF EQUAL
+.
+          MATCH     ACARE,XCODE                  * different care class
+          GOTO      BEDD2000 IF NOT EQUAL
+.
+          MATCH     ADATE,DDATE                  * daycase patient
+          GOTO      BEDD2000 IF EQUAL            * counted in sep days
+.
+          MATCH     ADATE,SDATE                  * admitted during period?
+          GOTO      BEDD5000 IF LESS
+.
+          MOVE      SDATE,CDYSFDTE
+          GOTO      BEDD6000
+.
+BEDD5000  MOVE      ADATE,CDYSFDTE
+.
+BEDD6000  MOVE      ENDDTE,CDYSTDTE
+          DAYSEP    CDYSFDTE,CDYSTDTE,CDYSDAYS
+.
+          MATCH     DDATE,ENDDTE                 * discharged on end range day
+          GOTO      BEDD7000 IF EQUAL            * don't count as bed day
+          ADD       ONE,CDYSDAYS
+.
+BEDD7000  MOVE      CDYSDAYS,BEDDAYS
+          MATCH     "1",FINYR
+          IF        @EQUAL
+            ADD       BEDDAYS,XYTDBED
+          ELSE
+            ADD       BEDDAYS,XBEDD
+          ENDIF
+          GOTO      BEDD2000
+.
+BEDD8000  CALL      UPWORK2                      * update the temp file
+          GOTO      BEDD1000
+.
+BEDD9000  DISPLAY   *P1:24,*EL,"Admission ",*V2LON,XADMN:
+                    " missing admission record"
+          GOTO      BEDD2000
+.
+BEDD9999  RETURN
++
+.******************************************************************************
+.*                                  LEAW0000              Called by: ML0000   *
+.*                              Process The Files                             *
+.******************************************************************************
+.
+LEAW0000  DISPLAY   *P40:24,*EL,*V2LON,"*** Calculating Leave Days ***"
+          PACK      KEY3,SP3
+          CALL      RDSWORK2
+LEAW1000  CALL      RDKWORK2
+          BRANCH    OVRCD,LEAW9999
+.
+          MATCH     "1",FINYR
+          IF        @EQUAL
+            MOVE      ZERO,XYTDLEV
+          ELSE
+            MOVE      ZERO,XLEVD
+          ENDIF
+.
+          MOVE      ZERO,CDYSDAYS
+          PACK      KEY8,SP10
+          CALL      RDSWORK1
+LEAW2000  CALL      RDKWORK1
+          BRANCH    OVRCD,LEAW1000
+.
+          PACK      KEY8,XADMN
+          CALL      RDMISS1
+          BRANCH    OVRCD,LEAW2000
+.
+          MATCH     DAADMNO,XADMN
+          GOTO      LEAW2000 IF NOT EQUAL
+.
+          MATCH     ACARE,XCODE
+          GOTO      LEAW2000 IF NOT EQUAL
+.
+          PACK      KEY30,XADMN,SP30
+          CALL      RDSTRAN2
+LEAW3000  CALL      RDKTRAN2
+          BRANCH    OVRCD,LEAW2000               * No transfer record
+.
+          MATCH     XADMN,DTADMN
+          GOTO      LEAW2000 IF NOT EQUAL        * Different admission no
+.
+          MATCH     ANSL,TMOVE                   * On leave transfer
+          GOTO      LEAW3000 IF NOT EQUAL
+.
+          MATCH     TDATE,ENDDTE            * Leave taken after date range
+          GOTO      LEAW2000 IF LESS        * Read next admission
+.
+          MOVE      TDATE,LVEDTE            * Leave date
+          MATCH     LVEDTE,SDATE
+          IF        !@LESS
+            MOVE      SDATE,LVEDTE          * Leave date before start date
+          ENDIF
+.
+          MOVE      ENDDTE,RETDTE           * Set return date as end date
+LEAW4000  CALL      RDKTRAN2
+          BRANCH    OVRCD,LEAW4500          * No return from leave
+.
+          MATCH     XADMN,DTADMN
+          GOTO      LEAW4500 IF NOT EQUAL        * Not returned from leave
+.
+          MATCH     ANSR,TMOVE                   * Return from leave
+          GOTO      LEAW4500 IF NOT EQUAL        * Still on leave
+.
+          MATCH     SDATE,TDATE             * returned before start of period
+          GOTO      LEAW3000 IF LESS        * Read next transfer
+.
+          MOVE      TDATE,RETDTE            * Return date
+          MATCH     RETDTE,ENDDTE           * Return date > end date ?
+          IF        @LESS
+            MOVE      ENDDTE,RETDTE         * Set return date as end date
+          ENDIF
+.
+LEAW4500  MOVE      ZERO,CDYSDAYS
+          MOVE      LVEDTE,CDYSFDTE
+          MOVE      RETDTE,CDYSTDTE
+          DAYSEP    CDYSFDTE,CDYSTDTE,CDYSDAYS
+.
+          MATCH     TDATE,ENDDTE
+          IF        @LESS
+            ADD       ONE,CDYSDAYS          * Set return date as end date
+          ENDIF
+.
+          MATCH     "1",FINYR
+          IF        @EQUAL
+            ADD       CDYSDAYS,XYTDLEV
+          ELSE
+            ADD       CDYSDAYS,XLEVD
+          ENDIF
+.
+LEAW9000  MOVE      XCODE,KEY3
+          CALL      UPWORK2                * update the temp file
+          GOTO      LEAW3000
+.
+LEAW9999  RETURN
++
+.**************************************************************************
+.*                               PRNT0000              Called by: ML0000  *
+.*              Read through temp file and print report                   *
+.**************************************************************************
+.
+PRNT0000  CLOCK     TIME,CTIMEIS
+          CALL      HEAD80                       * print heading
+.
+          UNPACK    ENDDTE,CCENT,CYEAR,CMON,CDAY 
+          CALL      PACDATE                      * format end of period
+          MOVE      CPCDATE,FENDDTE
+.
+          UNPACK    STFINYR,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                      * format start of fin year
+          MOVE      CPCDATE,FSTFINYR
+.
+          PRINT     *N,*N,*11,"Current Period From ",FSDATE," to ":
+                    FENDDTE," inclusive"
+          PRINT     *N,*12,"Year to Date from ",FSTFINYR," to ":
+                    FENDDTE," inclusive"
+.
+          PRINT     *1,"+-------------------------------+":
+                    "---------------------+":
+                    "------------------------+"
+.
+          PRINT     *1,"|",*33,"|  Current Period",*55,"|":
+                    *60,"Year to Date",*80,"|":
+                    *N,*1,"|",*33,"| Seps",*40,"|  Bed",*48,"| Leave":
+                    *55,"| Seps",*62,"|  Bed",*71,"| Leave  |":
+                    *N,*1,"|   Type of Care (Category CC)",*33,"|":
+                    *40,"|  Days",*48,"| Days",*55,"|",*62,"|  Days":
+                    *71,"| Days   |"
+.
+          PRINT     *1,"+-------------------------------+":
+                    "---------------------+":
+                    "------------------------+"
+.
+          PACK      KEY3,SP3
+          CALL      RDSWORK2
+PRNT1000  CALL      RDKWORK2
+          BRANCH    OVRCD,PRNT5000
+.
+          MOVE      ZERO,BEDDAY
+          MOVE      ZERO,YTDBED
+.
+          ASSIGN    (XSEPD+XBEDD-XLEVD),BEDDAY   * beddays =sep days +
+          ASSIGN    (XYTDSEP+XYTDBED-XYTDLEV),YTDBED  * inp bed days-leave days
+.
+          PRINT     *1,"|  ",XDESC,*33,"|",XNSEP,*40,"|",BEDDAY,*48,"|":
+                    XLEVD,*55,"|",XYTDNSP,*62,"| ",YTDBED,*71,"| ":
+                    XYTDLEV,*80,"|"
+.
+          ADD       XNSEP,TOTSEP                 * add to totals
+          ADD       BEDDAY,TOTBED
+          ADD       XLEVD,TOTLEV
+          ADD       XYTDNSP,TYTDSEP
+          ADD       YTDBED,TYTDBED
+          ADD       XYTDLEV,TYTDLEV
+.
+          GOTO      PRNT1000
+.
+PRNT5000  PRINT     *1,"+-------------------------------+":
+                    "---------------------+":
+                    "------------------------+"
+.
+          PRINT     *1,"|  Totals",*33,"|",TOTSEP,*40,"|",TOTBED,*48,"|":
+                    TOTLEV,*55,"|",TYTDSEP,*62,"| ",TYTDBED,*71,"| ":
+                    TYTDLEV,*80,"|"
+.
+          PRINT     *1,"+-------------------------------+":
+                    "---------------------+":
+                    "------------------------+"
+.
+          PRINT     *N,"Bed Days = No. of Day Cases + Separated Bed Days ":
+                    "in Period + Current Inpatient"
+          PRINT     *12,"Bed Days in Period."
+          PRINT     *N,*N,"** End of Report **"
+.
+PRNT9999  RETURN
++
+.**************************************************************************
+.*             I/O Routines for Temporary files                           *
+.*                                                                        *
+.**************************************************************************
+.
+.
+RDSWORK1  READ      WORK1,KEY8;;
+          RETURN
+.
+RDKWORK1  MOVE      ZERO,OVRCD
+          READKS    WORK1;XADMN,XADATE,XDDATE,XTDATE,XACARE,XBEDDY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWORK1   MOVE      ZERO,OVRCD
+          READ      WORK1,KEY8;XADMN,XADATE,XDDATE,XTDATE,XACARE,XBEDDY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRWORK1   WRITE     WORK1,KEY8;KEY8,XADATE,XDDATE,XTDATE,XACARE,XBEDDY
+          RETURN
+.
+RDSWORK2  READ      WORK2,KEY3;;
+          RETURN
+.
+RDKWORK2  MOVE      ZERO,OVRCD
+          READKS    WORK2;XCODE,XDESC,XNSEP,XSEPD,XBEDD,XLEVD,XYTDNSP,XYTDSEP:
+                    XYTDBED,XYTDLEV
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWORK2   MOVE      ZERO,OVRCD
+          READ      WORK2,KEY3;XCODE,XDESC,XNSEP,XSEPD,XBEDD,XLEVD,XYTDNSP:
+                    XYTDSEP,XYTDBED,XYTDLEV
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRWORK2   WRITE     WORK2,KEY3;XCODE,XDESC,XNSEP,XSEPD,XBEDD,XLEVD,XYTDNSP:
+                    XYTDSEP,XYTDBED,XYTDLEV
+          RETURN
+.
+UPWORK2   UPDATE    WORK2;XCODE,XDESC,XNSEP,XSEPD,XBEDD,XLEVD,XYTDNSP,XYTDSEP:
+                    XYTDBED,XYTDLEV
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       CALCDAYS
+          INC       TFILENAM                     * Generate Temp File Name
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATCODIO/INC                 * codes file
+          INC       PATDAYIO/INC                 * patient day file
+          INC       PATDRGIO/INC                 * date range file
+          INC       PATDSCIO/INC                 * discharge file
+          INC       PATMI1IO/INC                 * admission file
+          INC       PMSVX1IO/INC                 * admission file
+          INC       PATTRNIO/INC                 * tran file
+          INC       PATWR1IO/INC                 * ward file
+          INC       WEBERRIO/INC                 * Web Server Error Logging

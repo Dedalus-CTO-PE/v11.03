@@ -1,0 +1,620 @@
+.
+RSPRDT1   RESET     KEY22
+          READ      PRIDTRA1,KEY22;;
+          RETURN
+.
+RAPRDT1   RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA1,KEY22;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRDT1   RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA1,KEY22;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RKPRDT1   MOVE      ZERO,OVRCD
+          READKS    PRIDTRA1;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RPPRDT1   MOVE      ZERO,OVRCD
+          READKP    PRIDTRA1;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+UPPRDT1   PACK      PRDTCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PRDTCDAT
+          CLOCK     TIME,PRDTCTIM
+.
+          MOVE      PRDTUNIQ,DPRDTUNQ
+          MOVE      PRDTTRAN,DPRDTTRN
+          MOVE      PRDTSCAN,DPRDTSCN
+          MOVE      PRDTAPAY,DPRDTAPA
+          UPDATE    PRIDTRA1;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          RETURN
+.
+WRPRDT1   PACK      PRDTCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PRDTCDAT
+          CLOCK     TIME,PRDTCTIM
+.
+          RESET     KEY22
+          MOVE      PRDTUNIQ,DPRDTUNQ
+          MOVE      PRDTTRAN,DPRDTTRN
+          MOVE      PRDTSCAN,DPRDTSCN
+          MOVE      PRDTAPAY,DPRDTAPA
+          WRITE     PRIDTRA1,KEY22;KEY22,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          RETURN
+.
+DEPRDT1   RESET     KEY22
+          DELETE    PRIDTRA1,KEY22
+          RETURN
+.
+RSPRDT2   RESET     KEY30
+          READ      PRIDTRA2,KEY30;;
+          RETURN
+.
+RAPRDT2   RESET     KEY30
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA2,KEY30;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRDT2   RESET     KEY30
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA2,KEY30;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RKPRDT2   MOVE      ZERO,OVRCD
+          READKS    PRIDTRA2;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RPPRDT2   MOVE      ZERO,OVRCD
+          READKP    PRIDTRA2;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RSPRDT3   RESET     KEY24
+          READ      PRIDTRA3,KEY24;;
+          RETURN
+.
+RAPRDT3   RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA3,KEY24;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRDT3   RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA3,KEY24;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RKPRDT3   MOVE      ZERO,OVRCD
+          READKS    PRIDTRA3;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RPPRDT3   MOVE      ZERO,OVRCD
+          READKP    PRIDTRA3;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+UPPRDT3   MOVE      PRDTUNIQ,DPRDTUNQ
+          MOVE      PRDTTRAN,DPRDTTRN
+          MOVE      PRDTSCAN,DPRDTSCN
+          MOVE      PRDTAPAY,DPRDTAPA
+          UPDATE    PRIDTRA3;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          RETURN
+.
+RSPRDT4   RESET     KEY22
+          READ      PRIDTRA4,KEY22;;
+          RETURN
+.
+RAPRDT4   RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA4,KEY22;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRDT4   RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA4,KEY22;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RKPRDT4   MOVE      ZERO,OVRCD
+          READKS    PRIDTRA4;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RPPRDT4   MOVE      ZERO,OVRCD
+          READKP    PRIDTRA4;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+UPPRDT4   MOVE      PRDTUNIQ,DPRDTUNQ
+          MOVE      PRDTTRAN,DPRDTTRN
+          MOVE      PRDTSCAN,DPRDTSCN
+          UPDATE    PRIDTRA4;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          RETURN
+.
+.
+RSPRDT5   RESET     KEY31
+          READ      PRIDTRA5,KEY31;;
+          RETURN
+.
+RAPRDT5   RESET     KEY31
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA5,KEY31;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRDT5   RESET     KEY30
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA5,KEY31;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RKPRDT5   MOVE      ZERO,OVRCD
+          READKS    PRIDTRA5;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+RPPRDT5   MOVE      ZERO,OVRCD
+          READKP    PRIDTRA5;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          MOVE      DPRDTAPA,PRDTAPAY
+          RETURN
+.
+UPPRDT5   MOVE      PRDTUNIQ,DPRDTUNQ
+          MOVE      PRDTTRAN,DPRDTTRN
+          MOVE      PRDTSCAN,DPRDTSCN
+          MOVE      DPRDTAPA,PRDTAPAY          
+          UPDATE    PRIDTRA5;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          RETURN
+.
+RSPRDT6   RESET     KEY25
+          READ      PRIDTRA6,KEY25;;
+          RETURN
+.
+RAPRDT6   RESET     KEY25
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA6,KEY25;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRDT6   RESET     KEY25
+          MOVE      ZERO,OVRCD
+          READ      PRIDTRA6,KEY25;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          RETURN
+.
+RKPRDT6   MOVE      ZERO,OVRCD
+          READKS    PRIDTRA6;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          RETURN
+.
+RPPRDT6   MOVE      ZERO,OVRCD
+          READKP    PRIDTRA6;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRDTUNQ,PRDTUNIQ
+          MOVE      DPRDTTRN,PRDTTRAN
+          MOVE      DPRDTSCN,PRDTSCAN
+          RETURN
+.
+UPPRDT6   PACK      PRDTCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PRDTCDAT
+          CLOCK     TIME,PRDTCTIM
+.
+          MOVE      PRDTUNIQ,DPRDTUNQ
+          MOVE      PRDTTRAN,DPRDTTRN
+          MOVE      PRDTSCAN,DPRDTSCN
+          UPDATE    PRIDTRA6;DPRDTUNQ,PRDTINVN,DPRDTTRN,PRDTDEBT:
+                                  DPRDTSCN,PRDTSDAT,PRDTSTIM,PRDTDESC,PRDTAMNT:
+                                  PRDTPRAC,PRDTDOCT,PRDTSERV,PRDTREFD,PRDTREFT:
+                                  PRDTCLAM,PRDTCODE,PRDTMESS,PRDTRTYP,PRDTIFLG:
+                                  PRDTITMN,PRDTSUBN,PRDTSETC,PRDTRECN,PRDTMETH:
+                                  PRDTTTYP,PRDTINVP,PRDTCDAT,PRDTCTIM,PRDTBATC:
+                                  PRDTUDF1,PRDTUDF2,PRDTUDF3,PRDTUDF4,PRDTADMN:
+                                  PRDTMISG,PRDTRDTE,PRDTIAMT,PRDTOPS,PRDTMFLG:
+                                  PRDTGLT,PRDTMEDA,PRDTGSTA,PRDTGSTC,PRDTGSTM:
+                                  DPRDTAPA,PRDTRFPD,PRDTREFN,PRDTENCN,PRDTCNST:
+                                  PRDTPFLG,PRDTS4B3,PRDTEFFD,PRDTPCOD,PRDTACOI:
+                                  PRDTTDUR,PRDTRPER,PRDTROVR,PRDTMPOV,PRDTDSOV:
+                                  PRDTSTXT,PRDTASPF,PRDTASPC,PRDTAICF,PRDTAICV:
+                                  PRDTNMPT,PRDTLSPN,PRDTSDCD,PRDTLVIS,PRDTHOSI:
+                                  PRDTROVC,PRDTSPAR
+          RETURN
+.

@@ -1,0 +1,82 @@
+.------------------------------------------------------------------------------
+.
+. NHIMKCIO.INC : Keywords search IO for NHI Medical Warning Code Table 
+. 
+. Filename     : nhimckcaf.dat
+.
+.------------------------------------------------------------------------------
+.
+RSNHMK1   RESET     KEY23
+          READ      NHIMKCA1,KEY23;;
+          RETURN
+.
+RANHMK1   RESET     KEY23
+          MOVE      ZERO,OVRCD
+          READ      NHIMKCA1,KEY23;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDNHMK1   RESET     KEY23
+          MOVE      ZERO,OVRCD
+          READ      NHIMKCA1,KEY23;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKNHMK1   MOVE      ZERO,OVRCD
+          READKS    NHIMKCA1;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPNHMK1   MOVE      ZERO,OVRCD
+          READKP    NHIMKCA1;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPNHMK1   UPDATE    NHIMKCA1;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          RETURN
+.
+WRNHMK1   RESET     KEY23
+          WRITE     NHIMKCA1,KEY23;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          RETURN
+.
+DENHMK1   RESET     KEY23
+          DELETE    NHIMKCA1,KEY23
+          RETURN
+.
+RSNHMK2   RESET     KEY23
+          READ      NHIMKCA2,KEY23;;
+          RETURN
+.
+RANHMK2   RESET     KEY23
+          MOVE      ZERO,OVRCD
+          READ      NHIMKCA2,KEY23;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDNHMK2   RESET     KEY23
+          MOVE      ZERO,OVRCD
+          READ      NHIMKCA2,KEY23;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKNHMK2   MOVE      ZERO,OVRCD
+          READKS    NHIMKCA2;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPNHMK2   MOVE      ZERO,OVRCD
+          READKP    NHIMKCA2;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPNHMK2   UPDATE    NHIMKCA2;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          RETURN
+.
+WRNHMK2   RESET     KEY23
+          WRITE     NHIMKCA2,KEY23;NHMKKTYP,NHMKKITM,NHMKKKWD,NHMKSPAR
+          RETURN
+.
+DENHMK2   RESET     KEY23
+          DELETE    NHIMKCA2,KEY23
+          RETURN
+.

@@ -1,0 +1,529 @@
+.******************************************************************************
+.*                                                                            *
+.* Prcodeure Name   : AUTOPCOD.PBL                                            *
+.*                                                                            *
+.* Description      : Automatically generate the postcode from the suburb     *
+.*                                                                            *
+.* Author           : Junior  03/10/1996                                      *
+.*                                                                            *
+.* Parameters Req   : IBAADLN2 - 2nd address line                             *
+.*                    IBAADLN3 - 3rd address line                             *
+.*                    SUBKYLIN - Suburb keyin line (either 2 or 3)            *
+.*                                                                            *
+.* Returns          : IBAPCOD  - Postcode                                     *
+.*                    IBASTATE - State                                        *
+.*                    EXIT                                                    *
+.*                      0 - Valid postcode/suburb found                       *
+.*                      1 - Keyin postcode/suburb again                       *
+.*                      2 - Invalid postcode/suburb                           *
+.*                                                                            *
+.* Files Required   : STD001FD.PBL  AUPCDVAR.INC                              *
+.*                                                                            *
+.* Subroutines Used : STD001IO                                                *
+.*                                                                            *
+.* Modifications    :                                                         *
+.*        V10.04.01 17/06/2014  Steve Armstrong CAR 301639                    *
+.*                  Moved call to TFILENAM out into calling programs          *
+.******************************************************************************
+.*        V10.03.02 06/05/2013  Ebon Clements   CAR 261630                    *
+.*                  Removed port number from temp file name                   *
+.*        V10.03.01 17/11/2011  Mike Laming     CAR 240184                    *
+.*                  Changes to IBAPOSTF Post Code table - added State to Keys *
+.******************************************************************************
+.*        C2.00.01  27/04/2001  Greg Horvat                                   *
+.*                  Changed to return the state in IBASTATE                   *
+.*                    01/12/98 J.Tan   SRF 628881                             *
+.*                    Mods tempkey for KEY3                                   *
+.******************************************************************************
+.
+          DEFPROC   AUTOPCOD
+.
+          INC       IBAPOSFD/INC            * Postcode file
+          INC       IBASEQFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+. ----- Tempfile definitions -----
+.
+TEMP1     IFILE     SQL, FIXED=60, KEY="U1-3"
+FILELIN1  INIT      " 60 U1-3"
+.
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+DTMPCONT  DIM       3         3        1     Tempfile counter
+.IBPOPCOD DIM       8         8        4     Postcode
+.IBPOSUBR DIM       45        45       12    Suburb
+.IBPOSTAT DIM       3         3        57    Postcode
+.End of Record                         60
+.
+. ----- Procedure variables -----
+.
+DEFPCOD   FORM      3                       * Default postcode
+.
+FORM3     FORM      3
+.
+IBCNAPST  DIM       4                       * Postcode
+NEXT      FORM      1                       * Next screen flag
+.
+PCCCOL    FORM      2                       * Column position
+PCCVERT   FORM      2                       * Line position
+POSTCODE  DIM       4                       * Postcode
+PREVIOUS  FORM      1                       * Previous screen flag
+.
+SAVSCRFG  FORM      1                       * Save screen flag
+SAVSKYLN  FORM      1                       * Save the suburb keyin line
+SAVSUBRB  DIM       45                      * Save the suburb
+SCRARY    DIM       3[99]                   * 1st record on each screen
+SCRMAX    FORM      2                       * Maximum screen
+SCRNUM    FORM      2                       * Current screen
+SELMAX    FORM      3                       * Selection maximum
+SELMIN    FORM      3                       * Selection minimum
+STATE     DIM       3                       * State
+SUBURB    DIM       45                      * Suburb
+.
+TMPCOUNT  FORM      3                       * Tempfile counter
++
+.******************************************************************************
+.*                                  APCOD000                                  *
+.*                      Automatic Generation Of Postcode                      *
+.******************************************************************************
+APCOD000  CALL      INTAP000                * Initialise variables & open files
+          BRANCH    EXIT,APCOD900
+.
+. ----- Set up the suburb & address lines -----
+.
+          PACK      SUBURB,SP70             * Clear the suburb
+          PACK      IBAADLN2,IBAADLN2,SP70
+          REP       UPPLOW,IBAADLN2
+          PACK      IBAADLN3,IBAADLN3,SP70
+          REP       UPPLOW,IBAADLN3
+.
+. ----- Check the 3rd address line -----
+.
+          MATCH     SP70,IBAADLN3
+          GOTO      APCOD200 IF EQUAL       * Check the 2nd address line
+.
+          PACK      KEY56,IBAADLN3,SP70                               *C-240184
+          CALL      RSIBPOS2                * Position on & read the IBA
+          CALL      RKIBPOS2                  postcode file
+          BRANCH    OVRCD,APCOD100
+.
+          MATCH     IBAADLN3,IBPOSUBR
+          GOTO      APCOD100 IF NOT EQUAL   * Check the 2nd address line
+.
+          MOVE      THREE,SAVSKYLN          * Save the suburb keyin line - 3
+          GOTO      APCOD300
+.
+. ----- Check the 2nd address line -----
+.
+APCOD100  MATCH     SP70,IBAADLN2
+          GOTO      APCOD600 IF EQUAL       * Invalid 2nd & 3rd add lines, error
+.
+APCOD200  MATCH     SP70,IBAADLN2
+          GOTO      APCOD960 IF EQUAL       * No suburb, exit
+.
+          PACK      KEY56,IBAADLN2,SP70                               *C-240184
+          CALL      RSIBPOS2                * Position on & read the IBA
+          CALL      RKIBPOS2                  postcode file
+          BRANCH    OVRCD,APCOD600
+.
+          MATCH     IBAADLN2,IBPOSUBR
+          GOTO      APCOD600 IF NOT EQUAL   * Invalid 2nd & 3rd add lines, error
+.
+          MOVE      TWO,SAVSKYLN            * Save the suburb keyin line - 2
+.
+. ----- Check if the current suburb has changed -----
+.
+APCOD300  MATCH     SAVSUBRB,IBPOSUBR
+          GOTO      APCOD400 IF NOT EQUAL   * Different suburb, continue
+.
+          COMPARE   SAVSKYLN,SUBKYLIN
+          GOTO      APCOD900 IF NOT EQUAL   * Different suburb keyin line, exit
+.
+. ----- Suburb changed, new postcode required -----
+.
+APCOD400  PACK      POSTCODE,IBPOPCOD,SP10  * Postcode
+          PACK      SUBURB,IBPOSUBR,SP70    * Suburb
+          PACK      STATE,IBPOSTAT,SP70     * State
+.
+          PACK      SAVSUBRB,IBPOSUBR,SP70  * Save the suburb
+.
+          CALL      CKMUL000                * Check for muliple suburbs
+          PACK      IBAPCOD,POSTCODE,SP10
+          PACK      IBASTATE,STATE,SP10
+          BRANCH    EXIT,APCOD950           * Keyin the suburb again
+          GOTO      APCOD900
+.
+. ----- Display warning message -----
+.
+APCOD600  MOVE      ZERO,HLEF
+          CALL      GETSCR00                * Save the current screen
+          MOVE      ONE,SAVSCRFG            * Save screen flag - yes
+.
+          DISPLAY   *P1:24,*EL,*B,"Warning - Suburb not found. Continue (":
+                    *V2LON,"Y",*HOFF,"/",*V2LON,"N",*HOFF,") ? ";
+.
+APCOD700  KEYIN     *P46:24,*EL,*V2LON,ANS;
+.
+          REP       UPPLOW,ANS
+          MATCH     ANSY,ANS
+          GOTO      APCOD960 IF EQUAL       * No default postcode, exit
+.
+          MATCH     ANSN,ANS
+          GOTO      APCOD950 IF EQUAL       * Keyin suburb again
+.
+          BEEP
+          GOTO      APCOD700
+.
+APCOD900  MOVE      ZERO,EXIT
+          GOTO      APCOD990
+.
+APCOD950  CALL      CLRSB000                * Clear suburb fields
+          MOVE      ONE,EXIT
+          GOTO      APCOD990
+.
+APCOD960  CALL      CLRSB000                * Clear suburb fields
+          MOVE      TWO,EXIT
+.
+APCOD990  PERFORM   SAVSCRFG,PUTSCR00       * Replace the previous screen
+APCOD999  GOTO      ENDAUTO
++
+.******************************************************************************
+.*                                  INTAP000              Called by: APCOD000 *
+.*                      Initialise Variables & Open Files                     *
+.******************************************************************************
+INTAP000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*48,IBCNAPST
+.
+          PACK      IBAPCOD,IBAPCOD,SP10
+          PACK      IBASTATE,IBASTATE,SP10
+          PACK      IBCNAPST,IBCNAPST,SP10
+          MATCH     SP4,IBCNAPST
+          GOTO      INTAP950 IF EQUAL       * Blank dafault postcode, exit
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      IBAPOST2,"ibapostf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,INTAP950          * Postcode file not found, exit
+.
+          MOVE      ZERO,DEFPCOD            * Default postcode
+          MOVE      ZERO,SAVSCRFG           * Save screen flag - no
+          MOVE      ZERO,SAVSKYLN           * Save the suburb keyin line - 0
+          MOVE      ZERO,TMPCOUNT           * Reset the tempfile counter
+          MOVE      ZERO,EXIT
+          GOTO      INTAP999
+.
+INTAP950  MOVE      ONE,EXIT
+INTAP999  RETURN
++
+.******************************************************************************
+.*                                  CKMUL000              Called by: APCOD000 *
+.*                         Check For Muliptle Suburbs                         *
+.******************************************************************************
+CKMUL000  CALL      RKIBPOS2                * Read the next IBA postcode record
+          BRANCH    OVRCD,CKMUL900
+.
+          MATCH     SUBURB,IBPOSUBR
+          GOTO      CKMUL900 IF NOT EQUAL   * Different suburb, exit
+.
+. ----- Load the tempfile with multiple suburbs -----
+.
+          CALL      OPTMP000                * Open the tempfile
+          CALL      LDTMP000                * Load the tempfile
+.
+. ----- Display the multiple suburbs -----
+.
+          MOVE      "0",HLEF
+          CALL      GETSCR00                * Save the current screen
+          MOVE      ONE,SAVSCRFG            * Save screen flag - yes
+.
+          MOVE      ONE,SCRNUM              * Display the 1st screen
+          IF        DEFPCOD<>0
+            ASSIGN    DEFPCOD/6,SCRNUM      * Display default postcode screen
+            IF        DEFPCOD%6<>0
+              ADD       ONE,SCRNUM          * Display default postcode screen
+            ENDIF
+          ENDIF
+          CALL      DSBKS000                * Display the background screen
+.
+          PACK      KEY3,TMPCOUNT
+          CALL      RDTEMP1                 * Read the tempfile
+          BRANCH    OVRCD,CKMUL300
+          GOTO      CKMUL200
+.
+CKMUL100  CALL      RKTEMP1                 * Read the next tempfile record
+          BRANCH    OVRCD,CKMUL300
+.
+CKMUL200  MOVE      IBPOSUBR,KEY35
+          IF        DEFPCOD=TMPCOUNT
+            DISPLAY   *P15:PCCVERT,*V2LON,TMPCOUNT,".",*P19:PCCVERT,IBPOPCOD:
+                      *P24:PCCVERT,KEY35,*P60:PCCVERT,IBPOSTAT;
+          ELSE
+            DISPLAY   *P15:PCCVERT,*V2LON,TMPCOUNT,".":
+                      *P19:PCCVERT,*HOFF,IBPOPCOD,*P24:PCCVERT,KEY35:
+                      *P60:PCCVERT,IBPOSTAT;
+          ENDIF
+          MOVE      TMPCOUNT,SELMAX         * Maximum selection
+          ADD       ONE,PCCVERT
+          COMPARE   "15",PCCVERT
+          GOTO      CKMUL100 IF LESS
+.
+CKMUL300  CALL      QUEST000                * Main question
+          BRANCH    CEXIT,CKMUL400,CKMUL500,CKMUL200,CKMUL200
+.                         Select   Exit     Next     Previous
+.
+. ----- Record found -----
+.
+CKMUL400  PACK      POSTCODE,IBPOPCOD,SP10  * Postcode
+          PACK      STATE,IBPOSTAT,SP10     * State
+          CALL      KLTMP000                * Delete the tempfile
+          GOTO      CKMUL900
+.
+. ----- Exit -----
+.
+CKMUL500  PACK      POSTCODE,SP10           * Postcode
+          PACK      STATE,SP10              * State
+          PACK      SAVSUBRB,SP70           * No saved suburb
+          CALL      KLTMP000                * Delete the tempfile
+          GOTO      CKMUL950
+.
+CKMUL900  MOVE      ZERO,EXIT
+          GOTO      CKMUL999
+.
+CKMUL950  MOVE      ONE,EXIT
+CKMUL999  RETURN
++
+.******************************************************************************
+.*                                  CLRSB000              Called by: APCOD000 *
+.*                         Clear The Suburb Variables                         *
+.******************************************************************************
+CLRSB000  PACK      IBAPCOD,SP10
+          PACK      IBASTATE,SP10
+          MOVE      ZERO,SAVSKYLN           * No saved suburb keyin line
+          PACK      SAVSUBRB,SP70           * No saved suburb
+CLRSB999  RETURN
++
+.******************************************************************************
+.*                                  LDTMP000              Called by: CKMUL000 *
+.*                              Load The Tempfile                             *
+.******************************************************************************
+LDTMP000  MOVE      ZERO,DEFPCOD            * Default postcode
+          MOVE      ZERO,SCRMAX             * Maximum screen
+          MOVE      ZERO,TMPCOUNT           * Reset the tempfile counter
+          PACK      KEY56,SUBURB,SP70                                 *C-240184
+          CALL      RSIBPOS2                * Position on & read the IBA
+LDTMP100  CALL      RKIBPOS2                  postcode file
+          BRANCH    OVRCD,LDTMP900
+.
+          MATCH     SUBURB,IBPOSUBR
+          GOTO      LDTMP900 IF NOT EQUAL   * Different suburb, display tempfile
+.
+          ADD       ONE,TMPCOUNT            * Increment the tempfile counter
+          CALL      DFPST000                * Get default postcode
+          PACK      KEY3,TMPCOUNT
+          CALL      WRTEMP1                 * Write to the tempfile
+.
+          ASSIGN    TMPCOUNT%6,FORM1
+          IF        FORM1=1
+            ADD       ONE,SCRMAX
+            MOVE      TMPCOUNT,SCRARY[SCRMAX] * 1st record on each screen
+          ENDIF
+          GOTO      LDTMP100
+.
+LDTMP900  MOVE      ZERO,EXIT
+LDTMP999  RETURN
++
+.******************************************************************************
+.*                                  DFPST000              Called by: LDTMP000 *
+.*                          Get The Default Postcode                          *
+.******************************************************************************
+DFPST000  COMPARE   ZERO,DEFPCOD
+          GOTO      DFPST900 IF NOT EQUAL   * Already have a default postcode
+.
+          MATCH     IBCNAPST,IBPOPCOD
+          GOTO      DFPST900 IF LESS        * Postcode < default postcode
+.
+          MOVE      TMPCOUNT,DEFPCOD        * Default postcode
+DFPST900  MOVE      ZERO,EXIT
+DFPST999  RETURN
++
+.******************************************************************************
+.*                                  DSBKS000              Called by: CKMUL000 *
+.*                        Display The Background Screen            & QUEST000 *
+.******************************************************************************
+DSBKS000  MOVE      SCRARY[SCRNUM],TMPCOUNT
+          BOXCLR    13,6,66,18
+          BOX       1,14,7,65,17
+          HLINE     *G18,15,14,14
+          HLINE     *G37,15,15,64
+          HLINE     *G19,15,65,65
+          DISPLAY   *P15:8,*V2LON,*ULON,"Itm",*P19:8,"Post":
+                    *P24:8,"Suburb",SP20,SP9,*P60:8,"State";
+          MOVE      "9",PCCVERT
+          MOVE      TMPCOUNT,SELMIN         * Minimum selection
+DSBKS900  MOVE      ZERO,EXIT
+DSBKS999  RETURN
++
+.******************************************************************************
+.*                                  QUEST000              Called by: CKMUL000 *
+.*                                Main Question                               *
+.******************************************************************************
+QUEST000  MOVE      ZERO,CEXIT
+          ADD       ONE,PCCVERT
+          MOVE      ONE,NEXT                * Reset the next screen flag
+          MOVE      ONE,PREVIOUS            * Reset the previous screen flag
+.
+          DISPLAY   *P15:16,"Select Item";
+          MOVE      "26",PCCCOL
+.
+          IF        SCRNUM<SCRMAX
+            DISPLAY   ", ",*V2LON,"N",*HOFF,"ext";
+            ADD       "6",PCCCOL
+            MOVE      ZERO,NEXT             * Set the next screen flag
+          ENDIF
+.
+          IF        SCRNUM>1
+            DISPLAY   ", ",*V2LON,"P",*HOFF,"revious";
+            ADD       "10",PCCCOL
+            MOVE      ZERO,PREVIOUS         * Set the previous screen flag
+          ENDIF
+.
+          DISPLAY   ", e",*V2LON,"X",*HOFF,"it ? ";
+          ADD       "9",PCCCOL
+.
+QUEST100  MOVE      SP3,KEY3
+          IF        DEFPCOD>=SELMIN & DEFPCOD<=SELMAX
+            MOVE      DEFPCOD,KEY3          * Highlight the default postcode
+          ENDIF
+.
+          KEYIN     *PPCCCOL:16,*V2LON,*RV,*JR,KEY3;
+.
+          TYPE      KEY3
+          GOTO      QUEST300 IF EQUAL       * Numeric selection
+.
+          REP       UPPLOW,KEY3
+          REP       "X1N2P3",KEY3
+          TYPE      KEY3
+          GOTO      QUEST200 IF NOT EQUAL   * Invalid option selection
+.
+          MOVE      KEY3,FORM3
+          BRANCH    FORM3,QUEST400,QUEST500,QUEST600
+.                         Exit     Next     Previous
+.
+QUEST200  BEEP
+          GOTO      QUEST100
+.
+. ----- Numeric selection -----
+.
+QUEST300  MOVE      KEY3,FORM3
+          IF        FORM3<SELMIN | FORM3>SELMAX
+            GOTO      QUEST200              * Selection out of range
+          ENDIF
+.
+          PACK      KEY3,FORM3
+          CALL      RDTEMP1                 * Read the tempfile
+          BRANCH    OVRCD,QUEST800
+.
+          MOVE      "1",CEXIT
+          GOTO      QUEST900
+.
+. ----- Exit -----
+.
+QUEST400  MOVE      "2",CEXIT
+          GOTO      QUEST900
+.
+. ----- Next Screen -----
+.
+QUEST500  BRANCH    NEXT,QUEST200
+          ADD       ONE,SCRNUM              * Increment the current screen
+          MOVE      "3",CEXIT
+          GOTO      QUEST700
+.
+. ----- Previous Screen -----
+.
+QUEST600  BRANCH    PREVIOUS,QUEST200
+          SUB       ONE,SCRNUM              * Sub 1 from the current screen
+          MOVE      "4",CEXIT
+          GOTO      QUEST700
+.
+. ----- Redisplay the screen -----
+.
+QUEST700  CALL      DSBKS000                * Display the background screen
+          PACK      KEY3,TMPCOUNT
+          CALL      RDTEMP1                 * Read the tempfile
+          BRANCH    OVRCD,QUEST800
+          GOTO      QUEST900
+.
+. ----- Error with the tempfile -----
+.
+QUEST800  DISPLAY   *P1:24,*EL,*B,"Error reading the tempfile.  ";
+          CALL      HITENTER
+          MOVE      "2",CEXIT
+QUEST900  MOVE      ZERO,EXIT
+QUEST999  RETURN
++
+.******************************************************************************
+.*                                  OPTMP000              Called by: CKMUL000 *
+.*                              Open The Tempfile                             *
+.******************************************************************************
+OPTMP000  CALL      KLTMP000                * Delete the tempfile
+.
+          CLEAR     KEY99
+          APPEND    "isbuild ",KEY99
+          APPEND    FNAMPOST,KEY99
+          APPEND    FILELIN1,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+          OPEN      TEMP1,FNAMPOST
+OPTMP999  RETURN
++
+.******************************************************************************
+.*                                 KLTMP000               Called by: CKMUL000 *
+.*                            Delete The Tempfile                  & OPTMP000 *
+.******************************************************************************
+KLTMP000  CLOSE     TEMP1
+          CLEAR     KEY99
+          APPEND    "iserase ",KEY99
+          APPEND    FNAMPOST,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+KLTMP999  RETURN
++
+.******************************************************************************
+.*                        I/O Routines For The Tempfile                       *
+.******************************************************************************
+RSTEMP1   RESET     KEY3
+          READ      TEMP1,KEY3;;
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY3
+          READ      TEMP1,KEY3;DTMPCONT,IBPOPCOD,IBPOSUBR,IBPOSTAT
+          GOTO      OVERCOND IF OVER
+          MOVE      DTMPCONT,TMPCOUNT
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    TEMP1;DTMPCONT,IBPOPCOD,IBPOSUBR,IBPOSTAT
+          GOTO      OVERCOND IF OVER
+          MOVE      DTMPCONT,TMPCOUNT
+          RETURN
+.
+WRTEMP1   RESET     KEY3
+          MOVE      TMPCOUNT,DTMPCONT
+          WRITE     TEMP1,KEY3;DTMPCONT,IBPOPCOD,IBPOSUBR,IBPOSTAT
+          RETURN
++
+.==============================================================================
+.
+          INC       IBAOVRIO/INC            * Over flags
+          INC       IBAPOSIO/INC            * Postcode file
+          INC       IBASEQIO/INC
+          INC       WEBERRIO/INC
+
+.
+ENDAUTO   ENDPROC
++
+.
+

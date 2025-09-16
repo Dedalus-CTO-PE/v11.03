@@ -1,0 +1,45 @@
+.
+. AAEGRCIO.INC
+. ------------
+. Filenames       : aaegrcio
+. Description     : A&E Diagnosis Region codes file
+.
+. ******* INDEX ONE *******
+.
+RSAEGRC1  RESET     KEY2
+          READ      AAEGRCA1,KEY2;;
+          RETURN
+.
+RAAEGRC1  RESET     KEY2
+          MOVE      ZERO,OVRCD
+          READ      AAEGRCA1,KEY2;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDAEGRC1  RESET     KEY2
+          MOVE      ZERO,OVRCD
+          READ      AAEGRCA1,KEY2;AERCCODE,AERCDESC,AERCFLAG,AERCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKAEGRC1  MOVE      ZERO,OVRCD
+          READKS    AAEGRCA1;AERCCODE,AERCDESC,AERCFLAG,AERCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPAEGRC1  MOVE      ZERO,OVRCD
+          READKP    AAEGRCA1;AERCCODE,AERCDESC,AERCFLAG,AERCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPAEGRC1  UPDATE    AAEGRCA1;AERCCODE,AERCDESC,AERCFLAG,AERCSPAR
+          RETURN
+.
+WRAEGRC1  RESET     KEY2
+          WRITE     AAEGRCA1,KEY2;AERCCODE,AERCDESC,AERCFLAG,AERCSPAR
+          RETURN
+.
+DEAEGRC1  RESET     KEY2
+          DELETE    AAEGRCA1,KEY2
+          RETURN
+.

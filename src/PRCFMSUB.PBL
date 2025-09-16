@@ -1,0 +1,2114 @@
+. **********************************************************************
+. *  ###################################################################
+. *  # NOTE: The print batch routines in IBAFMS76.PBL and PRCFMSUB.PBL #
+. *  #       should produce the same reports                           #
+. *  ###################################################################
+. *                                                                    *
+. * System    :   Accounting System                                    *
+. * Procedure :   PRCFMSUB                                             *
+. * Desc      :   Update Batch Routine                                 *
+. * Routines  :   IBAT0000 Initialise Batch For Processing             *
+. *               UBAT0000 Update Batch                                *
+. *               PBAT0000 Print Batch                                 *
+. *               PERR0000 Process Error                               *
+. **********************************************************************
+. * Date      :   03.12.1990                                           *
+. * Author    :   B.G.Ackland (IBA)                                    *
+. * Mods      :                                                        *
+. **********************************************************************
+. * 14.11.2000 Sandra Barcham                                          *
+. *            Add BAS Code Print                                      *
+. **********************************************************************
+. * 12.11.1999 Sandra Barcham                                          *
+. *            Delete direct debits from apscilaf                      *
+. * 11.02.1996 B.G.Ackland                                             *
+. *            Fix Stats Batch Update                                  *
+. * 01.08.1995 B.G.Ackland                                             *
+. *            Change Compare on BCDISS to MATCH                       *
+. *            srf 123952 +++                                          *
+. * 29.03.1994 Neeriem Dye                                             *
+. *            Don't allow update different years for cash & accrual   *
+. *            srf 123934                                              *
+. * 10.09.1993 Neeriem Dye                                             *
+. *            Make sure data is posted to correct year/period         *
+. *            srf 125006 120667                                       *
+. * 06.08.1993 Neeriem Dye                                             *
+. *            Make stat trans unique id use alpha-numerics            *
+. *            srf 124487                                              *
+. * 22.04.1993 Neeriem Dye                                             *
+. *            Make bank rec unique id use alpha-numerics              *
+. *            srf 122040                                              *
+. * 01.02.1993 S.Barcham                                               *
+. *            Print transaction date not posting date in cash         *
+. *            srf 120020                                              *
+. * 30.09.1992 Neeriem Dye                                             *
+. *            Handle update of 12 & 13 period ledgers                 *
+. * 22.09.1992 S.Barcham                                               *
+. *            Wrote FMTRTDAT,FMBNDAT for all except journals          *
+. *            srf 117493                                              *
+. * 11.08.1992 S.Barcham                                               *
+. *            Wrote Transaction Date instead of Period Date to bank   *
+. *            srf 116450                                              *
+. * 21.07.1992 Neeriem Dye                                             *
+. *            Fixed so journal batches update correctly to bank rec   *
+. *            srf 113939                                              *
+. * 12.06.1992 S.Barcham                                               *
+. *            Change page length from 60 to 55                        *
+. *            srf 115147                                              *
+. * 14.05.1992 Neeriem Dye                                             *
+. *            Delete cheques in limbo (on file apscilaf)              *
+. * 09.02.1992 Neeriem Dye                                             *
+. *            Try not to leave batches as "PROCESSING"                *
+. *            srf 112485                                              *
+. * 29.11.1991 Neeriem Dye                                             *
+. *            Check if accounts exist                                 *
+. *            srf 111685                                              *
+. * 11.10.1991 Neeriem Dye                                             *
+. *            Modify print layout                                     *
+. *            srf 110742                                              *
+. * 07.10.1991 Neeriem Dye                                             *
+. *            Fixed to only write to FMSBNKAF if bank control         *
+. *            Fixed to handle "CS" stuff for FMSBNKAF                 *
+. *            srf 111010                                              *
+. * 06.09.1991 Neeriem Dye                                             *
+. *            Attempted to fix so update could not leave updated      *
+. *            batched as "processing"                                 *
+. *            srf 110319                                              *
+. * 02.09.1991 Neeriem Dye                                             *
+. *            Fixed to check for bank account correctly for adj       *
+. *            Fixed to write reference correctly for adj              *
+. *            Fixed to write status correctly for adj                 *
+. **********************************************************************
+.$$$$$$
+.    1. Open Files Required 
+.          OPEN     APSCILA1,"apscilaf"
+.          OPEN     FMSAMAA1,"fmsamaaf"
+.          OPEN     FMSAMAA2,"fmsamaaf"
+.          OPEN     FMSAMAA3,"fmsamaaf"
+.          OPEN     FMSLMAA1,"fmslmaaf"
+.          OPEN     FMSTCFA1,"fmstcfaf"
+.          OPEN     FMSTCFA2,"fmstcfaf"
+.          OPEN     CONTROLF,"controlf"
+.          CALL     RDFMCO50
+.          CALL     RDFMCO51
+.          CALL     RDFMCO52
+.
+.$$$$$$
+.
+.==============================================================================
+.**********************************************************************
+. Initialise Batch Details
+.**********************************************************************
+IBAT0000  MOVE     FMBCBAT,KEY5
+          CALL     RDFMBC1
+          BRANCH   OVRCD,IBAT9850
+          MOVE     FMBCSTA,D1
+          MOVE     FIVE,FMBCSTA
+          CALL     UPFMBC1
+          MOVE     D1,FMBCSTA
+.
+          MOVE     ZERO,EXIT
+          PACK     BATNAME,BCH,FMBCBAT
+          REP      " 0",BATNAME
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     BATFILE,BATNAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,IBAT9100   
+.
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF RANGE
+          TRAP     OVERCOND IF FORMAT
+          CALL     RDBAT1
+          TRAPCLR  RANGE
+          TRAPCLR  FORMAT
+          BRANCH   OVRCD,IBAT9700
+.
+          MOVE     ZERO,RESTART
+          COMPARE  FIVE,BC1STAT           * Ok No Restart
+          GOTO     IBAT2000 IF EQUAL
+.
+          COMPARE  SIX,BC1STAT            * Cash Update in Progress
+          GOTO     IBAT1000 IF EQUAL
+.
+          COMPARE  SEVEN,BC1STAT          * Accrual Update in Progress
+          GOTO     IBAT1100 IF EQUAL
+.
+          COMPARE  EIGHT,BC1STAT          * Batch Update Completed
+          GOTO     IBAT9800 IF NOT EQUAL
+          MOVE     THREE,RESTART
+          GOTO     IBAT3000
+.
+IBAT1000  MOVE     ONE,RESTART
+          GOTO     IBAT3000
+.
+IBAT1100  MOVE     TWO,RESTART
+          GOTO     IBAT3000
+.
+IBAT2000  MOVE     SIX,BC1STAT
+          CALL     WRBAT1           * Set Batch In Update
+.
+IBAT3000  MOVE     FMBCLED,KEY2
+          CALL     RDFMLA1
+.
+          MOVE     FMBCPDAT,WORKDATE
+          CALL     CFYR0000              * Calculate Financial Year
+          BRANCH   EXIT,IBAT9200         * Error in Financial Year
+.
+          UNPACK   PEREDAT,CCENT,CYEAR,CMON,CDAY
+          CALL     PACDATE
+          MOVE     CPCDATE,ENDPDATE
+          MOVE     CURYEAR,ACCYEAR       * Accrual Year
+          MOVE     PERCNT,ACCPER         * Accrual Period
+.
+          COMPARE  ONE,PERLOCK
+          GOTO     IBAT9300 IF EQUAL     * Period Locked
+.
+          BRANCH   RESTART,IBAT3100,IBAT3200,IBAT3200
+.
+IBAT3100  CALL     CASH0000              * Check for cash transaction update
+          BRANCH   EXIT,IBAT9900
+.
+IBAT3200  PACK     FILENAME,FMSP,ACCYEAR
+          MOVE     FMBCPDAT,WORKDATE
+          CALL     CFYR0000              * Calculate Financial Year Details
+          UNPACK   PEREDAT,CCENT,CYEAR,CMON,CDAY
+          CALL     PACDATE
+          MOVE     CPCDATE,ENDPDATE
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSFPSA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,IBAT9400
+.
+          PACK     FILENAME,FMSS,ACCYEAR
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSSMAA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,IBAT9500
+.
+          PACK     FILENAME,FMST,ACCYEAR
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSTRNA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,IBAT9600
+          OPEN     FMSTRNA2,FILENAME
+.
+          MOVE     ZERO,BASFLAG
+          MATCH    IBCNBSFY,ACCYEAR
+          GOTO     IBAT3300 IF LESS
+          PACK     FILENAME,FMSG,ACCYEAR
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSBASA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,IBAT9630
+          MOVE     ONE,BASFLAG
+.
+IBAT3300  PACK     FILENAME,FMSD,ACCYEAR
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSDSFA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,IBAT9650
+.
+          PACK     FILENAME,FMSA,ACCYEAR
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSSTRA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,IBAT9660
+.
+          PACK     FILENAME,FMSZ,ACCYEAR
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSSCZA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,IBAT9670
+.
+          PACK     SIBFILE,SIB,FMBCBAT
+          REP      " 0",SIBFILE
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSSIBA1,SIBFILE
+          TRAPCLR  IO
+          MOVE     ZERO,EXIT
+          COMPARE  ZERO,OVRCD          * stat batch to update ?
+          CALL     USIB0000 IF EQUAL
+          BRANCH   EXIT,IBAT9200       * error in stat batch ?
+.
+          MOVE     ZERO,EXIT
+          GOTO     IBAT9999
+.
+IBAT9100  CLEAR    ERRMSG
+          APPEND   "Batch File ",ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " Missing - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9200  CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9300  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - Ledger ",ERRMSG
+          APPEND   FMLCLEDG,ERRMSG
+          APPEND   " Period ",ERRMSG
+          APPEND   PERCNT,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   ACCYEAR,ERRMSG
+          APPEND   " Locked - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9400  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO Period Summary File for ",ERRMSG
+          APPEND   ACCYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9500  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO Stat. Summary File for ",ERRMSG
+          APPEND   ACCYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9600  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO Transaction File for ",ERRMSG
+          APPEND   ACCYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9630  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO BAS Transaction File for ",ERRMSG
+          APPEND   ACCYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9650  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO Dissection Summary File for ",ERRMSG
+          APPEND   ACCYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9660  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO Accrual Stat Tran File for ",ERRMSG
+          APPEND   ACCYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9670  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO Cash Stat Tran File for ",ERRMSG
+          APPEND   ACCYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9700  CLEAR    ERRMSG
+          APPEND   "Batch File ",ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " Corrupted in Sector 1 - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9800  CLEAR    ERRMSG
+          APPEND   "Batch File ",ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " Has an Invalid Status - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+.
+IBAT9850  CLEAR    ERRMSG
+          APPEND   "Batch File ",ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " Missing from fmsbcfa1 - ",ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     IBAT9900
+.
+IBAT9900  MOVE     ONE,EXIT
+.
+IBAT9999  RETURN
+.**********************************************************************
+. Print Batch Routine
+.**********************************************************************
+PBAT0000  REP       " 0",FMBCDAT
+          UNPACK    FMBCDAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,ENTRDATE
+          UNPACK    FMBCPDAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,POSTDATE
+          MOVE      SP70,LASTDRCR
+          CALL      HEAD0000
+          CALL      PTXT0000
+.
+PBAT9999  RETURN 
+.**********************************************************************
+.*                           PTXT0000                                 *
+.*                        Print the report                            *
+.**********************************************************************
+PTXT0000  MOVE      ZERO,TOTDEBS         * initialise total debits
+          MOVE      ZERO,TOTCREDS        * initialise total credits
+          MOVE      ZERO,RECCOUNT
+          MOVE      TWO,SECTOR
+          MOVE      SECTOR,BC0NXTSC
+.
+PTXT1000  CALL      RDBATC               * read the sector
+          GOTO      PTXT9500 IF OVER
+.
+          COMPARE   "55",CLNO           * test for a full page
+          CALL      HEAD0000 IF NOT LESS
+.
+          ADD       ONE,RECCOUNT         * increment the record count
+          ADD       ONE,SECTOR
+          MOVE      SECTOR,BC0NXTSC
+.
+          MATCH     "XX",BCTRAN
+          GOTO      PTXT1000 IF EQUAL    * Ignore Deleted Transactions
+          MATCH     "SI",BCTRAN          * Ignore Inventory Transactions
+          GOTO      PTXT1000 IF EQUAL
+          MATCH     "SC",BCTRAN          * Ignore Inventory Transactions
+          GOTO      PTXT1000 IF EQUAL
+.
+          ADD       ONE,CLNO             * increment the Line Number
+          CALL      CTOT0000             * calculate totals
+          CALL      PLIN0000             * print the report line
+          GOTO      PTXT1000
+.
+.----- end of batch so print totals etc ----
+.
+PTXT9500  MOVE      FORMAT3,OUTFORM3
+          FEDIT     TOTDEBS,OUTFORM3
+          CALL      UND132 
+          PRINT     *30,"Total Debit Entries : ",OUTFORM3;
+          MOVE      FORMAT3,OUTFORM3
+          FEDIT     TOTCREDS,OUTFORM3
+          PRINT     *76,"Total Credit Entries : ",OUTFORM3        
+          CALL      UND132
+.
+          CALL      PSIB0000             * print stat batch (if exists)
+.
+PTXT9999  DISPLAY   *P1:24,*EL
+          RETURN
+.**********************************************************************
+.*                         HSIB0000                                   *
+.*                  display the page heading                          *
+.**********************************************************************
+.
+HSIB0000  MOVE      ONE,CNOUNDLN
+          CALL      HEAD132
+.
+          PRINT       "Batch Number : ",FMBCBAT:
+                  *60,"Post to Date : ",POSTDATE,SP1,PERDESC,"Ending ",ENDPDATE:
+                   *N,"Batch Type   : Statistical Batch":
+                  *60,"Entered      : ",ENTRDATE," by ",SECUSER
+.
+          CALL      UND132
+          PRINT     "Ledger/Account",*17,"Description",*55,"Reference":
+                    *75,"Transaction Description",*112,"             Amount"
+          CALL      UND132
+          ADD       THREE,CLNO
+.
+HSIB9999  RETURN
+.**********************************************************************
+.  PSIB - Print Stat Batch                             Called By PTXT
+.**********************************************************************
+PSIB0000  PACK      SIBFILE,SIB,FMBCBAT
+          REP       " 0",SIBFILE
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FMSSIBA1,SIBFILE
+          TRAPCLR   IO
+          BRANCH    OVRCD,PSIB9999
+.
+          MOVE      ZERO,SIBTOTAL
+          CALL      HSIB0000
+.
+PSIB1000  CALL      RKFMSB1
+          BRANCH    OVRCD,PSIB9000     * no more records ?
+.
+          MOVE      SP70,FMAMDESC
+          PACK      KEY14,FMSBLEDG,FMSBACCT
+          CALL      RDFMAM1
+.
+          COMPARE   "55",CLNO            * test for a full page
+          CALL      UND132 IF NOT LESS
+          COMPARE   "55",CLNO            * test for a full page
+          CALL      HEAD0000 IF NOT LESS
+.
+          PRINT     FMSBLEDG,SLASH,FMSBACCT,*17,FMAMDESC,*55,FMSBREF:
+                    *75,FMSBDESC,*112,FMSBUNIT
+          ADD       ONE,CLNO
+          ADD       FMSBUNIT,SIBTOTAL
+          GOTO      PSIB1000
+.
+PSIB9000  CALL      UND132
+          PRINT     *105,"Total",*112,SIBTOTAL
+          CALL      UND132
+.
+PSIB9999  RETURN
+.**********************************************************************
+.*                         PLIN0000                                   *
+.*                 Print the report lines                             *
+.**********************************************************************
+PLIN0000  MATCH     SP70,LASTDRCR
+          GOTO      PLIN9000 IF EQUAL
+          MATCH     LASTDRCR,DEBCRED
+          GOTO      PLIN9000 IF EQUAL
+          PRINT     SP1
+          ADD       ONE,CLNO             * increment the row
+.
+PLIN9000  MOVE      DEBCRED,LASTDRCR
+          MATCH     "IN",FMBCTRT
+          GOTO      PLIN9100 IF EQUAL
+          MATCH     "CR",FMBCTRT
+          GOTO      PLIN9100 IF EQUAL
+          MATCH     "PY",FMBCTRT
+          GOTO      PLIN9100 IF EQUAL        .... srf 134609
+          MATCH     "CC",FMBCTRT             .... srf 134609
+          GOTO      PLIN9100 IF EQUAL        .... srf 134609
+          MATCH     "RF",FMBCTRT             .... srf 134609
+          GOTO      PLIN9100 IF EQUAL        .... srf 134609
+          MATCH     "RI",FMBCTRT             .... srf 134609
+          GOTO      PLIN9100 IF EQUAL        .... srf 134609
+          MATCH     "SC",FMBCTRT             .... srf 134609
+          GOTO      PLIN9100 IF EQUAL
+          GOTO      PLIN9200
+.
+.---- print supplier if desired ----
+.
+PLIN9100  MATCH     "00000",BCRED
+          GOTO      PLIN9200 IF EQUAL
+          PACK      APMACN1,BCCDESC,SP70
+          MATCH     SP35,BCCDESC
+          IF        @EQUAL
+            UNPACK    BCRED,DIM2,DIM3
+            MATCH     "~~",DIM2
+            IF        @EQUAL
+              PACK      KEY8,FMBCBAT,DIM3
+              CALL      RDAPNS1
+              IF        OVRCD=0
+                PACK      APMACN1,APNSNA1,SP70
+              ENDIF
+            ELSE
+              PACK      KEY5,BCRED,SP70
+              CALL      RDAPMA1
+            ENDIF
+          ENDIF
+.
+          MATCH     APMACN1,LASTNAME
+          GOTO      PLIN9200 IF EQUAL       * same as last creditor ?
+.
+          PACK      LASTNAME,APMACN1,SP70
+          ADD       ONE,CLNO
+          PRINT     *69,BCRED,*85,LASTNAME
+.
+PLIN9200  MOVE      FORMAT2,OUTFORM     * format the amount for printing
+          FEDIT     BCAMT,OUTFORM
+.
+          MOVE      SP70,FMAMDESC
+          PACK      KEY14,BCLEDG,BCACCT,SP70
+          CALL      RDFMAM1
+          MOVE      FMAMDESC,KEY25
+          UNPACK    BCDATED,CDAY,CMON,CCENT,CYEAR
+          CALL      PACDATE
+          MOVE      BCTRAND,KEY26
+          PRINT     BCLEDG,SLASH,BCACCT,*17,KEY25,*43,BCDISS,*49,BCRESP:
+                    *54,BCBASC,*58,CPCDATE,*69,BCREFER,*85,KEY26:
+                    *111,OUTFORM,DEBCRED
+.
+PLIN9999  RETURN
+.**********************************************************************
+.*                         CTOT0000                                   *
+.*                    Calculate totals                                *
+.**********************************************************************
+CTOT0000  MATCH     "JC",BCTRAN          * credit total if equal
+          GOTO      CTOT5000 IF EQUAL
+.
+          MATCH     "CS",BCTRAN          * credit total if equal
+          GOTO      CTOT5000 IF EQUAL
+.
+          MATCH     "CR",BCTRAN          * credit total if equal
+          GOTO      CTOT5000 IF EQUAL
+.
+          MATCH     "CC",BCTRAN
+          GOTO      CTOT5000 IF EQUAL
+.
+          MATCH     "RF",BCTRAN
+          GOTO      CTOT5000 IF EQUAL
+.
+          MATCH     "RI",BCTRAN
+          GOTO      CTOT5000 IF EQUAL
+.
+          ADD       BCAMT,TOTDEBS        * else add to debits
+          MOVE      "Dr",DEBCRED
+          GOTO      CTOT9999
+.
+CTOT5000  ADD       BCAMT,TOTCREDS       * add to credits
+          MOVE      "Cr",DEBCRED 
+.
+CTOT9999  RETURN
+.**********************************************************************
+.*                         HEAD0000                                   *
+.*                  display the page heading                          *
+.**********************************************************************
+HEAD0000  CALL      HEAD132
+          MOVE      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",LASTNAME
+.
+          MOVE      "Accrual",PRTDESC   * Update only prints accrual
+.         MATCH     "C",PRTTYPE
+.         GOTO      HEAD1000 IF NOT EQUAL
+.
+.         MOVE      "Cash   ",PRTDESC
+.
+HEAD1000  SUB       TWO,FMBCSEC
+          MOVE      FMBCFMT,FMBCFTOT
+          FEDIT     FMBCTOT,FMBCFTOT
+          PRINT        "Batch Number : ",FMBCBAT:
+                   *60,"Line Items   : ",FMBCSEC:
+                    *N,"Batch Type   : ",FMBCTRT,SP1,BATDESC,SP3:
+                       "(",PRTDESC,")":
+                  *60,"Post to Date : ",POSTDATE,SP1,PERDESC,"Ending ",ENDPDATE:
+                    *N,"Batch Total  : ",FMBCFTOT:
+                   *60,"Entered      : ",ENTRDATE," by ",FMBCUID,SP1,SECUSER
+          ADD       TWO,FMBCSEC
+          CALL      UND132
+          IF        IBCNUBAS=1
+            PRINT     *69,"Creditor Code",*85,"Creditor Name":
+                      *N,"Ledger/Account",*17,"Description",*43,"Diss":
+                      *49,"Resp":
+                      *54,"BAS",*60,"Date",*69,"Reference":
+                      *85,"Transaction Description",*124,"Amount"
+          ELSE
+            PRINT     *69,"Creditor Code",*85,"Creditor Name":
+                      *N,"Ledger/Account",*17,"Description",*43,"Diss":
+                      *49,"Resp":
+                      *60,"Date",*69,"Reference":
+                      *85,"Transaction Description",*124,"Amount"
+          ENDIF
+          CALL      UND132
+          ADD       FIVE,CLNO
+.
+HEAD9999  RETURN
+.**********************************************************************
+. Accrual Update Batch Routine
+.**********************************************************************
+UBAT0000  BRANCH    RESTART,UBAT0100,UBAT7000,UBAT8000 
+.
+UBAT0100  MOVE      ONE,BC0NXTSC       * Restart 1 = Cash Update in progress
+          MOVE      ZERO,TRUNIQ        *         2 = Accrual Update in progress
+          MOVE      TRUNIQ,FMTRUNIQ    *         3 = Update complete
+.
+          MATCH     "IBAFMS77",PRGID
+          GOTO      UBAT1000 IF NOT EQUAL
+          DISPLAY   *P1:24,"Accrual Update. Batch : ",*V2LON,FMBCBAT,*HOFF:
+                    "   Sector : ",*EL;
+.
+UBAT1000  ADD       ONE,BC0NXTSC
+          COMPARE   BC0NXTSC,FMBCSEC
+          GOTO      UBAT8000 IF EQUAL
+.
+          MATCH     "IBAFMS77",PRGID
+          GOTO      UBAT1050 IF NOT EQUAL
+          DISPLAY   *P42:24,*V2LON,BC0NXTSC;
+.
+UBAT1050  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF RANGE
+          TRAP      OVERCOND IF FORMAT
+          CALL      RDBATC
+          TRAPCLR   RANGE
+          TRAPCLR   FORMAT
+          BRANCH    OVRCD,UBAT9100        * Format or Range Error on BC0NXTSC
+.
+          MATCH     "XX",BCTRAN           * ignore deleted transactions
+          GOTO      UBAT5100 IF EQUAL
+          MATCH     "SI",BCTRAN           * ignore S&I transactions
+          GOTO      UBAT5100 IF EQUAL
+          MATCH     "SC",BCTRAN           * ignore S&I transactions
+          GOTO      UBAT5100 IF EQUAL
+.
+          MOVE      EIGHT,BCSTAT
+          CALL      WRBATC
+          ADD       ONE,TRUNIQ
+          MOVE      TRUNIQ,FMTRUNIQ
+.
+UBAT1100  PACK      KEY10,FMBCBAT,FMTRUNIQ  
+          CALL      RDFMTR1
+          COMPARE   ZERO,OVRCD
+          GOTO      UBAT9200 IF EQUAL
+.
+          IF        BASFLAG=1
+            CALL      RDFMBS1
+            COMPARE   ZERO,OVRCD
+            GOTO      UBAT9250 IF EQUAL
+          ENDIF
+.
+UBAT1200  CALL      MTRN0000              * Move in Transaction Record
+          MOVE      BCACCT,FMTRACCT
+          MOVE      FMBCPDAT,FMTRPDAT
+          REP       " 0",FMTRPDAT
+.
+          PACK      KEY14,BCLEDG,FMTRACCT,SP70
+          CALL      RDFMAM1
+          BRANCH    OVRCD,UBAT9300
+.
+          CALL      WRFMTR1
+.
+          IF        BASFLAG=1
+            CALL      WRFMBS1
+          ENDIF
+.
+          CALL      GPERA000              * get period
+          BRANCH    EXIT,UBAT9500,UBAT9600
+.
+          CALL      FAMT0000              * Fix Amount  for Debit/Credit
+.
+          PACK      KEY14,BCLEDG,BCACCT
+          CALL      RDFMFP1
+          BRANCH    OVRCD,UBAT1300
+          LOAD      PAMOUNT,ACCPER,FMFPA01,FMFPA02,FMFPA03,FMFPA04,FMFPA05:
+                                   FMFPA06,FMFPA07,FMFPA08,FMFPA09,FMFPA10:
+                                   FMFPA11,FMFPA12,FMFPA13
+          ADD       BCAMT,PAMOUNT
+          SUB       BCCOMXA,FMFPCOM
+          STORE     PAMOUNT,ACCPER,FMFPA01,FMFPA02,FMFPA03,FMFPA04,FMFPA05:
+                                   FMFPA06,FMFPA07,FMFPA08,FMFPA09,FMFPA10:
+                                   FMFPA11,FMFPA12,FMFPA13
+          CALL      MSCL0000         * Move to Scaled Amounts
+          CALL      UPFMFP1
+          GOTO      UBAT1400
+.
+UBAT1300  CALL      MFPZ0000         * Move Zero to Summary Fields
+          STORE     BCAMT,ACCPER,FMFPA01,FMFPA02,FMFPA03,FMFPA04,FMFPA05:
+                                 FMFPA06,FMFPA07,FMFPA08,FMFPA09,FMFPA10: 
+                                 FMFPA11,FMFPA12,FMFPA13
+          CALL      MSCL0000         * Move to Scaled Amounts
+          MOVE      BCLEDG,FMFPCULD
+          MOVE      BCACCT,FMFPCUAC
+          CALL      WRFMFP1
+.        
+UBAT1400  PACK      KEY23,BCLEDG,BCACCT,BCDISS,BCRESP
+          CALL      RDFMDF1
+          BRANCH    OVRCD,UBAT1500
+          LOAD      PAMOUNT,ACCPER,FMDF01,FMDF02,FMDF03,FMDF04,FMDF05:
+                                   FMDF06,FMDF07,FMDF08,FMDF09,FMDF10:
+                                   FMDF11,FMDF12,FMDF13
+          ADD       BCAMT,PAMOUNT
+          STORE     PAMOUNT,ACCPER,FMDF01,FMDF02,FMDF03,FMDF04,FMDF05:
+                                   FMDF06,FMDF07,FMDF08,FMDF09,FMDF10:
+                                   FMDF11,FMDF12,FMDF13
+          CALL      UPFMDF1
+          GOTO      UBAT5000
+.
+UBAT1500  CALL      MDFZ0000         * Move Zero to Summary Fields
+          STORE     BCAMT,ACCPER,FMDF01,FMDF02,FMDF03,FMDF04,FMDF05:
+                                 FMDF06,FMDF07,FMDF08,FMDF09,FMDF10:
+                                 FMDF11,FMDF12,FMDF13
+          UNPACK    KEY23,FMDFLEDG,FMDFACCT,FMDFDISS,FMDFRESP
+          CALL      WRFMDF1
+.
+UBAT5000  CALL      FAMT0000              * Fix BCAMT for Debit/Credit
+          COMPARE   ONE,FMCOCALC
+          GOTO      UBAT5100 IF NOT EQUAL
+.
+          MOVE      BCLEDG,LEDGER
+          MOVE      BCACCT,ACCOUNT
+          MOVE      ACCYEAR,UTYPE
+          PROC      FMSUA000              * Update all total Levels
+.
+UBAT5100  MOVE      NINE,BCSTAT
+          CALL      WRBATC
+.
+          MATCH     "DD-",BCORD
+          IF        @EQUAL
+            PACK      KEY40,BCORD,SP7,BC1BATCH,SP70
+            PACK      KEY20,BCORD,SP7,BC1BATCH,SP70
+          ELSE
+            PACK      KEY40,SP7,BCORD,BC1BATCH,SP70
+            PACK      KEY20,SP7,BCORD,BC1BATCH,SP70
+          ENDIF
+.
+UBAT5200  CALL      RSAPCL1            * delete cheque in limbo !!!!
+          CALL      RKAPCL1
+          BRANCH    OVRCD,UBAT5300
+          PACK      KEY40,APCLDOC,APCLBCH,APCLCRD,APCLREF,SP70
+          MATCH     KEY40,KEY20
+          GOTO      UBAT5300 IF NOT EQUAL
+          CALL      DEAPCL1
+          GOTO      UBAT5200
+.
+UBAT5300  
+          GOTO      UBAT1000
+.
+.**********************************************************************
+. Restart Batch Update
+.**********************************************************************
+UBAT7000  MOVE      ONE,BC0NXTSC          
+          MOVE      ZERO,TRUNIQ               * Line Number
+          MOVE      TRUNIQ,FMTRUNIQ               * Line Number
+.
+UBAT7100  ADD       ONE,BC0NXTSC
+          COMPARE   BC0NXTSC,FMBCSEC
+          GOTO      UBAT8000 IF EQUAL
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF RANGE
+          TRAP      OVERCOND IF FORMAT
+          CALL      RDBATC
+          TRAPCLR   RANGE
+          TRAPCLR   FORMAT
+          BRANCH    OVRCD,UBAT9100        * Format or Range Error on BC0NXTSC
+.
+          ADD       ONE,TRUNIQ
+          MOVE      TRUNIQ,FMTRUNIQ               * Line Number
+.
+          COMPARE   NINE,BCSTAT          * Loop through all completed sectors
+          GOTO      UBAT7100 IF EQUAL
+.
+          COMPARE   EIGHT,BCSTAT           * Sector not started so continue 
+          GOTO      UBAT1100 IF NOT EQUAL     * normal processing routine
+.
+          PACK      KEY10,FMBCBAT,FMTRUNIQ
+          CALL      RDFMTR1               * Transaction not update so return
+          BRANCH    OVRCD,UBAT1200        * to main processing loop
+.                                       
+. Transaction Updated so recalculate account total from tran file 
+. for the related period
+.
+          CALL      GPERA000              * get period
+          BRANCH    EXIT,UBAT9500,UBAT9600
+.
+          CALL      RECA0000              * Recalculate Summary File Totals
+          GOTO      UBAT5000
+.**********************************************************************
+. Update Complete Change Status and Delete Batch File.
+.**********************************************************************
+UBAT8000  CALL      RDBAT1              * read batch no for cur batch file
+          PACK      KEY5,BC1BATCH,SP70
+          CALL      RDFMBC1             * get batch control rec
+          BRANCH    OVRCD,UBAT9400      * should not be missing !!
+.
+          MOVE      FOUR,FMBCSTA        * status = processed
+          CALL      UPFMBC1
+.
+          PREP      BATFILE,BATNAME     * delete batch file
+          CLOSE     BATFILE
+          MOVE      ZERO,EXIT
+          GOTO      UBAT9999
+.
+.**********************************************************************
+. Batch Update Error Messages
+.**********************************************************************
+UBAT9100  CLEAR    ERRMSG
+          APPEND   "Batch File ",ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " Error on Sector ",ERRMSG
+          APPEND   BC0NXTSC,ERRMSG
+          APPEND   " - ",ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     UBAT9900
+.
+UBAT9200  CLEAR    ERRMSG
+          APPEND   "Batch File ",ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   BC0NXTSC,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   FMTRUNIQ,ERRMSG
+          APPEND   " Exists ",ERRMSG
+          APPEND   " - ",ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     UBAT9900
+.
+UBAT9250  CLEAR    ERRMSG
+          APPEND   "Batch File ",ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   BC0NXTSC,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   FMTRUNIQ,ERRMSG
+          APPEND   " Exists (fmsg) ",ERRMSG
+          APPEND   " - ",ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     UBAT9900
+.
+UBAT9300  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " Acc ",ERRMSG
+          APPEND   BCLEDG,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   FMTRACCT,ERRMSG
+          APPEND   " Doesn't Exist ",ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     UBAT9900
+.
+UBAT9400  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - Batch Control File Missing - ",ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     UBAT9900
+.
+UBAT9500  CALL     PERR0000
+          GOTO     UBAT9900
+.
+UBAT9600  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - Ledger ",ERRMSG
+          APPEND   FMLCLEDG,ERRMSG
+          APPEND   " Period ",ERRMSG
+          APPEND   PERCNT,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   ACCYEAR,ERRMSG
+          APPEND   " Locked - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     UBAT9900
+.
+UBAT9900  MOVE     ONE,EXIT
+          GOTO     UBAT9999
+.
+UBAT9999  RETURN 
+.**********************************************************************
+. Recalculate summary totals for the period from the transactions
+.**********************************************************************
+RECA0000  PACK      KEY32,BCLEDG,BCACCT,PERSDAT,SP70
+          CALL      RSFMTR1
+.
+RECA1000  CALL      RKFMTR1
+          BRANCH    OVRCD,RECA5000
+          MATCH     BCLEDG,FMTRLEDG
+          GOTO      RECA5000 IF NOT EQUAL
+          MATCH     BCACCT,FMTRACCT
+          GOTO      RECA5000 IF NOT EQUAL
+          MATCH     PEREDAT,FMTRPDAT
+          GOTO      RECA5000 IF LESS
+.
+          ADD       FMTRAMT,PAMOUNT             * Period Total
+.
+          MATCH     BCDISS,FMTRDISS
+          GOTO      RECA1000 IF NOT EQUAL
+          MATCH     BCRESP,FMTRRESP
+          GOTO      RECA1000 IF NOT EQUAL
+.
+          ADD       FMTRAMT,DAMOUNT             * Dissection Period Total
+          GOTO      RECA1000
+.
+RECA5000  PACK      KEY14,BCLEDG,BCACCT
+          CALL      RDFMFP1
+          BRANCH    OVRCD,RECA5100
+          STORE     PAMOUNT,ACCPER,FMFPA01,FMFPA02,FMFPA03,FMFPA04,FMFPA05:
+                                   FMFPA06,FMFPA07,FMFPA08,FMFPA09,FMFPA10:
+                                   FMFPA11,FMFPA12,FMFPA13
+          CALL      MSCL0000         * Move to Scaled Amounts
+          CALL      UPFMFP1
+          GOTO      RECA6000
+.
+RECA5100  CALL      MFPZ0000         * Move Zero to Summary Fields
+          MOVE      BCLEDG,FMFPCULD
+          MOVE      BCACCT,FMFPCUAC
+          STORE     PAMOUNT,ACCPER,FMFPA01,FMFPA02,FMFPA03,FMFPA04,FMFPA05:
+                                   FMFPA06,FMFPA07,FMFPA08,FMFPA09,FMFPA10:
+                                   FMFPA11,FMFPA12,FMFPA13
+          CALL      MSCL0000         * Move to Scaled Amounts
+          CALL      WRFMFP1
+.
+RECA6000  PACK      KEY23,BCLEDG,BCACCT,BCDISS,BCRESP
+          CALL      RDFMDF1
+          BRANCH    OVRCD,RECA6100
+          STORE     DAMOUNT,ACCPER,FMDF01,FMDF02,FMDF03,FMDF04,FMDF05:
+                                   FMDF06,FMDF07,FMDF08,FMDF09,FMDF10:
+                                   FMDF11,FMDF12,FMDF13
+          CALL      UPFMDF1
+          GOTO      RECA9999
+.
+RECA6100  CALL      MDFZ0000         * Move Zero to Summary Fields
+          UNPACK    KEY23,FMDFLEDG,FMDFACCT,FMDFDISS,FMDFRESP
+          STORE     DAMOUNT,ACCPER,FMDF01,FMDF02,FMDF03,FMDF04,FMDF05:
+                                   FMDF06,FMDF07,FMDF08,FMDF09,FMDF10:
+                                   FMDF11,FMDF12,FMDF13
+          CALL      WRFMDF1
+.
+RECA9999  RETURN
+
+.**********************************************************************
+. Process Error According to the Program that Calls Routine
+.**********************************************************************
+PERR0000  MATCH     "IBAFMS77",PRGID
+          GOTO      PERR5000 IF NOT EQUAL
+.
+          DISPLAY   *P1:24,*+,*EL,*B,ERRMSG;
+          CALL      HITENTER
+          GOTO      PERR9999
+.
+.  Program in Batch Mode so Write to System Control File
+.----------------------------------------------------------------------
+PERR5000  
+.
+PERR9999  RETURN
+.
+.**********************************************************************
+. Move Zero to FP summary Fields
+.**********************************************************************
+MFPZ00000 MOVE      ZERO,FMFPCBF 
+          MOVE      ZERO,FMFPC01 
+          MOVE      ZERO,FMFPC02 
+          MOVE      ZERO,FMFPC03 
+          MOVE      ZERO,FMFPC04 
+          MOVE      ZERO,FMFPC05 
+          MOVE      ZERO,FMFPC06 
+          MOVE      ZERO,FMFPC07 
+          MOVE      ZERO,FMFPC08 
+          MOVE      ZERO,FMFPC09 
+          MOVE      ZERO,FMFPC10 
+          MOVE      ZERO,FMFPC11 
+          MOVE      ZERO,FMFPC12 
+          MOVE      ZERO,FMFPC13 
+          MOVE      ZERO,FMFPABF 
+          MOVE      ZERO,FMFPA01 
+          MOVE      ZERO,FMFPA02 
+          MOVE      ZERO,FMFPA03 
+          MOVE      ZERO,FMFPA04 
+          MOVE      ZERO,FMFPA05 
+          MOVE      ZERO,FMFPA06 
+          MOVE      ZERO,FMFPA07 
+          MOVE      ZERO,FMFPA08 
+          MOVE      ZERO,FMFPA09 
+          MOVE      ZERO,FMFPA10 
+          MOVE      ZERO,FMFPA11 
+          MOVE      ZERO,FMFPA12 
+          MOVE      ZERO,FMFPA13 
+          MOVE      ZERO,FMFPCOM 
+          MOVE      ZERO,FMFPCOM2
+          MOVE      ZERO,FMFPCBFD
+          MOVE      ZERO,FMFPC01D
+          MOVE      ZERO,FMFPC02D
+          MOVE      ZERO,FMFPC03D
+          MOVE      ZERO,FMFPC04D
+          MOVE      ZERO,FMFPC05D
+          MOVE      ZERO,FMFPC06D
+          MOVE      ZERO,FMFPC07D
+          MOVE      ZERO,FMFPC08D
+          MOVE      ZERO,FMFPC09D
+          MOVE      ZERO,FMFPC10D
+          MOVE      ZERO,FMFPC11D
+          MOVE      ZERO,FMFPC12D
+          MOVE      ZERO,FMFPC13D
+          MOVE      ZERO,FMFPABFD
+          MOVE      ZERO,FMFPA01D
+          MOVE      ZERO,FMFPA02D
+          MOVE      ZERO,FMFPA03D
+          MOVE      ZERO,FMFPA04D
+          MOVE      ZERO,FMFPA05D
+          MOVE      ZERO,FMFPA06D
+          MOVE      ZERO,FMFPA07D
+          MOVE      ZERO,FMFPA08D
+          MOVE      ZERO,FMFPA09D
+          MOVE      ZERO,FMFPA10D
+          MOVE      ZERO,FMFPA11D
+          MOVE      ZERO,FMFPA12D
+          MOVE      ZERO,FMFPA13D
+          MOVE      ZERO,FMFPCOMD
+          MOVE      ZERO,FMFPCBFT
+          MOVE      ZERO,FMFPC01T
+          MOVE      ZERO,FMFPC02T
+          MOVE      ZERO,FMFPC03T
+          MOVE      ZERO,FMFPC04T
+          MOVE      ZERO,FMFPC05T
+          MOVE      ZERO,FMFPC06T
+          MOVE      ZERO,FMFPC07T
+          MOVE      ZERO,FMFPC08T
+          MOVE      ZERO,FMFPC09T
+          MOVE      ZERO,FMFPC10T
+          MOVE      ZERO,FMFPC11T
+          MOVE      ZERO,FMFPC12T
+          MOVE      ZERO,FMFPC13T
+          MOVE      ZERO,FMFPABFT
+          MOVE      ZERO,FMFPA01T
+          MOVE      ZERO,FMFPA02T
+          MOVE      ZERO,FMFPA03T
+          MOVE      ZERO,FMFPA04T
+          MOVE      ZERO,FMFPA05T
+          MOVE      ZERO,FMFPA06T
+          MOVE      ZERO,FMFPA07T
+          MOVE      ZERO,FMFPA08T
+          MOVE      ZERO,FMFPA09T
+          MOVE      ZERO,FMFPA10T
+          MOVE      ZERO,FMFPA11T
+          MOVE      ZERO,FMFPA12T
+          MOVE      ZERO,FMFPA13T
+          MOVE      ZERO,FMFPCOMT
+          RETURN
+.**********************************************************************
+. Move Zero to DF summary Fields
+.**********************************************************************
+MDFZ0000  MOVE      ZERO,FMDFBF
+          MOVE      ZERO,FMDF01
+          MOVE      ZERO,FMDF02
+          MOVE      ZERO,FMDF03
+          MOVE      ZERO,FMDF04
+          MOVE      ZERO,FMDF05
+          MOVE      ZERO,FMDF06
+          MOVE      ZERO,FMDF07
+          MOVE      ZERO,FMDF08
+          MOVE      ZERO,FMDF09
+          MOVE      ZERO,FMDF10
+          MOVE      ZERO,FMDF11
+          MOVE      ZERO,FMDF12
+          MOVE      ZERO,FMDF13
+          RETURN
+.**********************************************************************
+. Move dollar and cent fields to scaled fields in fps file for posting
+. accounts only
+.**********************************************************************
+MSCL0000 MOVE      FMFPCBF,FMFPCBFD
+         MOVE      FMFPC01,FMFPC01D
+         MOVE      FMFPC02,FMFPC02D
+         MOVE      FMFPC03,FMFPC03D
+         MOVE      FMFPC04,FMFPC04D
+         MOVE      FMFPC05,FMFPC05D
+         MOVE      FMFPC06,FMFPC06D
+         MOVE      FMFPC07,FMFPC07D
+         MOVE      FMFPC08,FMFPC08D
+         MOVE      FMFPC09,FMFPC09D
+         MOVE      FMFPC10,FMFPC10D
+         MOVE      FMFPC11,FMFPC11D
+         MOVE      FMFPC12,FMFPC12D
+         MOVE      FMFPC13,FMFPC13D
+         MOVE      FMFPABF,FMFPABFD
+         MOVE      FMFPA01,FMFPA01D
+         MOVE      FMFPA02,FMFPA02D
+         MOVE      FMFPA03,FMFPA03D
+         MOVE      FMFPA04,FMFPA04D
+         MOVE      FMFPA05,FMFPA05D
+         MOVE      FMFPA06,FMFPA06D
+         MOVE      FMFPA07,FMFPA07D
+         MOVE      FMFPA08,FMFPA08D
+         MOVE      FMFPA09,FMFPA09D
+         MOVE      FMFPA10,FMFPA10D
+         MOVE      FMFPA11,FMFPA11D
+         MOVE      FMFPA12,FMFPA12D
+         MOVE      FMFPA13,FMFPA13D
+         MOVE      FMFPCOM,FMFPCOMD
+.
+         MOVE      FMFPCBF,FMFPCBFT
+         MOVE      FMFPC01,FMFPC01T
+         MOVE      FMFPC02,FMFPC02T
+         MOVE      FMFPC03,FMFPC03T
+         MOVE      FMFPC04,FMFPC04T
+         MOVE      FMFPC05,FMFPC05T
+         MOVE      FMFPC06,FMFPC06T
+         MOVE      FMFPC07,FMFPC07T
+         MOVE      FMFPC08,FMFPC08T
+         MOVE      FMFPC09,FMFPC09T
+         MOVE      FMFPC10,FMFPC10T
+         MOVE      FMFPC11,FMFPC11T
+         MOVE      FMFPC12,FMFPC12T
+         MOVE      FMFPC13,FMFPC13T
+         MOVE      FMFPABF,FMFPABFT
+         MOVE      FMFPA01,FMFPA01T
+         MOVE      FMFPA02,FMFPA02T
+         MOVE      FMFPA03,FMFPA03T
+         MOVE      FMFPA04,FMFPA04T
+         MOVE      FMFPA05,FMFPA05T
+         MOVE      FMFPA06,FMFPA06T
+         MOVE      FMFPA07,FMFPA07T
+         MOVE      FMFPA08,FMFPA08T
+         MOVE      FMFPA09,FMFPA09T
+         MOVE      FMFPA10,FMFPA10T
+         MOVE      FMFPA11,FMFPA11T
+         MOVE      FMFPA12,FMFPA12T
+         MOVE      FMFPA13,FMFPA13T
+         MOVE      FMFPCOM,FMFPCOMT
+         RETURN
+.**********************************************************************
+. Move Batch Line to Transactiion Record Accrual
+.**********************************************************************
+MTRN0000  MOVE     FMBCBAT,FMTRBAT    *  Batch Number 
+          MOVE     BCLEDG,FMTRLEDG    *  Ledger Number 
+          MOVE     BCRED,FMTRCRED     *  Creditor Code / Debtors Code
+          UNPACK   BCDATED,CDAY,CMON,CCENT,CYEAR
+          PACK     FMTRTDAT,CCENT,CYEAR,CMON,CDAY  *  Transaction Date CCYYMMDD
+          REP      " 0",FMTRTDAT
+          MOVE     BCTRAN,FMTRTYPE    *  Transaction Type 
+          MOVE     BCDISS,FMTRDISS    *  Dissection Code 
+          MOVE     BCPAYT,FMTRPPER    *  Payment Period 
+          MOVE     BCREFER,FMTRDOCR   *  Document Reference (e.g. INV.NO.) 
+          MOVE     BCAMT,FMTRAMT      *  Amount of Transaction 
+          MOVE     BCORD,FMTRORD      *  Order No/Cheque No 
+          MOVE     BCRESP,FMTRRESP    *  Responsibility Code 
+          MOVE     BCTRAND,FMTRDESC   *  Transaction Description 
+.
+          IF       BASFLAG=1
+            MOVE     FMTRBAT,FMBSBAT
+            MOVE     FMTRUNIQ,FMBSUNIQ
+            MOVE     FMTRLEDG,FMBSLEDG
+            MOVE     BCBASC,FMBSBASC
+            MOVE     FMBCPDAT,FMBSPDAT
+            REP      " 0",FMBSPDAT
+            MOVE     SP20,FMBSSPAR
+          ENDIF
+.
+MTRN9999  RETURN
+.**********************************************************************
+. CASH0000 - Check for Cash Related Transactions and update if required.
+.**********************************************************************
+CASH0000  MATCH    "PY",FMBCTRT
+          GOTO     CASH1000 IF EQUAL
+.
+          MATCH    "CS",FMBCTRT
+          GOTO     CASH1000 IF EQUAL
+.
+          MATCH    "CJ",FMBCTRT
+          GOTO     CASH1000 IF EQUAL
+. 
+          MATCH    "CC",FMBCTRT
+          GOTO     CASH1000 IF EQUAL
+. 
+          MATCH    "RI",FMBCTRT
+          GOTO     CASH1000 IF EQUAL
+. 
+          GOTO     CASH9000
+.
+CASH1000  MOVE     FMBCCDAT,WORKDATE
+          CALL     CFYR0000              * Calculate Financial Year
+          BRANCH   EXIT,CASH9100         * Error in Financial Year
+          UNPACK   PEREDAT,CCENT,CYEAR,CMON,CDAY
+          CALL     PACDATE
+          MOVE     CPCDATE,ENDPDATE
+          MOVE     CURYEAR,CASYEAR
+.
+          MATCH    CASYEAR,ACCYEAR
+          GOTO     CASH9600 IF NOT EQUAL * Financial Year Conflict ?
+.
+          COMPARE  ONE,PERLOCK
+          GOTO     CASH9500 IF EQUAL     * Period Locked ?
+.
+          MOVE     CURYEAR,CASYEAR       * Accrual Year
+          MOVE     PERCNT,CASPER         * Accrual Period
+.
+          PACK     FILENAME,FMSP,CASYEAR
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSFPSA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,CASH9200
+.
+          PACK     FILENAME,FMSS,CASYEAR
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSSMAA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,CASH9300
+.
+          PACK     FILENAME,FMSR,CASYEAR
+          MOVE     ZERO,OVRCD
+          TRAP     OVERCOND IF IO
+          OPEN     FMSTRNA1,FILENAME
+          TRAPCLR  IO
+          BRANCH   OVRCD,CASH9400
+          OPEN     FMSTRNA2,FILENAME
+.
+          CALL     CUPD0000
+          BRANCH   EXIT,CASH9900
+.
+CASH9000  MOVE     ZERO,EXIT
+          MOVE     SEVEN,BC1STAT
+          CALL     WRBAT1           * Set Batch In Update
+          GOTO     CASH9999
+.
+CASH9100  CALL     PERR0000
+          GOTO     CASH9900
+.
+CASH9200  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO Period Summary File for ",ERRMSG
+          APPEND   CASYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     CASH9900
+.
+CASH9300  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO Statistical Summary File for ",ERRMSG
+          APPEND   CASYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     CASH9900
+.
+CASH9400  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - NO Transaction File for ",ERRMSG
+          APPEND   CASYEAR,ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     CASH9900
+.
+CASH9500  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - Period ",ERRMSG
+          APPEND   PERCNT,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   CASYEAR,ERRMSG
+          APPEND   " Locked - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     CASH9900
+.
+CASH9600  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   "Cash and Accrual Year Conflict - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     CASH9900
+.
+CASH9900  MOVE     ONE,EXIT
+.
+CASH9999  RETURN
+.**********************************************************************
+. Cash Update Batch Routine
+.**********************************************************************
+CUPD0000  BRANCH    RESTART,CUPD7000,CUPD9000,CUPD9000 
+          MOVE      ONE,BC0NXTSC       * Restart 1 = Cash Update in progress
+          MOVE      ZERO,TRUNIQ        *         2 = Accrual Update in progress
+          MOVE      TRUNIQ,FMTRUNIQ    *         3 = Update complete
+.
+          MATCH     "IBAFMS77",PRGID
+          GOTO      CUPD1000 IF NOT EQUAL
+          DISPLAY   *P1:24,"Cash Update.    Batch : ",*V2LON,FMBCBAT,*HOFF:
+                    "   Sector   : ",*EL;
+.
+CUPD1000  ADD       ONE,BC0NXTSC
+          COMPARE   BC0NXTSC,FMBCSEC
+          GOTO      CUPD9000 IF EQUAL
+.
+          MATCH     "IBAFMS77",PRGID
+          GOTO      CUPD1050 IF NOT EQUAL
+          DISPLAY   *P41:24,*V2LON,BC0NXTSC;
+.
+CUPD1050  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF RANGE
+          TRAP      OVERCOND IF FORMAT
+          CALL      RDBATC
+          TRAPCLR   RANGE
+          TRAPCLR   FORMAT
+          BRANCH    OVRCD,CUPD9100        * Format or Range Error on BC0NXTSC
+.
+          MATCH     "XX",BCTRAN
+          GOTO      CUPD5100 IF EQUAL
+.
+          MOVE      SIX,BCSTAT
+          CALL      WRBATC
+          ADD       ONE,TRUNIQ
+          MOVE      TRUNIQ,FMTRUNIQ
+.
+CUPD1100  PACK      KEY10,FMBCBAT,FMTRUNIQ  
+          CALL      RDFMTR1
+          COMPARE   ZERO,OVRCD
+          GOTO      CUPD9200 IF EQUAL
+.
+CUPD1200  CALL      MTRN0000              * Move in Transaction Record
+          MOVE      BCACCT,FMTRACCT
+          MOVE      FMBCPDAT,FMTRPDAT
+          REP       " 0",FMTRPDAT
+          MATCH     "CJ",FMBCTRT
+          GOTO      CUPD1205 IF EQUAL
+          MATCH     "CC",FMTRTYPE
+          GOTO      CUPD1210 IF EQUAL
+          MATCH     "RI",FMTRTYPE
+          GOTO      CUPD1202 IF EQUAL
+          MATCH     "CS",FMTRTYPE
+          GOTO      CUPD1202 IF EQUAL
+          MATCH     "00000",BCRED
+          GOTO      CUPD1210 IF EQUAL
+          MATCH     "     ",BCRED
+          GOTO      CUPD1210 IF EQUAL
+.         
+CUPD1202  MOVE      BCACCTP,FMTRACCT
+          GOTO      CUPD1210
+.
+CUPD1205  MOVE      FMBCCDAT,FMTRPDAT
+          REP       " 0",FMTRPDAT
+.
+CUPD1210  PACK      KEY14,BCLEDG,FMTRACCT,SP70
+          CALL      RDFMAM1
+          BRANCH    OVRCD,CUPD9300
+.
+          CALL      GPERB000              * get period
+          BRANCH    EXIT,CUPD9500,CUPD9600
+.
+          CALL      WRFMTR1
+.
+          CALL      BANK0000              * Update Bank Reconcillation File
+          CALL      FAMT0000              * Fix BCAMT for Debit/Credit
+.
+          PACK      KEY14,BCLEDG,FMTRACCT,SP70
+          CALL      RDFMFP1
+          BRANCH    OVRCD,CUPD1300
+          LOAD      PAMOUNT,CASPER,FMFPC01,FMFPC02,FMFPC03,FMFPC04,FMFPC05:
+                                   FMFPC06,FMFPC07,FMFPC08,FMFPC09,FMFPC10:
+                                   FMFPC11,FMFPC12,FMFPC13
+          ADD       BCAMT,PAMOUNT
+          STORE     PAMOUNT,CASPER,FMFPC01,FMFPC02,FMFPC03,FMFPC04,FMFPC05:
+                                   FMFPC06,FMFPC07,FMFPC08,FMFPC09,FMFPC10:
+                                   FMFPC11,FMFPC12,FMFPC13
+          CALL      UPFMFP1
+          GOTO      CUPD5000
+.
+CUPD1300  CALL      MFPZ0000         * Move Zero to Summary Fields
+          STORE     BCAMT,CASPER,FMFPC01,FMFPC02,FMFPC03,FMFPC04,FMFPC05:
+                                 FMFPC06,FMFPC07,FMFPC08,FMFPC09,FMFPC10:
+                                 FMFPC11,FMFPC12,FMFPC13
+          CALL      MSCL0000         * Move to Scaled Amounts
+          MOVE      BCLEDG,FMFPCULD
+          MOVE      FMTRACCT,FMFPCUAC
+          CALL      WRFMFP1
+.        
+CUPD5000  CALL      FAMT0000              * Fix BCAMT for Debit/Credit
+          COMPARE   ONE,FMCOCALC
+          GOTO      CUPD5100 IF NOT EQUAL
+.
+          MOVE      BCLEDG,LEDGER
+          MOVE      FMTRACCT,ACCOUNT
+          MOVE      CASYEAR,UTYPE
+          PROC      FMSUA000              * Update all total Levels
+.
+CUPD5100  MOVE      SEVEN,BCSTAT
+          CALL      WRBATC
+          GOTO      CUPD1000
+.
+.**********************************************************************
+. Restart Batch Update
+.**********************************************************************
+CUPD7000  MOVE      ONE,BC0NXTSC          
+          MOVE      ZERO,TRUNIQ               * Line Number
+          MOVE      TRUNIQ,FMTRUNIQ               * Line Number
+.
+CUPD7100  ADD       ONE,BC0NXTSC
+          COMPARE   BC0NXTSC,FMBCSEC
+          GOTO      CUPD9000 IF EQUAL
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF RANGE
+          TRAP      OVERCOND IF FORMAT
+          CALL      RDBATC
+          TRAPCLR   RANGE
+          TRAPCLR   FORMAT
+          BRANCH    OVRCD,CUPD9100        * Format or Range Error on BC0NXTSC
+.
+          ADD       ONE,TRUNIQ
+          MOVE      TRUNIQ,FMTRUNIQ               * Line Number
+.
+          COMPARE   SEVEN,BCSTAT          * Loop through all completed sectors
+          GOTO      CUPD7100 IF EQUAL
+.
+          COMPARE   FIVE,BCSTAT           * Sector not started so continue 
+          GOTO      CUPD1100 IF EQUAL     * normal processing routine
+.
+          PACK      KEY10,FMBCBAT,FMTRUNIQ
+          CALL      RDFMTR1               * Transaction not update so return
+          BRANCH    OVRCD,CUPD1200        * to main processing loop
+.                                       
+. Transaction Updated so recalculate account total from tran file 
+. for the related period
+.
+          CALL      GPERB000              * get period
+          BRANCH    EXIT,CUPD9500,CUPD9600
+.
+          CALL      RECC0000              * Recalculate Summary File Totals
+          GOTO      CUPD5000
+.**********************************************************************
+. Update Complete Change Status and Delete Batch File.
+.**********************************************************************
+CUPD9000  MOVE     ZERO,EXIT
+          GOTO     CUPD9999
+.
+.**********************************************************************
+. Batch Update Error Messages
+.**********************************************************************
+CUPD9100  CLEAR    ERRMSG
+          APPEND   "Batch File ",ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " Error on Sector ",ERRMSG
+          APPEND   BC0NXTSC,ERRMSG
+          APPEND   " - ",ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     CUPD9900
+.
+CUPD9200  CLEAR    ERRMSG
+          APPEND   "Batch ",ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " Sect/Line ",ERRMSG
+          APPEND   BC0NXTSC,ERRMSG
+          APPEND   SLASH,ERRMSG
+          APPEND   FMTRUNIQ,ERRMSG
+          APPEND   " Exists - ",ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     CUPD9900
+.
+CUPD9300  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " Acc ",ERRMSG
+          APPEND   BCLEDG,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   FMTRACCT,ERRMSG
+          APPEND   " Doesn't Exist ",ERRMSG
+          APPEND   " - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     CUPD9900
+.
+CUPD9500  CALL     PERR0000
+          GOTO     CUPD9900
+.
+CUPD9600  CLEAR    ERRMSG
+          APPEND   FMBCBAT,ERRMSG
+          APPEND   " - Ledger ",ERRMSG
+          APPEND   FMLCLEDG,ERRMSG
+          APPEND   " Period File ",ERRMSG
+          APPEND   PERCNT,ERRMSG
+          APPEND   "/",ERRMSG
+          APPEND   CASYEAR,ERRMSG
+          APPEND   " Locked - ",ERRMSG
+          APPEND   SP70,ERRMSG
+          RESET    ERRMSG
+          CALL     PERR0000
+          GOTO     CUPD9900
+.
+CUPD9900  MOVE     ONE,EXIT
+          GOTO     CUPD9999
+.
+CUPD9999  RETURN 
+.**********************************************************************
+. Recalculate summary totals for the period from the transactions
+.**********************************************************************
+RECC0000  MOVE      BCACCT,ACCOUNT
+          MATCH     "CJ",FMBCTRT
+          GOTO      RECC0100 IF EQUAL
+          MOVE      BCACCTP,ACCOUNT
+.
+RECC0100  PACK      KEY32,BCLEDG,ACCOUNT,PERSDAT,SP70
+          CALL      RSFMTR1
+.
+RECC1000  CALL      RKFMTR1
+          BRANCH    OVRCD,RECC5000
+          MATCH     BCLEDG,FMTRLEDG
+          GOTO      RECC5000 IF NOT EQUAL
+          MATCH     ACCOUNT,FMTRACCT
+          GOTO      RECC5000 IF NOT EQUAL
+          MATCH     PEREDAT,FMTRPDAT
+          GOTO      RECC5000 IF LESS
+.
+          ADD       FMTRAMT,PAMOUNT             * Period Total
+          GOTO      RECC1000
+.
+RECC5000  PACK      KEY14,BCLEDG,ACCOUNT
+          CALL      RDFMFP1
+          BRANCH    OVRCD,RECC5100
+          STORE     PAMOUNT,CASPER,FMFPC01,FMFPC02,FMFPC03,FMFPC04,FMFPC05:
+                                   FMFPC06,FMFPC07,FMFPC08,FMFPC09,FMFPC10:
+                                   FMFPC11,FMFPC12,FMFPC13
+          CALL      MSCL0000         * Move to Scaled Amounts
+          CALL      UPFMFP1
+          GOTO      RECC9999
+.
+RECC5100  CALL      MFPZ0000         * Move Zero to Summary Fields
+          MOVE      BCLEDG,FMFPCULD
+          MOVE      ACCOUNT,FMFPCUAC
+          STORE     PAMOUNT,CASPER,FMFPC01,FMFPC02,FMFPC03,FMFPC04,FMFPC05:
+                                   FMFPC06,FMFPC07,FMFPC08,FMFPC09,FMFPC10:
+                                   FMFPC11,FMFPC12,FMFPC13
+          CALL      MSCL0000         * Move to Scaled Amounts
+          CALL      WRFMFP1
+.
+RECC9999  RETURN
+.
+.**********************************************************************
+. FAMT0000 - Fix BCAMT as Debit/Credit
+.**********************************************************************
+FAMT0000  MATCH     "JC",BCTRAN
+          GOTO      FAMT1000 IF EQUAL
+.
+          MATCH     "CC",BCTRAN
+          GOTO      FAMT1000 IF EQUAL
+.
+          MATCH     "CS",BCTRAN
+          GOTO      FAMT1000 IF EQUAL
+.
+          MATCH     "CR",BCTRAN
+          GOTO      FAMT1000 IF EQUAL
+.
+          MATCH     "RF",BCTRAN
+          GOTO      FAMT1000 IF EQUAL
+.
+          MATCH     "RI",BCTRAN
+          GOTO      FAMT1000 IF EQUAL
+.
+          GOTO      FAMT9999
+.
+FAMT1000  MULT      SEQ,BCAMT
+.
+FAMT9999  RETURN
+.**********************************************************************
+. BANK - Update Cash Transactions to Bank Reconcillation File
+.**********************************************************************
+BANK0000  MATCH    "PY",FMTRTYPE    * Payment
+          GOTO     BANK2000 IF EQUAL
+.
+          MATCH    "CC",FMTRTYPE    * Cancelled Cheque
+          GOTO     BANK3000 IF EQUAL
+.
+          MATCH    "RI",FMTRTYPE    * Cancelled Cheque
+          GOTO     BANK3000 IF EQUAL
+.
+          MATCH    "CS",FMTRTYPE    * Cash Receipt
+          GOTO     BANK4000 IF EQUAL
+.
+          MATCH    "CS",FMBCTRT     * Cash Receipt
+          GOTO     BANK4000 IF EQUAL
+.**********************************************************************
+. Ignore Journal Entries for the following batch types
+.**********************************************************************
+          MATCH     "PY",FMBCTRT      * Journal Entry for payment
+          GOTO      BANK9999 IF EQUAL
+.
+          MATCH     "CC",FMBCTRT      * Journal Entry for cancelled Cheq
+          GOTO      BANK9999 IF EQUAL
+.
+          MATCH     "RI",FMBCTRT      
+          GOTO      BANK9999 IF EQUAL
+.**********************************************************************
+. Cash Journal Adjustment
+.**********************************************************************
+          PACK      KEY14,FMTRLEDG,BCACCT,SP70
+          CALL      RDFMCA1
+          BRANCH    OVRCD,BANK9999
+          BRANCH    FMCATYP,BANK1000      * Check if account is a bank
+          GOTO      BANK9999
+.
+BANK1000  
+          CALL      GNID0000                * get next id
+          UNPACK    KEY20,FMBNBNK,FMBNUNQ
+          MOVE      FMCALED,FMBNLED
+          MOVE      FMCAACC,FMBNACC
+.
+          MATCH     "JC",FMTRTYPE
+          GOTO      BANK1300 IF NOT EQUAL
+          MULT      SEQ,FMTRAMT
+.
+BANK1300  MOVE      TWO,FMBNTYP
+          MOVE      ONE,FMBNPRE
+          MOVE      FMTRAMT,FMBNAMT
+.
+          MOVE      SP8,FMBNPDT
+          MOVE      BCREFER,FMBNREF
+          MOVE      CASYEAR,FMBNFYR
+          MOVE      FMTRBAT,FMBNBCH
+          MOVE      FMTRUNIQ,FMBNLNO
+          MOVE      "00000",FMBNCRE
+          MOVE      FMTRPDAT,FMBNDAT
+          MOVE      SP70,FMBNNAM
+          MOVE      SP70,FMBNSPAR
+          CALL      WRFMBN1
+          GOTO      BANK9999
+.**********************************************************************
+. Payments
+.**********************************************************************
+BANK2000  PACK      KEY14,FMTRLEDG,BCCONT,SP70
+          CALL      RDFMCA1
+          BRANCH    OVRCD,BANK9999
+          BRANCH    FMCATYP,BANK2010      * Check if account is a bank
+          GOTO      BANK9999
+.
+BANK2010  CALL      GNID0000                * get next id
+          UNPACK    KEY20,FMBNBNK,FMBNUNQ
+          MOVE      BCLEDG,FMBNLED
+          MOVE      BCCONT,FMBNACC
+          MATCH     "DD-",BCORD
+          IF        @EQUAL
+            MOVE      BCORD,FMBNREF     * Direct Debit
+            MOVE      ONE,FMBNPRE       * Assume Presented
+            MOVE      FMTRTDAT,FMBNPDT
+            MOVE      FMTRCRED,FMBNCRE
+            MOVE      "DIRECT BANK TRANSFERS",FMBNNAM
+          ELSE
+            MOVE      ZERO,F15
+            MOVE      BCORD,F15
+            MOVE      F15,FMBNREF
+            MOVE      ZERO,FMBNPRE
+            MOVE      SP8,FMBNPDT
+            MOVE      FMTRCRED,FMBNCRE
+            MOVE      BCCDESC,FMBNNAM
+          ENDIF
+          MOVE      ZERO,FMBNTYP
+          MOVE      FMTRTDAT,FMBNDAT
+          MOVE      FMTRAMT,FMBNAMT
+          MOVE      CASYEAR,FMBNFYR
+          MOVE      FMTRBAT,FMBNBCH
+          MOVE      FMTRUNIQ,FMBNLNO
+          MOVE      SP70,FMBNSPAR
+.
+          CALL      WRFMBN1
+          GOTO      BANK9999
+.**********************************************************************
+. Cancelled Cheques
+.**********************************************************************
+BANK3000  MATCH     "DD-",BCORD
+          GOTO      BANK3200 IF EQUAL
+.
+          MOVE      BCORD,F15
+          MOVE      F15,D15
+          PACK      KEY36,BCCHQAC,ZERO,D15,SP70
+          CALL      RSFMBN2
+.
+BANK3100  CALL      RKFMBN2
+          BRANCH    OVRCD,BANK9999
+          MATCH     BCCHQAC,FMBNBNK
+          GOTO      BANK9999 IF NOT EQUAL
+          MATCH     "0",FMBNTYP
+          GOTO      BANK9999 IF NOT EQUAL
+          MATCH     D15,FMBNREF
+          GOTO      BANK9999 IF NOT EQUAL
+.
+          MOVE      FMBNPRE,F1
+          BRANCH    F1,BANK3100,BANK3100
+          MOVE      "2",FMBNPRE
+          MOVE      FMTRTDAT,FMBNPDT
+          CALL      UPFMBN2
+          GOTO      BANK3100
+.
+BANK3200  PACK      D15,BCORD,SP70
+          PACK      KEY36,BCCHQAC,ZERO,D15,SP70
+          CALL      RSFMBN2
+.
+BANK3300  CALL      RKFMBN2
+          BRANCH    OVRCD,BANK9999
+          MATCH     BCCHQAC,FMBNBNK
+          GOTO      BANK9999 IF NOT EQUAL
+          MATCH     "0",FMBNTYP
+          GOTO      BANK9999 IF NOT EQUAL
+          MATCH     D15,FMBNREF
+          GOTO      BANK9999 IF NOT EQUAL
+          MATCH     BCRED,FMBNCRE
+          GOTO      BANK3300 IF NOT EQUAL
+.
+          PACK      KEY36,FMBNBNK,FMBNTYP,FMBNREF,FMBNUNQ,SP70
+.
+          MATCH     "1",FMBNPRE
+          IF        @EQUAL
+            MOVE      "2",FMBNPRE
+            MOVE      FMTRTDAT,FMBNPDT
+            CALL      UPFMBN2
+          ENDIF
+          GOTO      BANK3300
+.**********************************************************************
+. Cash Receipts
+.**********************************************************************
+BANK4000  PACK      KEY14,FMTRLEDG,BCACCT,SP70
+          CALL      RDFMCA1
+          BRANCH    OVRCD,BANK9999
+          BRANCH    FMCATYP,BANK4010      * Check if account is a bank
+          GOTO      BANK9999
+.
+BANK4010  
+          CALL      GNID0000                * get next id
+          UNPACK    KEY20,FMBNBNK,FMBNUNQ
+          MOVE      BCLEDG,FMBNLED
+          MOVE      BCACCT,FMBNACC
+          MOVE      BCREFER,FMBNREF
+          MOVE      ONE,FMBNTYP
+          MOVE      ZERO,FMBNPRE
+          MOVE      FMTRTDAT,FMBNDAT
+          MOVE      SP8,FMBNPDT
+          MOVE      FMTRAMT,FMBNAMT
+          MOVE      CASYEAR,FMBNFYR
+          MOVE      FMTRBAT,FMBNBCH
+          MOVE      FMTRUNIQ,FMBNLNO
+          MOVE      FMTRCRED,FMBNCRE
+          MOVE      BCCDESC,FMBNNAM
+          MOVE      SP70,FMBNSPAR
+.
+          CALL      WRFMBN1
+.
+BANK9999  RETURN
+.**********************************************************************
+. Get next bank rec unique id
+.**********************************************************************
+GNID0000
+          MOVE      "~~~~~",KEY5
+          PACK      KEY20,FMCACHQ,KEY5
+          CALL      RSFMBN1
+          CALL      RPFMBN1
+          BRANCH    OVRCD,GNID1150
+          MATCH     FMBNBNK,FMCACHQ
+          GOTO      GNID1150 IF NOT EQUAL
+.
+          UNPACK    FMBNUNQ,ANS,KEY4
+          MOVE      ZERO,F4
+          MOVE      KEY4,F4
+.
+GNID1100  
+          COMPARE   "9999",F4          * at end of group ?
+          GOTO      GNID1110 IF NOT EQUAL
+.
+          MATCH     "z",ANS
+          GOTO      BADERROR IF EQUAL
+.
+          REP       REPUNIQ,ANS
+          MOVE      ZERO,F4
+.
+GNID1110
+          ADD       ONE,F4
+          PACK      KEY20,FMCACHQ,ANS,F4,SP70
+          CALL      RDFMBN1
+          BRANCH    OVRCD,GNID1200
+          GOTO      GNID1100
+.
+.---- no records !! ----
+.
+GNID1150  MOVE      ONE,F4
+          MOVE      " ",ANS
+          PACK      KEY20,FMCACHQ,ANS,F4,SP70
+.
+GNID1200  
+.
+GNID9999  RETURN
+.
+BADERROR  DISPLAY   *P1:24,"CONTACT IBA - fmsbnkaf full for ",FMCACHQ," - ";
+          CALL      HITENTER
+          GOTO      ML9999
+.**********************************************************************
+.  USIB -                                              Called By IBAT
+.        Requires - FMSSIBA1 to be open and at start of file
+.        Returns  - ERRMSG   error message if applic.
+.                   EXIT     (1=error)
+.**********************************************************************
+USIB0000  CALL      GNBN0000           * get next batch number
+          MOVE      ZERO,F2
+          MOVE      SP70,SIBPRE
+          UNPACK    BC1BDATE,CDAY,CMON,CCENT,CYEAR
+          PACK      BATDATE,CCENT,CYEAR,CMON,CDAY
+.
+USIB1000  CALL      RKFMSB1
+          BRANCH    OVRCD,USIB9000     * no more records ?
+.
+          PACK      KEY14,FMSBLEDG,FMSBACCT
+          CALL      RDFMAM1
+          BRANCH    OVRCD,USIB9500
+          MATCH     "8",FMAMTYPE
+          GOTO      USIB9500 IF NOT EQUAL
+.
+          IF        F2<99
+            ADD       ONE,F2
+          ELSE
+            MOVE      ONE,F2
+            REP       REPUNIQ,SIBPRE
+          ENDIF
+.
+          PACK      KEY8,STATBAT,SIBPRE,F2,SP70
+          UNPACK    KEY8,FMSRBAT,FMSRUNIQ
+          MOVE      FMSBLEDG,FMSRLEDG
+          MOVE      FMSBACCT,FMSRACCT
+          MOVE      BATDATE,FMSRDATE
+          MOVE      FMSBREF,FMSRREF
+          MOVE      FMSBUNIT,FMSRUNIT
+          MOVE      SP70,FMSRSPAR
+.
+          DISPLAY   *P1:24,"Stat Update. Batch : ",*V2LON,FMBCBAT,*HOFF:
+                    "   Item : ",*V2LON,FMSRBAT,SLASH,FMSRUNIQ,*EL;
+.
+          CALL      RAFMSR1
+          IF        OVRCD=1
+            CALL      WRFMSR1
+          ELSE
+            GOTO      USIB9700
+          ENDIF
+.
+          MATCH     "CJ",BC1TRAN
+          GOTO      USIB1900 IF NOT EQUAL
+.
+          PACK      KEY8,STATBAT,SIBPRE,F2,SP70
+          UNPACK    KEY8,FMSZBAT,FMSZUNIQ
+          MOVE      FMSBLEDG,FMSZLEDG
+          MOVE      FMSBACCT,FMSZACCT
+          MOVE      BATDATE,FMSZDATE
+          MOVE      FMSBREF,FMSZREF
+          MOVE      FMSBUNIT,FMSZUNIT
+          MOVE      SP70,FMSZSPAR
+          CALL      RAFMSZ1
+          IF        OVRCD=1
+            CALL      WRFMSZ1
+          ELSE
+            CALL      UPFMSR1
+          ENDIF
+.
+USIB1900  CALL      UPDST000
+          MOVE      FMSBLEDG,LEDGER
+          MOVE      FMSBACCT,ACCOUNT
+          MOVE      ACCYEAR,UTYPE
+          PROC      FMSUA000              * Update all total Levels
+          GOTO      USIB1000
+.
+USIB9000  MOVE      ZERO,EXIT          * continue
+          GOTO      USIB9999
+.
+USIB9500  MOVE      ONE,EXIT           * quit
+          MOVE      "Invalid Stat-post Account ",KEY30
+          MOVE      " - ",KEY3
+          PACK      ERRMSG,KEY30,FMSBLEDG,SLASH,FMSBACCT,KEY3
+          CALL      DSIB0000
+          GOTO      USIB9999
+.
+USIB9700  MOVE      ONE,EXIT           * quit
+          MOVE      "Possible Stat File Corruption - Contact IBA ",ERRMSG
+          CALL      DSIB0000
+          GOTO      USIB9999
+.
+USIB9999  RETURN
+.------------------------------------------------------------
+. Update Stats Summary Record
+.------------------------------------------------------------
+UPDST000  PACK      KEY14,FMSRLEDG,FMSRACCT
+          CALL      RDFMSS1
+          BRANCH    OVRCD,UPDST100
+.
+          CALL      ADDST000             * set the period total
+          CALL      UPFMSS1
+          GOTO      UPDST999
+.
+UPDST100  MOVE      ZERO,FMSSA1
+          MOVE      ZERO,FMSSA2
+          MOVE      ZERO,FMSSA3
+          MOVE      ZERO,FMSSA4
+          MOVE      ZERO,FMSSA5
+          MOVE      ZERO,FMSSA6
+          MOVE      ZERO,FMSSA7
+          MOVE      ZERO,FMSSA8
+          MOVE      ZERO,FMSSA9
+          MOVE      ZERO,FMSSA10
+          MOVE      ZERO,FMSSA11
+          MOVE      ZERO,FMSSA12
+          MOVE      ZERO,FMSSA13
+.
+          MOVE      ZERO,FMSSC1
+          MOVE      ZERO,FMSSC2
+          MOVE      ZERO,FMSSC3
+          MOVE      ZERO,FMSSC4
+          MOVE      ZERO,FMSSC5
+          MOVE      ZERO,FMSSC6
+          MOVE      ZERO,FMSSC7
+          MOVE      ZERO,FMSSC8
+          MOVE      ZERO,FMSSC9
+          MOVE      ZERO,FMSSC10
+          MOVE      ZERO,FMSSC11
+          MOVE      ZERO,FMSSC12
+          MOVE      ZERO,FMSSC13
+.
+          CALL      ADDST000
+.
+          MOVE      FMSRACCT,FMSSACCT
+          MOVE      FMSRLEDG,FMSSLEDG
+.
+          PACK      KEY14,FMSSLEDG,FMSSLEDG
+          CALL      WRFMSS1
+UPDST999  RETURN
+.***********************************************************************
+.*                         STOT0000                                    *
+.*                set the summary file period total                    *
+.***********************************************************************
+ADDST000  LOAD      F12P5,ACCPER,FMSSA1,FMSSA2,FMSSA3,FMSSA4,FMSSA5:
+                                 FMSSA6,FMSSA7,FMSSA8,FMSSA9,FMSSA10:
+                                 FMSSA11,FMSSA12,FMSSA13
+          ADD       FMSRUNIT,F12P5
+          STORE     F12P5,ACCPER,FMSSA1,FMSSA2,FMSSA3,FMSSA4,FMSSA5:
+                                 FMSSA6,FMSSA7,FMSSA8,FMSSA9,FMSSA10:
+                                 FMSSA11,FMSSA12,FMSSA13
+.
+          MATCH     "CJ",BC1TRAN
+          GOTO      ADDST999 IF NOT EQUAL
+.
+          LOAD      F12P5,CASPER,FMSSC1,FMSSC2,FMSSC3,FMSSC4,FMSSC5:
+                                 FMSSC6,FMSSC7,FMSSC8,FMSSC9,FMSSC10:
+                                 FMSSC11,FMSSC12,FMSSC13
+          ADD       FMSRUNIT,F12P5
+          STORE     F12P5,CASPER,FMSSC1,FMSSC2,FMSSC3,FMSSC4,FMSSC5:
+                                 FMSSC6,FMSSC7,FMSSC8,FMSSC9,FMSSC10:
+                                 FMSSC11,FMSSC12,FMSSC13
+.
+ADDST999  RETURN
+.*********************************************************************
+.*                         GNBN0000                                  *
+.*                   get the next batch number                       *
+.*********************************************************************
+.
+GNBN0000  CALL      RDFMCOST           * get next stat trans batch number
+          MATCH     "00000",FMBSTBAT
+          GOTO      GNBN0000 IF EQUAL  * cannot be zero
+.
+          MOVE      FMBSTBAT,STATBAT
+          PACK      KEY8,STATBAT,SP70
+          CALL      RSFMSR1            * position at bottom
+          CALL      RKFMSR1            * read next
+          BRANCH    OVRCD,GNBN8000     * no batches found ?
+.
+          MATCH     FMSRBAT,STATBAT
+          GOTO      GNBN0000 IF EQUAL  * batch already exists ?
+.
+GNBN8000  PACK      KEY8,STATBAT,SP70  * delete cash records for this batch
+.                                      * (should not be any on file !!)
+GNBN9000  CALL      RSFMSZ1
+          CALL      RKFMSZ1
+          BRANCH    OVRCD,GNBN9999     * no more records ?
+          MATCH     FMSZBAT,STATBAT
+          GOTO      GNBN9999 IF NOT EQUAL
+          PACK      KEY8,FMSZBAT,FMSZUNIQ,SP70
+          CALL      DEFMSZ1
+          GOTO      GNBN9000
+.
+GNBN9999  RETURN
+.**********************************************************************
+.  DSIB - delete batch data from file                  Called By USIB
+.**********************************************************************
+DSIB0000  PACK      KEY8,STATBAT,SP70  * delete cash records for this batch
+.
+DSIB1000  CALL      RSFMSZ1
+          CALL      RKFMSZ1
+          BRANCH    OVRCD,DSIB2000     * no more records ?
+          MATCH     FMSZBAT,STATBAT
+          GOTO      DSIB2000 IF NOT EQUAL
+          PACK      KEY8,FMSZBAT,FMSZUNIQ,SP70
+          CALL      DEFMSZ1
+          GOTO      DSIB1000
+.
+DSIB2000  PACK      KEY8,STATBAT,SP70  * delete cash records for this batch
+.
+DSIB3000  CALL      RSFMSZ1
+          CALL      RKFMSZ1
+          BRANCH    OVRCD,DSIB4000     * no more records ?
+          MATCH     FMSZBAT,STATBAT
+          GOTO      DSIB4000 IF NOT EQUAL
+          PACK      KEY8,FMSZBAT,FMSZUNIQ,SP70
+          CALL      DEFMSZ1
+          GOTO      DSIB3000
+.
+DSIB4000  
+.
+DSIB9999  RETURN
+.**********************************************************************
+. Get desired date data for current accrual record
+.  Returns : EXIT (0=ok, 1=error in fin year, 2=period locked)
+.**********************************************************************
+GPERA000
+          MOVE      FMTRLEDG,KEY2
+          CALL      RDFMLA1
+.
+          MOVE      FMTRPDAT,WORKDATE
+          CALL      CFYR0000              * Calculate Financial Year
+          BRANCH    EXIT,GPERA950         * Error in Financial Year
+.
+          UNPACK    PEREDAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,ENDPDATE
+          MOVE      CURYEAR,ACCYEAR       * Accrual Year
+          MOVE      PERCNT,ACCPER         * Accrual Period
+.
+          COMPARE   ONE,PERLOCK
+          GOTO      GPERA970 IF EQUAL     * Period Locked
+.
+GPERA900  MOVE      ZERO,EXIT
+          GOTO      GPERA999
+.
+GPERA950  MOVE      ONE,EXIT
+          GOTO      GPERA999
+.
+GPERA970  MOVE      TWO,EXIT
+          GOTO      GPERA999
+.
+GPERA999  RETURN
+.**********************************************************************
+. Get desired date data for current cash record
+.  Returns : EXIT (0=ok, 1=error in fin year, 2=period locked)
+.**********************************************************************
+GPERB000
+          MOVE      FMTRLEDG,KEY2
+          CALL      RDFMLA1
+.
+          MOVE      FMTRPDAT,WORKDATE
+          CALL      CFYR0000              * Calculate Financial Year
+          BRANCH    EXIT,GPERB950         * Error in Financial Year
+.
+          UNPACK    PEREDAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,ENDPDATE
+          MOVE      CURYEAR,CASYEAR       * Cash Year
+          MOVE      PERCNT,CASPER         * Cash Period
+.
+          COMPARE   ONE,PERLOCK
+          GOTO      GPERB970 IF EQUAL     * Period Locked
+.
+GPERB900  MOVE      ZERO,EXIT
+          GOTO      GPERB999
+.
+GPERB950  MOVE      ONE,EXIT
+          GOTO      GPERB999
+.
+GPERB970  MOVE      TWO,EXIT
+          GOTO      GPERB999
+.
+GPERB999  RETURN

@@ -1,0 +1,632 @@
+.*******************************************************************************
+.*                              ACONTACT.PBL                                   *
+.*        Contains common routines used to add an encounter (contact).         *
+.*        These routines are used by ALLWEB03 and HL7RECVR.                    *
+.* Mods:                                                                       *
+.*        V11.03.01 09/03/2023  Sunny            TSK 0927478
+.*                  Fixed check for ALREF006 in NEWENC00
+.*        V11.00.01 22/04/2020  Ebon Clements    TSK 0850105                   *
+.*                  Clear PMCUTSTA and PMCUTLOC before write to pmscuraf       *
+.*        V10.14.01 29/05/2019  Steve Armstrong  TSK 0872258                   *
+.*                  Mods to initialise EPAUDFLG and RIAUDFLG prior to calling  *
+.*                  VDEF0000.                                                  *
+.*        V10.13.01 24/08/2018  Steve Armstrong  TSK 0845563                   *
+.*                  Mods to use CLALLAUD.                                      *
+.*        V10.11.02 18/12/2017  Ebon Clements    TSK 0846952                   *
+.*                  Added save or triage status SAVVTRGS to NEWENC00           *
+.*        V10.11.01 04/08/2017  Ebon Clements    TSK 0843265                   *
+.*                  Fixed re read of original referal - AMAS0000               *
+.*        V10.10.01 22/05/2017  Ebon Clements    TSK 0836853                   *
+.*                  Call VDEF0000 after encounter record is written            *
+.*        V10.05.19 08/12/2014  Ebon Clements    CAR 305618                    *
+.*                  Added VINAHDEF - Default VINAH field functionality         *
+.*        V10.04.00 21/05/2014  Davin            CAR 292355                    *
+.*                  Created common code for hl7recvr & allweb03                *
+.*******************************************************************************
+.*******************************************************************************
+. Activate a waiting master referral if the linked internal referral is active
+. Requires CHECKREF - Internal Referral Number
+.*******************************************************************************
+AMAS0000  MATCH     "1",ALCNDAMR
+          GOTO      AMAS9999 IF EQUAL
+.
+          PACK      KEY8,CHECKREF,SP70
+          CALL      RDALREF1                * Read the referral to see if it's
+          BRANCH    OVRCD,AMAS9999          * an internal referral
+.
+          MATCH     "1",ALREUYN4            * Exit if not an internal referral
+          GOTO      AMAS9999 IF EQUAL
+.
+          MATCH     "1",ALRESTAT            * Exit if not active
+          GOTO      AMAS9999 IF NOT EQUAL
+.
+          MOVE      ALREDACT,SAVIADAT       * Save internal referral date active
+          MOVE      SP70,MASTREFN           * Clear master referral number
+.
+          PACK      KEY16,CHECKREF,SP70
+          CALL      RSALRLN2                * Determine master referral number
+          CALL      RKALRLN2
+          BRANCH    OVRCD,AMAS9999
+.
+          MATCH     CHECKREF,ALRLLNKV       * Linked referrals
+          GOTO      AMAS9999 IF NOT EQUAL
+.
+          MOVE      ALRLVISN,MASTREFN       * Save master referral number
+
+          PACK      KEY8,MASTREFN,SP70
+          CALL      RDALREF1                * Read the master referral
+          BRANCH    OVRCD,AMAS9999
+.
+          MATCH     "1",ALREUYN4            * Exit if not an master referral
+          GOTO      AMAS9000 IF NOT EQUAL
+.
+          MATCH     "0",ALRESTAT            * Exit if not waiting
+          GOTO      AMAS9000 IF NOT EQUAL
+.
+          MOVE      TWO,AUDTTYPE            * before history record
+          CALL      WAALRE00
+.
+          MOVE      ZERO,RACTVFLG
+          MOVE      "1",ALRESTAT            * Set status to active
+          MOVE      SAVIADAT,ALREDACT
+.
+          PACK      ALREUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",ALREUDAT
+          CLOCK     TIME,ALREUTIM
+          MOVE      USERID,ALREUUID
+.
+          CALL      URMHI000                * Set MHINC indicator
+          CALL      UPALREF1                * Update referral Table (allrefaf)
+.
+          CALL      PMIGTNID                * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      ONE,HL7TRGID
+          MOVE      "ACONTACT",HL7INCLD
+          CALL      DGCLII13                * broadcast Update Ref. (REF^I13)
+.
+          MOVE      THREE,AUDTTYPE          * after history record
+          CALL      WAALRE00
+.
+          MOVE      ALREDACT,ALSTSDAT
+          CALL      WRTRSH00                * write a record to allstsaf
+.
+          MOVE      "T",UPDTTYPE            * Update type
+          CALL      WRTRAU00                * write to the referral audit table
+.
+AMAS9000  PACK      KEY8,CHECKREF,SP70
+          CALL      RDALREF1                * Re read original referral
+          IF        OVRCD=1
+            CALL      CLALLREF
+          ENDIF
+.
+AMAS9999  RETURN
++
+.*****************************************************************************
+. Add New Encounter to a Referral                                            *
+.*****************************************************************************
+NEWENC00  MATCH     "1",CHECKBX2
+          IF        @EQUAL
+            CALL      LASTEN00             * Add Last Encounter
+            GOTO      NEWENC10
+          ENDIF
+.
+          MATCH     "0",CHECKBX1
+          IF        @EQUAL
+            CALL      WLSTEN00             * Stay On Waiting List
+          ENDIF
+.
+          CALL      FAPD0000                * Set first appointment booked
+.
+          MOVE      ALREPRTY,SAVVPRTY       * Save referral priority
+          MOVE      ALRETRGS,SAVVTRGS       * Save referral triage status
+.
+          MATCH     Z70,ALENC118
+          IF        !@EQUAL
+            MOVE      ALENC118,ALREREVD    * Update case review date on referral
+            CALL      URMHI000             * Set MHINC indicator
+            CALL      UPALREF1
+.
+            CALL      PMIGTNID              * get national id for dgate write
+            MOVE      NMPNUMB,PTNINMPI
+            MOVE      TWO,HL7TRGID
+            MOVE      "ACONTACT",HL7INCLD
+            CALL      DGCLII13              * broadcast Update Ref. (REF^I13)
+          ENDIF
+.
+          MATCH     Z70,ALREF006
+          IF        !@EQUAL & !@EOS
+              MOVE      ALREF006,ALRERCLO
+              CALL      UPALREF1
+          ENDIF
+.
+NEWENC10  CALL      ADDENC00               * Add Encounter With Referal
+          BRANCH    EXIT,NEWENC91
+.                                          * Save referral priority set above
+          MOVE      ALREVISN,SAVVREFN      * Referral number
+          MOVE      ZERO,EPAUDFLG      * init. audit flags
+          MOVE      ZERO,RIAUDFLG
+          PROC      VDEF0000               * VINAH Field default
+.
+          CALL      CHKBIL00
+          BRANCH    EXIT,NEWENC90
+.
+          MATCH     "5",NEXTPAGE
+          IF        !@EQUAL
+            CALL      ALLBIL00   * Call  Billing Routine if No Second Page
+          ENDIF                  * ie Veterans, TAC or work cover
+.
+          PACK      KEY16,ALENVISN,ALENENCT,SP70
+          CALL      RDALENC1
+          BRANCH    OVRCD,NEWENC90
+.
+          MOVE      TWO,AUDTTYPE            * before history record
+          CALL      WAALEN00
+.
+          MOVE      PRHDUNIQ,ALENUNIQ       * This has to be clarified
+.
+          CALL      UPALENC1
+.
+          MOVE      THREE,AUDTTYPE           * after history record
+          CALL      WAALEN00
+.
+          CALL      PMIGTNID                * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      THREE,HL7TRGID
+          MOVE      "ACONTACT",HL7INCLD
+          PROC      DGCLICEU                * write message to broadcast queue
+.
+NEWENC90  MOVE      ZERO,EXIT
+          PACK      REDIRECT,REDIRECT,SP70,SP70
+          STRIP     REDIRECT
+          ENDSET    REDIRECT
+          PACK      KEYENCTR,ALENVISN,ALENENCT,SP70
+          REP       " +",KEYENCTR
+          APPEND    "&encoutky=",REDIRECT
+          APPEND    KEYENCTR,REDIRECT
+          RESET     REDIRECT
+          GOTO      NEWENC99
+.
+NEWENC91  CLEAR     WEBTITLE
+          APPEND    "Contact limit of 99999999 has been reached. ",WEBTITLE
+          APPEND    "Please close this referral.",WEBTITLE
+          RESET     WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      NEWENC99
+.
+NEWENC99  RETURN
++
+.******************************************************************************
+.*                      VALIDATE DATE& TIME FOR ADD ENCOUNTER WITH REFERRAL   *
+.******************************************************************************
+VALIDT00  CLOCK     TIME,CTIMEIS
+          PACK      CDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CDATE
+          MOVE      ZERO,EXIT
+          MATCH     "4",ALRESTAT            * Cancelled(4) referral
+          GOTO      VALIDT90 IF EQUAL
+.
+          MATCH     SP70,ALRERDAT
+          GOTO      VALIDT95 IF EQUAL
+.
+          MATCH     ALRERDAT,ALENC005       * Check If ALENC05>=ALREDAT
+          GOTO      VALIDT91 IF LESS        * Check for contact date equal to
+.                                           * or greater than the Referral dt
+          IF        @EQUAL
+            MATCH     SP70,ALENC006
+            IF        !@EQUAL & !@EOS
+              MATCH     SP70,ALREUTM6
+              IF        !@EQUAL & !@EOS
+                MATCH     ALREUTM6,ALENC006     * If time is not empty then validate
+                GOTO      VALIDT91 IF LESS
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          MOVE      ALRESTAT,F1
+          ADD       ONE,F1
+          BRANCH    F1,VALIDT10,VALIDT20,VALIDT30,VALIDT40,VALIDT99,VALIDT50
+          GOTO      VALIDT99
+.
+VALIDT10                                    * Validation for Wating(0) Referral
+VALIDT20  MATCH     ALENC005,CDATE          * Same for Active(1)
+          GOTO      VALIDT92 IF LESS
+          MATCH     ALENC005,CDATE
+          IF        @EQUAL
+            MATCH     ALENC006,CTIMEIS
+            GOTO      VALIDT92 IF LESS
+          ENDIF
+          GOTO      VALIDT99
+.                                           * Referral Closed (2)
+VALIDT30  MATCH     ALENC005,ALREDCLO       * Check closed date
+          GOTO      VALIDT93 IF LESS
+          MATCH     ALENC005,ALREDCLO       * Check closed date
+          IF        @EQUAL
+            MATCH     ALENC006,ALRETCLO
+            GOTO      VALIDT93 IF LESS
+          ENDIF
+          GOTO      VALIDT99
+.                                           * Referral Inactive(3)
+VALIDT40  MATCH     ALENC005,ALREDINA       * Check inactive code
+          GOTO      VALIDT94 IF LESS
+          MATCH     ALENC005,ALREDINA       * Check inactive code
+          IF        @EQUAL
+            MATCH     ALENC006,ALRETINA
+            GOTO      VALIDT94 IF LESS
+          ENDIF
+          GOTO      VALIDT99
+.
+VALIDT50  MATCH     ALENC005,ALRESRDT       * Referral Rejected(5)
+          GOTO      VALIDT96 IF LESS
+.
+          MATCH     ALENC005,ALRESRDT       * Check rejected date
+          IF        @EQUAL
+            MATCH     ALENC006,ALRESRTM
+            GOTO      VALIDT96 IF LESS
+          ENDIF
+          GOTO      VALIDT99
+.
+VALIDT90  MOVE      "Contact Cannot be added to a Cancelled Referral",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      VALIDT99
+.
+VALIDT91  MOVE      "Contact date/time must be greater than referral.",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      VALIDT99
+.
+VALIDT92  MOVE      "Contact date/time should not be in future ",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      VALIDT99
+.
+VALIDT93  MOVE      "Contact dt/tm must be less than closed referral",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      VALIDT99
+.
+VALIDT94  MOVE      "Contact date and time must less than inactive ",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      VALIDT99
+.
+VALIDT95  MOVE      "Referral date cannot be blank",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      VALIDT99
+.
+VALIDT96  CLEAR     WEBTITLE
+          APPEND    "Contact date/time must less than ",WEBTITLE
+          APPEND    "rejected date/time. ",WEBTITLE
+          RESET     WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      VALIDT99
+.
+VALIDT99  RETURN
++
+.******************************************************************************
+. Check Billable Units                                                        *
+.******************************************************************************
+CHKBIL00  MOVE      ONE,EXIT    * No Billable Units
+          COMPARE   ZERO,ALENDBUN
+          GOTO      CHKBIL90 IF NOT EQUAL
+          COMPARE   ZERO,ALENIBUN
+          GOTO      CHKBIL90 IF NOT EQUAL
+          GOTO      CHKBIL99
+CHKBIL90  MOVE      ZERO,EXIT   * Yes We Have Billable Units
+CHKBIL99  RETURN
++
+.******************************************************************************
+.*                      WRITE TO ENCOUNTER TABLE(ENCOUNTER WITH REFERRAL)     *
+.******************************************************************************
+ADDENC00  MOVE      ZERO,EXIT
+          MOVE      ZERO,F8
+          PACK      KEY16,ADMISSNO,Z70
+          CALL      RSALENC1
+          CALL      RPALENC1
+          BRANCH    OVRCD,ADDENC10
+          MATCH     ADMISSNO,ALENVISN
+          GOTO      ADDENC10 IF NOT EQUAL
+          MOVE      ALENENCT,F8
+.
+          COMPARE   "99999999",F8                * Max 99999999 Encounters
+          GOTO      ADDENC90 IF EQUAL
+.
+ADDENC10  CALL      CLALLENC                * clear the alencaf paras
+          ADD       ONE,F8
+.
+          COMPARE   "99999999",F8                * Max 999 Encounters
+          GOTO      ADDENC90 IF EQUAL
+.
+          MOVE      F8,ALENENCT
+          CALL      MVALEN00                * move in the cgi-para
+.
+          MOVE      ADMISSNO,ALENVISN
+          MOVE      "0",ALENRSTA
+          PACK      ALENCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",ALENCDAT
+          CLOCK     TIME,ALENCTIM
+          MOVE      USERID,ALENCUID
+.
+          PACK      KEY16,ALENVISN,ALENENCT
+          CALL      RAALENC1
+          COMPARE   ONE,OVRCD
+          GOTO      ADDENC10 IF NOT EQUAL
+.
+          CALL      AEMHI000                * set to 'Unsent' - MHINC extract
+          CALL      WRALENC1                * write to the encounter table
+.
+          MOVE      ONE,AUDTTYPE            * write history record
+          CALL      WAALEN00
+.
+          IF        PTCNCPAH=1
+            CALL      WRCPAT00              * write to the current patient table
+          ENDIF
+.
+          CALL      ALIT0000                * write items to item file
+.
+          MATCH     "5",NEXTPAGE
+          IF        !@EQUAL
+            CALL      PMIGTNID              * get national id for dgate write
+            MOVE      NMPNUMB,PTNINMPI
+            MOVE      FOUR,HL7TRGID
+            MOVE      "ACONTACT",HL7INCLD
+            PROC      DGCLICEA              * Pass New Encounter to DG *I-90202
+          ENDIF                             * Only report HL7 message here if
+.                                           * the EOC is not TAC/VET or WORK C
+.                                           * Write Record To Erc Table
+          MOVE      ZERO,EXIT
+          GOTO      ADDENC99
+.
+ADDENC90  MOVE      ONE,EXIT                * Max 999 Encounters
+.
+ADDENC99  RETURN
++
+.------------------------------------------------------------
+. Write to the current patient list
+.------------------------------------------------------------
+WRCPAT00  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD * current date
+          REP       " 0",CURRDATE
+          REP       " 0",XCDATE                                        *I-60242
+.
+          MATCH     CURRDATE,ALENSDAT
+          GOTO      WRCPAT99 IF NOT EQUAL
+.
+          MOVE      ALENVISN,PMCUVISN
+          MOVE      ALENSDAT,PMCUDATE
+          MOVE      PTMASNAM,PMCUSURN
+          MOVE      PMPXFNAM,PMCUGNAM
+          MOVE      PMPXSNAM,PMCUGNM2
+          MOVE      PURNO,PMCUURNO
+          MOVE      "9",PMCUSYST
+          MOVE      SP70,PMCULOCN
+          MOVE      SP70,PMCUOSIT
+          MOVE      ALREHOSN,PMCUHOSP
+          MOVE      SP70,PMCUTSTA
+          MOVE      SP70,PMCUTLOC
+.
+          PACK      KEY8,PMCUVISN,SP70
+          CALL      RAPMCUR1
+          IF        OVRCD=1
+            CALL      WRPMCUR1
+          ENDIF
+.
+WRCPAT99  RETURN
++
+.******************************************************************************
+.         MHINC - Add Encounter for MH Department and Primary Ref.
+.******************************************************************************
+AEMHI000  PACK      KEY5,ANSC,ANSG,ALREDEPT,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,AEMHI999
+.
+          MATCH     "M",TCINDC4
+          GOTO      AEMHI999 IF NOT EQUAL      * Not a Mental Health department
+.
+          MATCH     "1",ALREUYN4
+          GOTO      AEMHI999 IF NOT EQUAL      * Not Primary Referral
+.
+          MOVE      "0",ALENMOHR               * Unsent
+AEMHI999  RETURN
++
+.******************************************************************************
+.         MHINC - Update Referral
+.******************************************************************************
+URMHI000  PACK      KEY5,ANSC,ANSG,ALREDEPT,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,URMHI900
+.
+          MATCH     "M",TCINDC4
+          GOTO      URMHI900 IF NOT EQUAL      * Not a Mental Health department
+.
+          MATCH     "1",ALREUYN4
+          GOTO      URMHI900 IF NOT EQUAL      * Not Primary Referral
+.
+          MATCH     "0",ALREMOHR
+          GOTO      URMHI200 IF EQUAL          * Unsent
+.
+          MATCH     "1",ALREMOHR
+          GOTO      URMHI400 IF EQUAL          * Sent
+.
+          GOTO      URMHI900
+.
+.         if Closing referral for Unsent - then set indicator to 4
+.
+URMHI200  MATCH     "2",ALRESTAT
+          GOTO      URMHI900 IF NOT EQUAL     * not Close status
+.
+          MOVE      "4",ALREMOHR              * 'Send RF and Discharge required'
+          GOTO      URMHI900
+.
+.         Already sent
+.
+URMHI400  MATCH     "2",ALRESTAT
+          GOTO      URMHI500 IF EQUAL          * Close Referral
+.
+          MATCH     "4",ALRESTAT
+          GOTO      URMHI600 IF EQUAL          * Cancelled
+.
+          MATCH     "5",ALRESTAT
+          GOTO      URMHI600 IF EQUAL          * Rejected
+.
+          MOVE      "0",ALREMOHR               * Unsent/Resend
+.
+.         If this was re-actived from Closed sent Referral - set indicator to 5
+.
+          IF        RACTVFLG=1
+            MOVE      "5",ALREMOHR             * 'Send Delete Discharge'
+          ENDIF
+
+          GOTO      URMHI900
+.
+URMHI500  MOVE      "3",ALREMOHR               * Send Discharge required
+          GOTO      URMHI900
+.
+URMHI600  MOVE      "2",ALREMOHR               * Send delete
+          GOTO      URMHI900
+.
+URMHI900  MOVE      ZERO,RACTVFLG
+URMHI999  RETURN
++
+.*******************************************************************************
+. Populate the first appointment booked field for SOP internal referrals
+.*******************************************************************************
+FAPD0000  MATCH     "1",ALREUYN4                 * Exit if master referral
+          GOTO      FAPD9999 IF EQUAL
+.
+          PACK      KEY5,ANSC,ANSG,ALREDEPT,SP70
+          CALL      RDCODE1                      * Read department
+          BRANCH    OVRCD,FAPD9999
+.
+.         MATCH     ANSO,TCINDC8                 * SOP referrals only
+.         GOTO      FAPD9999 IF NOT EQUAL
+.
+          MATCH     SP70,ALREUDT8                * Exit if first appointment
+          GOTO      FAPD9999 IF NOT EQUAL        * booked alredy populated
+.
+          MATCH     ALENC005,Z70                 * Check encounter date
+          GOTO      FAPD9999 IF EQUAL
+.
+          MOVE      ALENC005,ALREUDT8            * Set to encounter date
+.
+          CALL      UPALREF1
+.
+          CALL      PMIGTNID                * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      FIVE,HL7TRGID
+          MOVE      "ACONTACT",HL7INCLD
+          CALL      DGCLII13                * broadcast Update Ref. (REF^I13)
+.
+FAPD9999  RETURN
++
+.******************************************************************************
+.*                     STAY ON WAITING LIST( ENCOUNTER WITH REFERRAL)         *
+.******************************************************************************
+WLSTEN00  MATCH     "0",ALRESTAT            * Do not change status to active
+          GOTO      WLSTEN99 IF NOT EQUAL   * unless it is waiting
+.
+          MOVE      TWO,AUDTTYPE            * before history record
+          CALL      WAALRE00
+.
+          MOVE      "1",ALRESTAT
+          MOVE      ALENC005,ALREDACT
+          REP       " 0",XCDATE                                        *I-60242
+          MOVE      XCDATE,ALREUDAT
+          MOVE      CTIMEIS,ALREUTIM
+          MOVE      USERID,ALREUUID
+          CALL      URMHI000                * Set MHINC indicator
+          CALL      UPALREF1
+.
+          CALL      PMIGTNID                * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      SIX,HL7TRGID
+          MOVE      "ACONTACT",HL7INCLD
+          CALL      DGCLII13                * broadcast Update Ref. (REF^I13)
+.
+          MOVE      THREE,AUDTTYPE          * after history record
+          CALL      WAALRE00
+.                                           * Update Status History Table
+          MOVE      ADMISSNO,ALSTVISN
+          MOVE      "1",ALSTSTAT
+          MOVE      ALENC005,ALSTSDAT
+          PACK      KEY17,ALSTVISN,ALSTSTAT,ALSTSDAT,SP70
+          CALL      RDALSTS1
+          IF        OVRCD=1
+            REP       " 0",XCDATE
+            MOVE      XCDATE,ALSTCDAT
+            MOVE      CTIMEIS,ALSTCTIM
+            MOVE      USERID,ALSTCUID
+            CALL      WRALSTS1
+          ELSE
+            REP       " 0",XCDATE
+            MOVE     XCDATE,ALSTUDAT
+            MOVE     CTIMEIS,ALSTUTIM
+            MOVE     USERID,ALSTUUID
+            CALL     UPALSTS1
+          ENDIF
+.                                            *Update Referral Audit Table
+          CALL      CLALLAUD                 * clear allaudaf variables
+.
+          MOVE      ADMISSNO,ALAUVISN
+          REP       " 0",XCDATE
+          MOVE      XCDATE,ALAUADAT
+          MOVE      CTIMEIS,ALAUATIM
+          PACK      KEY24,ALAUVISN,ALAUADAT,ALAUATIM
+          CALL      RDALAUD1
+          MOVE      USERID,ALAUAUID
+          MOVE      "T",ALAUUPDT
+          IF        OVRCD=0
+            CALL      UPALAUD1
+          ELSE
+            CALL      WRALAUD1
+          ENDIF
+          GOTO      WLSTEN99
+.
+WLSTEN99  RETURN
++
+.******************************************************************************
+.      write a record to the Referral Status History Table
+.******************************************************************************
+WRTRSH00  MOVE      ALREVISN,ALSTVISN       * Populate all the fields and write
+          MOVE      ALRESTAT,ALSTSTAT
+          PACK      ALSTCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",ALSTCDAT
+          CLOCK     TIME,ALSTCTIM
+          MOVE      WBSEUID,ALSTCUID
+          PACK      KEY17,ALSTVISN,ALSTSTAT,ALSTSDAT,SP70
+          CALL      RAALSTS1
+          IF        OVRCD=0
+            CALL      UPALSTS1                * update to the file
+          ELSE
+            CALL      WRALSTS1                * write to the file
+          ENDIF
+.
+WRTRSH99  RETURN
++
+.******************************************************************************
+.      write a record to the Referral Audit Table
+.      Requires - UPDTTYPE - update type for allaudaf
+.******************************************************************************
+WRTRAU00  CALL      CLALLAUD                     * clear allaudaf variables
+.
+          MOVE      ALREVISN,ALAUVISN
+          PACK      ALAUADAT,CCC,CYY,CMM,CDD
+          MOVE      UPDTTYPE,ALAUUPDT
+          REP       " 0",ALAUADAT
+          CLOCK     TIME,ALAUATIM
+          MOVE      WBSEUID,ALAUAUID
+          PACK      AUDITKEY,ALAUVISN,ALAUADAT,ALAUATIM,SP70
+          PACK      KEY24,ALAUVISN,ALAUADAT,ALAUATIM,SP70
+          CALL      RDALAUD1
+          IF        OVRCD=1
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRALAUD1                * write to the file
+            TRAPCLR   IO
+            BRANCH    OVRCD,WRTRAU99
+          ENDIF
+WRTRAU99  RETURN
++

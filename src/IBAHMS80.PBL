@@ -1,0 +1,733 @@
+.******************************************************************************
+.* System         : Patient Management System                                 *
+.* Program        : IBAHMS80.PBL                                              *
+.* Name           : Patient Leave Report                                      *
+.******************************************************************************
+.* Date           : 03/03/2008                                                *
+.* Author         : J.Tan                                                     *
+.* Function       : Patients who went on Leave within the selected period and *
+.*                  range of Claim codes                                      *
+.* Modifications  :                                                           *
+.*                                                                            *
+.*        V10.04.01 13/06/2014 Steve Armstrong  CAR 301639                    *
+.*                  Moved calls to TFILENAM into INIT0000                     *
+.******************************************************************************
+.*        V10.03.01 24/12/2012 Patrick Adair  CAR 261630                      *
+.*                  Removed port number from temp file name                   *
+.******************************************************************************
+.*        V10.01.01 03/02/2011 Jill Parkinson CAR 233088                      *
+.*                  Added pmsvx1af                                            *
+.******************************************************************************
++
+          INC       STD001FD
+.
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       PATCODFD/INC            * Codes file
+          INC       PATMA1FD/INC            * Master file
+          INC       PATMI1FD/INC            * Admission file
+          INC       PMSVX1FD/INC            * Admission file
+          INC       PATTRNFD/INC            * Transfer file
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+. ----- Program Variables -----
+.
+CURDATE   DIM       8
+CMDLINE   DIM       80
+LEAVFLAG  FORM      1
+FNAMEI    DIM       8
+FNAMER    DIM       8
+GROUPCLM  FORM      1                       * Group each claim
+.
+SAVCLAIM  DIM       3
+SAVURNUM  DIM       8
+SAVADMNO  DIM       8
+STRTDATE  DIM       8                       * Start date (ccyymmdd)
+ENDDATE   DIM       8
+STRCLAIM  DIM       3
+ENDCLAIM  DIM       3
+.
+PATNAME   DIM       30
+TOTPAT    FORM      8
+.
+UKEY      INIT      " 65 U1-8,57-64,9-16,17-24 U54-56,1-8,57-64,9-16,17-24"
+TEMPFIL1  IFILE     SQL, FIXED=65, KEY="U1-8,57-64,9-16,17-24"
+TEMPFIL2  IFILE     SQL, FIXED=65, KEY="U54-56,1-8,57-64,9-16,17-24"
+.
+XXURNUM   DIM       8        1     U/R Number
+XXLDATE   DIM       8        9     Leave date
+XXLTIME   DIM       8       17     Leave time
+XXRDATE   DIM       8       25     Return date
+XXRTIME   DIM       8       33     Return time
+XXLTYPE   DIM       3       41     Leave type
+XXADOCT   DIM      10       44     Attending doctor
+XXCLAIM   DIM       3       54     Claim Code
+XXADMNO   DIM       8       57     Admission number
+.EOR                        65
+.
+UKEY1     INIT      " 9 U1-8"
+XPATFIL1  IFILE     SQL, FIXED=9, KEY="U1-8"
+.XXURNUM  DIM       8        1     U/R Number
+.EOR                         9
+.
+. ----- Program Constants -----
+.
+PRGID     INIT      "IBAHMS80"
+PRGNAM    INIT      "Patient Leave Report"
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                   ML0000                                   *
+.*                                 Main Module                                *
+.******************************************************************************
+ML0000    CALL      INIT0000                * Initialise variables & open files
+ML1000    CALL      OPTN0000                * Choose main option
+          BRANCH    EXIT,ML9999
+.
+ML2000    CALL      DATE0000                * Keyin the date range
+          BRANCH    EXIT,ML1000
+.
+ML3000    CALL      KCLM0000                * Keyin range of claim code
+          BRANCH    EXIT,ML2000
+.
+          CALL      GCLM0000                * Group by Claim code
+          BRANCH    EXIT,ML1000
+.
+          CALL      CONTQST                 * Ok to continue (Y/N/C) ?
+          BRANCH    CEXIT,ML4000,ML3000,ML1000
+          GOTO      ML1000
+.
+ML4000    CALL      PROC0000                * Process the files
+          CALL      PRNT0000                * Print report
+          CALL      KILL0000                * Kill tempfile
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM
++
+.******************************************************************************
+.*                                   INIT0000             Called by: ML0000   *
+.*                        Initialise Variable & Open Files                    *
+.******************************************************************************
+INIT0000  CALL      DISPHEAD                * Display screen heading
+.
+          DISPLAY   *P56:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"pattranf";
+          OPEN      PATTRAN2,"pattranf"
+.
+          PACK      CURDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURDATE 
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,FNAMEI
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,FNAMER
+.
+INIT9000  MOVE      ZERO,EXIT
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                  OPTN0000              Called by: ML0000   *
+.*                                Choose Option                               *
+.******************************************************************************
+OPTN0000  MOVE      ZERO,OPTION
+          MOVE      ZERO,CPAGENO            * Reset the page no
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,"0",*HOFF," = Exit":
+                    *P1:5,*V2LON,"1",*HOFF," = By Date Range":
+                    *P1:7,"Select Option : ";
+OPTN1000  KEYIN     *P17:7,*V2LON,*DV,UNDLN2,*P17:7,OPTION;
+.
+          COMPARE   ZERO,OPTION
+          GOTO      OPTN9500 IF EQUAL
+.
+          BRANCH    OPTION,OPTN9000
+.
+          BEEP
+          GOTO      OPTN1000
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+OPTN9999  RETURN
++
+.******************************************************************************
+.*                                  DATE0000              Called by: ML0000   *
+.*                            Keyin The Date Range                            *
+.******************************************************************************
+DATE0000  MOVE      "17",CCOL
+          DISPLAY   *P1:9,"Starting Date : ",*EF:
+                    *P1:10,"Ending Date   : ";
+.
+. ----- Keyin start date -----
+.
+DATE1000  MOVE      "9",CVERT
+          MOVE      CCC,CCENT
+          UNPACK    SP6,CYEAR,CMON,CDAY
+          CALL      KEYDATE                 * Keyin date
+          BRANCH    OVRCD,DATE9500          * Nothing entered
+.
+          PACK      STRTDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",STRTDATE
+.
+          CALL      PACDATE                 * Format the start date
+          DISPLAY   *PCCOL:CVERT,*EL,*V2LON,CPCDATE;
+.
+          MATCH     STRTDATE,CURDATE 
+          IF        @LESS
+            DISPLAY   *P1:24,*B,*EL,"Start date must not be in the future.  ";
+            CALL      HITENTER 
+            GOTO      DATE1000
+          ENDIF
+.
+. ----- Keyin end date -----
+.
+DATE2000  MOVE      "10",CVERT
+          UNPACK    STRTDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      KEYDATE                 * Keyin date
+          BRANCH    OVRCD,DATE1000          * Nothing entered
+.
+          PACK      ENDDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",ENDDATE
+.
+          CALL      PACDATE                 * Format the end date
+          DISPLAY   *PCCOL:CVERT,*EL,*V2LON,CPCDATE;
+.
+          MATCH     ENDDATE,CURDATE 
+          IF        @LESS
+            DISPLAY   *P1:24,*B,*EL,"End date must not be in the future.  ";
+            CALL      HITENTER 
+            GOTO      DATE2000
+          ENDIF
+.
+          MATCH     STRTDATE,ENDDATE
+          IF        @LESS
+            DISPLAY   *P1:24,*B,*EL,"End date must after the start date.  ";
+            CALL      HITENTER 
+            GOTO      DATE2000
+          ENDIF
+.
+DATE9000  MOVE      ZERO,EXIT
+          GOTO      DATE9999
+.
+DATE9500  MOVE      ONE,EXIT
+DATE9999  RETURN
++
+.**********************************************************************
+.*                             KCLM0000                               *
+.*                keyin range of claim codes                          *
+.**********************************************************************
+KCLM0000  MOVE       ZERO,EXIT
+          MOVE       SP20,STRCLAIM
+          MOVE       SP20,ENDCLAIM
+.
+          DISPLAY    *P1:4,*EF,"From Claim Code   :":
+                         *P1:5,"To   Claim Code   :";
+.
+          MOVE      "4",EVERT
+          MOVE      "20",ECOL               * keyin position
+          MOVE      SP3,ACODE
+          CALL      KCOD0000                * keyin code
+          BRANCH    EXIT,KCLM9000,KCLM2000
+          MOVE      ACODE,STRCLAIM
+          GOTO      KCLM3000
+.
+KCLM2000  DISPLAY   *P24:4,*EL,"Start"
+.
+KCLM3000  MOVE      "5",EVERT
+          MOVE      SP3,ACODE
+          CALL      KCOD0000                * keyin code
+          BRANCH    EXIT,KCLM0000,KCLM4000
+          MOVE      ACODE,ENDCLAIM
+          GOTO      KCLM9999
+.
+KCLM4000  DISPLAY   *P24:5,*EL,"End"
+          GOTO      KCLM9999
+.
+KCLM9000  MOVE      ONE,EXIT
+KCLM9999  RETURN
++
+.******************************************************************************
+.*                                  GCLM0000              Called by: ML0000   *
+.*                              Group by Claim Code                           *
+.******************************************************************************
+GCLM0000  MOVE      ZERO,GROUPCLM
+          DISPLAY   *P1:12,*EF,"Group by Claim Code (":
+                    *V2LON,"Y",*HOFF,"/",*V2LON,"N",*HOFF,") ? ";
+.
+GCLM1000  MOVE      ANSN,ANS
+          KEYIN     *P44:12,*V2LON,*RV,ANS;
+.
+          RESET     ANS
+          REP       UPPLOW,ANS
+.
+          MATCH     SP1,ANS
+          GOTO      GCLM2000 IF EQUAL       * Spaces, group by claim code
+.
+          MATCH     ANSN,ANS
+          GOTO      GCLM2000 IF EQUAL       * Dont group by claim code
+.
+          MATCH     ANSY,ANS
+          GOTO      GCLM3000 IF EQUAL       * group by claim code
+.
+          BEEP
+          GOTO      GCLM1000
+.
+GCLM2000  DISPLAY   *P44:12,*EL,*V2LON,"No";
+          MOVE      ZERO,GROUPCLM
+          GOTO      GCLM9000
+.
+GCLM3000  DISPLAY   *P44:12,*EL,*V2LON,"Yes";
+          MOVE      ONE,GROUPCLM
+.
+GCLM9000  MOVE      ZERO,EXIT
+          GOTO      GCLM9999
+.
+GCLM9500  MOVE      ONE,EXIT
+GCLM9999  RETURN
++
+.******************************************************************************
+.*                                  PROC0000              Called by: ML0000   *
+.*                              Process TRAN File                             *
+.******************************************************************************
+PROC0000  CALL      INDZD000
+.
+          MOVE      ZERO,TOTPAT
+          MOVE      SP70,SAVADMNO
+          MOVE      ZERO,LEAVFLAG
+          PACK      KEY30,SP70
+PROC0200  CALL      RDSTRAN2                * Position on & read next transfer
+PROC1000  CALL      RDKTRAN2                * file record
+          BRANCH    OVRCD,PROC4000
+.
+          MATCH     SAVADMNO,DTADMN
+          GOTO      PROC2000 IF EQUAL
+.
+          IF        LEAVFLAG=1
+            CALL      WREC0000            * Write record to tempfile
+          ENDIF
+.
+          MOVE      ZERO,LEAVFLAG
+          CALL      RCLM0000              * Check range of Claim code
+          IF        EXIT=1
+            PACK      KEY30,DTADMN,Z70    * goto last record of this patient
+            GOTO      PROC0200
+          ENDIF
+          MOVE      DTADMN,SAVADMNO       * save admission number
+.
+PROC2000  DISPLAY   *P12:24,*V2LON,TWARD,SP2,TBED,SP2,TADMN;
+.
+.         Only include patients who went on leave within the selected period
+.
+          MOVE      "0",KEY1
+          MOVE      TMOVE,KEY1
+          REP       "A0D0C0L1R1",KEY1
+          MATCH     "1",KEY1
+          GOTO      PROC1000 IF NOT EQUAL
+.
+          MATCH     ANSL,TMOVE
+          GOTO      PROC6000 IF NOT EQUAL   * Not a leave record
+.
+          MATCH     STRTDATE,TDATE
+          GOTO      PROC1000 IF LESS        * leave before start date
+.
+          MATCH     TDATE,ENDDATE
+          GOTO      PROC1000 IF LESS        * return before end date
+.
+          MOVE      TDATE,XXLDATE           * save leave start date
+          MOVE      TTIME,XXLTIME
+          MOVE      TURNO,XXURNUM            * U/R Number
+          MOVE      SP70,XXRDATE             * Return date
+          MOVE      SP70,XXRTIME             * Return time
+          MOVE      PTTRLTYP,XXLTYPE         * Leave type
+          PACK      XXADOCT,TADOCT           * Attending doctor
+          MOVE      ACLAIM,XXCLAIM           * Claim Code
+          MOVE      DTADMN,XXADMNO           * Admission Number
+          MOVE      ONE,LEAVFLAG
+          GOTO      PROC1000
+.
+PROC4000  IF        LEAVFLAG=1
+            CALL      WREC0000                * Write record to temp file
+          ENDIF
+          GOTO      PROC9999
+.
+PROC6000  COMPARE   ONE,LEAVFLAG
+          GOTO      PROC9000 IF NOT EQUAL     * Missing leave record
+          MOVE      TDATE,XXRDATE            * Return date
+          MOVE      TTIME,XXRTIME            * Return time
+          CALL      WREC0000                * Write record to temp file
+.
+PROC9000  MOVE      ZERO,LEAVFLAG
+          GOTO      PROC1000
+.
+PROC9999  RETURN
++
+.******************************************************************************
+.         Write record to tempfile         
+.******************************************************************************
+WREC0000  MOVE      SAVADMNO,KEY8
+          CALL      RDMISS1
+          BRANCH    OVRCD,WREC9999
+.
+          MOVE      XXURNUM,KEY8
+          CALL      RAXPAT1
+          IF        OVRCD=1
+            CALL      WRXPAT1
+            ADD       ONE,TOTPAT
+          ENDIF
+.
+          PACK      KEY32,XXURNUM,XXADMNO,XXLDATE,XXLTIME,SP70
+          CALL      RATEMP1
+          IF        OVRCD=1
+            CALL      WRTEMP1
+          ENDIF
+WREC9999  RETURN
++
+.******************************************************************************
+.         Check Range of Claim codes
+.******************************************************************************
+RCLM0000  MOVE      TADMN,KEY8
+          CALL      RDMISS1
+          BRANCH    OVRCD,RCLM9000
+.
+          MATCH     SP20,STRCLAIM
+          IF        !@EQUAL
+            MATCH     STRCLAIM,ACLAIM         * Check with Start claim code
+            GOTO      RCLM9000 IF LESS
+          ENDIF
+.
+          MATCH     SP20,ENDCLAIM
+          IF        !@EQUAL
+            MATCH     ACLAIM,ENDCLAIM         * Check with End of Claim code
+            GOTO      RCLM9000 IF LESS
+          ENDIF
+          MOVE      ZERO,EXIT
+          GOTO      RCLM9999
+.
+RCLM9000  MOVE      ONE,EXIT
+RCLM9999  RETURN
++
+.******************************************************************************
+.         Print report from tempfile
+.******************************************************************************
+PRNT0000  MOVE      ZERO,CPAGENO            * Reset the page counter
+          DISPLAY   *P1:24,*EL,"Scanning : ",*P35:24,"Printing : ";
+          MOVE      "99",CLNO
+.
+          MOVE      SP70,SAVCLAIM
+          MOVE      SP70,SAVURNUM
+          IF        GROUPCLM=0
+            PACK      KEY32,SP70
+            CALL      RSTEMP1
+          ELSE
+            PACK      KEY35,SP70
+            CALL      RSTEMP2
+          ENDIF
+.
+PRNT1000  IF        GROUPCLM=0
+            CALL      RKTEMP1
+            BRANCH    OVRCD,PRNT8000
+          ELSE
+            CALL      RKTEMP2
+            BRANCH    OVRCD,PRNT8000
+            MATCH     XXCLAIM,SAVCLAIM
+            IF        !@EQUAL
+              MOVE      XXCLAIM,SAVCLAIM
+              CALL      HEAD0000                * Print report header
+            ENDIF
+          ENDIF
+.
+          PACK      KEY8,XXURNUM
+          CALL      RDMAST1                     * Read a master file record
+          BRANCH    OVRCD,PRNT1000
+.
+          CALL      PREC0000                    * Print record
+.
+          GOTO      PRNT1000
+.
+PRNT8000  IF        CPAGENO=0
+            CALL      HEAD0000
+          ENDIF
+          CALL      UND132
+          PRINT     *1,"Number of Patients = ",TOTPAT
+.
+PRNT9000  MOVE      ZERO,EXIT
+PRNT9999  RETURN
++
+.******************************************************************************
+.*                                  PREC0000                                  *
+.*                             Print Record                                   *
+.******************************************************************************
+PREC0000  MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,PATNAME        * Patients name
+.
+          COMPARE   "58",CLNO
+          CALL      HEAD0000 IF NOT LESS
+.
+          MATCH     XXURNUM,SAVURNUM
+          IF        @EQUAL
+            PRINT     *1,"| ";
+          ELSE
+            PRINT     *1,"|",XXURNUM;
+          ENDIF
+            PRINT     *10,"|",XXADMNO,*20,"|",PATNAME;
+.
+          UNPACK    XXLDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          UNPACK    XXLTIME,KEY5
+.
+          PRINT     *53,"| ",CPCDATE," ",KEY5;
+.
+          MOVE      SP70,TDESC
+          MATCH     SP70,XXLTYPE
+          IF        !@EQUAL
+            PACK      KEY5,ANST,ANSL,XXLTYPE,SP70
+            CALL      RDCODE1
+          ENDIF
+.
+          UNPACK    SP70,CPCDATE,KEY5
+          MATCH     SP70,XXRDATE
+          IF        !@EQUAL
+            UNPACK    XXRDATE,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE
+            UNPACK    XXRTIME,KEY5
+          ENDIF
+.
+          PRINT     *73,"| ",CPCDATE," ",KEY5:
+                    *93,"| ",TDESC,*115,"| ",XXCLAIM,*122,"| ",XXADOCT,*132,"|"
+          ADD       ONE,CLNO
+.
+          MOVE      XXURNUM,SAVURNUM
+          MOVE      XXCLAIM,SAVCLAIM
+.
+PREC9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000                                  *
+.*                             Print Report Header                            *
+.******************************************************************************
+HEAD0000  CALL      IBACLOCK
+          CALL      HEAD132                 * Print report header
+.
+          UNPACK    STRTDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *40,"Date Range From : ",CPCDATE;
+.
+          UNPACK    ENDDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *85,"End Date   : ",CPCDATE
+.
+          MOVE      "Start               ",TDESC
+          MATCH     SP70,STRCLAIM
+          IF        !@EQUAL
+            PACK      KEY5,ANSC,ANSL,STRCLAIM
+            CALL      RDCODE1
+          ENDIF
+          PRINT     *40,"Claim Type From : ",TDESC;
+.
+          MOVE      "Finish              ",TDESC
+          MATCH     SP70,ENDCLAIM
+          IF        !@EQUAL
+            PACK      KEY5,ANSC,ANSL,ENDCLAIM
+            CALL      RDCODE1
+          ENDIF
+          PRINT     *85,"Claim Type To   : ",TDESC
+.
+          MOVE      "No ",KEY3
+          IF        GROUPCLM=1
+            MOVE      "Yes",KEY3
+          ENDIF
+          PRINT     *40,"Group by Claim Type: ",KEY3
+.
+          IF        GROUPCLM=1
+            PACK      KEY5,ANSC,ANSL,SAVCLAIM,SP70
+            CALL      RDCODE1
+            PRINT     *1,"Claim Code: ",SAVCLAIM," - ",TDESC
+            ADD       ONE,CLNO
+          ENDIF
+.
+          CALL      UND132
+          PRINT     *1,"| U/R No.",*10,"| Adm.No.",*20,"|Patient Name":
+                    *53,"| Leave Date/Time",*73,"| Return Date/Time":
+                    *93,"| Type of Leave",*115,"| Claim":
+                    *122,"| Att.Dr",*132,"|"
+          CALL      UND132
+          ADD       "5",CLNO
+.
+HEAD9999  RETURN
++
+.******************************************************************************
+.*                                 KCOD0000              Called By : ML0000   *
+.*                         Keyin codes                                        *
+.******************************************************************************
+KCOD0000  KEYIN     *PECOL:EVERT,*DV,UNDLN3:      * no default used
+                    *PECOL:EVERT,*V2LON,ACODE:
+                    *PECOL:EVERT,*DV,ACODE
+          ENDSET    ACODE
+          APPEND    SP3,ACODE
+          RESET     ACODE
+.
+          MATCH     SP3,ACODE
+          GOTO      KCOD8000 IF EQUAL       * nothing
+.
+          PACK      KEY5,ANSC,ANSL,ACODE
+          CALL      RDCODE1
+          COMPARE   ZERO,OVRCD
+          GOTO      KCOD1000 IF EQUAL
+          MOVE      ONE,EXIT
+          GOTO      KCOD9999
+.
+KCOD1000  DISPLAY   *P30:EVERT,*V2LON,TDESC;
+          MOVE      ZERO,EXIT
+          GOTO      KCOD9999
+.
+KCOD8000  MOVE      TWO,EXIT
+KCOD9999  RETURN
++
+.******************************************************************************
+.         Create an indexed file based on port
+.******************************************************************************
+.
+.         Check if previously exists..if so delete it
+.
+INDZD000  CALL      KILL0000
+.
+          PACK      CMDLINE,SP70,SP70
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAMEI,CMDLINE
+          APPEND    UKEY,CMDLINE
+          APPEND    SP70,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+.             Open Temp Index file
+.
+          TRAP      INDZD800 IF IO
+            OPEN      TEMPFIL1,FNAMEI
+          TRAPCLR   IO
+          OPEN      TEMPFIL2,FNAMEI
+.
+          PACK      CMDLINE,SP70,SP70
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAMER,CMDLINE
+          APPEND    UKEY1,CMDLINE
+          APPEND    SP70,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          TRAP      INDZD820 IF IO
+          OPEN      XPATFIL1,FNAMER
+          TRAPCLR   IO
+.
+          GOTO      INDZD999
+.
+INDZD800  DISPLAY   *P1:24,*EL,*B,"** Temporary Index File ",*V2LON,FNAMEI:
+                               *HOFF," not found **   ";
+          PRINT     *10,"** Temporary Index File ",FNAMEI," not found ** "
+          TRAPCLR   IO
+          GOTO      INDZD999
+.
+INDZD820  DISPLAY   *P1:24,*EL,*B,"** Temporary Index File ",*V2LON,FNAMER:
+                               *HOFF," not found **   ";
+          PRINT     *10,"** Temporary Index File ",FNAMER," not found ** "
+          TRAPCLR   IO
+INDZD999  RETURN
+.
+.******************************************************************************
+.*                                  KILL0000              Called by: ML0000   *
+.*                             Delete The Tempfile                 & OPEN0000 *
+.******************************************************************************
+.
+KILL0000  CLOSE     TEMPFIL1
+          CLOSE     TEMPFIL2
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAMEI,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          CLOSE     XPATFIL1
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAMER,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+KILL9999  RETURN
++
+.***************************************************************************
+.*  Temp file I/O's                                                        *
+.***************************************************************************
+RATEMP1   RESET     KEY32
+          MOVE      ZERO,OVRCD
+          READ      TEMPFIL1,KEY32;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP1   RESET     KEY32
+          READ      TEMPFIL1,KEY32;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    TEMPFIL1;XXURNUM,XXLDATE,XXLTIME,XXRDATE,XXRTIME:
+                             XXLTYPE,XXADOCT,XXCLAIM,XXADMNO
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   RESET     KEY32
+          WRITE     TEMPFIL1,KEY32;XXURNUM,XXLDATE,XXLTIME,XXRDATE,XXRTIME:
+                                  XXLTYPE,XXADOCT,XXCLAIM,XXADMNO
+          RETURN
+.
+RSTEMP2   RESET     KEY35
+          READ      TEMPFIL2,KEY35;;
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          READKS    TEMPFIL2;XXURNUM,XXLDATE,XXLTIME,XXRDATE,XXRTIME:
+                             XXLTYPE,XXADOCT,XXCLAIM,XXADMNO
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RAXPAT1   MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      XPATFIL1,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRXPAT1   RESET     KEY8
+          WRITE     XPATFIL1,KEY8;XXURNUM
+          RETURN
+.
+          INC       STD001IO
+          INC       TFILENAM                     * Generate Temp File Name
+.
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATCODIO/INC            * Codes file
+          INC       PATMA1IO/INC            * Master file
+          INC       PATMI1IO/INC            * Admission file
+          INC       PMSVX1IO/INC            * Admission file
+          INC       PATTRNIO/INC            * Transfer file
+          INC       WEBERRIO/INC                 * Web Server Error Logging+
+.
+

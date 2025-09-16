@@ -1,0 +1,58 @@
+.
+. OPRMOPIO.INC
+. ------------
+. Filenames       : oprmopaf
+. Description     : Theatre Usage operations performed file
+.
+RSOPMOP1  RESET     KEY13
+          READ      OPRMOPA1,KEY13;;
+          RETURN
+.
+RAOPMOP1  RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      OPRMOPA1,KEY13;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDOPMOP1  RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      OPRMOPA1,KEY13;OPMOUNIQ,OPMOTEAM,DOPMOCNT,OPMOCODE:
+                                  OPMOBAMT,OPMOGSTA,OPMOGSTC,OPMOSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOPMOCNT,OPMOCNT
+          MOVE      OPMOBAMT,OPMOAMNT
+          RETURN
+.
+RKOPMOP1  MOVE      ZERO,OVRCD
+          READKS    OPRMOPA1;OPMOUNIQ,OPMOTEAM,DOPMOCNT,OPMOCODE:
+                                  OPMOBAMT,OPMOGSTA,OPMOGSTC,OPMOSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOPMOCNT,OPMOCNT
+          MOVE      OPMOBAMT,OPMOAMNT
+          RETURN
+.
+RPOPMOP1  MOVE      ZERO,OVRCD
+          READKP    OPRMOPA1;OPMOUNIQ,OPMOTEAM,DOPMOCNT,OPMOCODE:
+                                  OPMOBAMT,OPMOGSTA,OPMOGSTC,OPMOSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOPMOCNT,OPMOCNT
+          MOVE      OPMOBAMT,OPMOAMNT
+          RETURN
+.
+UPOPMOP1  MOVE      OPMOCNT,DOPMOCNT
+          MOVE      OPMOAMNT,OPMOBAMT
+          UPDATE    OPRMOPA1;OPMOUNIQ,OPMOTEAM,DOPMOCNT,OPMOCODE:
+                                  OPMOBAMT,OPMOGSTA,OPMOGSTC,OPMOSPAR
+          RETURN
+.
+WROPMOP1  RESET     KEY13
+          MOVE      OPMOCNT,DOPMOCNT
+          MOVE      OPMOAMNT,OPMOBAMT
+          WRITE     OPRMOPA1,KEY13;OPMOUNIQ,OPMOTEAM,DOPMOCNT,OPMOCODE:
+                                  OPMOBAMT,OPMOGSTA,OPMOGSTC,OPMOSPAR
+          RETURN
+.
+DEOPMOP1  RESET     KEY13
+          DELETE    OPRMOPA1,KEY13
+          RETURN
+.

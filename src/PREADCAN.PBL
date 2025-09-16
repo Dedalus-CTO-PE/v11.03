@@ -1,0 +1,1367 @@
+.*******************************************************************************
+.*                              PREADCAN.PBL                                   *
+.*             Common routines used by PATWEB89 and HL7RECVR                   *
+.*******************************************************************************
+.* Mods:                                                                       *
+.*        V11.00.00 03/12/2020  Davin            TSK 0890602                   *
+.*                  Created common include from PATWEB89.PBL                   *
+.*******************************************************************************
+.------------------------------------------------------------
+. CPADM000 - Cancel Pre-Admission
+. Returns:  EXIT  0 = Ok to continue
+.                 1 = Error
+.------------------------------------------------------------
+.
+CPADM000  OPEN      RCPBNKA1,"rcpbnkaf"
+          OPEN      RCPDTEA6,"rcpdteaf"
+          OPEN      COMDEPA2,"comdepaf"
+.
+          MOVE      ADMISSNO,KEY8
+          CALL      RDMISS1
+          BRANCH    OVRCD,CPADM905
+.
+          CALL      CHKDET00                * Check input details
+          BRANCH    EXIT,CPADM995
+.
+          CALL      DEMRVS1                 * Delete any Med Rec volume links
+          MATCH     "HL7RECVR",PRGID
+          IF        @EQUAL
+            CALL      INTINP00              * Delete interpreter details
+          ELSE
+            CALL      INTDEL00              * Delete interpreter details
+          ENDIF
+          BRANCH    ASTAT,CPADM020:         * pre-admitted
+                          CPADM960:         * admitted
+                          CPADM970:         * discharged
+                          CPADM980:         * on-leave
+                          CPADM990          * cancelled
+          GOTO      CPADM995
+.
+CPADM010  MOVE      AURNO,KEY8
+          CALL      RLPTMAS1                * record found ?
+          BRANCH    OVRCD,CPADM910:         * no
+                          CPADM940          * yes, but already locked
+.
+          BRANCH    PSTAT,CPADM920,CPADM930,CPADM910
+          MOVE      AURNO,PURNO
+          GOTO      CPADM030
+.
+CPADM020  MOVE      AADMNO,KEY8
+          CALL      RDPRAM1
+          BRANCH    OVRCD,CPADM010
+.
+          MOVE      AURNO,PURNO
+.
+CPADM030  MOVE      AADMNO,KEY8
+          CALL      RLPTMIS1                     * record found ?
+          BRANCH    OVRCD,CPADM905:              * no
+                          CPADM950               * yes, but already locked
+.
+          BRANCH    ASTAT,CPADM040:              * pre-admitted
+                          CPADM960:              * admitted
+                          CPADM970:              * discharged
+                          CPADM980:              * on-leave
+                          CPADM990               * cancelled
+          GOTO      CPADM995
+.
+.         Check if patient has any deposits
+.
+CPADM040  MOVE      AADMNO,DAADMNO
+          MOVE      "0",CMDESTAT
+          PACK      KEY26,AADMNO,CMDESTAT,SP70
+          CALL      RSCMDEP2
+CPADM045  CALL      RKCMDEP2
+          BRANCH    OVRCD,CPADM046
+.
+          MATCH     DAADMNO,CMDEADMN
+          GOTO      CPADM046 IF NOT EQUAL
+.
+          MATCH     "0",CMDESTAT
+          GOTO      CPADM975 IF EQUAL       * Deposit held
+.
+          MATCH     "2",CMDESTAT            * Refunded?
+          GOTO      CPADM045 IF EQUAL
+.
+CPADM046  PACK      KEY25,AADMNO,SP70          * unreleased cash
+          CALL      RSRCDTE6
+CPADM047  CALL      RKRCDTE6
+          BRANCH    OVRCD,CPADM050
+.
+          MATCH     DAADMNO,RCDTVIST
+          GOTO      CPADM050 IF NOT EQUAL
+.
+          MATCH     SP70,RCDTRELD               * Unreleased
+          GOTO      CPADM047 IF NOT EQUAL
+.
+          MATCH     SP70,RCDTRELT
+          GOTO      CPADM047 IF NOT EQUAL
+.
+          PACK      KEY12,RCDTRECN,SP70
+          CALL      RDRCBNK1
+          BRANCH    OVRCD,CPADM050
+.
+          MATCH     "1",RCBNSTAT
+          GOTO      CPADM047 IF EQUAL            * Already cancelled
+.
+          GOTO      CPADM976
+.
+CPADM050  MOVE      PTMIS003,ACANCEL
+          MOVE      FIVE,ASTAT
+          CALL      UPLMISS1
+          MOVE      "5",PTUNTYPE
+          MOVE      ADATE,PTUNODTE
+          MOVE      SP70,PTUNHOSP
+          MOVE      SP70,PTUNOPRD
+          CALL      WRUNA000            * write to patunaaf
+          CALL      RMDIS000            * remove disaster details
+.
+          PACK      KEY8,AADMNO,SP70
+          CALL      RAPMCUR1
+          BRANCH    OVRCD,CPADM055
+.
+          CALL      DEPMCUR1
+.
+.         Broadcast message
+.
+CPADM055  CALL      PMIGTNID                * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      EIGHT,HL7TRGID
+          MOVE      SP8,HL7INCLD
+          PROC      DGCLICPA                * DG API Cancel Pre-Admiss *I-90202
+.
+.         delete Adm/Dsch Transfer Dest record if PTCNUADT is ON
+.
+          IF        PTCNUADT=1
+            PACK      KEY8,AADMNO
+            CALL      DEPTDAD1
+          ENDIF
+          MOVE      AADMNO,BKREBOOK
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDBKREC1
+          BRANCH    OVRCD,CPADM058
+.
+          PACK      KEY5,ANSB,ANSK,BKRETYPE,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,CPADM057
+.
+          MATCH     "THE",THCSCOD
+          GOTO      CPADM057 IF NOT EQUAL
+.
+          CALL      THET0000     *   Update oprdetaf status
+          GOTO      CPADM058
+.
+CPADM057  CALL      DOBK0000     *   Process Booking files
+          BRANCH    EXIT,CPADM995
+          CALL      DOWL0000     *   Process Waiting List files
+.
+.         delete claim details
+.
+CPADM058  CALL      DCLM0000
+.
+. Cancel admission special funding arrangement code
+.
+          CALL      DASF0000
+.
+.         Delete event from EOC files
+.
+          IF        PTCNUEOC = 1
+            MOVE      AADMNO,PVIBILL
+            PROC      EOCDELEV
+          ENDIF
+.
+. Cancel Pre-Admission Master details if they exist
+.
+          MATCH     ZEROUR,PURNO
+          GOTO      CPADM060 IF NOT EQUAL
+.
+. zero U/R - delete record from the Surname file
+.
+          MOVE      AADMNO,SAVADMN
+          CALL      DESURN00                * routine in OPRDEA01
+.
+          IF        CBOOK=1
+            MOVE      AADMNO,KEY8
+            CALL      RDBKREC1
+            CLOSE     BOKRC1A1
+            COMPARE   ZERO,OVRCD
+            GOTO      CPADM070 IF EQUAL
+          ENDIF
+.
+          MOVE      AADMNO,KEY8
+          CALL      DEPRAM1
+.
+          MOVE      AADMNO,PVIBILL
+          CALL      DNMP0000                 * Delete Pre-Adm National Id
+          GOTO      CPADM070
+.
+CPADM060  MOVE      PURNO,KEY8
+          CALL      RDMAST1
+.
+. Only change PSTAT to 1 if original PSTAT is non-zero
+. ie....it was a valid U/R and we want to keep it this way
+.
+          IF        PSTAT<>0
+            MOVE      ONE,PSTAT
+          ENDIF
+          CALL      UPMAST1
+.
+CPADM070  MATCH     SP70,SAVTDEPT
+          IF        @EQUAL | @EOS
+            CALL      MHCP0000                 * cancel Mental Health details
+          ELSE
+            REP       " +",URNUMBER
+            REP       " +",ADMISSNO
+            CLEAR     REDIRECT
+            APPEND    "patweb89.pbl?reportno=07&template=003&urnumber=",REDIRECT
+            APPEND    URNUMBER,REDIRECT
+            APPEND    "&admissno=",REDIRECT
+            APPEND    ADMISSNO,REDIRECT
+            RESET     REDIRECT
+            REP       "+ ",URNUMBER
+            REP       "+ ",ADMISSNO
+            MOVE      "9",NEXTPAGE
+          ENDIF
+.
+          CALL      CNBRQ000                 * Cancel bed request
+.
+          CALL      DELBMD00
+          PROC      BBUP0000                 * Bed Board
+          CALL      UNEMR000                 * Clear linked IP visit from ED
+.
+          MATCH     "1",PTCNEPIS
+          IF        @EQUAL
+            MOVE      FOUR,KEY1
+            MOVE      ADMISSNO,KEY8
+            PROC      UPEADSTS             * Update eAdmission Status only
+          ENDIF
+.
+.         we have finished the Cancellation process
+.
+          MOVE      "Patient is now Cancelled.  ",WEBTITLE
+          CALL      UUPTMIS1
+          CALL      UUPTMAS1
+          MOVE      ZERO,EXIT
+          GOTO      CPADM999
+.
+CPADM905  MOVE      "Patient has not been Pre-Admitted. ",WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM910  MOVE      "Patient Master Record is Missing.",WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM920  CLEAR     WEBTITLE
+          APPEND    "U/R Number",WEBTITLE
+          APPEND    PURNO,WEBTITLE
+          APPEND    "has an Associated U/R",WEBTITLE
+          RESET     WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM930  MOVE      "U/R Number has been Cancelled",WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM940  CLEAR     WEBTITLE
+          APPEND    "Patient U/R No. ",WEBTITLE
+          APPEND    AURNO,WEBTITLE
+          APPEND    " Busy on Terminal ",WEBTITLE
+          APPEND    PPORT,WEBTITLE
+          RESET     WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM950  CLEAR     WEBTITLE
+          APPEND    "Patient Admission Busy on Terminal ",WEBTITLE
+          APPEND    APORT,WEBTITLE
+          RESET     WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM960  MOVE      "Patient is Currently Admitted",WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMIS1
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM970  MOVE      "Patient has Already been Discharged.",WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMIS1
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM975  MOVE      "Patient has a Released Receipt",WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMIS1
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM976  MOVE      "Patient has an Unrealeased Receipt",WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMIS1
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM980  MOVE      "Patient is Currently on Leave. ",WEBTITLE
+          CALL      WEBERR00
+          CALL      UUPTMIS1
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM990  MOVE      "Pre-Admission has already been Cancelled",WEBTITLE
+          CALL      WEBERR00
+CPADM995  CALL      UUPTMIS1
+          CALL      UUPTMAS1
+          MOVE      ONE,EXIT
+          GOTO      CPADM999
+.
+CPADM999  CLOSE     RCPDTEA6
+          CLOSE     RCPBNKA1
+          CLOSE     COMDEPA2
+          RETURN
++
+.*******************************************************************************
+. WRUNA000 - Write a record to patunaaf
+.*******************************************************************************
+WRUNA000  OPEN      PATUNAA1,"patunaaf"          * 0890602
+          MOVE      AADMNO,PTUNADMN
+          CALL      IBACLOCK
+          PACK      PTUNDATE,CCC,CYY,CMM,CDD
+          REP       " 0",PTUNDATE
+          MOVE      CTIMEIS,PTUNTIME
+          REP       " 0",PTUNTIME
+          MOVE      USERID,PTUNAUID
+.
+          PACK      PTUNCANC,SP70
+          MATCH     Z70,PTMIS003
+          IF        !@EQUAL
+            PACK      PTUNCANC,PTMIS003,SP70
+          ENDIF
+.
+          MOVE      SP70,PTUNOTTM
+          MOVE      ZERO,PTUNSENT
+          MOVE      SP70,PTUNDTYP           * Discharge status
+.
+          PACK      KEY25,PTUNADMN,PTUNDATE,PTUNTIME,PTUNTYPE,SP70
+          CALL      RDAUNAA1
+          COMPARE   ZERO,OVRCD
+          GOTO      WRUNA999 IF EQUAL
+.
+          CALL      WRUNAA1
+.
+          CLOSE     PATUNAA1
+WRUNA999  RETURN
++
+.------------------------------------------------------------
+. Check if this patient has a EMR Visit  1=visit 0=no visit
+.------------------------------------------------------------
+.
+UNEMR000  PACK      KEY16,URNUMBER,Z70
+          CALL      RSEMVIS3
+UNEMR100  CALL      RPEMVIS3
+          BRANCH    OVRCD,UNEMR999
+.
+          MATCH     URNUMBER,EMVIURNO  * See if its the right patient
+          GOTO      UNEMR999 IF NOT EQUAL
+.
+          MATCH     EMVIPADM,ADMISSNO
+          GOTO      UNEMR100 IF NOT EQUAL
+.
+          MOVE      SP70,EMVIPADM
+          MOVE      SP70,EMVIEWRD
+          CALL      UPEMVIS3
+.
+UNEMR999  RETURN
++
+.-------------------------------------------------------------------------
+.DELBMD00 - Delete old patbmdaf records
+.-------------------------------------------------------------------------
+DELBMD00  MOVE      SP70,SAVEBRQN
+DELBMD10  PACK      KEY30,AADMNO,SP70
+          CALL      RSPTBMD2
+          CALL      RKPTBMD2
+          BRANCH    OVRCD,DELBMD99
+          MATCH     DAADMNO,PTBDADMN
+          GOTO      DELBMD99 IF NOT EQUAL
+          MOVE      PTBDBRQN,SAVEBRQN
+          PACK      KEY30,PTBDADMN,PTBDDATE,PTBDADTM,PTBDWARD,PTBDWBED,PTBDOPPE,SP70
+          CALL      DEPTBMD2
+          GOTO      DELBMD10
+.
+DELBMD99  RETURN
++
+.-----------------------------------------------------------
+. Cancel bed requests for a cancelled admission
+.------------------------------------------------------------
+CNBRQ000  PACK      KEY25,ADMISSNO,SP70
+          CALL      RSPMBRQ2
+CNBRQ100  CALL      RKPMBRQ2                * Read next pmsbrqaf record
+          BRANCH    OVRCD,CNBRQ999          * Exit on EOF
+.
+          MATCH     ADMISSNO,PMBRVISN       * Different visit?
+          GOTO      CNBRQ999 IF NOT EQUAL   * Yes, exit
+.
+          MATCH     " ",PMBRRSTA
+          GOTO      CNBRQ200 IF EQUAL
+.
+          MATCH     "1",PMBRRSTA            * Status Requested?
+          GOTO      CNBRQ200 IF EQUAL       * Yes, set status to Cancelled
+.
+          MATCH     "2",PMBRRSTA            * Status Allocated?
+          GOTO      CNBRQ200 IF EQUAL       * Yes, set status to Cancelled
+.
+          GOTO      CNBRQ100                * No, read next bed request record
+.
+CNBRQ200  MOVE      "4",PMBRRSTA            * Set Cancelled status
+          PACK      DIM8,CCC,CYY,CMM,CDD
+          REP       " 0",DIM8
+          MOVE      DIM8,PMBRCAND           * Set Cancel date
+          CLOCK     TIME,PMBRCANT           * Set Cancel time
+          MOVE      USERID,PMBRCANU         * Set Cancel by
+.
+.         Set cancel reason code if the first acode from Cat cz with
+.         indicator='C', otherwise, default value is blank
+.
+          MOVE      SP70,PMBRCANR
+          PACK      KEY5,CATcz,SP70         * Get Cancel reason code
+          CALL      RDSCODE1
+CNBRQ300  CALL      RDKCODE1                * Read next category code
+          BRANCH    OVRCD,CNBRQ500          * EOF, Cancel bed request
+.
+          MATCH     CATcz,TCODE             * Different category code?
+          GOTO      CNBRQ500 IF NOT EQUAL   * Yes, Cancel bed request
+.
+          MATCH     ANSI,PTCOACTV           * Status is inactive?
+          GOTO      CNBRQ300 IF EQUAL       * Yes, get next category code
+.
+          MATCH     ANSC,TCINDC2            * Cancel indicator?
+          GOTO      CNBRQ300 IF NOT EQUAL   * No, get next category code
+.
+          MOVE      ACODE,PMBRCANR          * Yes, set Cancel reason code
+.
+.         Cancel bed request and clear bed board
+.
+CNBRQ500  CALL      UPPMBRQ2                * Update pmsbrqaf record
+.
+          GOTO      CNBRQ100                * Read next record
+.
+CNBRQ999  RETURN
++
+.------------------------------------------------------------
+. MHCP0000 - Cancel all Mental Health Details for a patient
+. Para's  : AADMNO        admission number
+.------------------------------------------------------------
+.
+MHCP0000  COMPARE   ONE,MHCNUSE
+          GOTO      MHCP9999 IF NOT EQUAL   * not using mental health system
+.
+.         delete MEHVI1FD record
+.
+          MOVE      AADMNO,KEY8
+          CALL      DEMHVIS1
+          MOVE      FOUR,AUDIFLAG           * delete audit
+          CALL      MHAUDVIS                * write audit
+.
+.         delete all MEHDIAFD records
+.
+          PACK      KEY16,AADMNO,SP8
+          CALL      RSMHDIA1
+.
+MHCP1000  CALL      RKMHDIA1
+          BRANCH    OVRCD,MHCP2000          * end of file
+.
+          COMPARE   AADMNO,MHDIADMN
+          GOTO      MHCP2000 IF NOT EQUAL   * different person
+.
+          PACK      KEY16,MHDIADMN,MHDIDATE
+          CALL      DEMHDIA1
+          GOTO      MHCP1000
+.
+.         delete all MEHLEGFD records
+.
+MHCP2000  PACK      KEY21,AADMNO,SP20
+          CALL      RSMHLEG1
+          CALL      RKMHLEG1
+          BRANCH    OVRCD,MHCP3000          * end of file
+.
+          COMPARE   AADMNO,MHLEADMN
+          GOTO      MHCP3000 IF NOT EQUAL   * different person
+.
+          PACK      KEY21,MHLEADMN,MHLEDATE,MHLETIME,SP20
+          CALL      DEMHLEG1
+          GOTO      MHCP2000
+.
+.         delete all MEHCJAFD records
+.
+MHCP3000  PACK      KEY21,AADMNO,SP20
+          CALL      RSMHCJA1
+          CALL      RKMHCJA1
+          BRANCH    OVRCD,MHCP9999          * end of file
+.
+          COMPARE   AADMNO,MHCJADMN
+          GOTO      MHCP9999 IF NOT EQUAL   * different person
+.
+          PACK      KEY21,MHCJADMN,MHCJDATE,MHCJTIME,SP20
+          CALL      DEMHCJA1
+          GOTO      MHCP3000
+.
+MHCP9999  RETURN
++
+.------------------------------------------------------------
+. DNMP0000 - Delete PATPNI record
+.------------------------------------------------------------
+.
+DNMP0000  COMPARE   ZERO,PTCNNMPI            * No link between UR & NMPI
+          GOTO      DNMP9999 IF EQUAL
+.
+          PACK      KEY10,CHOSINDX,PVIBILL
+          CALL      DEPTPNI1                 * Delete record
+.
+DNMP9999  RETURN
++
+.******************************************************************************
+.*                           DESURN00                    Called by : CANREC00 *
+.*            DElete record from SURName file                                 *
+.******************************************************************************
+.
+DESURN00  OPEN      PATGSRN1,"patgsrnf"
+          MOVE      PTMASNAM,GSRSNAM
+          MOVE      PMPXFNAM,GSRGNAM
+          MOVE      PMPXSNAM,PTGSGNM2
+          PACK      KEY115,PURNO,SAVADMN,GSRSNAM,GSRGNAM,PTGSGNM2,PBDATE,PSEX:
+                           SP70,SP70
+          CALL      RAPTGSR1
+          BRANCH    OVRCD,DESURN99
+          CALL      DEPTGSR1
+.
+DESURN99  RETURN
++
+.-------------------------------------------------------------
+. DASF0000 - Cancel admission special funding arrangement code
+.-------------------------------------------------------------
+.
+DASF0000  PACK      KEY25,AADMNO,SP70
+          CALL      RSPTASF1              * Position on & read the admission
+          CALL      RKPTASF1                SFA file
+          BRANCH    OVRCD,DASF9999
+.
+          COMPARE   AADMNO,PTAFADMN
+          GOTO      DASF9999 IF NOT EQUAL * Different admission number
+.
+          PACK      KEY25,PTAFADMN,PTAFTYPE,PTAFDATE,PTAFTIME
+          CALL      DEPTASF1              * Delete the admission SFA file
+          GOTO      DASF0000
+.
+DASF9999  RETURN
++
+.------------------------------------------------------------
+. DOWL0000  :  Do Waiting List processing
+.------------------------------------------------------------
+.
+DOWL0000  COMPARE   ONE,HBWAIT                    * using Waiting Lists ?
+          GOTO      DOWL9999 IF NOT EQUAL
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDBKREC1
+          BRANCH    OVRCD,DOWL9999          * was not booked
+.
+          PACK      KEY19,BKREURNO,BKREPROC,BKRECNT
+          CALL      RDTREA1
+          BRANCH    OVRCD,DOWL9999
+.
+          OPEN      WATTX1A1,"wattx1af"
+          PACK      KEY19,WMURNO,WMCODE,WMCNT,SP70
+          CALL      RDWTTX11
+          BRANCH    OVRCD,DOWL9999
+.
+DOWL3000  CALL      PMIGTNID                * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      THIRTY8,HL7TRGID
+          MOVE      SP8,HL7INCLD
+          PROC      DGCLIWLD                * HL7 A38 - W/L Booking Cancellation
+.
+.         If the W/L record is not being removed, then send an I13 (update)
+.         where the booking is being cancelled.
+.
+          MATCH     CPADM002,ANSN           * returning to W/L ?
+          IF        !@EQUAL
+            CALL      PMIGTNID              * no-get national id for dgate write
+            MOVE      NMPNUMB,PTNINMPI
+            MOVE      SP8,HL7INCLD
+            MOVE      FORTY2,HL7TRGID       * send Update Waiting List
+            PROC      DGCLIUWL
+          ENDIF
+.
+          MATCH     CPADM002,ANSY                    * Yes
+          GOTO      DOWL6000 IF EQUAL
+          MATCH     CPADM002,ANSN                    * No?
+          GOTO      DOWL6000 IF NOT EQUAL
+.
+          MOVE      CPADM003,WMREMOVE            * removal reason
+          CALL      SAVHIS00                     * save history
+          MOVE      CPADM008,WMDATE4             * removal date
+          MOVE      SIX,WMSTAT
+          MOVE      "20",WTWMBSCD                * Booking Status is 'exited'
+          MOVE      ONE,NBRFLAG
+          MOVE      WMDATE3,SAVESCHA
+          MOVE      SP8,WMDATE3
+          CALL      UPTREA1
+.
+          MOVE      SP8,WTTXPATM
+          MOVE      CPADM009,WTTXRTIM            * Removal time
+          CALL      UPWTTX11
+          CLOSE     WATTX1A1
+.
+.         The W/L record is being removed, then send an I14 (delete)
+.         message, where the booking is being cancelled
+.
+          CALL      PMIGTNID                * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      SP8,HL7INCLD
+          MOVE      FORTY3,HL7TRGID         * no - send remove (I14) for W/L
+          PROC      DGCLIRWL                * HL7 - Update Waiting List Entry
+.
+          CALL      GTRSAC00                     * get reason
+          CALL      WRTHIS00                     * write to history
+          CALL      WRCHR000                     * write change audit removal
+.
+          CALL      IBACLOCK
+          PACK      WTENEVDT,CCC,CYY,CMM,CDD   * Write ESIS Intra Episode Record
+          REP       " 0",WTENEVDT
+          PACK      WTENEVAL,BKRECANC
+          MOVE      ANSP,WTENETYP
+          PACK      KEY5,ANSB,ANSC,BKRECANC,SP70
+          CALL      RDCODE1
+          IF        OVRCD<>1
+            MATCH     ANSA,THCSCOD
+            IF        @EQUAL
+              CALL      GETSET00
+              GOTO      DOWL9999
+            ENDIF
+          ENDIF
+          CALL      WSAD0000
+.
+          GOTO      DOWL9999
+.
+DOWL6000  IF        WTCNUSBC = 1
+            MOVE      ONE,WMSTAT                   * Unscheduled
+          ELSE
+            MOVE      NINE,WMSTAT                  * Cancelled Booking
+.
+            PACK      KEY8,WMBOOK,SP70
+            CALL      RDBKRX11                * Read booking extn file
+            BRANCH    OVRCD,DOWL6500,DOWL6500
+.
+            MOVE      CPADM007,BKRXUDF1       * Cancellation reason cat BE
+            MOVE      CPADM007,SAVEBOKC
+            CALL      UPBKRX11                * Update booking extn file
+          ENDIF
+.
+DOWL6500  CALL      SAVHIS00                     * save history
+          MOVE      "05",WTWMBSCD                * Booking Status is 'deferred'
+          MOVE      ONE,NBRFLAG
+          MOVE      WMBOOK,SAVBOOK               * save original booking #
+          MOVE      BKRECANC,SAVEBCAN
+          CALL      GENBOKNO                     * generate booking number
+.
+          PACK      KEY5,ANSW,ANSU,WMUNIT,SP70
+          CALL      RDCODE1
+          IF        OVRCD=0
+            MATCH     "R",TCINDC4
+            IF        @EQUAL
+              MOVE      WMDATE3,SAVESCHA
+              GOTO      DOWL6600
+            ENDIF
+          ENDIF
+.
+          MOVE      WMDATE3,SAVESCHA
+          MOVE      SP8,WMDATE3
+.
+DOWL6600  MOVE      SP70,SAVEBCAN
+          CALL      UPTREA1
+.
+          OPEN      WATTX1A1,"wattx1af"
+          PACK      KEY19,WMURNO,WMCODE,WMCNT,SP70
+          CALL      RDWTTX11
+          IF        OVRCD<>1
+            MOVE      SP8,WTTXPATM
+            CALL      UPWTTX11
+          ENDIF
+          CLOSE     WATTX1A1
+.
+          READ      CONTROLF,SEVENTY9;*120,PTCNUEOC
+          COMPARE   ONE,PTCNUEOC                 * using EOC ?
+          IF        @EQUAL
+            PACK      KEY23,WMURNO,SP70
+            CALL      RSECLNK1                   * position on U/R no.
+DOWL7000    CALL      RKECLNK1                   * read next record
+            BRANCH    OVRCD,DOWL8000             * eof - finished
+.
+            MATCH     WMURNO,ECLNURNO            * same U/R still ?
+            GOTO      DOWL8000 IF NOT EQUAL      * no - finished
+.
+            COMPARE   SAVBOOK,ECLNVISI           * same visit no. ?
+            GOTO      DOWL7000 IF NOT EQUAL      * no - get next record
+            MOVE      WMBOOK,ECLNVISI            * update visit no.
+            CALL      UPECLNK1
+          ENDIF
+.
+DOWL8000  CALL      GTRSAC00                     * get reason
+          CALL      WRTHIS00                     * write to history
+          CALL      WRCHW000                * write change cancel booking
+          MOVE      SP70,SAVEBOKC
+          CALL      SAVHIS00
+.
+DOWL9999  RETURN
++
+.------------------------------------------------------------
+. DOBK0000 - Do some booking processing
+. Returns:  EXIT  0 = Ok to continue
+.                 1 = Error
+.------------------------------------------------------------
+.
+DOBK0000  OPEN      BOKBSTA1,"bokstaaf"          * 0890602
+          OPEN      WATCATA1,"watcataf"
+.
+          COMPARE   ONE,CBOOK
+          GOTO      DOBK9000 IF NOT EQUAL   * not using Booking system
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDBKREC1
+          BRANCH    OVRCD,DOBK9000          * was not booked
+.
+          MOVE      CPADM001,BKRECANC       * booking cancellation reason
+          MOVE      TWO,BKRESTAT            * set status to cancelled
+          CALL      UPBKREC1
+.
+          MOVE      TEN6,HL7TRGID
+          MOVE      SP8,HL7INCLD
+          PROC      DGCLICCB                * DG API Cancel Booking    *I-90202
+.
+. ------ Added 02/06/94 Paul Howells                ------
+. ------ write a record to the Category Change file ------
+.
+          PACK      WTCAEDAT,CCC,CYY,CMM,CDD * Effective Date -Cancellation Date
+          REP       " 0",WTCAEDAT
+          MOVE      BKREURNO,WTCAURNO       * UR Number
+          MOVE      BKREPROC,WTCAPROC       * Procedure Code
+          MOVE      BKRECNT,WTCAPCNT        * Count
+          MOVE      "BC",WTCACATF         * Category (BC)
+          MOVE      SP3,WTCACODF            * Code Changed From
+          MOVE      BKRECANC,WTCACODT       * Code Changed To
+.
+          PACK      KEY29,WTCAEDAT,WTCACATF,WTCAURNO,WTCAPROC,WTCAPCNT
+          CALL      RAWTCAT1                * check if record already exist
+          IF        OVRCD = 0
+            CALL      UPWTCAT1
+          ELSE
+            CALL      WRWTCAT1              * write category change record
+          ENDIF
+.
+          MATCH     SP8,BKREEDAT
+          GOTO      DOBK9000 IF EQUAL        * no date so ignore stats
+.
+DOBK4000  UNPACK    BKREEDAT,CCENT,XYEAR,XMON,XDAY    * exp date
+          PACK      CPTDATE,CCENT,XYEAR,XMON,XDAY     * set up parameter
+          REP       " 0",CPTDATE
+.
+          CALL      GPERD                   * get the period for stats
+          BRANCH    EXIT,DOBK9100           * invalid period
+.
+          PACK      BSDATE,DRGYR,DRGNUM
+          REP       " 0",BSDATE
+.
+          MOVE      BKRETYPE,BSTYPE
+          PACK      KEY9,BSTYPE,BSDATE
+          CALL      RLBKBST1                * record found ?
+          BRANCH    OVRCD,DOBK7000:         * no
+                          DOBK9200          * yes, but already locked
+.
+          ADD       ONE,BSCANCP             * add to number of cancelled
+          CALL      UPBSTA1
+          GOTO      DOBK9000
+.
+. no booking stats record was on file so write a new one
+.
+DOBK7000  MOVE      ONE,BSCANCP
+          MOVE      ZERO,BSUNDLV
+          MOVE      ZERO,BSBOOKS
+          MOVE      ZERO,BSDELVY
+          MOVE      ZERO,BSCANCB
+          MOVE      ZERO,BSADMTS
+          MOVE      ZERO,BSDSCHS
+          MOVE      ZERO,BSDEPOS
+          MOVE      SP70,BSSPARE
+          CALL      WRBSTA1
+.
+DOBK9000  MOVE      ZERO,EXIT
+          GOTO      DOBK9999
+.
+DOBK9100  UNPACK    CPTDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          CLEAR     WEBTITLE
+          APPEND    CPCDATE,WEBTITLE
+          APPEND    " not Found in Period file.",WEBTITLE
+          RESET     WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      DOBK9999
+.
+DOBK9200  CLEAR     WEBTITLE
+          APPEND    "Booking Statistics ",WEBTITLE
+          APPEND    BSTYPE,WEBTITLE
+          APPEND    SLASH,WEBTITLE
+          APPEND    BSDATE,WEBTITLE
+          APPEND    " in use on Terminal ",WEBTITLE
+          APPEND    BSLOCK,WEBTITLE
+          RESET     WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      DOBK9999
+.
+DOBK9999  CLOSE     BOKBSTA1
+          CLOSE     WATCATA1
+          RETURN
++
+.------------------------------------------------------------
+. THET0000 - Theatre booking set to admitted
+.------------------------------------------------------------
+.
+THET0000  COMPARE   ONE,CTHETR
+          GOTO      THET9999 IF NOT EQUAL
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDBKREC1
+          BRANCH    OVRCD,THET9999
+.
+          MATCH     "1",KEEPBKTM
+          GOTO      THET1000 IF EQUAL
+.
+          COMPARE   THREE,PTCNHDPS          * Don't update confirmed admission
+          GOTO      THET0500 IF NOT EQUAL   * for victorian public hospitals
+.
+          COMPARE   ONE,CHOSTYP             * Public
+          GOTO      THET1000 IF EQUAL
+.
+THET0500  MATCH     PTMIS001,Z70
+          IF        !@EQUAL
+            MOVE      PTMIS001,BKREEDAT     * Confirmed admission date
+            REP       " 0",BKREEDAT
+          ENDIF
+.
+          MATCH     PTMIS002,Z70
+          IF        !@EQUAL
+            MOVE      PTMIS002,BKREATIM     * Confirmed admission time
+          ENDIF
+.
+THET1000  IF        BKRESTAT<>TWO
+            LOAD      BKRESTAT,ASTAT,ONE,THREE,FOUR,FOUR,ZERO
+            CALL      UPBKREC1
+          ENDIF
+.
+          PACK      KEY31,AADMNO,SP70
+          CALL      RSOPDEA2
+THET2000  CALL      RKOPDEA2
+          BRANCH    OVRCD,THET9999
+.
+          COMPARE   THREE,OPDASTAT            * cancelled?
+          GOTO      THET2000 IF EQUAL
+.
+          PACK      DIM8,AADMNO,SP70
+          MATCH     DIM8,OPDAADMN
+          GOTO      THET9999 IF NOT EQUAL
+.
+          MOVE     ZERO,F1
+          MOVE     OPDASTAT,F1
+          PACK    SAVKEY31,OPDAADMN,OPDASTAT,OPDADATE,OPDATIME,OPDACLIN,OPDACASE
+          LOAD      OPDASTAT,ASTAT,ONE,TWO,FOUR,TWO,ZERO
+          COMPARE   OPDASTAT,F1
+          IF        @EQUAL
+            GOTO      THET2000    * nothing is changing - ignore
+          ENDIF
+.
+          PACK  KEY31,OPDAADMN,OPDASTAT,OPDADATE,OPDATIME,OPDACLIN,OPDACASE,SP70
+          CALL      RAOPDEA2
+          IF        OVRCD=1
+            PACK      KEY31,SAVKEY31,SP70
+            CALL      RDOPDEA2
+            IF        OVRCD=0
+              LOAD      OPDASTAT,ASTAT,ONE,TWO,FOUR,TWO,ZERO
+.                            * Car 294400. no 'whoddunnit; (disabled  next 5 lines)
+.              CALL      IBACLOCK
+.              PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+.              REP       " 0",OPDAUDAT
+.              CLOCK     TIME,OPDAUTIM
+.              MOVE      WBSEUID,OPDAWEBU
+.
+              MOVE      ZERO,OVRCD
+              TRAP      OVERCOND IF IO
+              CALL      UPOPDEA2
+              TRAPCLR   IO
+.
+              MOVE      TEN1,HL7TRGID
+              MOVE      SP8,HL7INCLD
+              PROC      DGCLIS14                * send update booking message
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,OPDAPROC
+          GOTO      THET3000 IF NOT EQUAL
+.
+          PACK      KEY31,SAVKEY31,SP70
+          CALL      RSOPDEA2
+          GOTO      THET2000
+.
+.         Waiting Lists WMSTAT SET TO 4 AS DISCHARGED
+.
+THET3000  COMPARE   ONE,HBWAIT
+          GOTO      THET4000 IF NOT EQUAL
+.
+          PACK      KEY19,OPDAURNO,OPDAPROC,OPDACONT
+          CALL      RDTREA1
+          BRANCH    OVRCD,THET4000
+.
+          OPEN      WATTX1A1,"wattx1af"
+          PACK      KEY19,WMURNO,WMCODE,WMCNT,SP70
+          CALL      RDWTTX11
+          IF        OVRCD=1
+            CALL      CLWATTX1
+          ENDIF
+          CLOSE     WATTX1A1
+.
+          IF        WMSTAT <= 6
+            MATCH     SP70,ATYPE
+            IF        !@EQUAL
+              CALL      SAVHIS00
+              MOVE      ATYPE,WMPCAT
+              CALL      WRTHIS00
+            ENDIF
+            LOAD      WMSTAT,ASTAT,THREE,FOUR,FIVE,FOUR,TWO
+            CALL      UPTREA1
+            IF        WMSTAT=4
+              IF        UPDATETY<>6
+                CALL      SAVHIS00
+                MOVE      ZERO,NBRFLAG
+                MOVE      "33",WTWMBSCD
+                CALL      UPTREA1
+                MOVE      WMBOOK,SAVEBOOK
+                CALL      WRTHIS00
+                CALL      WRCHA000          * write change audit admission
+              ENDIF
+            ENDIF
+            CALL      PMIGTNID              * get national id for dgate write
+            MOVE      NMPNUMB,PTNINMPI
+            MOVE      FORTY1,HL7TRGID
+            MOVE      SP8,HL7INCLD
+            PROC      DGCLIUWL              * HL7 - Update Waiting List Entry
+          ENDIF
+.
+THET4000  PACK      KEY31,SAVKEY31,SP70
+          CALL      RSOPDEA2
+          GOTO      THET2000
+.
+THET9999  RETURN
++
+.--------------------------------------------------------------
+. CHKDET00 - Check for related booking and waiting list details
+. Returns:   EXIT   0 = Ok to continue
+.                   1 = Error
+.--------------------------------------------------------------
+.
+CHKDET00  BRANCH    CTHETR,CHKDET90
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDBKREC1
+          BRANCH    OVRCD,CHKDET90
+.
+          COMPARE   ZERO,BKRESTAT
+          GOTO      CHKDET90 IF NOT EQUAL
+.
+          MATCH     SP70,CPADM001           * is there booking cancel reason?
+          GOTO      CHKDET91 IF EQUAL       * no - error
+.
+.         Check waiting list details
+.
+          PACK      KEY19,BKREURNO,BKREPROC,BKRECNT
+          CALL      RDTREA1
+          BRANCH    OVRCD,CHKDET90
+.
+          MATCH     SP70,CPADM002           * check if returning to W/L entered?
+          GOTO      CHKDET92 IF EQUAL       * no - error
+.
+          MATCH     SP70,CPADM003           * check for removal reason
+          GOTO      CHKDET93 IF EQUAL       * no - error
+.
+CHKDET90  MOVE      ZERO,EXIT
+          GOTO      CHKDET99
+.
+CHKDET91  MOVE      "Please Enter a Booking Cancellation Reason",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      CHKDET99
+.
+CHKDET92  MOVE      "Please Enter Option for Returning to Waiting List",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      CHKDET99
+.
+CHKDET93  MOVE      "Please Enter Removal Reason",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      CHKDET99
+.
+CHKDET99  RETURN
++
+.------------------------------------------------------------
+. Write WL Field Change Audit for admission
+.------------------------------------------------------------
+WRCHA000  OPEN      WATCHAA1,"watchaaf"
+.
+          PACK      WTCHURNO,WMURNO,SP70
+          PACK      WTCHPROC,WMCODE,SP70
+          PACK      WTCHPCNT,WMCNT,SP70
+.
+          CALL      IBACLOCK
+          PACK      WTCHDATE,CCC,CYY,CMM,CDD
+          REPLACE   " 0",WTCHDATE
+          CLOCK     TIME,WTCHTIME
+.
+          PACK      WTCHUPTY,ZERO,THREE,SP70
+          PACK      WTCHREAS,SP70
+          MOVE      USERID,WTCHUSID
+          PACK      WTCHOVAL,ADATE,ATIME,SP70
+          PACK      WTCHCVAL,SP70
+.
+          PACK      KEY35,WTCHURNO,WTCHPROC,WTCHPCNT,WTCHDATE,WTCHTIME,SP70
+          CALL      RDWTCHA1
+          IF        OVRCD=1
+            CALL      WRWTCHA1
+          ENDIF
+.
+          CLOSE     WATCHAA1
+.
+WRCHA999  RETURN
++
+.------------------------------------------------------------
+. GTRSAC00 - Get Reason
+.------------------------------------------------------------
+.
+GTRSAC00  COMPARE   ONE,PTCNURHA       * check if using rha booking system
+          GOTO      GTRSAC90 IF NOT EQUAL
+.
+. ------- check if Sched Adm Date has changed ----------------
+.
+          MOVE      SAVERDT3,SAVERCSD
+          MATCH     SAVESCHA,WMDATE3
+          GOTO      GTRSAC90 IF EQUAL
+.
+          MOVE      SP10,SAVERDT3
+          MATCH     SAVEDAT3,WMDATE3
+          GOTO      GTRSAC90 IF EQUAL
+.
+          MOVE      CPADM004,SAVERDT3
+          MATCH     SAVERCSD,SAVERDT3
+          IF        !@EQUAL
+            MOVE      ONE,NBRFLAG
+          ENDIF
+.
+GTRSAC90  MOVE      ZERO,EXIT
+.
+GTRSAC99  RETURN
++
+.******************************************************************************
+.*                                 GETSET00                                   *
+.*     Write delete for watesnaf if cancelling without informing the patient  *
+.******************************************************************************
+GETSET00  COMPARE   THREE,PTCNHDPS           * If not VIC - exit
+          GOTO      GETSET99 IF NOT EQUAL
+.
+          PACK      KEY36,WTWMECNT,ANSS,OPDAUNIQ,SP70
+          CALL      RSWTESN5
+          CALL      RKWTESN5
+          BRANCH    OVRCD,GETSET99
+.
+          MATCH     WTENUNIQ,WTWMECNT
+          GOTO      GETSET99 IF NOT EQUAL
+.
+          MATCH     ANSS,WTENETYP
+          GOTO      GETSET99 IF NOT EQUAL
+.
+          MATCH     OPDAUNIQ,WTENSADI
+          GOTO      GETSET99 IF NOT EQUAL
+.
+          MATCH     SP70,WTENEDAT
+          IF        @EQUAL
+            PACK      KEY36,WTENUNIQ,WTENETYP,WTENSADI,WTENEVDT,WTENEDAT,SP70
+            CALL      DEWTESN5
+            GOTO      GETSET99
+          ENDIF
+.
+          MOVE      DELESN,WTENEVAL
+          MOVE      SP70,WTENEDAT
+          PACK      WTENWEBC,USERID
+          CALL      IBACLOCK
+          PACK      WTENCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",WTENCDAT
+          CLOCK     TIME,WTENCTIM
+          REP       " 0",WTENCTIM
+          PACK      WTENWEBU,SP70
+          PACK      WTENUDAT,SP70
+          PACK      WTENUTIM,SP70
+          MOVE      ZERO,WTENMANU
+.
+          PACK      KEY36,WTENUNIQ,WTENETYP,WTENEVDT,WTENEDAT,WTENSADI,SP70
+          CALL      RAWTESN1
+          IF        OVRCD=1
+            CALL      WRWTESN1
+          ENDIF
+.
+GETSET99  RETURN
++
+.------------------------------------------------------------
+. Write WL Field Change Audit for cancel pre adm WL removal
+.------------------------------------------------------------
+WRCHR000  OPEN      WATCHAA1,"watchaaf"
+.
+          PACK      WTCHURNO,WMURNO,SP70
+          PACK      WTCHPROC,WMCODE,SP70
+          PACK      WTCHPCNT,WMCNT,SP70
+.
+          CALL      IBACLOCK
+          PACK      WTCHDATE,CCC,CYY,CMM,CDD
+          REPLACE   " 0",WTCHDATE
+          CLOCK     TIME,WTCHTIME
+.
+          PACK      WTCHUPTY,ZERO,FIVE,SP70
+          PACK      WTCHREAS,WMREMOVE,SP70
+          MOVE      USERID,WTCHUSID
+          PACK      WTCHOVAL,SP70
+          PACK      WTCHCVAL,WMDATE4,WTTXRTIM,SP70
+.
+          MOVE      ZERO,ADDSECND
+.
+WRCHR200  PACK      KEY35,WTCHURNO,WTCHPROC,WTCHPCNT,WTCHDATE,WTCHTIME,SP70
+          CALL      RAWTCHA1
+          IF        OVRCD=1
+            CALL      WRWTCHA1
+          ELSE
+            IF        ADDSECND<=5
+              ADD       ONE,ADDSECND
+            ELSE
+              GOTO      WRCHR900
+            ENDIF
+.
+            UNPACK    WTCHTIME,HOURD,D1,MIN,D1,SEC
+            PACK      XDATTIME,WTCHDATE,HOURD,MIN,SEC,SP70
+            CALL      ASEC0000                     * add 1 sec to date/time
+                                                   * to stop duplicate key
+            UNPACK    XDATTIME,WTCHDATE,HOURD,MIN,SEC
+            PACK      WTCHTIME,HOURD,COLON,MIN,COLON,SEC
+            GOTO      WRCHR200
+          ENDIF
+.
+WRCHR900  CLOSE     WATCHAA1
+.
+WRCHR999  RETURN
++
+.------------------------------------------------------------
+. Write WL Field Change Audit for cancel booking
+.------------------------------------------------------------
+WRCHW000  OPEN      WATCHAA1,"watchaaf"
+.
+          PACK      WTCHURNO,WMURNO,SP70
+          PACK      WTCHPROC,WMCODE,SP70
+          PACK      WTCHPCNT,WMCNT,SP70
+.
+          CALL      IBACLOCK
+          PACK      WTCHDATE,CCC,CYY,CMM,CDD
+          REPLACE   " 0",WTCHDATE
+          CLOCK     TIME,WTCHTIME
+.
+          PACK      WTCHUPTY,TEN6,SP70
+.
+          PACK      WTCHREAS,BKRECANC,SP70
+.
+          MOVE      USERID,WTCHUSID
+          PACK      WTCHOVAL,BKREEDAT,BKREATIM,SP70
+          PACK      WTCHCVAL,SP70
+.
+          MOVE      ZERO,ADDSECND
+.
+WRCHW200  PACK      KEY35,WTCHURNO,WTCHPROC,WTCHPCNT,WTCHDATE,WTCHTIME,SP70
+          CALL      RAWTCHA1
+          IF        OVRCD=1
+            CALL      WRWTCHA1
+          ELSE
+            IF        ADDSECND<=5
+              ADD       ONE,ADDSECND
+            ELSE
+              GOTO      WRCHW900
+            ENDIF
+.
+            UNPACK    WTCHTIME,HOURD,D1,MIN,D1,SEC
+            PACK      XDATTIME,WTCHDATE,HOURD,MIN,SEC,SP70
+            CALL      ASEC0000                     * add 1 sec to date/time
+                                                   * to stop duplicate key
+            UNPACK    XDATTIME,WTCHDATE,HOURD,MIN,SEC
+            PACK      WTCHTIME,HOURD,COLON,MIN,COLON,SEC
+            GOTO      WRCHW200
+          ENDIF
+.
+WRCHW900  CLOSE     WATCHAA1
+.
+WRCHW999  RETURN
++
+.*****************************************************************************
+.*                            ASEC0000                                       *
+.*               Add one second to date/time                                 *
+.* Requires: XDATTIME - Date/time value (ccyymmddhhmmss)                     *
+.* Returns : XDATTIME - Date/time value (ccyymmddhhmmss) incremented by 1 sec*
+.*****************************************************************************
+ASEC0000  UNPACK    XDATTIME,DIM8,HOURTM,MINTIME,SECTIME
+          MATCH     "59",SECTIME
+          IF        !@EQUAL
+            MOVE      SECTIME,FORM2              * just increment seconds
+            ADD       ONE,FORM2
+            MOVE      FORM2,SECTIME
+            REP       " 0",SECTIME
+            PACK      XDATTIME,DIM8,HOURTM,MINTIME,SECTIME
+            GOTO      ASEC9999
+          ENDIF
+.
+.         The seconds were "59", so reset these to "00" and increment the
+.         minutes
+.
+          MOVE      "00",SECTIME
+          MATCH     "59",MINTIME
+          IF        !@EQUAL
+            MOVE      MINTIME,FORM2              * just increment minutes
+            ADD       ONE,FORM2
+            MOVE      FORM2,MINTIME
+            REP       " 0",MINTIME
+            PACK      XDATTIME,DIM8,HOURTM,MINTIME,SECTIME
+            GOTO      ASEC9999
+          ENDIF
+.
+.         The minutes were "59", so reset these to "00" and increment the
+.         hours
+.
+          MOVE      "00",SECTIME
+          MOVE      "00",MINTIME
+          MATCH     "23",HOURTM
+          IF        !@EQUAL
+            MOVE      HOURTM,FORM2              * just increment hours
+            ADD       ONE,FORM2
+            MOVE      FORM2,HOURTM
+            REP       " 0",HOURTM
+            PACK      XDATTIME,DIM8,HOURTM,MINTIME,SECTIME
+            GOTO      ASEC9999
+          ENDIF
+.
+.         The hours were "59", so reset these to "00" and increment the
+.         date
+.
+          MOVE      "00",SECTIME
+          MOVE      "00",MINTIME
+          MOVE      "00",HOURTM
+.
+.         We need to increment the date by 1 day
+.
+          UNPACK    DIM8,CCENT,CYEAR,CMON,CDAY
+          MOVE      CCENT,CC
+          MOVE      CYEAR,YY
+          MOVE      CMON,MM
+          MOVE      CDAY,DD
+          CALL      DMYCON                       * get julian day
+          ADD       ONE,JULDAY                   * increment julian day
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON                       * get new date
+          PACK      XDATTIME,CC,YY,MM,DD,ZERO6
+          REP       " 0",XDATTIME
+.
+ASEC9999  RETURN
++
+.------------------------------------------------------------------------
+. Write ESIS SAD record
+.------------------------------------------------------------------------
+WSAD0000  READ      CONTROLF,EIGHTY;*250,PTCNHDPS
+          COMPARE   THREE,PTCNHDPS
+          GOTO      WSAD9999 IF NOT EQUAL
+.
+          PACK      WTENUNIQ,WTWMECNT,SP70
+          PACK      WTENEDAT,SP70
+          PACK      WTENWEBC,USERID,SP70
+          CALL      IBACLOCK
+          PACK      WTENCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",WTENCDAT
+          CLOCK     TIME,WTENCTIM
+          REP       " 0",WTENCTIM
+          PACK      WTENWEBU,SP70
+          PACK      WTENUDAT,SP70
+          PACK      WTENUTIM,SP70
+          MOVE      ZERO,WTENMANU
+.
+          PACK      KEY26,WTENUNIQ,WTENETYP,WTENEVDT,WTENEDAT,SP70
+          CALL      RAWTESN1
+          IF        OVRCD=1
+            CALL      WRWTESN1
+          ELSE
+            CALL      UPWTESN1
+          ENDIF
+.
+WSAD9999  RETURN
++
+.-------------------------------------------------------------------
+. DCLM0000 - Delete any claim details associated with this admission
+.-------------------------------------------------------------------
+.
+DCLM0000  MATCH     "1",PTCNXCOM
+          GOTO      DCLM9999 IF EQUAL  * Using Extra Compensable
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDWCOM1
+          COMPARE   ZERO,OVRCD
+          CALL      DEWCOM1 IF EQUAL
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDPMWX11
+          COMPARE   ZERO,OVRCD
+          CALL      DEPMWX11 IF EQUAL
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDWMAB1
+          COMPARE   ZERO,OVRCD
+          CALL      DEWMAB1 IF EQUAL
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDWVET1
+          COMPARE   ZERO,OVRCD
+          CALL      DEWVET1 IF EQUAL
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDPMCTC1
+          COMPARE   ZERO,OVRCD
+          CALL      DEPMCTC1 IF EQUAL
+.
+DCLM9999  RETURN
++

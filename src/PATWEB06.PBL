@@ -1,0 +1,231 @@
+.----------------------------------------------------------------------
+. Program       : PATWEB06
+.
+. Function      : Modify Available Beds - Background Processing
+.                 This program monitors the Bed Closure Details file (pmsbdcaf)
+.                 for any unprocessed rows that are now due for processing.
+.                 All records that are due for processing are processed - i.e
+.                 Beds are opened and closed as required on Ward/Bed file
+.                 (patwr1af) and Bed Closure Details file (pmsbdcaf).
+.
+. Modifications : 
+. V10.03.01 16/07/2013  Jill Parkinson CAR 287923
+.           Added include of PATCONFD
+.         V9.03.02  01/10/2003 Sylvek Litewka CAR 43834
+.                   Changed position of label MAIN0250 to begin at statement
+.                   packing the key and removed label MAIN0550 (loop starts 
+.                   at MAIN0500 instead of MAIN0550).
+.         V9.03.01  30/09/2003 Sylvek Litewka CAR 43834
+.                   Modified to set the 'Update User ID' field on Ward/Bed file
+.                   (patwr1af.PTWDUPID) only if it is not equal to "PATWEB06".
+.         V9.03.00  10/09/2003 Sylvek Litewka CAR 41826
+.                   Created Program.
+.----------------------------------------------------------------------
+          INC       IBAWEBDF    
+.
+          INC       PATCONFD/INC
+          INC       PATWR1FD/INC
+          INC       PMSBDCFD/INC
+.
+PROCFLAG  DIM       1
+CURRDATE  DIM       8
+CURRTIME  DIM       8
+SAVEWARD  DIM       3
+SAVEBED   DIM       3
+SAVEUPID  DIM       10
+SAVKEY22  DIM       22   
+.
+PRGID     INIT      "PATWEB06"
+VERSION   INIT      "V11.03.00"
+PRGNAM    INIT      "Mod Available Beds - Background Processing"
+.
+.
+MAIN0000  CALL      WEBINT00       * Initialise Fifo Etc.
+.
+          CALL      INIT0000       * Open Files
+.
+MAIN0100  COMMIT
+.
+          BEGIN
+          DISPLAY   *W5                * Wait 5 seconds
+.
+MAIN0200  CALL      SETVAR00           * Set variables
+.
+.         Find all past records with unprocessed closure to details
+.         (i.e. all beds that should be now opened).
+.
+MAIN0250  PACK      KEY39,PROCFLAG,CURRDATE,CURRTIME,Z70
+          CALL      RSPMBDC3
+          CALL      RPPMBDC3           * Read bed to be opened
+          BRANCH    OVRCD,MAIN0500     * Not found, process beds to be closed
+          CALL      OPEN0000           * Open this bed 
+          COMMIT
+          BEGIN
+          GOTO      MAIN0250           * Get next record
+.
+.         Find all past records with unprocessed closure from details
+.         (i.e. all beds that should be now closed).
+.
+MAIN0500  PACK      KEY23,PROCFLAG,CURRDATE,CURRTIME,Z70
+          CALL      RSPMBDC2
+          CALL      RPPMBDC2           * Read bed to be closed
+          BRANCH    OVRCD,MAIN0100     * Not found, go to start
+          CALL      CLSE0000           * Close this bed 
+          COMMIT
+          BEGIN
+          GOTO      MAIN0500           * Get next record
+.
+MAIN9999  MOVE      "SERVER SHUTDOWN COMPLETE",WEBTITLE
+          CALL      WEBERR00
+          STOP
+.------------------------------------------------------------
+. Open Files and Initialize Variables
+.------------------------------------------------------------
+INIT0000  OPEN      PMSBDCA1,"pmsbdcaf"
+          OPEN      PMSBDCA2,"pmsbdcaf"
+          OPEN      PMSBDCA3,"pmsbdcaf"
+          OPEN      PATWR1A1,"patwr1af"
+.
+          RETURN
+.
+.------------------------------------------------------------
+. Clear Parameters
+.------------------------------------------------------------
+CLRPAR00  RETURN
+.
+.------------------------------------------------------------
+. Set Parameters
+.------------------------------------------------------------
+SETPAR00  RETURN
+.
+.------------------------------------------------------------
+. Process Fields 
+.------------------------------------------------------------
+PROFLD00  RETURN
+.
+.------------------------------------------------------------
+. Set Variables
+.------------------------------------------------------------
+SETVAR00  CALL      IBACLOCK
+          CLOCK     TIME,CTIMEIS
+.
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      CTIMEIS,CURRTIME
+.
+          MOVE      ZERO,PROCFLAG
+.          
+SETVAR99  RETURN
+.
+.------------------------------------------------------------
+. Open Bed
+.------------------------------------------------------------
+OPEN0000  MOVE      PMBCWARD,SAVEWARD
+          MOVE      PMBCBED,SAVEBED
+          MOVE      PMBCUPID,SAVEUPID
+.
+          PACK      KEY22,PMBCWARD,PMBCBED,PMBCFRDT,PMBCFRTM,SP70
+          MOVE      KEY22,SAVKEY22
+          CALL      RDPMBDC1
+          BRANCH    OVRCD,OPEN9999
+.
+.         Check whether the row found in MAIN0250 is no longer valid (i.e. 
+.         is there a row for this Ward/Bed with greater 'Closure From'
+.         Date/Time that have already been processed. If such a row is found,
+.         then row found in MAIN0250 is no longer valid and is set as
+.         processed.
+.
+OPEN0100  CALL      RKPMBDC1                * Get next row for this Ward/Bed
+          BRANCH    OVRCD,OPEN0500          * No next record, open this bed
+          MATCH     PMBCWARD,SAVEWARD       * Same Ward?
+          GOTO      OPEN0500 IF NOT EQUAL   * No, open this bed 
+          MATCH     PMBCBED,SAVEBED         * Same Bed?
+          GOTO      OPEN0500 IF NOT EQUAL   * No, open this bed 
+.
+          MATCH     "1",PMBCFRPR            * Is 'Closure From' processed?
+          GOTO      OPEN0900 IF EQUAL       * Yes, only mark as processed
+          MATCH     "1",PMBCTOPR            * Is 'Closure To' processed
+          GOTO      OPEN0900 IF EQUAL       * Yes, only mark as processed
+.
+.         The Bed Closure record found in MAIN0250 is a valid record.
+.         This record is therefore processed by changing the Bed status
+.         on the Ward/Bed file to 'Open'.
+.         
+OPEN0500  PACK      KEY6,SAVEWARD,SAVEBED,SP70
+          CALL      RDWARD1                  * Read Ward/Bed file
+          BRANCH    OVRCD,OPEN0900
+.
+          MOVE      ZERO,PTWDBDST            * Set Bed Status to Open
+          MOVE      SP70,PTWDRBSC            * Clear reason for bed closure
+          MOVE      CURRDATE,PTWDUPDT        * Set update date
+          MOVE      CURRTIME,PTWDUPTM        * Set update time
+.
+.         Set Update User ID if it is not equal to "PATWEB06".
+.
+          MATCH     PRGID,SAVEUPID           
+          IF        !@EQUAL
+            MOVE      SAVEUPID,PTWDUPID      * Set update user id
+          ENDIF
+.
+          CALL      UPWARD1                  * Update Bed details
+.         
+.         Mark Bed Closure record found in MAIN0250 as processed
+.
+OPEN0900  MOVE      SAVKEY22,KEY22
+          CALL      RDPMBDC1
+          BRANCH    OVRCD,OPEN9999
+.
+          MOVE      ONE,PMBCFRPR            * Set 'Closure From' to Processed
+          MOVE      ONE,PMBCTOPR            * Set 'Closure To' to Processed
+          MOVE      CURRDATE,PMBCUPDT       * Set update date
+          MOVE      CURRTIME,PMBCUPTM       * Set update time
+          MOVE      PRGID,PMBCUPID          * Set update user id
+.
+          CALL      UPPMBDC1                * Update Bed Closure record
+.
+OPEN9999  RETURN
+.
+.------------------------------------------------------------
+. Close Bed
+.------------------------------------------------------------
+CLSE0000  PACK      SAVKEY22,PMBCWARD,PMBCBED,PMBCFRDT,PMBCFRTM,SP70
+          PACK      KEY6,PMBCWARD,PMBCBED,SP70
+          CALL      RDWARD1
+          BRANCH    OVRCD,CLSE0500
+.
+          MOVE      ONE,PTWDBDST             * Set Bed Status to Closed
+          MOVE      PMBCREAS,PTWDRBSC        * Set reason for bed closure
+          MOVE      CURRDATE,PTWDUPDT        * Set update date
+          MOVE      CURRTIME,PTWDUPTM        * Set update time
+.
+.         Set Update User ID if it is not equal to "PATWEB06".
+.
+          MATCH     PRGID,PMBCUPID           
+          IF        !@EQUAL
+            MOVE      PMBCUPID,PTWDUPID      * Set update user id
+          ENDIF
+.
+          CALL      UPWARD1
+.
+.         Mark Bed Closure record found in MAIN0500 as processed for 
+.         "Closure From" details only.
+.
+CLSE0500  MOVE      SAVKEY22,KEY22
+          CALL      RDPMBDC1
+          BRANCH    OVRCD,CLSE9999
+.
+          MOVE      ONE,PMBCFRPR            * Set "Closure From" to processed
+          MOVE      CURRDATE,PMBCUPDT       * Set update date
+          MOVE      CURRTIME,PMBCUPTM       * Set update time
+          MOVE      PRGID,PMBCUPID          * Set update user id
+.
+          CALL      UPPMBDC1                * Update Bed Closure record
+.
+CLSE9999  RETURN
+.
++
+          INC       IBAWEBCD
+.
+          INC       PATWR1IO/INC 
+          INC       PMSBDCIO/INC 
+.

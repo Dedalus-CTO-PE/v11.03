@@ -1,0 +1,861 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   CCAUPLOD                                                    *
+.* Desc      :   Interface Program to upload ICD coding and DRG details from *
+.*               CCA into webPAS.                                            *
+.*****************************************************************************
+.* Date      :   30/09/2015                                                  *
+.* Author    :   Davin Sloan                                                 *
+.* Function  :   This program will read the file provided by CCA and upload  *
+.*               the patient coding and drg details into webPAS for valid    *
+.*               patients.                                                   *
+.* Mods      :                                                               *
+.*****************************************************************************
+.* V10.08.01     12/04/2016  Don Nguyen        TSK 0815300                   *
+.*               Changed size of CCACCLCD to 11 chars to cater for ECCS val  *
+.*               Added processing for PTPGECRW (ECCS RAW Format)             *
+.* V10.07.05     18/12/2015  Davin             CAR 316612                    *
+.*               Set prefix to 'X' if DRG driver (PTEDDRGD or PTEODRGD) = X  *
+.* V10.07.04     03/12/2015  Davin             CAR 316612                    *
+.*               Change disease type to CMDISC if onset type=2 (not CCCL)    *
+.*               Changed KEY116 to KEY24 for mrtcieaf (VERR0000)             *
+.* V10.07.03     24/11/2015  Davin             CAR 316612                    *
+.*               Mods to set disease code type as CMDISC if CCCL=2 (wdiag000)*
+.* V10.07.02     18/11/2015  Davin             CAR 316612                    *
+.*               Mods to validation of header and morphology codes (vdiag000)*
+.* V10.07.01     26/10/2015  Davin             CAR 316612                    *
+.*               Save pathname to mrcefnam when writing error (verr0000)     *
+.* V10.07.00     30/09/2015  Davin             CAR 316612                    *
+.*               Created program                                             *
+.*****************************************************************************
+.
+          INC       STD002FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       MRTCIEFD/INC
+          INC       MRTCONFD/INC
+          INC       PATCONFD/INC
+          INC       PATDGWFD/INC
+          INC       PATDSCFD/INC
+          INC       PATECDFD/INC
+          INC       PATECOFD/INC
+          INC       PATECMFD/INC
+          INC       PATICDFD/INC
+          INC       PATICOFD/INC
+          INC       PATMI1FD/INC
+          INC       PATPGRFD/INC
+          INC       PMSVX1FD/INC
+          INC       WEBSECFD/INC
+.
+.         CCA Exported file layout - ccauplod.txt
+.
+CCAUPLD1  FILE      HL7, FIXED=4000         * Pipe delimited export file
+.                                             4096 is maximum
+.
+.         Fields must be pipe delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+CCAURNUM  DIM       8       1     * UR Number (used in validation)
+CCASURNM  DIM      20       9     * Surname   (used in validation)
+CCAGIVNM  DIM      25      29     * Given Name(used in validation)
+CCADOBTH  DIM       8      54     * DOB       (used in validation)
+CCAVISNO  DIM       8      62     * Visit No. (used in validation)
+CCAADATE  DIM       8      70     * Adm.Date  (used in validation)
+CCASDATE  DIM       8      78     * Sep.Date  (used in validation)
+.
+CCADIAGC  DIM      10[50]  86     * Diagnosis Code (patecdaf)
+CCACCCLV  DIM       1[50]  586    * Diagnosis CC Class Level (patecdaf)
+CCADRGDD  DIM       1[50]  636    * Diagnosis DRG Driver (patecdaf)
+.
+CCAPROCC  DIM       9[50]  686    * Procedure Code (patecoaf)
+CCADRGDO  DIM       1[50]  1136   * Procedure DRG Driver (patecoaf)
+CCAODATE  DIM       8[50]  1186   * Procedure Date (patecoaf)
+CCASTIME  DIM       4[50]  1586   * Procedure Start Time (patecoaf)
+CCAETIME  DIM       4[50]  1836   * Procedure End Time (patecoaf)
+.
+CCAUSRID  DIM      10      2086   * User ID
+.
+CCADRGCD  DIM       4[9]   2096   * DRG Code (9 versions:4.1-8.0)
+CCAMDCCD  DIM       4[9]   2132   * MDC Code (9 versions:4.1-8.0)
+CCACCLCD  DIM      11[9]   2168   * PCCL Code (9 versions:4.1-8.0)
+.
+. End of Record            2267 (+ pipe delimiters)
+.
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CCACOUNT  FORM      8             * input file array counter
+CURRDATE  DIM       8             * current date
+.
+ERORDESC  DIM       200
+ERORFLAG  FORM      1             * Field Validation Error Flag
+.                                     0 = No Errors on Field Validations
+.                                     1 = Errors on Field Validations
+.
+CCAFNAME  DIM       40            * name for CCA interface file
+FORM10    FORM      10
+.
+PATHNAME  DIM       100           * path for CCA interface file
+.
+TMPSTRNG  DIM       8             * Temporary string (max field length)
+.
+VCHKFLAG  FORM      1             * Validation flag
+.                                     0 = writing data to database
+.                                     1 = only validating import data file
+.
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+DGV41     INIT      "041"
+DGV42     INIT      "042"
+DGV50     INIT      "050"
+DGV51     INIT      "051"
+DGV52     INIT      "052"
+DGV60     INIT      "060"
+DGV62     INIT      "062"
+DGV70     INIT      "070"
+DGV80     INIT      "080"
+DASH      INIT      "-"
+PIPE      INIT      "|"
+.
+.
+PRGID     INIT      "CCAUPLOD"
+PRGNAM    INIT      "CCA Coding and DRG Upload"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      SETX0000               * Setup common variables
+          CALL      INIT0000               * initialisation and open files
+          BRANCH    EXIT,MAIN9999          * not using CCA interface
+.
+          CALL      OPEN0000               * open upload file
+          BRANCH    EXIT,MAIN9999          * file not found
+.
+MAIN2000  CALL      UPLD0000               * process upload
+.
+MAIN9999  STOP
++
+.*****************************************************************************
+.*                                INIT0000                                   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          OPEN      CONTROLF,"controlf"
+.
+          READ      CONTROLF,TEN;*37,CMOPRT,*235,CMDISP,*236,CMDISS:
+                                 *237,CMDISC,*238,CMDISA
+          READ      CONTROLF,EIGHTY;*250,PTCNHDPS
+          READ      CONTROLF,NINTY7;*145,MRCNGRUP,*184,MRCNCCAP
+          READ      CONTROLF,HUND05;*147,CMDISM
+.
+          COMPARE   TWO,MRCNGRUP
+          GOTO      INIT9500 IF NOT EQUAL        * using CCA interface?
+.
+          OPEN      PATDGWA1,"patdgwaf"
+          OPEN      PATDSCH1,"patdschf"
+          OPEN      PATECDA1,"patecdaf"
+          OPEN      PATECOA1,"patecoaf"
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PATPGRA1,"patpgraf"
+          OPEN      PMSVX1A1,"pmsvx1af"
+          OPEN      WEBSECA1,"websecaf"
+.
+          CALL      OPICD1
+          CALL      OPICO1
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      MRTCIEA1,"mrtcieaf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,INIT9500
+.
+          MOVE      ONE,CNOUNDLN
+.
+INIT9000  MOVE      ZERO,EXIT
+          GOTO      INIT9999
+.
+INIT9500  MOVE      ONE,EXIT
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                            POUT0000                                       *
+.*            Pad out all the record fields with spaces given that we        *
+.*            are dealing with pipe delimited records                        *
+.*****************************************************************************
+POUT0000  PACK      CCAURNUM,CCAURNUM,SP70
+          RJUSTIFY  CCAURNUM
+.
+          PACK      CCASURNM,CCASURNM,SP70
+          PACK      CCAGIVNM,CCAGIVNM,SP70
+          PACK      CCADOBTH,CCADOBTH,SP70
+          PACK      CCAVISNO,CCAVISNO,SP70
+          RJUSTIFY  CCAVISNO
+.
+          PACK      CCAADATE,CCAADATE,SP70
+          UNPACK    CCAADATE,CDAY,CMON,CCENT,CYEAR
+          PACK      CCAADATE,CCENT,CYEAR,CMON,CDAY
+          PACK      CCASDATE,CCASDATE,SP70
+          UNPACK    CCASDATE,CDAY,CMON,CCENT,CYEAR
+          PACK      CCASDATE,CCENT,CYEAR,CMON,CDAY
+.
+          MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 50
+            ADD       ONE,CCACOUNT
+            PACK      CCADIAGC[CCACOUNT],CCADIAGC[CCACOUNT],SP70
+            PACK      CCACCCLV[CCACOUNT],CCACCCLV[CCACOUNT],SP70
+            PACK      CCADRGDD[CCACOUNT],CCADRGDD[CCACOUNT],SP70
+.
+            PACK      CCAPROCC[CCACOUNT],CCAPROCC[CCACOUNT],SP70
+            PACK      CCADRGDO[CCACOUNT],CCADRGDO[CCACOUNT],SP70
+            PACK      CCAODATE[CCACOUNT],CCAODATE[CCACOUNT],SP70
+            PACK      CCASTIME[CCACOUNT],CCASTIME[CCACOUNT],SP70
+            PACK      CCAETIME[CCACOUNT],CCAETIME[CCACOUNT],SP70
+          DO
+.
+          PACK      CCAUSRID,CCAUSRID,SP70
+.
+          MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 9
+            ADD       ONE,CCACOUNT
+            PACK      CCADRGCD[CCACOUNT],CCADRGCD[CCACOUNT],SP70
+            PACK      CCAMDCCD[CCACOUNT],CCAMDCCD[CCACOUNT],SP70
+            PACK      CCACCLCD[CCACOUNT],CCACCLCD[CCACOUNT],SP70
+          DO
+.
+POUT9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000                                    *
+.*                        Open CCA upload file                               *
+.*****************************************************************************
+OPEN0000  DISPLAY   *P1:10,*EL,"CCA Interface Path: ",MRCNCCAP
+          STRIP     MRCNCCAP
+.davvy    KEYIN     *P1:11,*EL,"Filename: ",CCAFNAME;
+.davvy    PACK      PATHNAME,MRCNCCAP,CCAFNAME
+.davvy    PACK      PATHNAME,CCAFNAME
+          KEYIN     *P1:11,*EL,"Filename: ",PATHNAME
+          STRIP     PATHNAME
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      CCAUPLD1,PATHNAME
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,"CCA input file not found.  ";
+.davvy    CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.******************************************************************************
+.*                                  UPLD0000                                  *
+.*                  Process the PMI upload file records                       *
+.******************************************************************************
+.
+UPLD0000  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+.         Load CCA upload file data
+.
+UPLD1000  READ      CCAUPLD1,SEQ;CCAURNUM,CCASURNM,CCAGIVNM,CCADOBTH,CCAVISNO:
+                                 CCAADATE,CCASDATE;
+.
+          MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 50
+            ADD       ONE,CCACOUNT
+            READ      CCAUPLD1,SEQ;CCADIAGC[CCACOUNT]:
+                                   CCACCCLV[CCACOUNT]:
+                                   CCADRGDD[CCACOUNT];
+          DO
+.
+          MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 50
+            ADD       ONE,CCACOUNT
+            READ      CCAUPLD1,SEQ;CCAPROCC[CCACOUNT]:
+                                   CCADRGDO[CCACOUNT]:
+                                   CCAODATE[CCACOUNT]:
+                                   CCASTIME[CCACOUNT]:
+                                   CCAETIME[CCACOUNT];
+          DO
+.
+          READ      CCAUPLD1,SEQ;CCAUSRID;
+.
+          MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 9
+            ADD       ONE,CCACOUNT
+            READ      CCAUPLD1,SEQ;CCADRGCD[CCACOUNT]:
+                                   CCAMDCCD[CCACOUNT]:
+                                   CCACCLCD[CCACOUNT];
+          DO
+.
+          CALL      POUT0000                     * pad out fields with spaces
+.
+          CALL      VALD0000                     * validate input fields
+          BRANCH    EXIT,UPLD9000                * errors on validation
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          MOVE      CCASDATE,ICDRDDTE            * initialise coding date
+          CALL      CDIAG000                     * clear patecdaf
+          CALL      CPROC000                     * clear patecoaf
+          CALL      CGRPR000                     * clear patpgraf
+          CALL      WDIAG000                     * write to patecdaf
+          CALL      WPROC000                     * write to patecoaf
+          CALL      WGRPR000                     * patpgraf/patmi1af/patdschf
+          CALL      WECMB000                     * write to patecmaf
+.
+.         Upload completed
+.
+UPLD9000  DISPLAY   *P1:24,*EL,"Upload complete.  ";
+.davvy    CALL      HITENTER
+.
+UPLD9999  RETURN
++
+.******************************************************************************
+.*                                  CDIAG000                                  *
+.*                    Clear all the patecdaf records                          *
+.******************************************************************************
+CDIAG000  PACK      KEY13,CCAVISNO,SP70
+          CALL      RSPTECD1
+          CALL      RKPTECD1
+          BRANCH    OVRCD,CDIAG999
+.
+          MATCH     CCAVISNO,DPTEDADM
+          GOTO      CDIAG999 IF NOT EQUAL
+.
+          PACK      KEY13,PTEDADMN,PTEDEPNO,PTEDCNT,SP70
+          CALL      DEPTECD1
+          GOTO      CDIAG000
+.
+CDIAG999  RETURN
++
+.******************************************************************************
+.*                                  WDIAG000                                  *
+.*                       Load the diagnoses into patecdaf                     *
+.******************************************************************************
+WDIAG000  MOVE      CCAVISNO,PTEDADMN
+          MOVE      ONE,PTEDEPNO
+          MOVE      SP70,PTEDOPER
+          MOVE      SP70,PTEDACDT
+          MOVE      CURRDATE,PTEDDTCD
+          MOVE      CTIMEIS,PTEDTIME
+          MOVE      CCAUSRID,PTEDUSID
+          MOVE      SP70,PTEDSPAR
+          MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 50
+            ADD       ONE,CCACOUNT
+            MATCH     SP70,CCADIAGC[CCACOUNT]
+            GOTO      WDIAG999 IF EQUAL
+.
+            MOVE      CCACOUNT,PTEDCNT
+            MOVE      CCACOUNT,PTEDUNQN
+.
+            UNPACK    CCADIAGC[CCACOUNT],ANS,D3,D2,D4
+.davvy      CMATCH    ANSM,D3
+            MATCH     SP70,D4
+            IF        !@EQUAL
+              PACK      PTEDCODE,D3,D2,SLASH,D4  * morphology
+            ELSE
+              PACK      PTEDCODE,D3,DOT,D2,D4
+              MATCH     SP70,D2
+              IF        @EQUAL
+                PACK      PTEDCODE,D3,SP70
+              ENDIF
+            ENDIF
+.
+            MOVE      CMDISA,PTEDTYPE
+            MOVE      ANS,PTEDOSET
+            MATCH     "2",PTEDOSET
+            IF        @EQUAL
+              MOVE      CMDISC,PTEDTYPE          * complication
+            ENDIF
+            IF        CCACOUNT=1
+              MOVE      CMDISP,PTEDTYPE          * primary
+            ENDIF
+            PACK      PTEDDESC,SP70,SP70,SP70
+            PACK      KEY9,PTEDCODE,SP70
+            CALL      RDPTICD1
+            IF        OVRCD<>1
+              MOVE      PT0DDSC2,PTEDDESC
+              MATCH     "4",PT0DACRQ
+              IF        @EQUAL
+                MOVE      CMDISM,PTEDTYPE        * Morphology
+              ENDIF
+            ENDIF
+            MOVE      CCACCCLV[CCACOUNT],PTEDCCCL
+            MOVE      CCADRGDD[CCACOUNT],PTEDDRGD
+            MATCH     "X",PTEDDRGD
+            IF        @EQUAL
+              MOVE      "X",PTEDTYPE                  * exclusion
+            ENDIF
+.
+            PACK      KEY13,PTEDADMN,PTEDEPNO,PTEDCNT,SP70
+            CALL      RAPTECD1
+            IF        OVRCD=1
+              CALL      WRPTECD1
+            ENDIF
+          DO
+WDIAG999  RETURN
++
+.******************************************************************************
+.*                                  CPROC000                                  *
+.*                    Clear all the patecoaf records                          *
+.******************************************************************************
+CPROC000  PACK      KEY13,CCAVISNO,SP70
+          CALL      RSPTECO1
+          CALL      RKPTECO1
+          BRANCH    OVRCD,CPROC999
+.
+          MATCH     CCAVISNO,DPTEOADM
+          GOTO      CPROC999 IF NOT EQUAL
+.
+          PACK      KEY13,PTEOADMN,PTEOEPNO,PTEOCNT,SP70
+          CALL      DEPTECO1
+          GOTO      CPROC000
+.
+CPROC999  RETURN
++
+.******************************************************************************
+.*                                  WPROC000                                  *
+.*                       Load the procedures into patecoaf                    *
+.******************************************************************************
+WPROC000  MOVE      CCAVISNO,PTEOADMN
+          MOVE      ONE,PTEOEPNO
+          MOVE      CMOPRT,PTEOTYPE
+          MOVE      SP70,PTEOOPER
+          MOVE      SP70,PTEOCLIN
+          MOVE      CURRDATE,PTEODTCD
+          MOVE      CTIMEIS,PTEOTIME
+          MOVE      CCAUSRID,PTEOUSID
+          MOVE      SP70,PTEOSPAR
+          MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 50
+            ADD       ONE,CCACOUNT
+            MATCH     SP70,CCAPROCC[CCACOUNT]
+            GOTO      WPROC999 IF EQUAL
+.
+            MOVE      CCACOUNT,PTEOCNT
+            MOVE      CCACOUNT,PTEOUNQN
+            UNPACK    CCAPROCC[CCACOUNT],D5,D4
+            PACK      PTEOCODE,D5,DASH,D4
+            PACK      PTEODESC,SP70,SP70,SP70
+            PACK      KEY9,PTEOCODE,SP70
+            CALL      RDPTICO1
+            IF        OVRCD<>1
+              MOVE      PT0ODSC2,PTEODESC
+            ENDIF
+            MOVE      CCADRGDO[CCACOUNT],PTEODRGD
+            UNPACK    CCAODATE[CCACOUNT],CDAY,CMON,CCENT,CYEAR
+            PACK      PTEODATE,CCENT,CYEAR,CMON,CDAY
+            UNPACK    CCASTIME[CCACOUNT],D2,DIM2
+            MATCH     SP70,D2
+            IF        !@EQUAL
+              PACK      PTEOSTTM,D2,COLON,DIM2
+            ELSE
+              PACK      PTEOSTTM,SP70
+            ENDIF
+            UNPACK    CCAETIME[CCACOUNT],D2,DIM2
+            MATCH     SP70,D2
+            IF        !@EQUAL
+              PACK      PTEOEDTM,D2,COLON,DIM2
+            ELSE
+              PACK      PTEOEDTM,SP70
+            ENDIF
+            MATCH     "X",PTEODRGD
+            IF        @EQUAL
+              MOVE      "X",PTEOTYPE                  * exclusion
+            ENDIF
+.
+            PACK      KEY13,PTEOADMN,PTEOEPNO,PTEOCNT,SP70
+            CALL      RAPTECO1
+            IF        OVRCD=1
+              CALL      WRPTECO1
+            ENDIF
+          DO
+WPROC999  RETURN
++
+.******************************************************************************
+.*                                  CGRPR000                                  *
+.*                    Clear all the patpgraf records                          *
+.******************************************************************************
+CGRPR000  PACK      KEY13,CCAVISNO,SP70
+          CALL      RSPTPGR1
+          CALL      RKPTPGR1
+          BRANCH    OVRCD,CGRPR999
+.
+          MATCH     CCAVISNO,DPTPGADM
+          GOTO      CGRPR999 IF NOT EQUAL
+.
+          PACK      KEY13,PTPGADMN,PTPGEPNO,PTPGGPVR,SP70
+          CALL      DEPTPGR1
+          GOTO      CGRPR000
+.
+CGRPR999  RETURN
++
+.******************************************************************************
+.*                                  WGRPR000                                  *
+.*                       Load the DRGs/MDCs into patpgraf                     *
+.******************************************************************************
+WGRPR000  PACK      KEY8,CCAVISNO,SP70
+          CALL      RDMISS1
+          BRANCH    OVRCD,WGRPR999               * must have an admission
+.
+          MOVE      CURRDATE,ACODDTE             * coding complete date
+          CALL      UPMISS1
+.
+          PACK      KEY8,CCAVISNO,SP70
+          CALL      RDDSCH1
+          BRANCH    OVRCD,WGRPR999               * must be discharged
+.
+          MOVE      CCAVISNO,PTPGADMN
+          MOVE      ONE,PTPGEPNO
+          MOVE      SP70,PTPGSPAR
+          MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 9
+            ADD       ONE,CCACOUNT
+            MATCH     SP70,CCADRGCD[CCACOUNT]
+            IF        !@EQUAL
+              LOAD      PTPGGPVR,CCACOUNT,DGV41,DGV42,DGV50,DGV51,DGV52:
+                                          DGV60,DGV62,DGV70,DGV80
+.
+              MOVE      CCADRGCD[CCACOUNT],PTPGNDRG
+              MOVE      CCAMDCCD[CCACOUNT],PTPGNMDC
+              MOVE      ZERO,PTPGNWGT
+              MOVE      ZERO,PTPGNALS
+.
+              MOVE      CCADRGCD[CCACOUNT],PTPGSDRG
+              MOVE      CCAMDCCD[CCACOUNT],PTPGSMDC
+              MOVE      ZERO,PTPGSWGT
+              MOVE      ZERO,PTPGSALS
+.
+              MOVE      CCADRGCD[CCACOUNT],PTPGLDRG
+              MOVE      CCAMDCCD[CCACOUNT],PTPGLMDC
+              MOVE      ZERO,PTPGLWGT
+              MOVE      ZERO,PTPGLALS
+.
+              IF        CCACOUNT = 9
+                MOVE      CCACCLCD[CCACOUNT],PTPGECRW      * ECCS (DRG 8.0 only)
+                LJUSTIFY  PTPGECRW
+              ELSE
+                MOVE      CCACCLCD[CCACOUNT],PTPGPCCL      * PCCL
+              ENDIF
+.
+              MOVE      ZERO,PTPGWFIX
+              MOVE      ZERO,PTPGWVAR
+              MOVE      ZERO,PTPGWTOL
+              MOVE      ZERO,PTPGWWTU
+              MOVE      SP70,PTPGWWTD
+.
+              PACK      KEY13,PTPGADMN,PTPGEPNO,PTPGGPVR,SP70
+              CALL      RAPTPGR1
+              IF        OVRCD=1
+                CALL      WRPTPGR1
+              ENDIF
+.
+              MOVE      PTPGSDRG,PTDSDDRG        * discharge DRG
+              MOVE      PTPGSMDC,PTDSDMDC        * discharge MDC
+              MOVE      PTPGGPVR,PTDSVOGU        * discharge DRG version
+              MOVE      PTPGPCCL,PTDSSIDX        * discharge DRG severity index
+            ENDIF
+          DO
+          CALL      UPDSCH1                      * update discharge DRG/MDC
+WGRPR999  RETURN
++
+.******************************************************************************
+.*                                  WECMB000                                  *
+.*                   Update The Episode Morbidity Changes File                *
+.******************************************************************************
+WECMB000  IF        PTCNHDPS = 6
+            OPEN      PATECMA1,"patecmaf"
+            MOVE      SP1,CKYIDEF1            * 1st record flag - default
+            CALL      WTECM000         * Write a record of eps changes (WA)
+            GOTO      WECMB999
+          ENDIF
+.
+          COMPARE   THREE,PTCNHDPS          * State Indicator
+          GOTO      WECMB999 IF NOT EQUAL   * Not Using Morbidity Changes File
+.
+          OPEN      PATECMA1,"patecmaf"
+          MOVE      SP1,CKYIDEF1            * 1st record flag - default
+          UNPACK    CURRDATE,CKYIDEF6
+.
+          PACK      KEY18,CCAVISNO,SP1,ONE,SP70
+WECMB100  CALL      RSPTECM1                * Position on & read an episode
+WECMB200  CALL      RKPTECM1                * morbidity changes file record
+          BRANCH    OVRCD,WECMB300
+.
+          MATCH     CCAVISNO,DPTEMADM
+          GOTO      WECMB300 IF NOT EQUAL   * Different admin no
+.
+          COMPARE   ONE,PTEMEPNO
+          GOTO      WECMB300 IF NOT EQUAL   * Different Episode no
+.
+          UNPACK    PTEMCDTE,KEY6
+          MATCH     CKYIDEF6,KEY6
+          GOTO      WECMB200 IF NOT EQUAL   * Different change month
+.
+          PACK      KEY18,PTEMADMN,PTEMEPNO,PTEMCDTE
+          CALL      DEPTECM1                * Delete an eps morb change file rec
+          MOVE      ANSC,CKYIDEF1           * 1st record flag - changed
+.
+          GOTO      WECMB100
+.
+WECMB300  CALL      WTECM000         * Write a record of eps changes (VIC)
+.
+WECMB999  RETURN
++
+.******************************************************************************
+.*                                  WTECM000                                  *
+.*                  Write A Record To The Episode Changes File                *
+.******************************************************************************
+WTECM000  PACK      KEY18,CCAVISNO,SP1,ONE,CURRDATE,SP70
+          CALL      RAPTECM1                * Read An Eps Morb Change File Rec
+          COMPARE   ZERO,OVRCD
+          GOTO      WTECM999 IF EQUAL       * Record already there
+.
+          MOVE      CCAVISNO,PTEMADMN
+          MOVE      ONE,PTEMEPNO
+          MOVE      CURRDATE,PTEMCDTE
+          MOVE      CKYIDEF1,PTEMNEWF
+          PACK      PTEMSPAR,SP20
+.
+          PACK      KEY18,PTEMADMN,PTEMEPNO,PTEMCDTE
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO        * Trap to stop I * D
+          CALL      WRPTECM1              * Write an eps morb change file rec
+          TRAPCLR   IO
+          BRANCH    OVRCD,WTECM999
+.
+WTECM999  RETURN
++
+.*****************************************************************************
+.*                            VALD0000                                       *
+.*                    Validate CCA fields                                    *
+.* Returns:  EXIT - 0 = no validation errors                                 *
+.*                  1 = validation errors                                    *
+.*****************************************************************************
+VALD0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          PACK      KEY8,CCAVISNO,SP70
+          CALL      RDMISS1
+          COMPARE   ZERO,OVRCD
+          GOTO      VALD0100 IF EQUAL
+.
+VALD0050  MOVE      "Visit Number mismatch ",ERORDESC
+          CALL      VERR0000
+          GOTO      VALD9000
+.
+VALD0100  MATCH     CCAURNUM,AURNO
+          GOTO      VALD0200 IF EQUAL
+.
+VALD0150  MOVE      "UR Number mismatch ",ERORDESC
+          CALL      VERR0000
+          GOTO      VALD9000
+.
+VALD0200  MATCH     CCAADATE,ADATE
+          GOTO      VALD0300 IF EQUAL
+.
+VALD0250  MOVE      "Admission Date mismatch ",ERORDESC
+          CALL      VERR0000
+          GOTO      VALD9000
+.
+VALD0300  PACK      KEY8,CCAVISNO,SP70
+          CALL      RDDSCH1
+          IF        OVRCD<>0
+            MOVE      "Patient not Discharged ",ERORDESC
+            CALL      VERR0000
+            GOTO      VALD9000
+          ENDIF
+.
+          MATCH     CCASDATE,DDATE
+          GOTO      VALD0400 IF EQUAL
+.
+VALD0350  MOVE      "Discharge Date mismatch ",ERORDESC
+          CALL      VERR0000
+          GOTO      VALD9000
+.
+VALD0400  PACK      KEY10,CCAUSRID,SP70
+          CALL      RDWBSE1
+          IF        OVRCD<>0
+            MOVE      "User-id does not match webPAS User table ",ERORDESC
+            CALL      VERR0000
+            GOTO      VALD9000
+          ENDIF
+.
+VALD0500  MOVE      CCASDATE,ICDRDDTE            * initialise coding date
+          CALL      VDIAG000                     * validate diagnoses
+          BRANCH    EXIT,VALD9000                * errors on validation
+.
+          CALL      VPROC000                     * validate procedures
+          BRANCH    EXIT,VALD9000                * errors on validation
+.
+          CALL      VDRGC000                     * validate drg codes
+          BRANCH    EXIT,VALD9000                * errors on validation
+.
+VALD9000  BRANCH    ERORFLAG,VALD9100            * errors on validation
+.
+          MOVE      ZERO,EXIT                    * no errors on validation
+          GOTO      VALD9999
+.
+VALD9100  MOVE      ONE,EXIT                     * errors on validation
+.
+VALD9999  RETURN
++
+.*****************************************************************************
+.*                            VDIAG000                                       *
+.*                    Validate diagnosis codes                               *
+.*****************************************************************************
+VDIAG000  MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 50
+            ADD       ONE,CCACOUNT
+            MATCH     SP70,CCADIAGC[CCACOUNT]
+            GOTO      VDIAG900 IF EQUAL
+.
+            UNPACK    CCADIAGC[CCACOUNT],ANS,D3,D2,D4
+.davvy      CMATCH    ANSM,D3
+            MATCH     SP70,D4
+            IF        !@EQUAL
+              PACK      D9,D3,D2,SLASH,D4             * morphology
+            ELSE
+              PACK      D9,D3,DOT,D2,D4
+              MATCH     SP70,D2
+              IF        @EQUAL
+                PACK      D9,D3,SP70
+              ENDIF
+            ENDIF
+.
+            PACK      KEY9,D9,SP70
+            CALL      RDPTICD1
+            IF        OVRCD=1
+              MOVE      "Diagnosis Code [",ERORDESC
+              ENDSET    ERORDESC
+              SQUEEZE   KEY9
+              APPEND    KEY9,ERORDESC
+              APPEND    "] does not match webPAS ICD table ",ERORDESC
+              RESET     ERORDESC
+              CALL      VERR0000
+              GOTO      VDIAG910
+            ENDIF
+          DO
+VDIAG900  MOVE      ZERO,EXIT                    * no errors on validation
+          GOTO      VDIAG999
+.
+VDIAG910  MOVE      ONE,EXIT                     * errors on validation
+VDIAG999  RETURN
++
+.*****************************************************************************
+.*                            VPROC000                                       *
+.*                    Validate procedure codes                               *
+.*****************************************************************************
+VPROC000  MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 50
+            ADD       ONE,CCACOUNT
+            MATCH     SP70,CCAPROCC[CCACOUNT]
+            GOTO      VPROC900 IF EQUAL
+.
+            UNPACK    CCAPROCC[CCACOUNT],D5,D4
+            PACK      D9,D5,DASH,D4
+.
+            PACK      KEY9,D9,SP70
+            CALL      RDPTICO1
+            IF        OVRCD=1
+              MOVE      "Procedure Code does not match webPAS ICD table ",ERORDESC
+              CALL      VERR0000
+              GOTO      VPROC910
+            ENDIF
+          DO
+VPROC900  MOVE      ZERO,EXIT                    * no errors on validation
+          GOTO      VPROC999
+.
+VPROC910  MOVE      ONE,EXIT                     * errors on validation
+VPROC999  RETURN
++
+.*****************************************************************************
+.*                            VDRGC000                                       *
+.*                       Validate DRG codes                                  *
+.*****************************************************************************
+VDRGC000  MOVE      ZERO,CCACOUNT
+          WHILE     CCACOUNT < 9
+            ADD       ONE,CCACOUNT
+            MATCH     SP70,CCADRGCD[CCACOUNT]
+            IF        !@EQUAL
+              LOAD      D3,CCACOUNT,DGV41,DGV42,DGV50,DGV51,DGV52:
+                                    DGV60,DGV62,DGV70,DGV80
+.
+              PACK      KEY7,CCADRGCD[CCACOUNT],D3
+              CALL      RDPTDGW1
+              IF        OVRCD=1
+                MOVE      "DRG Code does not match webPAS DRG table ",ERORDESC
+                CALL      VERR0000
+                GOTO      VDRGC910
+              ENDIF
+            ENDIF
+          DO
+VDRGC900  MOVE      ZERO,EXIT                    * no errors on validation
+          GOTO      VDRGC999
+.
+VDRGC910  MOVE      ONE,EXIT                     * errors on validation
+VDRGC999  RETURN
++
+.*****************************************************************************
+.*                            VERR0000                                       *
+.*                    Process field error                                    *
+.*****************************************************************************
+VERR0000  MOVE      CURRDATE,MRCEDATE            * Date File Received
+          MOVE      CTIMEIS,MRCETIME             * Time File Received
+          MOVE      CCAURNUM,MRCEURNO            * UR Number
+          MOVE      CCAVISNO,MRCEVISN            * Visit Number
+.davvy    MOVE      CCAFNAME,MRCEFNAM            * Input File Name
+          MOVE      PATHNAME,MRCEFNAM            * Input File Name
+          MOVE      ERORDESC,MRCEERRM            * Error Message
+          MOVE      SP70,MRCEPROC                * Error Processed (1=yes)
+          MOVE      SP70,MRCEUFAP                * User ID Flagged as Processed
+          MOVE      SP70,MRCEDFAP                * Date Flagged as Processed
+          MOVE      SP70,MRCETFAP                * Time Flagged as Processed
+          MOVE      SP70,MRCESPAR                * Date File Received
+.
+          PACK      KEY24,MRCEDATE,MRCETIME,MRCEVISN,SP70
+          CALL      RAMRCIE1
+          IF        OVRCD=1
+            CALL      WRMRCIE1                   * write interface error
+          ENDIF
+.
+          MOVE      ONE,ERORFLAG                 * set number error flag
+.
+VERR9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD002IO
+.
+          INC       MRTCIEIO/INC
+          INC       PATDGWIO/INC
+          INC       PATDSCIO/INC
+          INC       PATECDIO/INC
+          INC       PATECOIO/INC
+          INC       PATECMIO/INC
+          INC       PATICDIO/INC
+          INC       PATICOIO/INC
+          INC       PATMI1IO/INC
+          INC       PATPGRIO/INC
+          INC       PMSVX1IO/INC
+          INC       WEBSECIO/INC

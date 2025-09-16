@@ -1,0 +1,238 @@
+.
+. ******************************************************************************
+.* System         : Patient Billing                                           *
+.* Include Name   : ISBITEMS.PBL                                              *
+.* Author         : J.Tan                                                     *
+.* Date           : 14/02/2014                                                *
+.* Function       : Routine to update to be invoiced items for                *
+.*                  Independence Services Billing         CAR 297139          *
+.*                                                                            *
+.* Requires       : AADMNO   - Admission Number                               *
+.*                                                                            *
+.* Modification   :                                                           *
+.*        V10.13.03 23/10/2018  Tracey Nguyen  TSK 0859743                    *
+.*                  Added PMMIHOSI - Hopsital Indicator on PMSMTIFD           *
+.*        V10.13.02 19/09/2018  J.Tan          TSK 0863727                    *
+.*                  Added Restrictive Override code                           *
+.*        V10.13.01 21/08/2017  J.Tan        TSK 0859742                      *
+.*                  Added ECLIPSE new fields from pmsmtiaf                    *
+.*        V10.11.01 31/08/2017  J.Tan            TSK 0837479                  *
+.*                  Added PMMICTYP - Consumption Type                         *
+.*                                                                            *
+. ******************************************************************************
+
+ISBITEMS
+ISBI0000 TRAP       OVERCOND IF IO
+         OPEN       PMSPBRA1,"pmspbraf"
+         TRAPCLR    IO
+         BRANCH     OVRCD,ISBI9999
+.
+         PACK       KEY22,DIPADMNO,SP70
+         CALL       RSPMPBR1
+         CALL       RKPMPBR1
+         BRANCH     OVRCD,ISBI9999
+         MATCH      DIPADMNO,PMPBADMN          * Same admission?
+         GOTO       ISBI9999 IF NOT EQUAL
+.
+         CALL       AREG0000                   * Add items of regimes
+.
+ISBI9999 RETURN
++
+.-----------------------------------------------------------------------
+.  Add items of the Regime for Independent Service Billing
+.-----------------------------------------------------------------------
+AREG0000  MOVE      IPADMNO,KEY8
+          CALL      RDMISS1
+          BRANCH    OVRCD,AREG9999
+.
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      ALACDTE,FROMDATE
+          MOVE      CURRDATE,TODATE
+          REP       " 0",TODATE
+          IF        ASTAT=3
+            CALL      RDDSCH1
+            BRANCH    OVRCD,AREG9999
+            MOVE      DDATE,TODATE
+          ENDIF
+          MOVE      ZERO,NBRDAYS
+          DAYSEP    FROMDATE,TODATE,NBRDAYS * LOS include leaves
+          COMPARE   ZERO,NBRDAYS
+          GOTO      AREG9999 IF EQUAL
+.
+.         Write all items of Regime with correct quantity
+.
+          OPEN      PATRGMA1,"patrgmaf"
+          OPEN      PMSREGA1,"pmsregaf"
+          PACK      KEY10,DIPADMNO,SP70   * get regime code
+          CALL      RSPTRGM1
+          CALL      RKPTRGM1
+          BRANCH    OVRCD,AREG9999
+          MATCH     DIPADMNO,PTRGADMN
+          GOTO      AREG9999 IF NOT EQUAL
+.
+          CALL      DCLM0000              * get default claim code
+.
+          PACK      KEY13,PTRGREGM,SP70
+          CALL      RSPMREG1
+AREG2000  CALL      RKPMREG1
+          BRANCH    OVRCD,AREG8000
+.
+          MATCH     PTRGREGM,PMREREGM
+          GOTO      AREG8000 IF NOT EQUAL      * different regime
+          MATCH     "1",PMREITYP
+          GOTO      AREG2000 IF NOT EQUAL
+.
+          CALL      DITM0000                   * Delete item
+.
+          CALL      AITM0000                   * Add item with updated quantity
+          GOTO      AREG2000                   * next item
+.
+AREG8000  MOVE      ZERO,EXIT
+AREG9999  RETURN
++
+.------------------------------------------------------------
+.         Delete item
+.------------------------------------------------------------
+DITM0000  MOVE      "3",PMMIRTYP
+          PACK      KEY15,DIPADMNO,PMMIRTYP,SP70
+          CALL      RSPMMTI2
+DITM1000  CALL      RKPMMTI2
+          BRANCH    OVRCD,DITM9999
+.
+          MATCH     DIPADMNO,PMMIVISN       * Same visit number?
+          GOTO      DITM9999 IF NOT EQUAL
+          MATCH     "3",PMMIRTYP
+          GOTO      DITM9999 IF NOT EQUAL
+.
+          MATCH     PMMIITEM,PMREITMN
+          GOTO      DITM1000 IF NOT EQUAL   * try next record
+          MATCH     "1",PMMIINCT
+          GOTO      DITM1000 IF NOT EQUAL   * Item not from Regime
+.
+          PACK      KEY15,PMMIVISN,PMMIRTYP,PMMITRAN,SP70
+          CALL      DEPMMTI2
+          GOTO      DITM1000
+.
+DITM9999  RETURN
++
+.------------------------------------------------------------
+.         Add item with quantity equals to curent LOS
+.------------------------------------------------------------
+AITM0000  MOVE      ZERO,EXIT
+          MOVE      ALACDTE,PMMITDAT      *  Use the ALACDTE as Item date
+          REP       " 0",PMMITDAT
+          MOVE      PMMITDAT,MISCDATE
+          MOVE      PMREITMN,PMMIITEM
+          MOVE      PMMIITEM,MCHARGE
+          CALL      GETMSC00            * Get the new misc. charge
+          BRANCH    EXIT,AITM9999
+.
+          MOVE      DIPADMNO,KEY8
+AITM4000  CALL      TRVISA1               * Get the next transaction number
+          MOVE      PVITRAN,PMMITRAN
+.
+          PACK      KEY14,DIPADMNO,PMMITRAN
+          CALL      RAPMMTI1
+          COMPARE   ZERO,OVRCD
+          GOTO      AITM4000 IF EQUAL
+.
+          MOVE      DIPADMNO,PMMIVISN
+          MOVE      AURNO,PMMIURNO
+          MOVE      " 3",PMMISYST
+          MOVE      THREE,PMMIRTYP
+          MOVE      NBRDAYS,PMMISERV
+.
+          MOVE      ZERO,PMMIGSTM
+          UNPACK    SP70,PMMIDESC,PMMIDES2
+          MOVE      ZERO,PMMIAMTG
+          MOVE      ZERO,PMMIAMTH
+.
+          MOVE      PTMCGSTA,PMMIGSTA
+          MOVE      PTMCGSTC,PMMIGSTC
+          MOVE      MDESC,PMMIDESC
+          MOVE      MITMTYP,PMMIRTYP
+          MOVE      MMSCGRP,PMMIMGRP
+          MOVE      MPATPOR,PMMIAMTP
+          MOVE      MHFPOR,PMMIRBAT
+.
+          MOVE      PMMIAMTP,PMMIAMTT
+          ADD       PMMIRBAT,PMMIAMTT
+          MULT      PMMISERV,PMMIAMTT
+          MOVE      ONE,PMMIINVN
+.
+          UNPACK    SP70,PMMIBTCH,PMMIMVBR,PMMIUNIQ,PMMICNTR,PMMISUNQ:
+                         PMMITDOC,PMMIODOC
+          UNPACK    SP70,PMMIINCT,PMMISUBN,PMMIEDAD,PMMISVTM,PMMICCON
+          UNPACK    SP70,PMMIITYP,PMMIREFN,PMMISESS
+          MOVE      SP70,PMMICTYP
+          PACK      PMMIACOI,SP70       * After Care Override Indicator
+          PACK      PMMIDSOV,SP70       * Duplicate Service Override
+          PACK      PMMISTXT,SP70       * Service Text
+          PACK      PMMILSPN,SP70       * Location Specific Practice No(LSPN)
+          PACK      PMMIMPOV,SP70       * Multi Procedure Override
+          PACK      PMMINMPT,SP70       * Number of Patients Seen
+          PACK      PMMISDCD,SP70       * Self Deem Code (Cat Sd)
+          PACK      PMMITDUR,SP70       * Time Duration (Mins)
+          PACK      PMMIROVR,SP70       * Restricted Override Code (Cat Ro)
+          PACK      PMMIHOSI,SP70       * Hospital Indicator         *T0859743
+          MOVE      "1",PMMIINCT          * flag Item from Regime
+.
+          MOVE      ZERO,PMMISCHF
+          PACK      PMMIDUPD,CCC,CYY,CMM,CDD
+          REP       " 0",PMMIDUPD
+          CALL      IBACLOCK
+          MOVE      CTIMEIS,PMMITUPD
+          PACK      PMMIWUSR,PASSCODE,SP70        * User id
+          PACK      PMMISPAR,SP70,SP70
+.
+          PACK      KEY14,DIPADMNO,PMMITRAN
+          CALL      WRPMMTI1
+
+          MOVE      AADMNO,KEY8
+          CALL      RDAMISS1
+          MOVE      PVITRAN,ATRANNO      * next transaction number
+          PACK      PTMIWEBU,WBSEUID,SP70
+          CALL      UPLMISS1
+.
+AITM9999  RETURN
++
+.------------------------------------------------------------
+. Get the appropriate miscellaneous charges record
+.------------------------------------------------------------
+GETMSC00  MOVE      ZERO,EXIT
+          MOVE      MCHARGE,KEY9            * (MCHARGE re-use in PATMCHRD)
+.
+          UNPACK    SP20,PTHFBCAT      * change "H/F Table" to "Table Type"
+          PACK      KEY14,AFUNDH,AFNDTB,SP20
+          CALL      RDFUND1            * "Table Type code" now in PTHFBCAT
+          MOVE      PTHFBCAT,PTMCHFTT
+.
+          PACK      KEY29,ACLAIM,AFUNDH,PTMCHFTT,KEY9,MISCDATE,SP10
+          CALL      PATMCHRD                * read Misc.Charges file
+          COMPARE   ZERO,EXIT
+          GOTO      GETMSC99 IF EQUAL
+.
+.         No record with health fund detials - try a blank health fund
+.
+GETMSC10  PACK      KEY29,ACLAIM,SP6,SP3,KEY9,MISCDATE,SP10
+          CALL      PATMCHRD                * read Misc.Charges file
+          COMPARE   ZERO,EXIT
+          GOTO      GETMSC99 IF EQUAL
+.
+.         No record with health fund detials - last chance, try default claim
+.
+GETMSC20  IF        IBCNMHOS=1
+            PACK      KEY29,PTHSDCLM,SP6,SP3,KEY9,MISCDATE,SP10
+          ELSE
+            PACK      KEY29,PTCNDCLM,SP6,SP3,KEY9,MISCDATE,SP10
+          ENDIF
+.
+          CALL      PATMCHRD                * read Misc.Charges file
+          COMPARE   ZERO,EXIT
+          GOTO      GETMSC99 IF EQUAL
+.
+GETMSC90  MOVE      ONE,EXIT
+.
+GETMSC99  RETURN
++

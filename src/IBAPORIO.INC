@@ -1,0 +1,73 @@
+.
+.         INCLUDE NAME : IBAIOPOR.PBL
+.
+.         FILE  I/O REQUESTS FOR CURRENT PORTS
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.
+.KEY2   DIM            2             KEY FOR IBAPORT1
+.
+.
+RDPORT1  MOVE      ZERO,OVRCD
+         RESET     KEY2
+         READ      IBAPORT1,KEY2;IBAPPORT,IBAPPROG,IBAPUSER,IBAPDATE,IBAPTIME:
+                                  IBAPDESC,IBAPIDNT,IBAPSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSPORT1 RESET     KEY2
+         READ      IBAPORT1,KEY2;;
+         RETURN  
+.
+RDKPORT1 MOVE      ZERO,OVRCD
+         READKS    IBAPORT1;IBAPPORT,IBAPPROG,IBAPUSER,IBAPDATE,IBAPTIME:
+                            IBAPDESC,IBAPIDNT,IBAPSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+.        PROGRAM & PROGRAM DESCRIPTION MUST BE SET
+.
+WRPORT1  MOVE      ZERO,OVRCD
+.
+         MOVE      PORT,IBAPPORT
+         REP       " 0",IBAPPORT
+         MOVE      PASSCODE,IBAPUSER
+         PACK      IBAPDATE,CCC,CYY,CMM,CDD
+         REP       " 0",IBAPDATE
+         CLOCK     TIME,IBAPTIME
+         MOVE      SP30,IBAPSPAR
+         UNPACK    PGM INTO IBAPDIM3,IBAPIDNT,IBAPDIM2
+.
+         MOVE      IBAPPORT,KEY2
+.
+         READ      IBAPORT1,KEY2;ANS
+         GOTO      UPPORT1 IF NOT OVER
+.
+.
+         WRITE     IBAPORT1,KEY2;KEY2,IBAPPROG,IBAPUSER,IBAPDATE,IBAPTIME:
+                                 IBAPDESC,IBAPIDNT,IBAPSPAR
+         RETURN  
+.
+.       UPDATE THE PORT
+.
+UPPORT1
+         UPDATE    IBAPORT1;*3,IBAPPROG,IBAPUSER,IBAPDATE,IBAPTIME:
+                               IBAPDESC,IBAPIDNT,IBAPSPAR
+         RETURN  
+.
+.    CLEAR THE TERMINAL NOW
+.
+ULPORT1  MOVE      ZERO,OVRCD
+.
+         MOVE      PORT,KEY2
+         REP       " 0",KEY2
+.
+         READ      IBAPORT1,KEY2;ANS
+         GOTO      OVERCOND IF OVER
+.
+         UNPACK     SP30 INTO IBAPPROG,IBAPUSER,IBAPDATE,IBAPTIME,IBAPIDNT
+         MOVE       SP30,IBAPDESC
+         MOVE       SP30,IBAPSPAR
+         GOTO       UPPORT1
+.

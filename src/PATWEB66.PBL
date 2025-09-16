@@ -1,0 +1,290 @@
+.----------------------------------------------------------------------
+. Program       : PATWEB66
+.
+. Function      : SMS Polling Server - Read in SMS Response details
+.
+. Modifications :
+.
+.     V11.03.01   06/12/2023  Ebon Clements   TSK 0936255
+.                 Improved response mapping file reads - PROCRM00
+.     V10.13.01   31/10/2018  Ebon Clements   TSK 0850893
+.                 Fixed sleep time should be minutes not seconds
+.     V10.08.01   18/10/2016  Ebon Clements   TSK 0294154
+.                 Fixed error status update of pmssmhaf 
+.     V10.08.00   10/02/2016  Ebon Clements   TSK 0294154
+.                 Created program
+.----------------------------------------------------------------------
+.
+          INC       IBAWEBDF
+          INC       WEBDATDF
+.
+          INC       PATCONFD/INC
+          INC       PMSSRRFD/INC
+          INC       PMSSMHFD/INC
+          INC       PMSSRMFD/INC
+          INC       PMSVX1FD/INC       * Patient Visit Extension File
+.
+. SMS response text file
+.
+SMSRESP1  FILE      HL7, FIXED=4000         * smsresp1.txt 
+.
+.         Fields must be pipe delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+RESPMNUM  DIM       20            * Phone Number
+.PIPE     DIM       1             * Pipe Delimiter
+RESPUMID  DIM       16            * Message Id  
+.PIPE     DIM       1             * Pipe Delimiter
+RESPDATE  DIM       8             * Response Date
+.PIPE     DIM       1             * Pipe Delimiter
+RESPTIME  DIM       8             * Response Time
+.PIPE     DIM       1             * Pipe Delimiter
+RESPMESA  DIM       160           * Message details A
+.PIPE     DIM       1             * Pipe Delimiter
+RESPMESB  DIM       160           * Message details B
+.PIPE     DIM       1             * Pipe Delimiter
+RESPMESC  DIM       160           * Message details C
+.PIPE     DIM       1             * Pipe Delimiter
+RESPMESD  DIM       160           * Message details D
+.PIPE     DIM       1             * Pipe Delimiter
+RESPMESE  DIM       160           * Message details E
+.PIPE     DIM       1             * Pipe Delimiter
+RESPMESF  DIM       160           * Message details F
+.PIPE     DIM       1             * Pipe Delimiter
+RESPSTAT  DIM       2             * Message details F
+.
+. End of record                  
+.
+. ----- Program Variables -----
+.
+CMDLINE   DIM       200
+FORM16    FORM      16
+POLLTIME  FORM      16
+RECVMESG  DIM       50
+RECVADMN  DIM       8
+.
+.----------------------------------------------------------------------
+PRGID     INIT      "PATWEB66"
+VERSION   INIT      "V11.03.01"
+PRGNAM    INIT      "SMS Response Polling Server"
+.----------------------------------------------------------------------
+.
+          CALL      WEBINT00       * Initialise Fifo Etc.
+.
+          CALL      INIT0000       * Open Files
+.
+MAIN0000  COMMIT                   * Match BEGIN in WEBINT00 for Transactions
+.
+          BEGIN
+.
+          DISPLAY   *WPOLLTIME
+.
+          CALL      RESP0000       * load SSM response details
+.
+          GOTO      MAIN0000
+.------------------------------------------------------------
+. Open Files and Initialize Variables
+.------------------------------------------------------------
+INIT0000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,HUND20;*243,PTCNSMSN
+          READ      CONTROLF,HUND24;*101,PTCNSMSM
+.
+          MOVE      ZERO,POLLTIME
+          SQUEEZE   PTCNSMSM
+          MOVE      PTCNSMSM,POLLTIME
+          ASSIGN    (POLLTIME * 60),POLLTIME   * COnvert to seconds
+.
+          IF        POLLTIME=0
+            MOVE       "1800",POLLTIME     * 1/2 and hour
+          ENDIF
+.
+          OPEN      PMSSRRA1,"pmssrraf"
+          OPEN      PMSSMHA1,"pmssmhaf"
+          OPEN      PMSSRMA1,"pmssrmaf"
+          OPEN      PMSSRMA2,"pmssrmaf"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+INIT9999  RETURN
+.
+.------------------------------------------------------------
+. Check for any sms resposes
+.------------------------------------------------------------
+RESP0000  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      SMSRESP1,"smsresp1"     * See if old response text
+          TRAPCLR   IO                      * file exists
+          IF        OVRCD=0
+            CLOSE     SMSRESP1,DELETE       * Delete old response text file
+          ENDIF
+.
+          CLEAR     CMDLINE
+          APPEND    "patweb66.us1",CMDLINE   * get sms response details
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      SMSRESP1,"smsresp1"     * No response text file found
+          TRAPCLR   IO                      * so exit
+          BRANCH    OVRCD,RESP9999
+.
+RESP1000  READ      SMSRESP1,SEQ;RESPMNUM,RESPUMID,RESPDATE,RESPTIME:
+                                 RESPMESA,RESPMESB,RESPMESC,RESPMESD:
+                                 RESPMESE,RESPMESF,RESPSTAT
+          GOTO      RESP9000 IF OVER
+.
+          PACK      RESPMNUM,RESPMNUM,SP70  * Pad fields out to full length
+.
+          MOVE      ZERO,FORM16
+          SQUEEZE   RESPUMID
+          MOVE      RESPUMID,FORM16
+          MOVE      FORM16,RESPUMID
+.
+          PACK      RESPDATE,RESPDATE,SP70
+          PACK      RESPTIME,RESPTIME,SP70
+          PACK      RESPMESA,RESPMESA,SP70
+          PACK      RESPMESB,RESPMESB,SP70
+          PACK      RESPMESC,RESPMESC,SP70
+          PACK      RESPMESD,RESPMESD,SP70
+          PACK      RESPMESE,RESPMESE,SP70
+          PACK      RESPMESF,RESPMESF,SP70
+.
+          MOVE      ZERO,FORM2
+          SQUEEZE   RESPSTAT
+          MOVE      RESPSTAT,FORM2
+          MOVE      FORM2,RESPSTAT
+.
+          CALL      CLPMSSRR                * Clear received file details
+.
+          MOVE      RESPUMID,PMRRUMID
+          MOVE      ONE,FORM2            
+          MOVE      FORM2,PMRRUCNT   
+          MOVE      RESPMNUM,PMRRMNUM
+          MOVE      RESPDATE,PMRRRDTE
+          MOVE      RESPTIME,PMRRRTIM
+          MOVE      RESPMESA,PMRRRESA
+          MOVE      RESPMESB,PMRRRESB
+          MOVE      RESPMESC,PMRRRESC
+          MOVE      RESPMESD,PMRRRESD
+          MOVE      RESPMESE,PMRRRESE
+          MOVE      RESPMESF,PMRRRESF
+          MOVE      RESPSTAT,PMRRSTAT
+          MOVE      ZERO,PMRRMAPD           * Message Mapped? default 'No'
+.
+          PACK      KEY16,RESPUMID,SP70
+          CALL      RDPMSMH1
+          IF        OVRCD<>1
+            MOVE      PMSMURNO,PMRRURNO     * Populate U/R and record key
+            MOVE      PMSMMTYP,PMRRMTYP     * Message type
+            MOVE      PMSMRKEY,PMRRRKEY     * from sent details
+          ENDIF
+.
+RESP4000  PACK      KEY18,PMRRUMID,PMRRUCNT,SP70
+          CALL      RAPMSRR1
+          IF        OVRCD=0
+            MOVE      PMRRUCNT,FORM2
+            ADD       ONE,FORM2
+            MOVE      FORM2,PMRRUCNT
+.
+            COMPARE   NINTY9,FORM2          * Max responses recieved
+            GOTO      RESP1000 IF EQUAL
+.
+            GOTO      RESP4000
+          ELSE
+            UNPACK    PMRRRESA,RECVMESG     * Only take first 50 chars of msg
+            REP       UPPLOW,RECVMESG       * Convert msg to uppercase
+            UNPACK    PMRRRKEY,RECVADMN
+            CALL      PROCRM00              * Process response message
+            IF        EXIT=0
+              MOVE      ONE,PMRRMAPD        * Response already mapped
+            ENDIF
+            CALL      WRPMSRR1              * Write SMS recieved file record
+          ENDIF
+.
+          PACK      KEY16,RESPUMID,SP70
+          CALL      RDPMSMH1
+          BRANCH    OVRCD,RESP1000
+.
+          MATCH     " 0",PMRRSTAT           * Response received
+          IF        @EQUAL
+            MOVE      " 1",PMSMSTAT       
+          ENDIF
+.
+          MATCH     " 3",PMRRSTAT           * Response error
+          IF        @EQUAL
+            MOVE      " 2",PMSMSTAT       
+          ENDIF
+.
+          CALL      UPPMSMH1
+.
+          GOTO      RESP1000
+.
+RESP9000  CLOSE     SMSRESP1,DELETE         * Delete response text file
+.
+RESP9999  RETURN
+.
+.------------------------------------------------------------
+. Clear Parameters
+.------------------------------------------------------------
+CLRPAR00  RETURN
+.
+.------------------------------------------------------------
+. Set Parameters
+.------------------------------------------------------------
+SETPAR00  RETURN
+.
+.------------------------------------------------------------
+. Process Fields
+.------------------------------------------------------------
+PROFLD00  RETURN
+.
+.------------------------------------------------------------
+.         Process the response message; locate a matching
+.         active response mapping and use it's mapped value
+.         to update the visit extension table.
+.
+.         Parameters:
+.           RECVMESG - Received SMS message (50 chars)
+.           RECVADMN - Received Admission No.
+.
+.         Return:
+.               EXIT - 0 (processed; active response mapping found)
+.                      1 (error; no matching response mapping)
+.------------------------------------------------------------
+PROCRM00  PACK      KEY60,RECVMESG,SP70
+          CALL      RSPMSRM2
+PROCRM10  CALL      RKPMSRM2
+          BRANCH    OVRCD,PROCRM91
+.
+          MATCH     RECVMESG,PMSRINBS       * Exit no match found
+          GOTO      PROCRM91 IF NOT EQUAL
+.
+          MATCH     "1",PMSRACTV            * Active?
+          GOTO      PROCRM10 IF NOT EQUAL
+.
+          PACK      KEY8,RECVADMN,SP70
+          CALL      RDPMVX11
+          BRANCH    OVRCD,PROCRM90
+.
+          MOVE      PMSRMVAL,PMVXCONF
+          CALL      UPPMVX11
+          GOTO      PROCRM90
+.
+PROCRM90  MOVE      ZERO,EXIT
+          GOTO      PROCRM99
+.
+PROCRM91  MOVE      ONE,EXIT
+PROCRM99  RETURN
+.
+.----------------------------------------------------------------------
+.
+          INC       IBAWEBCD
+          INC       CLPMSSMH
+          INC       CLPMSSRR
+.
+          INC       PMSSRRIO/INC
+          INC       PMSSMHIO/INC
+          INC       PMSSRMIO/INC
+          INC       PMSVX1IO/INC       * Patient Visit Extension File
++

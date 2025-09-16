@@ -1,0 +1,982 @@
+.******************************************************************************
+.* System    :  PATIENT MANAGEMENT                                            *
+.* Program   :  IBAPMS85                                                      *
+.* Desc      :  Patient Day File Integrity Check & Fixit                      *
+.******************************************************************************
+.* Date      :  05/02/1991                                                    *
+.* Author    :  DIG                                                           *
+.* Comment   :                                                                *
+.* Mods      :                                                                *
+.* V10.04.01  23/07/2014 Ebon Clements        CAR 303856                      *
+.*            Removed port number from temp file name                         *
+.* V10.03.01  02/01/2013 Patrick Adair        CAR 261630                      *
+.*            Removed port number from temp file name                         *
+.*        V10.01.01 03/02/2011 Jill Parkinson CAR 233088                      *
+.*                  Added pmsvx1af                                            *
+.*        V9.12.01  26/02/2010  Mike Laming   CAR 216878                      *
+.*                  Add "Fixit" option (to clean up rubbish on "patdataf")    *
+.*        V5.08.01  28/08/2000  Caleb Sharman                                 *
+.*                  Changed Health Fund variables to be 8 chars               *
+.                   09/11/1998  Glenn Berry      5.07 changes                 *
+.******************************************************************************
+.*             V5.01.02  06/02/1991  DIG                                      *
+.*                       Fixed problem with infinite loop when the            *
+.*                       to month and day is exactly equal to 31/12           *
+.*             V5.01.03  12/12/1991  i chung          SRF 111124              *
+.*                       Fixed to print date range as part of heading         *
+.*                                                                            *
+.******************************************************************************
+.
+          INC       STD001FD 
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       PATDAYFD/INC 
+          INC       PATDSCFD/INC 
+          INC       PATMI1FD/INC 
+          INC       PMSVX1FD/INC 
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
++
+.**********************************************************************
+.*                       GLOBAL VARIABLES                             *
+.**********************************************************************
+TMPDAY1   IFILE     SQL,FIXED=13, KEY="U5-12,1-4"       * KEY12
+.
+. NAME    TYPE   LENGTH  PHYSICAL  START     DECRIPTION
+. ----    ----   ------  --------  ------    ----------
+TMPDATE   DIM         4         4       1    Date (MMDD)
+TMPADMN   DIM         8         8       5    Admission Number
+.
+ADMISNO   FORM      8
+ASTATUS   FORM      1
+.
+CMDLINE   DIM       50
+CURDATE   DIM       8
+CURRADMN  DIM       8
+CURRADAT  DIM       8
+CURRDDAT  DIM       8
+CURRASTA  FORM      1
+CURRYEAR  FORM      4
+.
+DIM2A     DIM       2
+DIM2B     DIM       2
+DIM4A     DIM       4
+DIM4B     DIM       4
+DELNO     FORM      5
+DSCNO     FORM      5
+.
+ENDDATE   DIM       8
+ERRRADMN  DIM       8
+.
+FLAGERR   FORM      1
+FROMDATE  DIM       8
+.
+JUNK      DIM       20
+.
+PRNTADMN  DIM       14
+PRNTDATE  DIM       10
+PRNTLINE  DIM       60 
+PREVADMN  DIM       8
+RECNO     FORM      5
+.
+SAV12     DIM       12
+SCRNROW   FORM      2
+SELN02    FORM      1
+SELNYEAR  FORM      4
+SMONDAY   DIM       4
+STRTDATE  DIM       8
+SYEAR     DIM       4
+.
+TMPFNAM1  DIM       8
+THISADMN  FORM      8
+THISYEAR  DIM       4
+TODATE    DIM       8
+TOTODAY   DIM       8
+.
+VALNO     FORM      5
+WORKDATE  DIM       8
++
+.**********************************************************************
+.*                             CONSTANTS                              *
+.**********************************************************************
+FOR       INIT      " for "
+SLSH      INIT      "/"
+UNDLN80   INIT      "************************************************":
+                    "********************************"
+.
+PRGID     INIT      "IBAPMS85"
+PRGNAM    INIT      "Patient Day File Integrity Check"
+VERSION   INIT      "V11.03.00"
++
+.**********************************************************************
+.*                           MAINLINE                                 *
+.*                       Controlling Logic                            *
+.**********************************************************************
+ML0000    CALL      INIT0000            * initialization -
+.                                         open files and display header
+.
+ML1000    CALL      OPTN0000            * main option screen
+          BRANCH    EXIT,ML9999
+.           
+          IF        OPTION = 2
+            CALL      FIXIT000          * remove rubbish from day file
+            GOTO      ML1000
+          ENDIF
+.
+ML2000    MOVE      TEN,SCRNROW 
+          CALL      DATE0000            * enter date range
+          BRANCH    EXIT,ML1000
+.
+          CALL      CONTQST             * see if Ok to continue
+          BRANCH    CEXIT,ML3000,ML2000,ML1000
+.                          Yes     No   Cancel
+.
+.
+.                                   * if date range is same year, 'fixit' first
+ML3000    UNPACK    FROMDATE,DIM4A,JUNK
+          UNPACK    TODATE,DIM4B,JUNK
+          MATCH     DIM4A,DIM4B
+          CALL      FIXIT000 IF EQUAL
+.
+ML4000    CALL      PROC0000            * process admission numbers
+          CALL      ENDR0000            * print the end of the report
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM
++
+.**********************************************************************
+.*                           INIT0000                                 *
+.*               Open files and display header                        *
+.**********************************************************************
+INIT0000  CALL      DISPHEAD                * display screen header
+.
+          DISPLAY   *P56:24,"Opening patmi1af";
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PATMI1A2,"patmi1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"patdschf";
+          OPEN      PATDSCH1,"patdschf"
+          OPEN      PATDSCH2,"patdschf"
+.
+          PACK      CURDATE,CCC,CYY,CMM,CDD
+          PACK      KEY4,CCC,CYY
+          MOVE      KEY4,CURRYEAR
+.
+INIT9999  RETURN
++
+.**********************************************************************
+.*                           OPTN0000                                 *
+.*                   Display the main option screen                   *
+.**********************************************************************
+OPTN0000  MOVE      FALSE,EXIT
+          MOVE      ZERO,OPTION
+          DISPLAY   *P1:4,*EF,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Check Day File":
+                    *P1:6,*V2LON,TWO,*HOFF," = Fix Day File errors":
+                    *P1:8,"Select Option :";
+.
+OPTN1000  KEYIN     *P17:8,*EL,*DV,UNDLN1,*P17:8,*V2LON,OPTION;
+.
+          COMPARE   ZERO,OPTION             * check for zero
+          GOTO      OPTN9000 IF EQUAL
+.
+          BRANCH    OPTION,OPTN9999,OPTN7000
+          BEEP                              * invalid option
+          GOTO      OPTN1000
+.
+.
+OPTN7000  MOVE      ZERO,SELN02
+          DISPLAY   *P1:10,*EF,*V2LON,ONE,*HOFF," = Full Year":
+                    *P1:11,*V2LON,TWO,*HOFF," = Date Range (within ":
+                           "the same year)":
+                    *P1:13,"Select Option :";
+.
+OPTN7200  KEYIN     *P17:13,*EL,*DV,UNDLN1,*P17:13,*V2LON,SELN02;
+.
+          COMPARE   ZERO,SELN02             * check for zero
+          GOTO      OPTN0000 IF EQUAL
+.
+          BRANCH    SELN02,OPTN7500,OPTN8000
+          BEEP                              * invalid option
+          GOTO      OPTN7200
+.
+OPTN7500  DISPLAY   *P1:15,*EF,"Enter Year required : ";
+          MOVE      "2000",SELNYEAR
+.
+OPTN7700  KEYIN     *P23:15,*EL,*DV,UNDLN1,*P23:15,*V2LON,SELNYEAR;
+.
+          IF        SELNYEAR = 0 
+            GOTO      OPTN7000
+          ENDIF
+.
+          IF        SELNYEAR < 2000 | SELNYEAR > CURRYEAR
+            GOTO      OPTN7500
+          ENDIF
+.
+          MOVE      "0101",KEY4
+          PACK      FROMDATE,SELNYEAR,KEY4
+          MOVE      "1231",KEY4
+          PACK      TODATE,SELNYEAR,KEY4
+.
+          GOTO      OPTN9999
+
+OPTN8000  MOVE      "15",SCRNROW
+          CALL      DATE0000
+          BRANCH    EXIT,OPTN7500
+          GOTO      OPTN9999
+.
+OPTN9000  MOVE      TRUE,EXIT               * Exit option chosen
+.
+OPTN9999  RETURN
++
+.**********************************************************************
+.*                               DATE0000                             *
+.*             Enter date range for Day File integrity check          *
+.**********************************************************************
+DATE0000  MOVE      FALSE,EXIT
+          MOVE      ZERO,CHIGHLT
+          PACK      CURDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURDATE
+.
+          MOVE      TEN3,CCOL
+.
+.------ keyin From Date ------
+.
+DATE1000  MOVE      SCRNROW,CVERT
+          DISPLAY   *P1:CVERT,*EF,"From Date : ";
+
+DATE1100  UNPACK    SP6,CYEAR,CMON,CDAY
+          MOVE      CCC,CCENT
+          REP       " 0",CCENT
+          CALL      KEYDATE                 * keyin the date
+          BRANCH    CQUEST,DATE1100
+          BRANCH    OVRCD,DATE9000
+          PACK      FROMDATE,CCENT,CYEAR,CMON,CDAY
+.
+          MATCH     FROMDATE,CURDATE        * match to todays date
+          GOTO      DATE2000 IF NOT LESS
+.
+          DISPLAY   *P1:24,*EL,*B,*V2LON,"** Date cannot be future date **    ";
+          CALL      HITENTER
+          GOTO      DATE1100
+.
+.------ keyin To Date ------
+.
+DATE2000  MOVE      SCRNROW,CVERT
+          ADD       ONE,CVERT
+          DISPLAY   *P1:CVERT,*EL,"To   Date : ";
+.
+DATE2100  UNPACK    SP6,CYEAR,CMON,CDAY
+          MOVE      CCC,CCENT
+          REP       " 0",CCENT
+          CALL      KEYDATE                 * keyin the date
+          BRANCH    CQUEST,DATE2100
+          BRANCH    OVRCD,DATE1000
+          PACK      TODATE,CCENT,CYEAR,CMON,CDAY
+.
+          MATCH     TODATE,CURDATE          * match to todays date
+          GOTO      DATE2500 IF NOT LESS
+.
+          DISPLAY   *P1:24,*EL,*B,*V2LON,"** Date cannot be future date **    ";
+          CALL      HITENTER
+          GOTO      DATE2100
+.
+.------ make sure we have a valid date range ------
+.
+DATE2500  MATCH     FROMDATE,TODATE
+          GOTO      DATE3000 IF NOT LESS
+.
+          DISPLAY   *P1:24,*EL,*B,*V2LON:
+                    "** To Date must be greater than or = From Date **    ";
+          CALL      HITENTER
+          GOTO      DATE2000
+.
+.                                           * check Year range for "Fixit"
+DATE3000  BRANCH    OPTION,DATE9999         * where OPTION is 2
+          BRANCH    SELN02,DATE9999         * and SELN02 is 2
+.
+          UNPACK    FROMDATE,DIM4A,KEY4
+          UNPACK    TODATE,DIM4B,KEY4
+          MATCH     DIM4A,DIM4B
+          GOTO      DATE9999 IF EQUAL
+.
+          DISPLAY   *P1:24,*EL,*B,*V2LON:
+                    "** From and To dates must be in the same Year **    ";
+          CALL      HITENTER
+          GOTO      DATE2000
+.
+.------ no dates entered ------
+.
+DATE9000  MOVE      TRUE,EXIT
+.
+DATE9999  RETURN
++
+.**********************************************************************
+.*                               PROC0000                             *
+.*         Process admission numbers and set up variables for day     *
+.*         file integrity check                                       *
+.**********************************************************************
+PROC0000  UNPACK    FROMDATE,CCENT,CYEAR,CMON,CDAY
+          UNPACK    TODATE,CCENT,CYEAR,CMON,CDAY
+          CLOCK     TIME,CTIMEIS
+.
+          MOVE      ZERO,CPAGENO
+          MOVE      ONE,CNOUNDLN
+          MOVE      ZERO,CLNO
+          MOVE      FALSE,FLAGERR
+.
+          CALL      HEAD0000                * print report page header
+.
+          MOVE      TWO,ASTATUS
+          CALL      ADMN0000                * process admission numbers
+.
+          MOVE      FOUR,ASTATUS
+          CALL      ADMN0000                * process admission numbers
+.
+          CALL      DISC0000                * process discharges
+.
+PROC9999  RETURN
++
+.**********************************************************************
+.*                               ADMN0000                             *
+.*      Process admission numbers, either current or on-leave,        *
+.*      for day file integrity check                                  *
+.**********************************************************************
+ADMN0000  DISPLAY   *P1:24,*EL,"Processing Admission Number : ";
+          PACK      KEY9,ASTATUS,SP8
+          CALL      RDSMISS2
+.
+.------ read through the Admissions file ------
+.
+ADMN1000  CALL      RDKMISS2
+          BRANCH    OVRCD,ADMN9999
+.
+          COMPARE   ASTATUS,ASTAT           * test the admission status
+          GOTO      ADMN9999 IF NOT EQUAL
+.
+          MATCH     ADATE,TODATE            * make sure patient is not admitted
+          GOTO      ADMN1000 IF LESS          after the end of the period
+.
+          DISPLAY   *P31:24,*V2LON,AADMNO;
+          MOVE      TODATE,ENDDATE
+          MOVE      AADMNO,ADMISNO
+.
+          MATCH     FROMDATE,ADATE          * see if admission date is less 
+          GOTO      ADMN1100 IF LESS          than the start of the period
+.
+          PACK      STRTDATE,ADATE
+          REP       " 0",STRTDATE
+          GOTO      ADMN2000
+.
+.------ admission date is less than the start of the period so use the ------
+.------ start of the period as the starting date for the day file check ------
+.
+ADMN1100  MOVE      FROMDATE,STRTDATE
+.
+.------ check the day file for the given admission number ------
+.
+ADMN2000  CALL      CDAY0000                * check the day file for the given
+.                                             admission number
+          GOTO      ADMN1000
+.
+ADMN9999  RETURN
++
+.**********************************************************************
+.*                             DISC0000                               *
+.*        Routine to process discharged patients for the day file     *
+.*        integrity check                                             *
+.**********************************************************************
+DISC0000  DISPLAY   *P1:24,*EL,"Processing Discharged Admission Number : ";
+          PACK      KEY16,FROMDATE,SP8
+          CALL      RDSDSCH2
+.
+.------ read through the discharge file ------
+.
+DISC1000  CALL      RDKDSCH2
+          BRANCH    OVRCD,DISC9999
+.
+          MOVE      DADMNO,KEY8
+          CALL      RDMISS1                 * read the admission file
+          BRANCH    OVRCD,DISC1000
+.
+....                                        * somebody's brain wasn't working !!
+          MATCH     ADATE,TODATE            * make sure patient is not admitted
+          GOTO      DISC1000 IF LESS          after the end of the period
+.
+          DISPLAY   *P42:24,*V2LON,DADMNO;
+          MOVE      DADMNO,ADMISNO
+.
+          MATCH     TODATE,DDATE            * see if patient is discharged 
+          GOTO      DISC1100 IF LESS          after the end of the period
+          MOVE      TODATE,ENDDATE
+          GOTO      DISC1500
+.
+.------ patient has been discharged before the end of the period so use ------
+.------ the discharge date as the end date for the day file check ------
+.
+DISC1100  PACK      ENDDATE,DDATE
+          REP       " 0",ENDDATE
+.
+.------ see if patient is admitted before the start of the period ------
+.
+DISC1500  MATCH     FROMDATE,ADATE
+          GOTO      DISC2000 IF LESS
+.
+          PACK      STRTDATE,ADATE
+          REP       " 0",STRTDATE
+          GOTO      DISC3000
+.
+.------ patient has been admitted before the start of the period so use ------
+.------ from date of the period as the start date for the day file check ------
+.
+DISC2000  MOVE      FROMDATE,STRTDATE
+.
+.------ check the day file for the given admission number ------
+.
+DISC3000  CALL      CDAY0000                * check the day file for the given
+.                                             admission number
+          GOTO      DISC1000
+.
+DISC9999  RETURN
++
+.**********************************************************************
+.*                             CDAY0000                               *
+.*      Check the patient day file for the given admission number     *
+.**********************************************************************
+CDAY0000  UNPACK    STRTDATE,SYEAR,SMONDAY
+          MOVE      ZERO,THISADMN
+          MOVE      STRTDATE,WORKDATE
+.
+.------ close previous day file and set up the name of the next one ------
+.
+CDAY1000  CLOSE     PATDAYA1
+          PACK      CFNAME,FILDAYA1,SYEAR      * "patd...." where .... = ccyy
+          MOVE      SYEAR,THISYEAR
+.
+          TRAP      DYCR0000 IF IO        * trap and create new file 
+          OPEN      PATDAYA1,CFNAME         if it does not exist
+          TRAPCLR   IO
+.
+.------ read the daily list file ------
+.
+CDAY2000  PACK      KEY12,SMONDAY,ADMISNO
+          CALL      RDPTDAY1
+          COMPARE   ZERO,OVRCD
+          GOTO      CDAY2500 IF EQUAL
+.
+          MOVE      SMONDAY,PTDYDATE
+          MOVE      ADMISNO,PTDYADMN
+.
+          CALL      WRPTDAY1               * write to the patdayaf file
+.
+          COMPARE   ZERO,THISADMN          * see if first error for this
+          GOTO      CDAY2100 IF NOT EQUAL    admission number
+.
+          DISPLAY   *P1:22,*EL,*B,*V2LON,*BLINKON,"ERROR",*HOFF," - with ":
+                           "Admission Number ",*V2LON,ADMISNO;
+.
+.------ print the error record ------
+.
+CDAY2100  CALL      PRNT0000               * print an error record
+          MOVE      TRUE,FLAGERR
+.
+.------ see if we have reached the end date for the day file check ------
+.
+CDAY2500  MATCH     ENDDATE,WORKDATE
+          GOTO      CDAY9999 IF NOT LESS
+.
+.------ increment the working date and keep checking ------
+.
+CDAY2600  CALL      INCR0000               * increment working date
+.
+          MATCH     THISYEAR,SYEAR         * if the year has changed then
+          GOTO      CDAY1000 IF NOT EQUAL    open new file
+          GOTO      CDAY2000
+.
+CDAY9999  RETURN
++
+.**********************************************************************
+.*                         DYCR0000                                   *
+.*      create the new patdayaf file that is needed to write to       *
+.**********************************************************************
+DYCR0000  CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    CFNAME,CMDLINE
+          APPEND    " 13 U1-4,5-12 ",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      PATDAYA1,CFNAME
+.
+DYCR9999  RETURN
++
+.**********************************************************************
+.*                         INCR0000                                   *
+.*              Increment the working date                            *
+.**********************************************************************
+INCR0000  UNPACK    SYEAR,CCENT,CYEAR
+          MOVE      CCENT,CC
+          MOVE      CYEAR,YY
+          UNPACK    SMONDAY,CMON,CDAY
+          MOVE      CMON,MM
+          MOVE      CDAY,DD
+.
+          CALL      DMYCON                 * convert to julian date
+.
+          ADD       ONE,JULDAY
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+.
+          CALL      JULCON      
+.
+          PACK      SYEAR,CC,YY
+          PACK      SMONDAY,MM,DD
+          REP       " 0",SYEAR
+          REP       " 0",SMONDAY
+          PACK      WORKDATE,SYEAR,SMONDAY
+.
+INCR9999  RETURN
++
+.******************************************************************************
+.*                              FIXIT000                                      *
+.*            Routine to correct rubbish in "paydayaf"                        *
+.******************************************************************************
+FIXIT000  MOVE      ZERO,EXIT
+          MOVE      SP8,PREVADMN
+          MOVE      "99",CLNO
+          MOVE      ZERO,RECNO
+          MOVE      ZERO,DELNO
+          MOVE      ZERO,DSCNO
+          MOVE      ZERO,VALNO
+.
+          CALL      LDTMP000                * load the temp "patdayaf" file
+          BRANCH    EXIT,FIXIT999
+.
+          MOVE      ZERO,RECNO
+          PACK      KEY12,SP20              * read thru the temp file
+          CALL      RSTEMP1
+FIXIT100  CALL      RKTEMP1
+          BRANCH    OVRCD,FIXIT900
+          PACK      SAV12,TMPADMN,TMPDATE,SP20
+          ADD       ONE,RECNO
+.
+          MATCH     TMPADMN,PREVADMN        * change of Admn.No. ?
+          IF        !@EQUAL
+            MOVE      TMPADMN,PREVADMN
+            MOVE      "Admn. ",KEY6
+            PACK      PRNTADMN,KEY6,TMPADMN
+            UNPACK    SP20,CURRADAT,CURRDDAT
+            MOVE      TMPADMN,CURRADMN
+            MOVE      "9",CURRASTA
+.
+            PACK      KEY8,TMPADMN,SP20     * read Admission record
+            CALL      RDPTMIS1
+            IF        OVRCD = 0
+              MOVE      ADATE,CURRADAT
+              MOVE      TODATE,CURRDDAT     * set default end date
+              MOVE      ASTAT,CURRASTA
+              IF        ASTAT = 3 
+                PACK      KEY8,TMPADMN,SP20
+                CALL      RDDSCH1           * read Discharge record
+                IF        OVRCD = 1
+                  MOVE      "8",CURRASTA
+                ELSE
+                  MOVE      DDATE,CURRDDAT
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+.
+.                             MM    DD
+FIXIT200  UNPACK    TMPDATE,DIM2A,DIM2B
+          PACK      PRNTDATE,DIM2B,SLSH,DIM2A,SLSH,THISYEAR,SP20
+          BRANCH    CURRASTA,FIXIT210,FIXIT300,FIXIT300,FIXIT300,FIXIT220:
+                             FIXIT300,FIXIT300,FIXIT230,FIXIT2400
+          GOTO      FIXIT300
+.
+FIXIT210  CLEAR     PRNTLINE
+          APPEND    " - This is a Pre-admission - Day record deleted",PRNTLINE
+.
+          CALL      DOIT0000                * print message & delete record
+          GOTO      FIXIT100
+.
+FIXIT220  CLEAR     PRNTLINE
+          APPEND    " - Admission is cancelled  - Day record deleted",PRNTLINE
+.
+          CALL      DOIT0000                * print message & delete record
+          GOTO      FIXIT100
+.
+FIXIT230  CLEAR     PRNTLINE
+          APPEND    " - Discharge record is missing - no action ****",PRNTLINE
+          RESET     PRNTLINE
+          ADD       ONE,DSCNO
+          MATCH     TMPADMN,ERRRADMN
+          GOTO      FIXIT100 IF EQUAL       * don't print error more than once
+.
+          CALL      PRN20000
+          MOVE      TMPADMN,ERRRADMN
+          GOTO      FIXIT100
+.
+FIXIT240  CLEAR     PRNTLINE
+          APPEND    " - Admission not found     - Day record deleted",PRNTLINE
+.
+          CALL      DOIT0000                * print message & delete record
+          GOTO      FIXIT100
+.
+.
+FIXIT300  PACK      KEY8,THISYEAR,TMPDATE,SP10
+          MATCH     CURRADAT,KEY8           * check against Admiss. Date
+          IF        @LESS
+            CLEAR     PRNTLINE
+            APPEND    " - is before Admis. date   - Day record deleted",PRNTLINE
+.
+            CALL      DOIT0000                * print message & delete record
+            GOTO      FIXIT100
+          ENDIF
+.
+          MATCH     KEY8,CURRDDAT
+          IF        @LESS
+            CLEAR     PRNTLINE
+            APPEND    " - is after Discharge date - Day record deleted",PRNTLINE
+            RESET     PRNTLINE 
+.
+            CALL      DOIT0000                * print message & delete record
+            GOTO      FIXIT100
+          ENDIF
+.
+          ADD       ONE,VALNO
+          GOTO      FIXIT100
+.
+.
+FIXIT900  MOVE      "** End of date-range **",PRNTLINE
+          UNPACK    SP30,PRNTADMN,PRNTDATE
+          CALL      PRN20000
+          CALL      BLNK0000
+.
+          CLEAR     PRNTLINE
+          APPEND    SP8,PRNTLINE
+          APPEND    RECNO,PRNTLINE
+          APPEND    " Day records read",PRNTLINE
+          RESET     PRNTLINE
+          CALL      PRN20000
+.
+          IF        DELNO > 0
+            CLEAR     PRNTLINE
+            APPEND    SP8,PRNTLINE
+            APPEND    DELNO,PRNTLINE
+            APPEND    " Day records removed",PRNTLINE
+            RESET     PRNTLINE
+            CALL      PRN20000
+          ENDIF
+.
+          IF        DSCNO > 0
+            CLEAR     PRNTLINE
+            APPEND    SP8,PRNTLINE
+            APPEND    DSCNO,PRNTLINE
+            APPEND    " Day records for missing Discharge records",PRNTLINE
+            RESET     PRNTLINE
+            CALL      PRN20000
+          ENDIF
+.
+          CLEAR     PRNTLINE
+          APPEND    SP8,PRNTLINE
+          APPEND    VALNO,PRNTLINE
+          APPEND    " Valid Day records in date range",PRNTLINE
+          RESET     PRNTLINE
+          CALL      PRN20000
+          CALL      BLNK0000
+          CALL      BLNK0000
+.
+          GOTO      FIXIT999
+.
+FIXIT999  CALL      KILL0000                * delete the temp file
+          RETURN
++
+.**********************************************************************
+.*                              DOIT0000                              *
+.**********************************************************************
+DOIT0000  MOVE      ZERO,EXIT               * if not the first page header then
+          RESET     PRNTLINE
+          CALL      PRN20000
+.
+          PACK      KEY12,TMPDATE,TMPADMN
+          CALL      DEPTDAY1
+          ADD       ONE,DELNO
+          MOVE      SAV12,KEY12
+          CALL      RSTEMP1                 * reposition after delete
+DOIT9999  RETURN
++
+.**********************************************************************
+.*                              HEAD0000                              *
+.*            Print the page header for the report                    *
+.**********************************************************************
+HEAD0000  COMPARE   ZERO,CPAGENO            * if not the first page header then
+          GOTO      HEAD1000 IF EQUAL         print underline for the previous
+.                                             page
+          PRINT     *N,UNDLN80;
+.
+.------ print the page header ------
+.
+HEAD1000  CALL      HEAD80
+          PRINT     *20,"Date Range : ";
+.
+          UNPACK    FROMDATE,CCENT,CYEAR,CMON,CDAY
+          PRINT     CDAY,SLASH,CMON,SLASH,CCENT,CYEAR," to ";
+.
+          UNPACK    TODATE,CCENT,CYEAR,CMON,CDAY
+          PRINT     CDAY,SLASH,CMON,SLASH,CCENT,CYEAR
+.
+          MOVE      FIVE,CLNO
+          MOVE      ZERO,THISADMN
+.
+          MOVE      "Admn. ",KEY6
+          PACK      PRNTADMN,KEY6,PREVADMN,SP20
+.
+HEAD9999  RETURN
++
+.**********************************************************************
+.*                              PRNT0000                              *
+.*      Print the error record for the current admission number       *
+.**********************************************************************
+PRNT0000  COMPARE   "57",CLNO               * paginate if required
+          CALL      HEAD0000 IF NOT LESS
+.
+          UNPACK    SMONDAY,CMON,CDAY
+.
+          COMPARE   ZERO,THISADMN           * see if the first error record for
+          GOTO      PRNT1000 IF EQUAL         this admission
+.
+          PRINT     *N,*1,"|",*28," has no record for ":
+                          CDAY,SLASH,CMON,SLASH,THISYEAR,*80,"|";
+.
+          ADD       ONE,CLNO
+          GOTO      PRNT9999
+.
+.------ print the full error record for this admission number ------
+.
+PRNT1000  PRINT     *N,UNDLN80:
+                    *N,*1,"| Admission Number ",ADMISNO," has no record for ":
+                          CDAY,SLASH,CMON,SLASH,THISYEAR,*80,"|";
+.
+          ADD       TWO,CLNO
+          MOVE      ADMISNO,THISADMN
+.
+PRNT9999  RETURN
++
+.**********************************************************************
+.*                              PRN20000                              *
+.*      Print the error record for the FIXIT routine                  *
+.**********************************************************************
+PRN20000  COMPARE   "57",CLNO               * paginate if required
+          CALL      HEAD0000 IF NOT LESS
+.
+          MATCH     SP10,PRNTDATE
+          IF        @EQUAL
+            PRINT     *12,PRNTLINE
+          ELSE
+            PRINT     *1,PRNTADMN,FOR,PRNTDATE,PRNTLINE
+          ENDIF
+.
+          ADD       ONE,CLNO
+          MOVE      SP20,PRNTADMN
+.
+PRN29999  RETURN
+.
+BLNK0000  COMPARE   "57",CLNO               * paginate if required
+          GOTO      BLNK9999 IF NOT LESS
+.
+          PRINT     *1,*N
+          ADD       ONE,CLNO
+.
+BLNK9999  RETURN
+.**********************************************************************
+.*                              ENDR0000                              *
+.*           Routine to print the end of the report                   *
+.**********************************************************************
+ENDR0000  BRANCH    FLAGERR,ENDR1000        * skip if errors found
+.
+          DISPLAY   *P1:24,*EL,*B,*V2LON,"** No errors found **     ";
+          CALL      HITENTER
+.
+          PRINT     *N,UNDLN80:
+                    *N,*1,"| No errors found in the given date range",*80,"|":
+                    *N,UNDLN80;
+          GOTO      ENDR9000
+.
+.------ print the last underline ------
+.
+ENDR1000  PRINT     *N,UNDLN80;
+.
+.------ print the end of report ------
+.
+ENDR9000  PRINT     *N,*N,*1,"***  End of Report  ***";
+.
+          DISPLAY   *P1:22,*EF,*P25:24,*V2LON:
+                    "** Integrity Check Completed **",*W2;
+.
+ENDR9999  RETURN
++
+.****************************************************************************
+.*                               LDTMP000                                   *
+.*                        Load "patdataf" temp file                         *
+.****************************************************************************
+LDTMP000  MOVE      ZERO,EXIT
+          MOVE      "99",CLNO
+          MOVE      ZERO,RECNO   
+          UNPACK    SP30,PRNTADMN,PRNTDATE
+.
+          CALL      CREA0000                * create Temp file
+.
+          UNPACK    FROMDATE,DIM4A,DIM4B
+          PACK      CFNAME,FILDAYA1,DIM4A      * "patd...." where .... = ccyy
+          MOVE      DIM4A,THISYEAR
+.         
+          TRAP      LDTMP800 IF IO          * trap if file does not exist
+          OPEN      PATDAYA1,CFNAME 
+          TRAPCLR   IO
+.
+          UNPACK    TODATE,DIM4A,TOTODAY
+.                                    ------ read "patdayaf" for this date range
+.
+LDTMP100  PACK      KEY12,DIM4B,SP10        * set "fromday" (for this year)
+          CALL      RSPTDAY1
+LDTMP200  CALL      RKPTDAY1
+          BRANCH    OVRCD,LDTMP900
+.
+          UNPACK    PTDYDATE,DIM4A          * only extract recs within date rang
+          MATCH     DIM4A,TOTODAY
+          GOTO      LDTMP900 IF LESS
+.
+          MOVE      PTDYDATE,TMPDATE
+          MOVE      DPTDYADM,TMPADMN
+          PACK      KEY12,TMPADMN,TMPDATE,SP20
+          CALL      WRTEMP1
+          ADD       ONE,RECNO
+          PACK      KEY12,PTDYDATE,DPTDYADM,SP20
+.
+          GOTO      LDTMP200
+.
+LDTMP800  CLEAR     PRNTLINE
+          APPEND    "A Day file does not exist for Year ",PRNTLINE
+          APPEND    DIM4B,PRNTLINE
+          APPEND    " - Program has terminated",PRNTLINE
+          RESET     PRNTLINE
+          CALL      PRN20000
+          CALL      BLNK0000
+          MOVE      ONE,EXIT
+          GOTO      LDTMP999
+.
+LDTMP900  CLEAR     PRNTLINE
+          APPEND    RECNO,PRNTLINE
+          APPEND    " Day records in this date range",PRNTLINE
+          RESET     PRNTLINE
+          CALL      PRN20000
+          CALL      BLNK0000
+.
+LDTMP999  RETURN
+          
+.****************************************************************************
+.*                               CREA0000                                   *
+.*                        Create Temporary File/s                           *
+.****************************************************************************
+.                                           * to handle Oracle temp tables
+CREA0000  MOVE      ZERO,EXIT
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TMPFNAM1
+.
+          TRAP      OVERCOND IF IO
+          OPEN      TMPDAY1,TMPFNAM1
+          BRANCH    OVRCD,CREA2000          
+          TRAPCLR   IO
+          CALL      CLER0000                * clear existing temp file
+          GOTO      CREA9000
+.         
+CREA2000  PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TMPFNAM1,CMDLINE
+          APPEND    " 13 U5-12,1-4",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+CREA9000  OPEN      TMPDAY1,TMPFNAM1
+.
+CREA9999  RETURN
+.
+.****************************************************************************
+.*                               KILL0000                                   *
+.*                        Remove Temporary Files                            *
+.****************************************************************************
+.
+KILL0000  CLOSE     TMPDAY1
+          PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TMPFNAM1,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          MATCH     "0",TASKID
+          GOTO      KILL9999 IF EQUAL
+.
+          CALL      CLER0000                * to handle Oracle temp tables
+.
+KILL9999  RETURN
++
+.******************************************************************************
+.*                             CLER0000                 Called by:            *
+.*               close and erase the temporary file                           *
+.******************************************************************************
+.
+CLER0000  PACK      KEY12,SP20
+          CALL      RSTEMP1
+          CALL      RKTEMP1
+          BRANCH    OVRCD,CLER9999
+.
+          PACK      KEY12,TMPADMN,TMPDATE,SP20
+          CALL      DETEMP1
+.
+          GOTO      CLER0000
+.
+CLER9999  RETURN
++
+.****************************************************************************
+. TEMP FILE I/O
+.
+RSTEMP1   READ      TMPDAY1,KEY12;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    TMPDAY1;TMPDATE,TMPADMN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      TMPDAY1,KEY14;TMPDATE,TMPADMN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPTEMP1   MOVE      ZERO,OVRCD
+          UPDATE    TMPDAY1;TMPDATE,TMPADMN
+          RETURN
+.
+WRTEMP1   MOVE      ZERO,OVRCD
+          WRITE     TMPDAY1,KEY14;TMPDATE,TMPADMN
+          RETURN
+.
+DETEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          DELETE    TMPDAY1,KEY12
+          RETURN
+.
+.**********************************************************************
+.
+          INC       STD001IO
+          INC       TFILENAM                     * Generate Temp File Name
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATDAYIO/INC
+          INC       PATDSCIO/INC
+          INC       PATMI1IO/INC
+          INC       PMSVX1IO/INC
+          INC       WEBERRIO/INC                 * Web Server Error Logging

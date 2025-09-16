@@ -1,0 +1,2025 @@
+.*******************************************************************************
+.* System         : Patient Management      Release 5                          *
+.* Program        : IBAPMS29.PBL                                               *
+.* Name           : Patient Day Mix Report                                     *
+.*******************************************************************************
+.* Date           : 09/05/1991                                                 *
+.* Author         : Justin Coates                                              *
+.* Function       : List the number of days patients have been in a given set  *
+.*                  of step down ranges for each admission type and health fund*
+.* Modifications  :                                                            *
+.*                                                                             *
+.*        V10.04.01 18/06/2014 Steve Armstrong  CAR 301639                     *
+.*                  Changed tempfiles to use TEMPFILA & TEMPFILB instead of    *
+.*                  both using CFNAME.                                         *
+.*                  Moved calls to TFILENAM for TEMPFILA & TEMPFILB from       *
+.*                  CTPA0000 & CTPB0000 into INIT0000.                         *
+.*******************************************************************************
+.*        V10.03.01 02/01/2013 Patrick Adair  CAR 261630                       *
+.*                  Removed port number from temp file name                    *
+.*******************************************************************************
+.*        V10.01.01 03/02/2011 Jill Parkinson CAR 233088                       *
+.*                  Added pmsvx1af                                             *
+.*******************************************************************************
+.*        V9.03.00  30/07/2004  Lina Vo      CAR 52050                         *
+.*                  Port from R6.12.                                           *
+.*******************************************************************************
+.*        V6.06.02  09/12/1999  Jill Habasque                                  *
+.*                  Fixed overcond on pattran to go to EXTB3700 instead of 3600*
+.*        V6.06.01  23/09/1999  Steve Downing         SRF 634827               *
+.*                  Mods to use DAYSEP, Y2K fixes                              *
+.*******************************************************************************
+.*        V6.05.03  08/12/1998  Nicole Harrington                              *
+.*                  Removed CCENTRY                                            *
+.*        V6.05.02  18/11/1998  Nicole Harrington                              *
+.*                  Changed to use century in DMYCON compares                  *
+.*        V6.05.01  28/10/1998  Nicole Harrington                              *
+.*                  Fixed printing over end of page                            *
+.*        V5.01     12/06/1991  Graeme Williams                                *
+.*                  Made report return to asking for the option                *
+.*        V5.02     14/06/1991  Graeme Williams       SRF 108996               *
+.*                  Added ranges 5 and 6.                                      *
+.*                  14/06/1991  J.Tan                 SRF 108991               *
+.*                  Fixed calculating bed days                                 *
+.*        V5.03     17/06/91    J.Tan                                          *
+.*                  Fixed on-leave patients                                    *
+.*        V5.04     18/06/91    J.Tan                                          *
+.*                  Fixed bed days for on-leave patients again                 *
+.*        V5.05     05/11/91    J.Tan                 SRF 111468               *
+.*                  Fixed extracting patients to temp file A                   *
+.*        V5.06     10/12/91    J.Tan                 SRF 108986               *
+.*                  Fixed extracting patients and the stepdown periods         *
+.*        V5.07     12/11/1992    Justin Coates  Quote 7441      (MERCY)       *
+.*                  Added Admissions/Av. Length of stay columns                *
+.*                  Added extra Stepdown ranges.                               *
+.*                                                                            *
+.*        V6.00.01  26/11/1992    Justin Coates  Quote 7441      (MERCY)      *
+.*                  Added desc. of how ALOS is calculated.                    *
+.*        V6.00.02  30/11/1992    Justin Coates  Quote 7442 SRF 112216        *
+.*                  Changes for the new layouts required (PTCNNTCM)           *
+.* Version 6.01                                                               *
+.* ------------                                                               *
+.*        V6.01.01  21/03/1994  Greg Horvat      SRF 128362                   *
+.*                  Changed so the correct health fund is printed             *
+.*                                                                            *
+.******************************************************************************
+.
+.$$$$$
+.
+.             report layout 1 -> by Claim Code (no Health Funds)
+.             report layout 2 -> by Claim Code (with Health Funds)
+.             report layout 3 -> by Health Fund 
+.             report layout 4 -> by Health Fund and Room Type
+.
+.$$$$$
+.
+.         FD's required
+.
+          INC       STD001FD                * standard variables
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       PATCODFD/INC            * codes file
+          INC       PATCONFD/INC            * control file
+          INC       PATDAYFD/INC            * day file
+          INC       PATDSCFD/INC            * discharge file
+          INC       PATDTRFD/INC            * patient debtors transaction file
+          INC       PATFN1FD/INC            * health fund file
+          INC       PATMI1FD/INC            * admission file
+          INC       PMSVX1FD/INC            * admission file
+          INC       PATTRNFD/INC            * transfer file
+          INC       PATWR1FD/INC            * ward file
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+.         program variables
+.
+ALOS      FORM      5         * average length of stay
+CALCDATE  DIM       8         * end date to calculate days for
+CCYY      DIM       4         * century and year
+CDFRDATE  DIM       8         * starting date : ccyymmdd
+CDTODATE  DIM       8         * ending   date : ccyymmdd
+CMDLINE   DIM       50        * command line for execute command
+CURRATYP  DIM       3         * current admission type
+CURRDATE  DIM       8         * current date
+CURRROOM  DIM       3         * current room type
+CNDMX1    FORM      6         * working stepdown ranges
+CNDMX2    FORM      6
+CNDMX3    FORM      6
+CNDMX4    FORM      6
+CNDMX5    FORM      6
+CNDMX6    FORM      6
+CNDMX7    FORM      6
+CNDMX8    FORM      6
+CNDMX9    FORM      6
+CNDMX10   FORM      6
+.
+DAYCASE   FORM      1         * 1 = a day case patient
+DAYSPERD  FORM      6         * number of days for type in period
+DAYSTYPE  FORM      6         * number of days for type
+DIM4      DIM       4         * date as mmdd
+DIM8      DIM       8         * date as ccyymmdd
+DIM26     DIM       26        * for normal print line
+DIM30     DIM       30        * for line header
+DIFFDAY   FORM      6         * difference in total days and days for period
+DXFRDATE  DIM       10        * starting date : dd/mm/ccyy
+DXTODATE  DIM       10        * ending   date : dd/mm/ccyy
+.
+FORM6     FORM      6         * working variable for days b/w two dates
+FORM8     FORM      8         * form version of admission number
+FRDATE8   DIM       8         * from date as dim 8
+HEAD1     DIM       30        * report header desc
+HEAD2     DIM       30        * report header desc
+.
+MMDD      DIM       4         * month and day
+OPT       DIM       32        * report option
+PRNTCLAM  FORM      1         * = 1 means claim printed
+PRNTFUND  FORM      1         * = 1 means fund  printed
+PERDDATE  DIM       8         * starting date of the period ccyymmdd
+RECFLG    FORM      1
+REPTFRMT  FORM      1         * report format (for ptcnntcm = one)
+.                                 1 = claim code - no health fund
+.                                 2 = claim code - with health fund
+.                                 3 = health fund
+.                                 4 = health fund and room type
+STRTDAY   FORM      3         * julian day of start date
+STRTYR    FORM      2         * julian year of start date
+STRTLEAP  FORM      1         * if a leap year for start date
+OYEAR     FORM      "365"
+.
+TEMPFILA  DIM       8
+TEMPFILB  DIM       8
+TODATE8   DIM       8         * to date as dim 8
+TYPEDATE  DIM       8         * starting date of current admission type ccyymmdd
+TYPETOTL  FORM      6         * the total for a type
+.
+FRCCYY    FORM      4
+TOCCYY    FORM      4
+DYEAR     DIM       2
+DCENT     DIM       2
+DCCYY     DIM       4
+.
+.         temp file definitions
+.
+TEMPA     IFILE     SQL, FIXED=9, KEY="U1-8"
+KEYA      INIT      " 9 U1-8"
+.
+.Name     Type      Length  Physical Start  Name
+.-------  ----      ------  -------- -----  -----------------------------------
+XADMISS   DIM       8            8       1  Admission Number
+. End of Record                          9
+.
+TEMPB     IFILE     SQL, FIXED=72, KEY="U1-3,4-9,10-12,13-15"
+KEYB      INIT      " 72 U1-3,4-9,10-12,13-15"
+.
+.Name     Type      Length  Physical Start  Name
+.-------  ----      ------  -------- -----  -----------------------------------
+XCLAIM    DIM       3            3       1  Claim Code
+XHFUND    DIM       6            6       4  Health fund code 
+XATYPE    DIM       3            3      10  Admission type
+XROOM     DIM       3            3      13  Room Type
+XDAYCAS   FORM      6            4      16  Number of day cases
+XRANGE1   FORM      6            4      20  Number of days in range 1
+XRANGE2   FORM      6            4      24  Number of days in range 2
+XRANGE3   FORM      6            4      28  Number of days in range 3
+XRANGE4   FORM      6            4      32  Number of days in range 4
+XRANGE5   FORM      6            4      36  Number of days in range 5
+XRANGE6   FORM      6            4      40  Number of days in range 6
+XRANGE7   FORM      6            4      44  Number of days in range 7
+XRANGE8   FORM      6            4      48  Number of days in range 8
+XRANGE9   FORM      6            4      52  Number of days in range 9
+XRNGE10   FORM      6            4      56  Number of days in range 10
+XRNGE11   FORM      6            4      60  Number of days greater than range 10
+XNADMNS   FORM      5            4      64  Number of admissions
+XNPATNT   FORM      5            4      68  Number of patients
+. End of Record                         72
+.
+SXDAYCAS  FORM      6            4      10  Number of day cases
+SXRANGE1  FORM      6            4      14  Number of days in range 1
+SXRANGE2  FORM      6            4      18  Number of days in range 2
+SXRANGE3  FORM      6            4      22  Number of days in range 3
+SXRANGE4  FORM      6            4      26  Number of days in range 4
+SXRANGE5  FORM      6            4      30  Number of days in range 5
+SXRANGE6  FORM      6            4      34  Number of days in range 6
+SXRANGE7  FORM      6            4      38  Number of days in range 7
+SXRANGE8  FORM      6            4      42  Number of days in range 8
+SXRANGE9  FORM      6            4      46  Number of days in range 9
+SXRNGE10  FORM      6            4      50  Number of days in range 10
+SXRNGE11  FORM      6            4      54  Number of days greater than range 10
+SXNADMNS  FORM      5            4      58  Number of admissions
+SXNPATNT  FORM      5            4      62  Number of patients
+.
+.         program constants
+.
+CATA      INIT      "A "      * admission type
+CATCL     INIT      "CL"      * claim code
+CATRT     INIT      "RT"      * room type
+ISBUILD   INIT      "isbuild "
+ISERASE   INIT      "iserase "
+.
+HLTHFND   INIT      "Total for H-Fund"
+INVCODE   INIT      "Invalid Code : "
+OPT1      INIT      "By Claim Code (no Health Fund)  "
+OPT2      INIT      "By Claim Code (with Health Fund)"
+OPT3      INIT      "By Health Fund                  "
+OPT4      INIT      "By Health Fund and Room Type    "
+.
+Z3        INIT      "zzz"
+Z6        INIT      "zzzzzz"
+ZERO4     INIT      "0000"
+ZERO8     INIT      "0000    "
+.
+PRGID     INIT      "IBAPMS29"
+PRGNAM    INIT      "PATIENT DAY MIX REPORT"
+VERSION   INIT      "V11.03.00"
+.
+.*********************************************************************
+.*                  ML0000                                           *
+.*        Mainline Code / Controlling Logic                          *
+.*********************************************************************
+ML0000    CALL      INIT0000                * initialization
+.
+ML1000    CALL      OPTN0000                * Print report ??
+          BRANCH    EXIT,ML9999             * exit
+.
+ML2000    CALL      DATE0000                * enter date range
+          BRANCH    EXIT,ML1000             * nothing entered
+.
+ML3000    CALL      EXTA0000                * extract all the patients to temp A
+          CALL      EXTB0000                * extract data to temp file B
+.
+ML4000    CALL      REPT0000                * produce the report
+.
+          CALL      DTPA0000                * delete temp file A
+          CALL      DTPB0000                * delete temp file B
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM
++
+.*********************************************************************
+.*                  INIT0000                    Called by : ML0000   *
+.*        Initialization and open files                              *
+.*********************************************************************
+INIT0000  CALL      DISPHEAD                * display program details
+          CALL      IBACLOCK
+          DISPLAY   *P50:24,"Opening ",*EL;
+.
+          DISPLAY   *P58:24,"controlf"
+          OPEN      CONTROLF,"controlf"
+          DISPLAY   *P58:24,"patmi1af"
+          OPEN      PATMI1A1,"patmi1af"     * admission file
+          OPEN      PMSVX1A1,"pmsvx1af"     * admission file
+          DISPLAY   *P58:24,"patdschf"
+          OPEN      PATDSCH1,"patdschf"     * discharge file
+          DISPLAY   *P58:24,"pattranf"
+          OPEN      PATTRAN2,"pattranf"     * transfer file
+          DISPLAY   *P58:24,"patfn1af"
+          OPEN      PATFN1A1,"patfn1af"     * health fund file
+          DISPLAY   *P58:24,"patcodes"
+          OPEN      PATCODE1,"patcodes"     * codes file
+          DISPLAY   *P58:24,"patwr1af"
+          OPEN      PATWR1A1,"patwr1af"     * ward file
+.
+          MOVE      "1",CCANLDTE            * can cancel default
+          MOVE      "1",CDEFDTE             * enter once to accept default
+          MOVE      "0",CHIGHLT             * use highlighting
+          MOVE      "1",CNEWDS              * new ? option
+          MOVE      "0",CNOUNDLN            * print underlines at End Of Page
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TEMPFILA
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TEMPFILB
+.
+INIT9999  RETURN
++
+.*********************************************************************
+.*                  DATE0000                    Called by : ML2000   *
+.*        Enter the date ranges                                      *
+.*        Returns : CDFRDATE      from date                          *
+.*                : CDTODATE      to   date                          *
+.*********************************************************************
+DATE0000  DISPLAY   *P1:11,*EF:
+                    *P1:12,"Starting Date : ":
+                    *P1:13,"Ending   Date : "
+.
+DATE1000  UNPACK    SP20,CDFRDATE,CDTODATE  * clear codes
+          UNPACK    SP20,DXFRDATE,DXTODATE  * clear descriptions
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE           * get current date
+.
+          UNPACK    SP6,CMON,CDAY,CYEAR
+          MOVE      CCC,CCENT               * have current century
+.
+          DISPLAY   *P17:12,*EL,*P17:12,*EL
+.
+.         enter the from date
+.
+          MOVE      TEN2,CVERT              * row
+          MOVE      TEN7,CCOL               * column
+.
+          CALL      KEYDATE
+          BRANCH    CQUEST,DATE1000         * ? not allowed
+          BRANCH    OVRCD,DATE9100          * exit
+.
+          PACK      CDFRDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",CDFRDATE
+          UNPACK    CDFRDATE,FRDATE8
+.
+          CALL      PACDATE
+          MOVE      CPCDATE,DXFRDATE        * formatted date
+.
+          MATCH     CURRDATE,CDFRDATE
+          GOTO      DATE2000 IF LESS        * entered < current -> OK
+.
+          DISPLAY   *P1:24,*B,"Date must be in the past.  ",*EL;
+          CALL      HITENTER 
+          GOTO      DATE1000
+.
+.         enter the to date
+.
+DATE2000  MOVE      TEN3,CVERT              * row
+          MOVE      TEN7,CCOL               * column
+          UNPACK    CDFRDATE,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    CQUEST,DATE2000         * ? not allowed
+          BRANCH    OVRCD,DATE1000          * re-enter from date
+.
+          PACK      CDTODATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",CDFRDATE
+          UNPACK    CDTODATE,TODATE8
+.
+          CALL      PACDATE
+          MOVE      CPCDATE,DXTODATE        * formatted date
+.
+          MATCH     CURRDATE,CDTODATE
+          GOTO      DATE3000 IF LESS        * entered < current -> OK
+.
+          DISPLAY   *P1:24,*B,"Date must be in the past.  ",*EL;
+          CALL      HITENTER 
+          GOTO      DATE2000
+.
+DATE3000  MATCH     CDFRDATE,CDTODATE
+          GOTO      DATE3100 IF NOT LESS    * ending >= starting -> OK
+.
+          DISPLAY   *P1:24,*B,"Ending date must be after Start date.  ",*EL;
+          CALL      HITENTER 
+          GOTO      DATE1000
+.
+.         Add one to the TODATE. This is because initially the program did not
+.         include the end date, so it looks at all the data upto but including
+.         the TODATE
+.
+DATE31000 UNPACK    TODATE8,XCENT,XYEAR,XMON,XDAY
+          MOVE      XDAY,DD
+          MOVE      XMON,MM
+          MOVE      XYEAR,YY
+          MOVE      XCENT,CC
+          CALL      DMYCON
+.
+          ADD       ONE,JULDAY
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON
+.
+          PACK      TODATE8,CC,YY,MM,DD
+          REP       " 0",TODATE8
+.
+.         OK to Continue (Y/N/C) ?
+.
+DATE4000  CALL      CONTQST
+          BRANCH    CEXIT,DATE9000,DATE0000,DATE9100
+.                         Yes      No       Cancel
+.
+DATE9000  MOVE      ZERO,EXIT               * continue
+          GOTO      DATE9999
+.
+DATE9100  MOVE      ONE,EXIT                * exit selected
+.
+DATE9999  RETURN
++
+.*********************************************************************
+.*                  EXTA0000                    Called by : ML3000   *
+.*        Loop over day file for the entered date and write the      *
+.*        Admission numbers to temp file A                           *
+.*********************************************************************
+EXTA0000  CALL      CTPA0000                * create temp file
+          UNPACK    CDFRDATE,CCYY,MMDD      * get ccyy and mmdd of start date
+          DISPLAY   *P1:24,*EL,"Extracting Admission No : ";
+.
+.         open the current file
+.
+EXTA0500  PACK      CFNAME,FILDAYA1,CCYY    * open starting file
+          REP       " 0",CFNAME
+          DISPLAY   *P70:24,CFNAME,*EL;
+.
+          CLOSE     PATDAYA1                * close old file
+          MOVE      ZERO,OVRCD              * clear flag
+          TRAP      OVERCOND IF IO          * call overcond if no file
+          OPEN      PATDAYA1,CFNAME         * starting file
+          TRAPCLR   IO                      * clear the trap
+          BRANCH    OVRCD,EXTA3000          * get next years file
+.
+          PACK      KEY12,MMDD,SP8
+          CALL      RSPTDAY1                * positional read
+.
+EXTA1000  CALL      RKPTDAY1                * next read
+          BRANCH    OVRCD,EXTA3000          * end of current file
+.
+          UNPACK    PTDYDATE,XMON,XDAY
+          DISPLAY   *P27:24,XADMISS,*P55:24,XDAY,SLASH,XMON
+.
+          UNPACK    CDTODATE,KEY4,DIM4      * get mmdd into DIM4
+.
+          MATCH     KEY4,CCYY               * check the from year and to year ?
+          GOTO      EXTA2000 IF LESS
+          GOTO      EXTA3000 IF NOT EQUAL
+.
+          MATCH     PTDYDATE,DIM4
+          GOTO      EXTA9999 IF LESS        * after end date
+.
+EXTA2000  MOVE      PTDYADMN,KEY8           * admission number is key
+          CALL      RATEMPA1
+          COMPARE   ZERO,OVRCD
+          GOTO      EXTA1000 IF EQUAL       * already exists
+.
+          MOVE      PTDYADMN,XADMISS        * set up admission number
+          MOVE      XADMISS,KEY8
+          DISPLAY   *P27:24,*V2LON,XADMISS
+          CALL      WRTEMPA1
+          GOTO      EXTA1000
+.
+. ------- increment year by one and get open next day file -------
+.
+EXTA3000  CALL      IBACLOCK                * get current century and year
+          PACK      KEY4,CCC,CYY            * get current century and year
+          REP       " 0",KEY4
+.
+          UNPACK    CCYY,CCENT,CYEAR        * century and year of current file
+          MOVE      CYEAR,IYEAR             * get as a form
+          ADD       ONE,IYEAR               * get next year
+          MOVE      IYEAR,CYEAR             * reset year
+.
+          COMPARE   ZERO,IYEAR
+          GOTO      EXTA3100 IF NOT EQUAL   * not a new century
+.
+.         have a change in centuries
+.
+          MOVE      CCENT,ICENT             * get as a form
+          ADD       ONE,ICENT               * get next century
+          MOVE      ICENT,CCENT             * reset century
+.
+EXTA3100  PACK      CCYY,CCENT,CYEAR        * set new century and year 
+          REP       " 0",CCYY
+.
+          MATCH     CCYY,KEY4
+          GOTO      EXTA9999 IF LESS        * will be opening into the future
+.
+          MOVE      SP4,MMDD                * set to start of file
+          GOTO      EXTA0500                * try and open it
+.
+EXTA9999  RETURN
++
+.*********************************************************************
+.*                  EXTB0000                    Called by : ML3000   *
+.*        Loop over temp file A and extract valid data to temp fileB *
+.*********************************************************************
+EXTB0000  CALL      CTPB0000                * create temp file B
+.
+. -------------------------------------
+. ------- loop over temp file A -------
+. -------------------------------------
+.
+          DISPLAY   *P1:24,"Processing Admission No : ":
+                    *P40:24,"Admission type : ",*EL;
+          MOVE      SP8,KEY8                * clear key
+          CALL      RSTEMPA1                * positional read
+.
+EXTB1000  CALL      RKTEMPA1                * next read
+          BRANCH    OVRCD,EXTB9999          * finished temp file
+.
+          DISPLAY   *P27:24,XADMISS         * read in admission number
+.
+          MOVE      XADMISS,KEY8            * admission number
+          CALL      RDMISS1                 * read admission file
+          BRANCH    OVRCD,EXTB1000          * invalid admission number
+.
+          REP       " 0",ADATE              * zero fill admission date
+          MATCH     TODATE8,ADATE
+          GOTO      EXTB1000 IF NOT LESS    * admitted after period
+.
+          MOVE      SP8,DDATE               * clear discharge date
+          CALL      RDDSCH1                 * read discharge file
+          BRANCH    OVRCD,EXTB1100          * no discharge record
+.
+          MATCH     FRDATE8,DDATE
+          GOTO      EXTB1000 IF LESS        * discharged before period
+.
+EXTB1100  DISPLAY   *P27:24,*V2LON,XADMISS  * valid admission number
+.
+          MOVE      ONE,SXNPATNT            * set the amount of patients to add
+          MOVE      ZERO,SXNADMNS           * clear Number of admissions
+          MATCH     FRDATE8,ADATE
+          GOTO      EXTB1200 IF LESS        * admitted before period
+          MOVE      ONE,SXNADMNS            * set to one admission
+.
+.         set up for transfer file
+.
+EXTB1200  MOVE      ZERO,DAYCASE            * set to not a daycase
+          MOVE      ZERO,DAYSPERD           * clear period total
+          MOVE      ZERO,DAYSTYPE           * clear type days
+          MOVE      SP3,CURRATYP            * clear current admission type
+          MOVE      SP10,TYPEDATE           * clear starting type date
+          MOVE      SP10,PERDDATE           * clear starting for the period
+          MOVE      SP8,CALCDATE            * clear ending type date
+          MOVE      ZERO,RECFLG
+          MOVE      XADMISS,KEY8
+.
+          PACK      KEY30,KEY8,SP30         * start at visit number
+          CALL      RDSTRAN2                * positional read
+.
+. -------------------------------------------------------
+. ------- loop over PATTRNFD for the visit number -------
+. -------------------------------------------------------
+.
+EXTB2000  CALL      RDKTRAN2                * next read
+          BRANCH    OVRCD,EXTB3700          * finished for visit number
+.
+          MOVE      XADMISS,FORM8           * get as a form
+          COMPARE   FORM8,TADMN
+          GOTO      EXTB3700 IF NOT EQUAL   * different visit
+.
+          DISPLAY   *P57:24,*V2LON,TATYPE   * display admission type
+.
+.         If this is an admission or return record, then just save the details
+.
+          MOVE      TMOVE,STMOVE
+          MOVE      TWARD,STWARD 
+          MOVE      TBED,STBED 
+          MATCH     "A",TMOVE
+          GOTO      EXTB2200 IF EQUAL       * admission record
+.
+          MATCH     "R",TMOVE
+          GOTO      EXTB2200 IF EQUAL       * return record
+.
+          MATCH     "C",TMOVE
+          GOTO      EXTB2100 IF EQUAL
+.
+          MATCH     "L",TMOVE
+          GOTO      EXTB2100 IF EQUAL
+.
+          MATCH     ADATE,DDATE
+          GOTO      EXTB2010 IF EQUAL       * day case patient
+.
+          MATCH     FRDATE8,TDATE
+          GOTO      EXTB1000 IF LESS
+.
+          MATCH     TODATE8,TDATE
+          GOTO      EXTB3600 IF LESS
+          MOVE      TODATE8,TDATE
+          GOTO      EXTB3600
+.
+.         Day case
+.
+EXTB2010  MOVE      ONE,DAYSTYPE
+          MOVE      ONE,DAYSPERD
+          MOVE      ONE,DAYCASE
+          MOVE      TATYPE,CURRATYP
+          CALL      POST1000
+          GOTO      EXTB1000
+.
+.         If the admission type has not changed, then ignore the record
+.
+EXTB2100  CMATCH    "L",TMOVE 
+          GOTO      EXTB2105 IF NOT EQUAL       * must be change record
+.
+          MATCH     TODATE8,TDATE
+          GOTO      EXTB2109 IF NOT LESS
+.
+          MOVE      TDATE,CALCDATE
+          CALL      BDAY0000
+          MOVE      ONE,RECFLG
+          GOTO      EXTB2000
+.
+EXTB2105  MATCH     CURRATYP,TATYPE
+          GOTO      EXTB2000 IF EQUAL       * same admission type
+.
+.         A change record
+.
+EXTB2108  MOVE      ZERO,RECFLG
+          MATCH     TODATE8,TDATE
+          GOTO      EXTB2110 IF LESS
+.
+EXTB2109  MOVE      TODATE8,CALCDATE
+          CALL      POST0000
+          GOTO      EXTB1000
+.
+EXTB2110  MOVE      TDATE,CALCDATE
+          CALL      POST0000
+          MOVE      TATYPE,CURRATYP         * set current type
+.
+.         Start of period - Save the admission type
+.
+EXTB2200  MATCH     TODATE8,TDATE
+          GOTO      EXTB3700 IF NOT LESS
+.
+.         Is this starting date less than the start date of the period ?
+.
+          MOVE      TDATE,TYPEDATE          * Start date for last adm.type chg.
+          MATCH     FRDATE8,TDATE
+          GOTO      EXTB2210 IF NOT LESS
+          MOVE      FRDATE8,PERDDATE        * Start date for the period
+          GOTO      EXTB2220
+.
+EXTB2210  MOVE      TDATE,PERDDATE
+.
+EXTB2220  MATCH     "R",TMOVE
+          GOTO      EXTB2225 IF NOT EQUAL
+.
+          MATCH     CURRATYP,TATYPE
+          GOTO      EXTB2000 IF EQUAL
+.
+          COMPARE   ONE,RECFLG
+          CALL      POST1000 IF EQUAL
+          MOVE      ZERO,RECFLG
+.
+EXTB2225  MOVE      TATYPE,CURRATYP         * set current type
+.
+          MOVE      ZERO,DAYSTYPE           * init number of days of this type
+          MOVE      ZERO,DAYSPERD           * init days in period
+          GOTO      EXTB2000
+.
+.         End of this admissions records in transfer file. No discharge record
+.
+EXTB3600  MATCH     "L",STMOVE
+          GOTO      EXTB3700 IF EQUAL
+.
+          MATCH     SP1,STMOVE
+          GOTO      EXTB3700 IF EQUAL
+.
+          MATCH     "D",STMOVE
+          GOTO      EXTB3610 IF NOT EQUAL
+.
+          MOVE      TDATE,CALCDATE
+          GOTO      EXTB3620
+.
+EXTB3610  MOVE      TODATE8,CALCDATE
+EXTB3620  CALL      POST0000
+          GOTO      EXTB1000
+.
+EXTB3700  COMPARE   ONE,RECFLG
+          CALL      POST1000 IF EQUAL
+          MOVE      ZERO,RECFLG
+          GOTO      EXTB1000
+.
+EXTB9999  RETURN
+.
++
+.*********************************************************************
+.*                  REPT0000                    Called by : ML4000   *
+.*        Produce the report                                         *
+.*********************************************************************
+REPT0000  DISPLAY   *P1:24,"Producing the Report now - ",*V2LON,*BLINKON:
+                    "Please wait",*EL;
+          MOVE      ZERO,CPAGENO            * clear page counter
+          CALL      HEAD0000
+          MOVE      ZERO,PRNTCLAM           * claim not printed
+          MOVE      ZERO,PRNTFUND           * fund  not printed
+          MOVE      "***",CURRATYP          * set current ad. type
+.
+          MOVE      SP20,KEY15              * start of file
+          CALL      RDTEMPB1                * exact read
+          COMPARE   ZERO,OVRCD
+          GOTO      REPT1100 IF EQUAL       * valid read
+.
+. -----------------------------------
+. ------- loop over temp file -------
+. -----------------------------------
+.
+REPT1000  CALL      RKTEMPB1                * next read
+          BRANCH    OVRCD,REPT9100          * end of file
+.
+REPT1100  COMPARE   ONE,REPTFRMT
+          CALL      RPTA0000 IF EQUAL       * report format 1
+          COMPARE   TWO,REPTFRMT
+          CALL      RPTB0000 IF EQUAL       * report format 2
+          COMPARE   THREE,REPTFRMT
+          CALL      RPTC0000 IF EQUAL       * report format 3
+          COMPARE   FOUR,REPTFRMT
+          CALL      RPTD0000 IF EQUAL       * report format 4
+          GOTO      REPT1000
+.
+.         end of report
+.
+REPT9100  PRINT     *N,*20,"*** End of Report ***",*N
+.
+REPT9999  RETURN
++
+.*********************************************************************
+.*                  HEAD0000                    Called by : REPT0000 *
+.*        Print a new page heading for the report                    *
+.*********************************************************************
+HEAD0000  CALL      HDRA0000
+.
+          MOVE      ZERO,PRNTCLAM
+          MOVE      ZERO,PRNTFUND
+HEAD9999  RETURN
++
+.*********************************************************************
+.*                  BDAY0000                    Called by : POST0000 *
+.*        Calculate no of days for the periods and                   *
+.*                  no of days since admission date                  *
+.*********************************************************************
+BDAY0000  MOVE      ZERO,EXIT
+          MATCH     TYPEDATE,CALCDATE
+          GOTO      BDAY1000 IF LESS
+.
+          MOVE      TYPEDATE,DIM8            * Starting date
+          CALL      CDAY0000                 * Calculate no of days for adm.
+          ADD       FORM6,DAYSTYPE           * add to current days value
+.
+BDAY1000  MATCH     PERDDATE,CALCDATE
+          GOTO      BDAY1100 IF LESS
+.
+          MOVE      PERDDATE,DIM8            * Starting date
+          CALL      CDAY0000                 * Calculate no of days for periods
+          ADD       FORM6,DAYSPERD           * add to the days in the period
+.
+BDAY1100  COMPARE   ZERO,DAYSTYPE
+          GOTO      BDAY2000 IF NOT EQUAL
+.
+          COMPARE   ZERO,DAYSPERD
+          GOTO      BDAY2000 IF NOT EQUAL
+          MOVE      ONE,EXIT
+.
+BDAY2000  RETURN
+.
+.*********************************************************************
+.*                  CDAY0000                    Called by : BDAY0000 *
+.*        Calculate the duration between two dates                   *
+.*        Para's  : TYPEDATE      the starting date                  *
+.*                  CALCDATE      the ending   date                  *
+.*                  DAYSTYPE      the current number of days         *
+.*                  DAYSPERD      the number of days in the period   *
+.*        Returns : DAYSTYPE      the number of days for adm type    *
+.*                  DAYSPERD      the number of days in the period   *
+.*********************************************************************
+CDAY0000  MOVE      ZERO,FORM6              * clear working days variable .
+.         turn starting date into julian days
+.
+          DAYSEP    DIM8,CALCDATE,FORM6
+.
+CDAY9999  RETURN
++
+.*********************************************************************
+.*                  POST0000                    Called by : EXTB4000 *
+.*        Update temp file B with required combination of data       *
+.*        Para's  : DAYSTYPE      days for the admission type        *
+.*                  DAYSPERD      days for the period                *
+.*                  TYPEDATE      starting date for the period       *
+.*                  CALCDATE      ending   date for the period       *
+.*                  CURRATYP      current admission type             *
+.*                  CURRROOM      current room type                  *
+.*********************************************************************
+POST0000  CALL      BDAY0000                * calculate number of days
+          BRANCH    EXIT,POST9999
+.
+POST1000  MOVE      DAYSTYPE,DIFFDAY        * total days for admission type
+          SUB       DAYSPERD,DIFFDAY        * get stepdown factor
+.
+          CALL      CADB0000                * Calculate days in ranges
+.
+          MOVE      SP3,WRTYPE              * clear room type code
+          PACK      KEY6,TWARD,TBED,SP10
+          CALL      RDWARD1
+          MOVE      WRTYPE,CURRROOM         * set room type
+.
+          COMPARE   ONE,REPTFRMT
+          CALL      TPBA0000 IF EQUAL       * report layout 1
+          COMPARE   TWO,REPTFRMT
+          CALL      TPBB0000 IF EQUAL       * report layout 2
+          COMPARE   THREE,REPTFRMT
+          CALL      TPBC0000 IF EQUAL       * report layout 3
+          COMPARE   FOUR,REPTFRMT
+          CALL      TPBD0000 IF EQUAL       * report layout 4
+.
+. have to clear values as if the person has a change of admission type
+. this post routine will be called twice and so to avoid adding the 
+. amounts more than once, must clear the values
+.
+          MOVE      ZERO,SXNADMNS           * clear temp no. of admissions
+          MOVE      ZERO,SXNPATNT           * clear number of patients
+.
+POST9999  RETURN
++
+.*********************************************************************
+.*                  CADB0000                    Called by : POST0000 *
+.*        Updates values on temp file B                              *
+.*        Para's  : KEY15         health fund and admission type     *
+.*                  DIFFDAYS      stepdown factor                    *
+.*                  DAYSPERD      days in the period                 *
+.*                  DAYCASE       1=patient is a day-case            *
+.*********************************************************************
+CADB0000  MOVE      ZERO,SXDAYCAS           * clear Number of day cases
+          MOVE      ZERO,SXRANGE1           * clear Number of days in range 1
+          MOVE      ZERO,SXRANGE2           * clear Number of days in range 2
+          MOVE      ZERO,SXRANGE3           * clear Number of days in range 3
+          MOVE      ZERO,SXRANGE4           * clear Number of days in range 4
+          MOVE      ZERO,SXRANGE5           * clear Number of days in range 5
+          MOVE      ZERO,SXRANGE6           * clear Number of days in range 6
+          MOVE      ZERO,SXRANGE7           * clear Number of days in range 7
+          MOVE      ZERO,SXRANGE8           * clear Number of days in range 8
+          MOVE      ZERO,SXRANGE9           * clear Number of days in range 9
+          MOVE      ZERO,SXRNGE10           * clear Number of days in range 10
+          MOVE      ZERO,SXRNGE11           * clear Number of days in range 11
+.
+          READ      CONTROLF,HUND03;*21,PTCNDMX1,PTCNDMX2,PTCNDMX3,PTCNDMX4:
+                                    *29,PTCNDMX5,PTCNDMX6,PTCNDMX7,PTCNDMX8:
+                                    *37,PTCNDMX9,PTCNDX10
+.
+          BRANCH    DAYCASE,CADB8900        * a day case patient
+.
+          MOVE      PTCNDMX1,CNDMX1
+          MOVE      PTCNDMX2,CNDMX2
+          MOVE      PTCNDMX3,CNDMX3
+          MOVE      PTCNDMX4,CNDMX4
+          MOVE      PTCNDMX5,CNDMX5
+          MOVE      PTCNDMX6,CNDMX6
+          MOVE      PTCNDMX7,CNDMX7
+          MOVE      PTCNDMX8,CNDMX8
+          MOVE      PTCNDMX9,CNDMX9
+          MOVE      PTCNDX10,CNDMX10
+.
+          SUB       DIFFDAY,CNDMX1          * new range 1
+          SUB       DIFFDAY,CNDMX2          * new range 2
+          SUB       DIFFDAY,CNDMX3          * new range 3
+          SUB       DIFFDAY,CNDMX4          * new range 4
+          SUB       DIFFDAY,CNDMX5          * new range 5
+          SUB       DIFFDAY,CNDMX6          * new range 6
+          SUB       DIFFDAY,CNDMX7          * new range 7
+          SUB       DIFFDAY,CNDMX8          * new range 8
+          SUB       DIFFDAY,CNDMX9          * new range 9
+          SUB       DIFFDAY,CNDMX10         * new range 10
+.
+          CALL      RNGA0000                * using 6 ranges
+          GOTO      CADB9999
+.
+CADB8900  ADD       ONE,SXDAYCAS             * add to daycase amount
+CADB9999  RETURN
+.
+.*********************************************************************
+.*                  UPDB0000                    Called by : POST0000 *
+.*         Update/write to tempfile                                  *
+.         Para's  : KEY15         key for temp file                  *
+.*********************************************************************
+UPDB0000  MOVE      ZERO,XDAYCAS
+          MOVE      ZERO,XRANGE1
+          MOVE      ZERO,XRANGE2
+          MOVE      ZERO,XRANGE3
+          MOVE      ZERO,XRANGE4
+          MOVE      ZERO,XRANGE5
+          MOVE      ZERO,XRANGE6
+          MOVE      ZERO,XRANGE7
+          MOVE      ZERO,XRANGE8
+          MOVE      ZERO,XRANGE9
+          MOVE      ZERO,XRNGE10
+          MOVE      ZERO,XRNGE11
+          MOVE      ZERO,XNADMNS
+          MOVE      ZERO,XNPATNT
+.
+          CALL      RDTEMPB1                * read temp file
+.
+.         update current values
+.
+          ADD       SXDAYCAS,XDAYCAS
+          ADD       SXRANGE1,XRANGE1
+          ADD       SXRANGE2,XRANGE2
+          ADD       SXRANGE3,XRANGE3
+          ADD       SXRANGE4,XRANGE4
+          ADD       SXRANGE5,XRANGE5
+          ADD       SXRANGE6,XRANGE6
+          ADD       SXRANGE7,XRANGE7
+          ADD       SXRANGE8,XRANGE8
+          ADD       SXRANGE9,XRANGE9
+          ADD       SXRNGE10,XRNGE10
+          ADD       SXRNGE11,XRNGE11
+          ADD       SXNADMNS,XNADMNS
+          ADD       SXNPATNT,XNPATNT
+.
+          BRANCH    OVRCD,UPDB9500          * write a record
+.
+.         update record
+.
+          CALL      UPTEMPB1              
+          GOTO      UPDB9999
+.
+.         write a new record
+.
+UPDB9500  UNPACK    KEY15,XCLAIM,XHFUND,XATYPE,XROOM
+          CALL      WRTEMPB1
+.
+UPDB9999  RETURN
++
+.*********************************************************************
+.*                  DTPA0000                    Called by : EXTA0000 *
+.*        Delete temp file A                                         *
+.*********************************************************************
+DTPA0000  CLOSE     TEMPA
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISERASE,TEMPFILA
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+DTPA9999  RETURN
++
+.*********************************************************************
+.*                  CTPA0000                    Called by : EXTA0000 *
+.*        Create temp file A                                         *
+.*********************************************************************
+CTPA0000  CALL      DTPA0000                * delete it first
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILA,KEYA,SP30
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPA,TEMPFILA
+.
+CTPA9999  RETURN
++
+.*********************************************************************
+.*                  DTPB0000                    Called by : EXTB0000 *
+.*        Delete temp file B                                         *
+.*********************************************************************
+DTPB0000  CLOSE     TEMPB
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISERASE,TEMPFILB
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+DTPB9999  RETURN
++
+.*********************************************************************
+.*                  CTPB0000                    Called by : EXTB0000 *
+.*        Create temp file B                                         *
+.*********************************************************************
+CTPB0000  CALL      DTPB0000                * delete it first
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILB,KEYB,SP30
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPB,TEMPFILB
+.
+CTPB9999  RETURN
++
+.*********************************************************************
+.*        I/O routines for Temp file A                               *
+.*********************************************************************
+RATEMPA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      TEMPA,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMPA1  RESET     KEY8
+          READ      TEMPA,KEY8;;
+          RETURN
+.
+RDTEMPA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      TEMPA,KEY8;XADMISS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMPA1  MOVE      ZERO,OVRCD
+          READKS    TEMPA;XADMISS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMPA1  MOVE      ZERO,OVRCD
+          READKP    TEMPA;XADMISS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMPA1  RESET     KEY8
+          WRITE     TEMPA,KEY8;XADMISS
+          RETURN
+.
+UPTEMPA1  UPDATE    TEMPA;XADMISS
+          RETURN
++
+.*********************************************************************
+.*        I/O routines for Temp file B                               *
+.*********************************************************************
+RATEMPB1  MOVE      ZERO,OVRCD
+          RESET     KEY15
+          READ      TEMPB,KEY15;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMPB1  RESET     KEY15
+          READ      TEMPB,KEY15;;
+          RETURN
+.
+RDTEMPB1  MOVE      ZERO,OVRCD
+          RESET     KEY15
+          READ      TEMPB,KEY15;XCLAIM,XHFUND,XATYPE,XROOM,XDAYCAS:
+                               XRANGE1,XRANGE2,XRANGE3,XRANGE4,XRANGE5:
+                               XRANGE6,XRANGE7,XRANGE8,XRANGE9,XRNGE10:
+                               XRNGE11,XNADMNS,XNPATNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMPB1  MOVE      ZERO,OVRCD
+          READKS    TEMPB;XCLAIM,XHFUND,XATYPE,XROOM,XDAYCAS:
+                          XRANGE1,XRANGE2,XRANGE3,XRANGE4,XRANGE5:
+                          XRANGE6,XRANGE7,XRANGE8,XRANGE9,XRNGE10:
+                          XRNGE11,XNADMNS,XNPATNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMPB1  MOVE      ZERO,OVRCD
+          READKP    TEMPB;XCLAIM,XHFUND,XATYPE,XROOM,XDAYCAS:
+                          XRANGE1,XRANGE2,XRANGE3,XRANGE4,XRANGE5:
+                          XRANGE6,XRANGE7,XRANGE8,XRANGE9,XRNGE10:
+                          XRNGE11,XNADMNS,XNPATNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMPB1  RESET     KEY15
+          WRITE     TEMPB,KEY15;XCLAIM,XHFUND,XATYPE,XROOM,XDAYCAS:
+                               XRANGE1,XRANGE2,XRANGE3,XRANGE4,XRANGE5:
+                               XRANGE6,XRANGE7,XRANGE8,XRANGE9,XRNGE10:
+                               XRNGE11,XNADMNS,XNPATNT
+          RETURN
+.
+UPTEMPB1  UPDATE    TEMPB;XCLAIM,XHFUND,XATYPE,XROOM,XDAYCAS:
+                          XRANGE1,XRANGE2,XRANGE3,XRANGE4,XRANGE5:
+                          XRANGE6,XRANGE7,XRANGE8,XRANGE9,XRNGE10:
+                          XRNGE11,XNADMNS,XNPATNT
+          RETURN
++
+.
+.         I/O includes needed
+.
+          INC       STD001IO                * standard routines
+          INC       TFILENAM                     * Generate Temp File Name
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATDAYIO/INC            * day file
+          INC       PATCODIO/INC            * codes file
+          INC       PATDSCIO/INC            * discharge file
+          INC       PATFN1IO/INC            * health fund file
+          INC       PATMI1IO/INC            * admission file
+          INC       PMSVX1IO/INC            * admission file
+          INC       PATTRNIO/INC            * transfer file
+          INC       PATWR1IO/INC            * ward file
+          INC       WEBERRIO/INC                 * Web Server Error Logging
+................................................................................
+.*********************************************************************
+.         print the required underlines for the report
+.*********************************************************************
+PUFR0000  PRINT     *20,"*----------------------------------------------":
+                       "----------------------------------------------*"
+          ADD       ONE,CLNO
+          GOTO      PUFR9999
+.
+PUFR9999  RETURN
++
+.*********************************************************************
+.*                  HDRA0000                    Called by : REPT0000 *
+.*        Print a new page heading for the report - 6 ranges         *
+.*********************************************************************
+HDRA0000  MOVE      ONE,CNOUNDLN            * no underline at new page
+          CALL      HEAD132                 * report page heading
+          READ      CONTROLF,HUND03;*21,PTCNDMX1,PTCNDMX2,PTCNDMX3,PTCNDMX4:
+                                    *29,PTCNDMX5
+          PRINT     *40,"From ",DXFRDATE," to ",DXTODATE:
+                    *N,*40,OPT,*N:
+                    *N,*20,"*----------------------------------------------":
+                       "----------------------------------------------*":
+                    *N,*20,"| ",HEAD1,*53,"| --------------- Stepdown Periods ":
+                    "--------------- |  Total |"
+          PRINT     *20,"| ",HEAD2,*53,"|    Day   1-",PTCNDMX1,SP2;
+          ADD       ONE,PTCNDMX1
+          PRINT     PTCNDMX1,"-",PTCNDMX2,SP2;
+          ADD       ONE,PTCNDMX2
+          PRINT     PTCNDMX2,"-",PTCNDMX3,SP2;
+          ADD       ONE,PTCNDMX3
+          PRINT     PTCNDMX3,"-",PTCNDMX4,SP2;
+          ADD       ONE,PTCNDMX4
+          PRINT     PTCNDMX4,"-",PTCNDMX5,SP4;
+          ADD       ONE,PTCNDMX5
+.
+          PRINT     PTCNDMX5,"+ |   Days |":
+                    *N,*20,"*----------------------------------------------":
+                           "----------------------------------------------*"
+          MOVE      "11",CLNO               * set line number
+          MOVE      "***",CURRATYP
+.
+HDRA9999  RETURN
++
+.*********************************************************************
+.*                  HDRB0000                    Called by : REPT0000 *
+.*        Print a new page heading for the report  - 11 ranges       *
+.*********************************************************************
+..HDRB0000  CALL      HEAD132                 * report page heading
+..          READ      CONTROLF,HUND03;*21,PTCNDMX1,PTCNDMX2,PTCNDMX3,PTCNDMX4:
+..                                    *29,PTCNDMX5,PTCNDMX6,PTCNDMX7,PTCNDMX8:
+..                                    *37,PTCNDMX9,PTCNDX10
+..          PRINT     *40,"From ",DXFRDATE," to ",DXTODATE,*N
+..          CALL      UND132
+..          PRINT     *1,"| Health Fund /":
+..                    *23,"| -------------------------------- Stepdown ":
+..                    "Periods -------------------------------- ":
+..                    "|  Total | Total | ALOS |":
+..                    *N,"| Admission Type":
+..                    *23,"|   Day    1-",PTCNDMX1,SP2;
+..          ADD       ONE,PTCNDMX1
+..          PRINT     PTCNDMX1,"-",PTCNDMX2,SP2;
+..          ADD       ONE,PTCNDMX2
+..          PRINT     PTCNDMX2,"-",PTCNDMX3,SP2;
+..          ADD       ONE,PTCNDMX3
+..          PRINT     PTCNDMX3,"-",PTCNDMX4,SP2;
+..          ADD       ONE,PTCNDMX4
+..          PRINT     PTCNDMX4,"-",PTCNDMX5,SP1;
+..          ADD       ONE,PTCNDMX5
+..          PRINT     PTCNDMX5,"-",PTCNDMX6,SP2;
+..          ADD       ONE,PTCNDMX6
+..          PRINT     PTCNDMX6,"-",PTCNDMX7,SP2;
+..          ADD       ONE,PTCNDMX7
+..          PRINT     PTCNDMX7,"-",PTCNDMX8,SP2;
+..          ADD       ONE,PTCNDMX8
+..          PRINT     PTCNDMX8,"-",PTCNDMX9,SP2;
+..          ADD       ONE,PTCNDMX9
+..          PRINT     PTCNDMX9,"-",PTCNDX10,SP4;
+..          ADD       ONE,PTCNDX10
+.
+..          PRINT     PTCNDX10,"+ |   Days | Admns |      |"
+..          CALL      UND132
+..          MOVE      "10",CLNO               * set line number
+..
+..HDRB9999  RETURN
++
+.*********************************************************************
+.         print a header line - DIM30
+.*********************************************************************
+PLHD0000  COMPARE   "53",CLNO
+          CALL      HEAD0000 IF NOT LESS    * print new page
+.
+          PRINT     *20,"| ",DIM30," |",*104,"|",*113,"|"
+.
+          ADD       ONE,CLNO
+PLHD9999  RETURN
+.
+.*********************************************************************
+.         print a line of the report
+.         Para's  : DIM26         desc of line
+.*********************************************************************
+PLIN0000  COMPARE   "53",CLNO
+          CALL      HEAD0000 IF NOT LESS    * need new page
+.
+          MOVE      XDAYCAS,TYPETOTL
+          ADD       XRANGE1,TYPETOTL
+          ADD       XRANGE2,TYPETOTL
+          ADD       XRANGE3,TYPETOTL
+          ADD       XRANGE4,TYPETOTL
+          ADD       XRANGE5,TYPETOTL
+          ADD       XRANGE6,TYPETOTL
+          ADD       XRANGE7,TYPETOTL
+          ADD       XRANGE8,TYPETOTL
+          ADD       XRANGE9,TYPETOTL
+          ADD       XRNGE10,TYPETOTL
+          ADD       XRNGE11,TYPETOTL        * get total for line
+.
+          PRINT     *20,"| ",DIM26,*53,"| ",XDAYCAS,SP1,XRANGE1,SP1,XRANGE2:
+                    SP1,XRANGE3,SP1,XRANGE4,SP1,XRANGE5,SP1,XRANGE6:
+                    " | ",TYPETOTL," |"
+          GOTO      PLIN9999
+.
+PLIN9999  RETURN
++
+.*********************************************************************
+.         now work out where to store the data - 6 ranges
+.         see if days in period is in range 1
+.*********************************************************************
+RNGA0000  COMPARE   CNDMX1,ZERO
+          GOTO      RNGA4000 IF NOT LESS    * range 1 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX1
+          GOTO      RNGA3100 IF LESS        * days is after range 1
+.
+.         days in period is in range 1
+.
+          ADD       DAYSPERD,SXRANGE1       * add number to range 1 days
+          GOTO      RNGA9999
+.
+.         days in period is after range 1
+.
+RNGA3100  ADD       CNDMX1,SXRANGE1       * add to number in range 1
+          SUB       CNDMX1,DAYSPERD       * get number of days left to add
+          SUB       CNDMX1,CNDMX2         * get new range 2
+          SUB       CNDMX1,CNDMX3         * get new range 3
+          SUB       CNDMX1,CNDMX4         * get new range 4
+          SUB       CNDMX1,CNDMX5         * get new range 5
+.
+.         see if days in period is in range 2
+.
+RNGA4000  COMPARE   CNDMX2,ZERO
+          GOTO      RNGA5000 IF NOT LESS    * range 2 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX2
+          GOTO      RNGA4100 IF LESS        * days is after range 2
+.
+.         days in period is in range 2
+.
+          ADD       DAYSPERD,SXRANGE2       * add number to range 2 days
+          GOTO      RNGA9999
+.
+.         days in period is after range 2
+.
+RNGA4100  ADD       CNDMX2,SXRANGE2       * add to number in range 2
+          SUB       CNDMX2,DAYSPERD       * get number of days left to add
+          SUB       CNDMX2,CNDMX3         * get new range 3
+          SUB       CNDMX2,CNDMX4         * get new range 4
+          SUB       CNDMX2,CNDMX5         * get new range 5
+.
+.         see if days in period is in range 3
+.
+RNGA5000  COMPARE   CNDMX3,ZERO
+          GOTO      RNGA6000 IF NOT LESS    * range 3 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX3
+          GOTO      RNGA5100 IF LESS        * days is after range 3
+.
+.         days in period is in range 3
+.
+          ADD       DAYSPERD,SXRANGE3       * add number to range 3 days
+          GOTO      RNGA9999
+.
+.         days in period is after range 3
+.
+RNGA5100  ADD       CNDMX3,SXRANGE3       * add to number in range 3
+          SUB       CNDMX3,DAYSPERD       * get number of days left to add
+          SUB       CNDMX3,CNDMX4         * get new range 4
+          SUB       CNDMX3,CNDMX5         * get new range 5
+.
+.         see if days in period is in range 4
+.
+RNGA6000  COMPARE   CNDMX4,ZERO
+          GOTO      RNGA7000 IF NOT LESS    * range 4 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX4
+          GOTO      RNGA6100 IF LESS        * days is after range 4
+.
+.         days in period is in range 4
+.
+          ADD       DAYSPERD,SXRANGE4        * add number to range 4 days
+          GOTO      RNGA9999
+.
+.         days in period is after range 4
+.
+RNGA6100  ADD       CNDMX4,SXRANGE4       * add to number in range 4
+          SUB       CNDMX4,DAYSPERD       * get number of days left to add
+          SUB       CNDMX4,CNDMX5         * get new range 5
+.
+.         see if days in period is in range 5
+.
+RNGA7000  COMPARE   CNDMX5,ZERO
+          GOTO      RNGA8000 IF NOT LESS    * range 5 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX5
+          GOTO      RNGA7100 IF LESS        * days is after range 5
+.
+.         days in period is in range 5
+.
+          ADD       DAYSPERD,SXRANGE5       * add number to range 5 days
+          GOTO      RNGA9999
+.
+.         days in period is after range 5
+.
+RNGA7100  ADD       CNDMX5,SXRANGE5       * add to number in range 5
+          SUB       CNDMX5,DAYSPERD       * get number of days left to add
+.
+.         days in period is in range 6
+.
+RNGA8000  ADD       DAYSPERD,SXRANGE6       * update days in range 6
+RNGA9999  RETURN
++
+.*********************************************************************
+.         now work out where to store the data - 11 ranges
+.*********************************************************************
+.
+. ******* see if days in range 1
+.
+RNGB0000  COMPARE   CNDMX1,ZERO
+          GOTO      RNGB1000 IF NOT LESS    * range 1 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX1
+          GOTO      RNGB0500 IF LESS        * days is after range 1
+.
+.         days in period is in range 1
+.
+          ADD       DAYSPERD,SXRANGE1       * add number to range 1 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 1
+.
+RNGB0500  ADD       CNDMX1,SXRANGE1       * add to number in range 1
+          SUB       CNDMX1,DAYSPERD       * get number of days left to add
+          SUB       CNDMX1,CNDMX2         * get new range 2
+          SUB       CNDMX1,CNDMX3         * get new range 3
+          SUB       CNDMX1,CNDMX4         * get new range 4
+          SUB       CNDMX1,CNDMX5         * get new range 5
+          SUB       CNDMX1,CNDMX6         * get new range 6
+          SUB       CNDMX1,CNDMX7         * get new range 7
+          SUB       CNDMX1,CNDMX8         * get new range 8
+          SUB       CNDMX1,CNDMX9         * get new range 9
+          SUB       CNDMX1,CNDMX10        * get new range 10
+.
+. ******* see if days in period is in range 2
+.
+RNGB1000  COMPARE   CNDMX2,ZERO
+          GOTO      RNGB2000 IF NOT LESS    * range 2 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX2
+          GOTO      RNGB1500 IF LESS        * days is after range 2
+.
+.         days in period is in range 2
+.
+          ADD       DAYSPERD,SXRANGE2       * add number to range 2 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 2
+.
+RNGB1500  ADD       CNDMX2,SXRANGE2       * add to number in range 2
+          SUB       CNDMX2,DAYSPERD       * get number of days left to add
+          SUB       CNDMX2,CNDMX3         * get new range 3
+          SUB       CNDMX2,CNDMX4         * get new range 4
+          SUB       CNDMX2,CNDMX5         * get new range 5
+          SUB       CNDMX2,CNDMX6         * get new range 6
+          SUB       CNDMX2,CNDMX7         * get new range 7
+          SUB       CNDMX2,CNDMX8         * get new range 8
+          SUB       CNDMX2,CNDMX9         * get new range 9
+          SUB       CNDMX2,CNDMX10        * get new range 10
+.
+. ******* see if days in period is in range 3
+.
+RNGB2000  COMPARE   CNDMX3,ZERO
+          GOTO      RNGB3000 IF NOT LESS    * range 3 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX3
+          GOTO      RNGB2500 IF LESS        * days is after range 3
+.
+.         days in period is in range 3
+.
+          ADD       DAYSPERD,SXRANGE3       * add number to range 3 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 3
+.
+RNGB2500  ADD       CNDMX3,SXRANGE3       * add to number in range 3
+          SUB       CNDMX3,DAYSPERD       * get number of days left to add
+          SUB       CNDMX3,CNDMX4         * get new range 4
+          SUB       CNDMX3,CNDMX5         * get new range 5
+          SUB       CNDMX3,CNDMX6         * get new range 6
+          SUB       CNDMX3,CNDMX7         * get new range 7
+          SUB       CNDMX3,CNDMX8         * get new range 8
+          SUB       CNDMX3,CNDMX9         * get new range 9
+          SUB       CNDMX3,CNDMX10        * get new range 10
+.
+. ******* see if days in period is in range 4
+.
+RNGB3000  COMPARE   CNDMX4,ZERO
+          GOTO      RNGB4000 IF NOT LESS    * range 4 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX4
+          GOTO      RNGB3500 IF LESS        * days is after range 4
+.
+.         days in period is in range 4
+.
+          ADD       DAYSPERD,SXRANGE4        * add number to range 4 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 4
+.
+RNGB3500  ADD       CNDMX4,SXRANGE4       * add to number in range 4
+          SUB       CNDMX4,DAYSPERD       * get number of days left to add
+          SUB       CNDMX4,CNDMX5         * get new range 5
+          SUB       CNDMX4,CNDMX6         * get new range 6
+          SUB       CNDMX4,CNDMX7         * get new range 7
+          SUB       CNDMX4,CNDMX8         * get new range 8
+          SUB       CNDMX4,CNDMX9         * get new range 9
+          SUB       CNDMX4,CNDMX10        * get new range 10
+.
+. ******* see if days in period is in range 5
+.
+RNGB4000  COMPARE   CNDMX5,ZERO
+          GOTO      RNGB5000 IF NOT LESS    * range 5 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX5
+          GOTO      RNGB4500 IF LESS        * days is after range 5
+.
+.         days in period is in range 5
+.
+          ADD       DAYSPERD,SXRANGE5        * add number to range 5 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 5
+.
+RNGB4500  ADD       CNDMX5,SXRANGE5       * add to number in range 5
+          SUB       CNDMX5,DAYSPERD       * get number of days left to add
+          SUB       CNDMX5,CNDMX6         * get new range 6
+          SUB       CNDMX5,CNDMX7         * get new range 7
+          SUB       CNDMX5,CNDMX8         * get new range 8
+          SUB       CNDMX5,CNDMX9         * get new range 9
+          SUB       CNDMX5,CNDMX10        * get new range 10
+.
+. ******* see if days in period is in range 6
+.
+RNGB5000  COMPARE   CNDMX6,ZERO
+          GOTO      RNGB6000 IF NOT LESS    * range 6 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX6
+          GOTO      RNGB5500 IF LESS        * days is after range 6
+.
+.         days in period is in range 6
+.
+          ADD       DAYSPERD,SXRANGE6        * add number to range 6 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 6
+.
+RNGB5500  ADD       CNDMX6,SXRANGE6       * add to number in range 6
+          SUB       CNDMX6,DAYSPERD       * get number of days left to add
+          SUB       CNDMX6,CNDMX7         * get new range 7
+          SUB       CNDMX6,CNDMX8         * get new range 8
+          SUB       CNDMX6,CNDMX9         * get new range 9
+          SUB       CNDMX6,CNDMX10        * get new range 10
+.
+. ******* see if days in period is in range 7
+.
+RNGB6000  COMPARE   CNDMX7,ZERO
+          GOTO      RNGB7000 IF NOT LESS    * range 7 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX7
+          GOTO      RNGB6500 IF LESS        * days is after range 7
+.
+.         days in period is in range 7
+.
+          ADD       DAYSPERD,SXRANGE7        * add number to range 7 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 7
+.
+RNGB6500  ADD       CNDMX7,SXRANGE7       * add to number in range 7
+          SUB       CNDMX7,DAYSPERD       * get number of days left to add
+          SUB       CNDMX7,CNDMX8         * get new range 8
+          SUB       CNDMX7,CNDMX9         * get new range 9
+          SUB       CNDMX7,CNDMX10        * get new range 10
+.
+. ******* see if days in period is in range 8
+.
+RNGB7000  COMPARE   CNDMX8,ZERO
+          GOTO      RNGB8000 IF NOT LESS    * range 8 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX8
+          GOTO      RNGB7500 IF LESS        * days is after range 8
+.
+.         days in period is in range 8
+.
+          ADD       DAYSPERD,SXRANGE8        * add number to range 8 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 8
+.
+RNGB7500  ADD       CNDMX8,SXRANGE8       * add to number in range 8
+          SUB       CNDMX8,DAYSPERD       * get number of days left to add
+          SUB       CNDMX8,CNDMX9         * get new range 9
+          SUB       CNDMX8,CNDMX10        * get new range 10
+.
+. ******* see if days in period is in range 9
+.
+RNGB8000  COMPARE   CNDMX9,ZERO
+          GOTO      RNGB9000 IF NOT LESS    * range 9 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX9
+          GOTO      RNGB8500 IF LESS        * days is after range 8
+.
+.         days in period is in range 9
+.
+          ADD       DAYSPERD,SXRANGE9        * add number to range 9 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 9
+.
+RNGB8500  ADD       CNDMX9,SXRANGE9       * add to number in range 9
+          SUB       CNDMX9,DAYSPERD       * get number of days left to add
+          SUB       CNDMX9,CNDMX10        * get new range 10
+.
+. ******* see if days in period is in range 10
+.
+RNGB9000  COMPARE   CNDMX10,ZERO
+          GOTO      RNGB9800 IF NOT LESS    * range 10 <= 0
+.
+          COMPARE   DAYSPERD,CNDMX10
+          GOTO      RNGB9500 IF LESS        * days is after range 10
+.
+.         days in period is in range 10
+.
+          ADD       DAYSPERD,SXRNGE10       * add number to range 10 days
+          GOTO      RNGB9999
+.
+.         days in period is after range 10
+.
+RNGB9500  ADD       CNDMX10,SXRNGE10        * add to number in range 10
+          SUB       CNDMX10,DAYSPERD        * get number of days left to add
+.
+.         days in period is in range 11
+.
+RNGB9800  ADD       DAYSPERD,SXRNGE11       * update days in range 11
+.
+RNGB9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 1
+.*********************************************************************
+TPBA0000  PACK      KEY15,ACLAIM,Z6,CURRATYP,Z3
+          CALL      UPDB0000
+          PACK      KEY15,ACLAIM,Z6,Z3,Z3
+          CALL      UPDB0000
+          PACK      KEY15,Z3,Z6,CURRATYP,Z3
+          CALL      UPDB0000
+          PACK      KEY15,Z3,Z6,Z3,Z3
+          CALL      UPDB0000
+          MOVE      SP30,HEAD1
+          MOVE      "Claim Code/Admission Type     ",HEAD2
+TPBA9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 2
+.*********************************************************************
+TPBB0000  PACK      KEY15,ACLAIM,AFUNDH,CURRATYP,Z3
+          CALL      UPDB0000
+          PACK      KEY15,ACLAIM,AFUNDH,Z3,Z3
+          CALL      UPDB0000
+          PACK      KEY15,ACLAIM,Z6,Z3,Z3
+          CALL      UPDB0000
+          PACK      KEY15,Z3,Z6,CURRATYP,Z3
+          CALL      UPDB0000
+          PACK      KEY15,Z3,Z6,Z3,Z3
+          CALL      UPDB0000
+          MOVE      "Claim Code/Health Fund        ",HEAD1
+          MOVE      "Admission Type                ",HEAD2
+TPBB9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 3
+.*********************************************************************
+TPBC0000  PACK      KEY15,Z3,AFUNDH,CURRATYP,Z3
+          CALL      UPDB0000
+          PACK      KEY15,Z3,AFUNDH,Z3,Z3
+          CALL      UPDB0000
+          PACK      KEY15,Z3,Z6,CURRATYP,Z3
+          CALL      UPDB0000
+          PACK      KEY15,Z3,Z6,Z3,Z3
+          CALL      UPDB0000
+          MOVE      SP30,HEAD1
+          MOVE      "Health Fund/Admission Type    ",HEAD2
+TPBC9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 4
+.*********************************************************************
+TPBD0000  PACK      KEY15,Z3,AFUNDH,CURRATYP,CURRROOM
+          CALL      UPDB0000
+          PACK      KEY15,Z3,AFUNDH,Z3,Z3
+          CALL      UPDB0000
+          PACK      KEY15,Z3,Z6,CURRATYP,Z3
+          CALL      UPDB0000
+          PACK      KEY15,Z3,Z6,Z3,Z3
+          CALL      UPDB0000
+          MOVE      "Health Fund                   ",HEAD1
+          MOVE      "Admission Type/Room Type      ",HEAD2
+TPBD9999  RETURN
++
+.*********************************************************************
+.         detemine which option to ask
+.*********************************************************************
+OPTN0000  
+..          BRANCH    PTCNMDXR,OPTN1000       * have one  option  
+..          BRANCH    PTCNNTCM,OPTN2000       * have four options
+.
+..OPTN1000  CALL      OPNA0000
+..          GOTO      OPTN9999
+.
+OPTN2000  CALL      OPNB0000
+.
+OPTN9999  RETURN
++
+.*********************************************************************
+.         option screen One - ptcnntcm = zero
+.*********************************************************************
+..OPNA0000  DISPLAY   *P1:3,*EF:
+..                    *P1:4,*V2LON,"0",*P1:5,"1",*HOFF:
+..                    *P2:4," = Exit":
+..                    *P2:5," = Print Report":
+..                    *P1:7,"Select Option :";
+.
+..OPNA1000  KEYIN     *P17:7,*DV,UNDLN1,*P17:7,*V2LON,MOPTION;
+.
+..          COMPARE   ZERO,MOPTION
+..          GOTO      OPNA9000 IF EQUAL       * exit
+.
+..          BRANCH    MOPTION,OPNA8000
+..          BEEP
+..          GOTO      OPNA1000
+.
+..OPNA8000  MOVE      ZERO,EXIT
+..          MOVE      THREE,REPTFRMT          * set to report 3
+..          PACK      OPT,SP20,SP20
+..          GOTO      OPNA9999
+.
+..OPNA9000  MOVE      ONE,EXIT
+.
+..OPNA9999  RETURN
++
+.*********************************************************************
+.         option screen Two - ptcnntcm = one
+.*********************************************************************
+OPNB0000  DISPLAY   *P1:3,*EF,*V2LON:
+                    *P1:4,"0",*P1:5,"1",*P1:6,"2",*P1:7,"3",*P1:8,"4",*HOFF:
+                    *P2:4," = Exit":
+                    *P2:5," = ",OPT1:
+                    *P2:6," = ",OPT2:
+                    *P2:7," = ",OPT3:
+                    *P2:8," = ",OPT4:
+                    *P1:10,"Select option : ";
+.
+OPNB1000  KEYIN     *P17:10,*DV,UNDLN1:
+                    *P17:10,*V2LON,MOPTION;
+.
+          COMPARE   ZERO,MOPTION
+          GOTO      OPNB9000 IF EQUAL       * exit
+.
+          BRANCH    MOPTION,OPNB8000,OPNB8000,OPNB8000,OPNB8000
+          BEEP
+          GOTO      OPNB1000
+.
+OPNB8000  MOVE      ZERO,EXIT
+          MOVE      MOPTION,REPTFRMT
+          LOAD      OPT,MOPTION,OPT1,OPT2,OPT3,OPT4
+          GOTO      OPNB9999
+.
+OPNB9000  MOVE      ONE,EXIT
+.
+OPNB9999  RETURN
++
+.*********************************************************************
+.         print report - layout 1
+.         claim code / no health fund / admission type
+.*********************************************************************
+RPTA0000  MATCH     Z3,XCLAIM
+          GOTO      RPTA9000 IF EQUAL       * have GT's
+.
+          MATCH     Z3,XATYPE
+          GOTO      RPTA8000 IF EQUAL       * print claim code totals
+.
+. ------- see if to print claim code -------
+.
+          BRANCH    PRNTCLAM,RPTA2100       * claim has been printed
+          MOVE      "No Claim Code",TDESC
+          MATCH     SP3,XCLAIM
+          GOTO      RPTA2000 IF EQUAL
+.
+          PACK      TDESC,INVCODE,XCLAIM
+          PACK      KEY5,CATCL,XCLAIM
+          CALL      RDCODE1
+.
+RPTA2000  PACK      DIM30,TDESC,SP10
+          CALL      PLHD0000                * print health fund line
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+.         print the admission type
+.
+RPTA2100  MOVE      "No Admission Type",TDESC 
+          MATCH     SP3,XATYPE
+          GOTO      RPTA2300 IF EQUAL       * no banding set
+.
+          PACK      TDESC,INVCODE,XATYPE
+          PACK      KEY5,CATA,XATYPE
+          CALL      RDCODE1
+.
+RPTA2300  PACK      DIM26,SP2,TDESC,SP30
+          CALL      PLIN0000
+          GOTO      RPTA9999
+.
+. ------- print the total for a claim code -------
+.
+RPTA8000  CALL      PUFR0000
+          MOVE      "Total for Claim Code",DIM26
+          CALL      PLIN0000
+          CALL      PUFR0000
+          MOVE      ZERO,PRNTCLAM           * signal claim not printed
+          GOTO      RPTA9999
+.
+. ------- print the grand totals -------
+.
+RPTA9000  BRANCH    PRNTCLAM,RPTA9200       * heading been printed
+.
+          MOVE      "Admission Type Totals",DIM30
+          CALL      PLHD0000
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+RPTA9200  MATCH     Z3,XATYPE        
+          GOTO      RPTA2100 IF NOT EQUAL   * print band totals
+.
+          CALL      PUFR0000
+          MOVE      "Grand Total",DIM26
+          CALL      PLIN0000
+          CALL      PUFR0000
+.
+RPTA9999  RETURN
++
+.*********************************************************************
+.         print report - layout 2
+.         claim code / health fund / admission type
+.*********************************************************************
+RPTB0000  MATCH     Z3,XCLAIM
+          GOTO      RPTB9000 IF EQUAL       * have GT's
+.
+          MATCH     Z6,XHFUND
+          GOTO      RPTB8000 IF EQUAL       * have claim code total
+.
+          MATCH     Z3,XATYPE         
+          GOTO      RPTB7000 IF EQUAL       * have health fund total
+.
+. ------- see if to print the claim code -------
+.
+RPTB1000  BRANCH    PRNTCLAM,RPTB2100       * claim has been printed
+          MOVE      "No Claim Code",TDESC
+          MATCH     SP3,XCLAIM
+          GOTO      RPTB2000 IF EQUAL
+.
+          PACK      TDESC,INVCODE,XCLAIM
+          PACK      KEY5,CATCL,XCLAIM
+          CALL      RDCODE1
+.
+RPTB2000  PACK      DIM30,TDESC,SP30
+          CALL      PLHD0000
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+. ------- see if to print health fund -------
+.
+RPTB2100  BRANCH    PRNTFUND,RPTB2300       * fund has been printed
+          MOVE      "No Health Fund",HFNAME
+          MATCH     SP6,XHFUND
+          GOTO      RPTB2200 IF EQUAL
+.
+          PACK      HFNAME,INVCODE,XHFUND
+          PACK      KEY14,XHFUND,ZERO8      * health fund and "0000    "
+          CALL      RDFUND1
+.
+RPTB2200  PACK      DIM30,SP2,HFNAME
+          CALL      PLHD0000
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+. ------- print the admission type -------
+.
+RPTB2300  MOVE      "No Admission Type",TDESC 
+          MATCH     SP3,XATYPE
+          GOTO      RPTB2400 IF EQUAL       * no banding set
+.
+          PACK      TDESC,INVCODE,XATYPE
+          PACK      KEY5,CATA,XATYPE
+          CALL      RDCODE1
+.
+RPTB2400  PACK      DIM26,SP4,TDESC,SP30
+          CALL      PLIN0000
+          GOTO      RPTB9999
+.
+. ------- print the total health fund -------
+.
+RPTB7000  CALL      PUFR0000
+          MOVE      "  Total for Health Fund",DIM26
+          CALL      PLIN0000
+          CALL      PUFR0000
+          MOVE      ZERO,PRNTFUND           * signal fund not printed
+          GOTO      RPTB9999
+.
+. ------- print the claim code total -------
+.
+RPTB8000  MOVE      "Total for Claim Code",DIM26
+          CALL      PLIN0000
+          CALL      PUFR0000
+          MOVE      ZERO,PRNTCLAM           * signal claim not printed
+          PRINT     *N;
+          ADD       ONE,CLNO
+          CALL      PUFR0000
+          GOTO      RPTB9999
+.
+. ------- print the grand totals -------
+.
+RPTB9000  BRANCH    PRNTCLAM,RPTB9200       * heading been printed
+.
+          MOVE      "Admission Type Totals",DIM30
+          CALL      PLHD0000
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+RPTB9200  MATCH     Z3,XATYPE        
+          GOTO      RPTB2300 IF NOT EQUAL   * print ad. type totals
+.
+          CALL      PUFR0000
+          MOVE      "Grand Total",DIM26
+          CALL      PLIN0000
+          CALL      PUFR0000
+.
+RPTB9999  RETURN
++
+.*********************************************************************
+.         print report - layout 3
+.         health fund / admission type
+.*********************************************************************
+RPTC0000  MATCH     Z6,XHFUND        
+          GOTO      RPTC9000 IF EQUAL       * print grand totals
+.
+          MATCH     Z3,XATYPE         
+          GOTO      RPTC8000 IF EQUAL       * print health fund totals
+.
+. ------- see if to print the health fund -------
+.
+          BRANCH    PRNTFUND,RPTC2100       * claim has been printed
+          MOVE      "No Health Fund",HFNAME
+          MATCH     SP6,XHFUND
+          GOTO      RPTC1200 IF EQUAL
+.
+          PACK      HFNAME,INVCODE,XHFUND
+          PACK      KEY14,XHFUND,ZERO8      * health fund and "0000    "
+          CALL      RDFUND1
+.
+RPTC1200  PACK      DIM30,HFNAME,SP30
+          CALL      PLHD0000
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+. ------- print the admission type -------
+.
+RPTC2100  MOVE      "No Admission Type",TDESC 
+          MATCH     SP3,XATYPE
+          GOTO      RPTC2200 IF EQUAL       * no admission type
+.
+          PACK      TDESC,INVCODE,XATYPE,SP20
+          PACK      KEY5,CATA,XATYPE         * get type desc
+          CALL      RDCODE1
+.
+RPTC2200  PACK      DIM26,SP2,TDESC,SP30
+          CALL      PLIN0000
+          ADD       ONE,CLNO
+          GOTO      RPTC9999
+.
+. ------- print the total for a health fund -------
+.
+RPTC8000  MOVE      "Total for Health Fund",DIM26
+..          LOAD      DIM26,PTCNMDXR,HLTHFND
+          CALL      PUFR0000                * print the underline
+          CALL      PLIN0000
+          CALL      PUFR0000                * print the underline
+          MOVE      ZERO,PRNTFUND           * signal fund not printed
+          GOTO      RPTC9999
+.
+. ------- print the grand totals -------
+.
+RPTC9000  BRANCH    PRNTFUND,RPTC9200       * heading been printed
+.
+          MOVE      "Admission Type Totals",DIM30
+          CALL      PLHD0000               * print health fund line
+          MOVE      ONE,PRNTFUND
+.
+RPTC9200  MATCH     Z3,XATYPE         
+          GOTO      RPTC2100 IF NOT EQUAL   * print band totals
+.
+. ------- print overall grand totals -------
+.
+          MOVE      "Grand Total",DIM26
+          CALL      PUFR0000                * print the underline
+          CALL      PLIN0000
+          CALL      PUFR0000                * print the underline
+         
+RPTC9999  RETURN
++
+.*********************************************************************
+.         print report - layout 4
+.         health fund / admission type / room type
+.*********************************************************************
+RPTD0000  MATCH     Z6,XHFUND        
+          GOTO      RPTD9000 IF EQUAL       * print grand totals
+.
+          MATCH     Z3,XATYPE         
+          GOTO      RPTD8000 IF EQUAL       * print health fund totals
+.
+. ------- see if to print the fund name -------
+.
+          BRANCH    PRNTFUND,RPTD2000       * fund has been printed
+          MOVE      "No Health Fund",HFNAME
+          MATCH     SP6,XHFUND
+          GOTO      RPTD1200 IF EQUAL
+.
+          PACK      HFNAME,INVCODE,XHFUND
+          PACK      KEY14,XHFUND,ZERO8      * health fund and "0000    "
+          CALL      RDFUND1
+.
+RPTD1200  PACK      DIM30,HFNAME,SP30
+          CALL      PLHD0000
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+. ------- see if to print the admission type -------
+.
+RPTD2000  MATCH     CURRATYP,XATYPE
+          GOTO      RPTD2100 IF EQUAL       * same code
+.
+          MOVE      ZERO,PRNTCLAM           * set to print ad. type desc
+.  
+RPTD2100  BRANCH    PRNTCLAM,RPTD5100       * claim has been printed
+          MOVE      "No Admission Type",TDESC
+          MATCH     SP3,XATYPE
+          GOTO      RPTD2200 IF EQUAL
+.
+          MOVE      XATYPE,CURRATYP         * set current admission type
+          PACK      TDESC,INVCODE,XATYPE
+          PACK      KEY5,CATA,XATYPE
+          CALL      RDCODE1
+.
+RPTD2200  PACK      DIM30,SP2,TDESC,SP30
+          CALL      PLHD0000
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+. ------- print the room type -------
+.
+RPTD5100  MOVE      "No Room Type",TDESC 
+          MATCH     SP3,XROOM 
+          GOTO      RPTD5200 IF EQUAL       * no admission type
+.
+          PACK      TDESC,INVCODE,XROOM,SP20
+          PACK      KEY5,CATRT,XROOM
+          CALL      RDCODE1
+.
+RPTD5200  PACK      DIM26,SP4,TDESC,SP30
+          CALL      PLIN0000
+          ADD       ONE,CLNO
+          GOTO      RPTD9999
+.
+. ------- print the total for a health fund -------
+.
+RPTD8000  MOVE      "Total for Health Fund",DIM26
+..          LOAD      DIM26,PTCNMDXR,HLTHFND
+          CALL      PUFR0000                * print the underline
+          CALL      PLIN0000
+          CALL      PUFR0000                * print the underline
+          MOVE      ZERO,PRNTFUND           * signal fund not printed
+          MOVE      ZERO,PRNTCLAM           * signal admiss type not printed
+          GOTO      RPTD9999
+.
+. ------- print the grand totals -------
+.
+RPTD9000  BRANCH    PRNTFUND,RPTD9200       * heading been printed
+.
+          MOVE      "Admission Type Totals",DIM30
+          CALL      PLHD0000                * print health fund line
+          MOVE      ONE,PRNTFUND
+.
+RPTD9200  MATCH     Z3,XATYPE         
+          GOTO      RPTD9500 IF EQUAL       * print grand total
+.
+. ------- print the admission type totals -------
+.
+          MOVE      "No Admission Type",TDESC
+          MATCH     SP3,XATYPE
+          GOTO      RPTD9300 IF EQUAL
+.
+          PACK      TDESC,INVCODE,XATYPE
+          PACK      KEY5,CATA,XATYPE
+          CALL      RDCODE1
+.
+RPTD9300  PACK      DIM26,SP2,TDESC,SP30
+          CALL      PLIN0000
+          ADD       ONE,CLNO
+          GOTO      RPTD9999
+.
+. ------- print overall grand totals -------
+.
+RPTD9500  MOVE      "Grand Total ",DIM26
+          CALL      PUFR0000                * print the underline
+          CALL      PLIN0000
+          CALL      PUFR0000                * print the underline
+         
+RPTD9999  RETURN
++

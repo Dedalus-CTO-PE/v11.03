@@ -1,0 +1,96 @@
+create table legdoctf
+(
+  ldcode      varchar2(6) default ' ' not null,
+  ldtitl      varchar2(9) default ' ' not null,
+  ldgname     varchar2(25) default ' ' not null,
+  ldsname     varchar2(20) default ' ' not null,
+  ldrtype     varchar2(3) default ' ' not null,
+  ldrname     varchar2(25) default ' ' not null,
+  ldsadd1     varchar2(35) default ' ' not null,
+  ldsadd2     varchar2(35) default ' ' not null,
+  ldsadd3     varchar2(35) default ' ' not null,
+  ldsadd4     varchar2(35) default ' ' not null,
+  ldspost     varchar2(8) default ' ' not null,
+  lpdoseml    varchar2(80) default ' ' not null,
+  ldteles     varchar2(20) default ' ' not null,
+  ldtelep     varchar2(20) default ' ' not null,
+  ldpager     varchar2(20) default ' ' not null,
+  ldassoc1    varchar2(25) default ' ' not null,
+  ldassoc2    varchar2(25) default ' ' not null,
+  ldassoc3    varchar2(25) default ' ' not null,
+  ldassoc4    varchar2(25) default ' ' not null,
+  ldassoc5    varchar2(25) default ' ' not null,
+  ldprov      varchar2(10) default ' ' not null,
+  ldteleh     varchar2(20) default ' ' not null,
+  ldhadd1     varchar2(35) default ' ' not null,
+  ldhadd2     varchar2(35) default ' ' not null,
+  ldhadd3     varchar2(35) default ' ' not null,
+  ldhadd4     varchar2(35) default ' ' not null,
+  ldhpost     varchar2(8) default ' ' not null,
+  lpdoheml    varchar2(80) default ' ' not null,
+  ldafirst    varchar2(8) default ' ' not null,
+  ldalast     varchar2(8) default ' ' not null,
+  ldayears    number(2,0) default 0 not null,
+  ldaccred    varchar2(3) default ' ' not null,
+  ldrtype2    varchar2(3) default ' ' not null,
+  ldrtype3    varchar2(3) default ' ' not null,
+  ldrtype4    varchar2(3) default ' ' not null,
+  ldrtype5    varchar2(3) default ' ' not null,
+  ldfspare    varchar2(2) default ' ' not null,
+  ldbirth     varchar2(8) default ' ' not null,
+  ldhcscod    number(3,0) default 0 not null,
+  ldalevel    varchar2(3) default ' ' not null,
+  ldrstat     number(1,0) default 0 not null,
+  lpdofaxn    varchar2(12) default ' ' not null,
+  lpdohfax    varchar2(12) default ' ' not null,
+  lpdomobl    varchar2(12) default ' ' not null,
+  lpdoglcc    varchar2(5) default ' ' not null,
+  lpdowhdp    varchar2(6) default ' ' not null,
+  lpdomreg    varchar2(10) default ' ' not null,
+  lpdonhsn    varchar2(10) default ' ' not null,
+  llupddte    varchar2(8) default ' ' not null,
+  llupdtme    varchar2(8) default ' ' not null,
+  lpdoudf1    varchar2(3) default ' ' not null,
+  lpdoudf2    varchar2(3) default ' ' not null,
+  lpdoudf3    varchar2(3) default ' ' not null,
+  lpdoudf4    varchar2(3) default ' ' not null,
+  lpdoudf5    varchar2(3) default ' ' not null,
+  lpdoinsc    varchar2(6) default ' ' not null,
+  lpdoinsn    varchar2(20) default ' ' not null,
+  lpdoinsf    varchar2(8) default ' ' not null,
+  lpdoinst    varchar2(8) default ' ' not null,
+  lpdoregn    varchar2(20) default ' ' not null,
+  lpdoregf    varchar2(8) default ' ' not null,
+  lpdoregt    varchar2(8) default ' ' not null,
+  lpdovisa    varchar2(8) default ' ' not null,
+  lpdocomt    varchar2(3) default ' ' not null,
+  lpdopref    varchar2(30) default ' ' not null,
+  lpdoabnn    varchar2(11) default ' ' not null,
+  lpdodina    varchar2(8) default ' ' not null,
+  lpdodact    varchar2(8) default ' ' not null,
+  lpdodaco    varchar2(8) default ' ' not null,
+  lpdopro2    varchar2(10) default ' ' not null,
+  lpdopro3    varchar2(10) default ' ' not null,
+  lpdopro4    varchar2(10) default ' ' not null,
+  lpdopro5    varchar2(10) default ' ' not null,
+  ldaspare    varchar2(30) default ' ' not null,
+  lf          varchar2(1) default ' ' not null,
+constraint legdoct1 primary key( 
+ldcode)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 
+create unique index legdoct2 on legdoctf
+(
+ldsname,
+ldcode
+)
+  tablespace pas_indx; 
+create unique index legdoct3 on legdoctf
+(
+ldalevel,
+ldsname,
+ldcode
+)
+  tablespace pas_indx; 

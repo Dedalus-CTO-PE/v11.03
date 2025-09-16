@@ -1,0 +1,301 @@
+.*****************************************************************************
+.*                              VINAHCOM                                     *
+.*     Common include for VINAH routines shared by LDALLHDT and the          *
+.*     VINAH Extract programs                                                *
+.*                                                                           *
+.*****************************************************************************
+.*  V11.01.03 08/07/2021  Ebon Clements    TSK 0908790 0908174               *
+.*            Added FRSTLKKK similar to FRSTLNKK to get the referral in      *
+.*            reason for a program referral but with a referral record       *
+.*            restore                                                        *
+.*  V11.01.02 15/04/2021  Ebon Clements    TSK 0902602                       *
+.*            Added FRSTLNKK similar to FRSTLINK to get the referral in      *
+.*            reason for a program referral                                  *
+.*  V11.01.01 30/03/2021  Ebon Clements    TSK 0902602                       *
+.*            2021 Vic health department changes                             *
+.*            Added return of fist linked episde referral problem code and   *
+.*            department - SAVERIRD & SAVERIRS                               *
+.*****************************************************************************
+.*  V11.00.02 11/05/2020  Ebon Clements    TSK 0891032                       *
+.*            Removed 2020 Vic health department changes (Task 088624)       *
+.*  V11.00.01 19/03/2019  Ebon Clements    TSK 0888624                       *
+.*            Added return of fist linked episde referral problem code and   *
+.*            department - SAVERIRD & SAVERIRS                               *
+.*  V10.06.00 07/04/2015  Steve Armstrong  CAR 315150                        *
+.*            Pulled code from LDALLHDT to make a common routine used by     *
+.*            both LDALLHDT and the VINAH Extract programs.                  *
+.*****************************************************************************
+.*                              FRSTLINK                                     *
+.*       Find the first linked Episode record for a Referral In so           *
+.*       that we can use the Date Referral Accepted. The first linked episode*
+.*       has the oldest referral date.                                       *
+.*       At the same time, we can also get the default priority code.        *
+.*       Clinical Urgency (ALHDCLUC - priority) was missing from the         *
+.*       Specialist O/P Referral-In screen (from July 2012), so if this      *
+.*       field is blank, then we need to populate it with the priority       *
+.*       from the first linked internal referral where priority (alreprty)   *
+.*       is not blank.  If a default priority value is not found, then       *
+.*       an error will be generated at extract time at which point the       *
+.*       user will have to fix it.                                           *
+.*       Also reture the first linked episodes problem code and department.  *
+.*       This will be used for the referral in reason.                       *
+.*****************************************************************************
+.*       Any change maigh also need to be made in FRSTLNKK and FRSTLKKK      *
+.*****************************************************************************
+.* Requires: VISITNUM - Referral In visit number                             *
+.*           PRGMSTRM - Program Stream                                       *
+.*           CURGENCY - Priority                                             *
+.* Returns : SAVEUDT1 - Date Referral Accepted                               *
+.*           CURGENCY - Updated Priority                                     *
+.*           SAVERIRD - Referral (In) Reason Department                      *
+.*           SAVERIRS - Referral (In) Reason Code (problem code)             *
+.*           EXIT  0 = Ok to continue                                        *
+.*                 1 = Error repositioning on current referral record        *
+.*****************************************************************************
+.
+FRSTLINK  MOVE      SP8,SAVEUDT1                 * initialise saved ref acc dat
+          MOVE      SP8,SAVERDAT                 * initialise ref date
+          MOVE      SP70,SAVERIRD     * Referral (In) Reason Department
+          MOVE      SP70,SAVERIRS     * Referral (In) Reason Code (problem code)
+.
+          PACK      KEY16,VISITNUM,SP20
+          CALL      RSALRLN1                     * position before visit
+FRSTLN50  CALL      RKALRLN1                     * read next record
+          BRANCH    OVRCD,FRSTLN90               * eof - finished
+.
+          MATCH     VISITNUM,ALRLVISN            * same Ref. In visit still ?
+          GOTO      FRSTLN90 IF NOT EQUAL        * no - finished
+.
+          MOVE      ALRLLNKV,KEY8
+          CALL      RDALREF1                     * episode record found ?
+          BRANCH    OVRCD,FRSTLN50               * no - get next record
+.
+.         If this is a Specialist O/P related referral and the priority
+.         is blank, load the linked episode priority as the default value
+.
+          COMPARE   EIGHT,PRGMSTRM               * Spec. O/P program ?
+          GOTO      FRSTLN70 IF NOT EQUAL        * no
+.
+          MATCH     SP3,CURGENCY                 * priority blank ?
+          GOTO      FRSTLN70 IF NOT EQUAL        * no
+.
+          MOVE      ALREPRTY,CURGENCY            * yes - load default value
+.
+FRSTLN70  MATCH     SP8,ALRERDAT                 * blank referral date ?
+          GOTO      FRSTLN50 IF EQUAL            * yes - get next record
+.
+          MATCH     SP8,SAVERDAT                 * blank saved ref. date ?
+          GOTO      FRSTLN80 IF EQUAL            * yes - load dates
+.
+          MATCH     ALRERDAT,SAVERDAT            * saved ref.date < ref. date ?
+          GOTO      FRSTLN50 IF LESS             * yes - get next record
+.
+          MATCH     SAVERDAT,ALRERDAT            * ref.date < saved ref. date ?
+          GOTO      FRSTLN80 IF LESS             * yes - load dates
+.
+.         The saved referral date and the referral date of this episode
+.         are the same, so check if the saved referral acccepted date is blank
+.
+          MATCH     SP8,SAVEUDT1                 * blank saved ref acc date ?
+          GOTO      FRSTLN50 IF NOT EQUAL        * no - get next record
+          GOTO      FRSTLN81                     * yes - save date
+.
+.         Save record dates
+.
+FRSTLN80  MOVE      ALRERDAT,SAVERDAT            * save referral date
+FRSTLN81  MOVE      ALREUDT1,SAVEUDT1            * save referral accepted date
+.
+.         First linked episodes problem code and department
+.         This will be used for the referral in reason.      
+.
+          MOVE      ALREDEPT,SAVERIRD     * Referral (In) Reason Department
+          MOVE      ALREPRO1,SAVERIRS     * Referral (In) Reason Code (problem)
+.
+          GOTO      FRSTLN50                     * get next record
+.
+.         Reposition back on the current referral record for this visit
+.
+FRSTLN90  MOVE      VISITNUM,KEY8
+          CALL      RDALREF1
+          BRANCH    OVRCD,FRSTLN91
+.
+          MOVE      ZERO,EXIT
+          GOTO      FRSTLN99
+.
+FRSTLN91  MOVE      ONE,EXIT
+.
+FRSTLN99  RETURN
++
+.*****************************************************************************
+.*                              DEFRACKN                                     *
+.* Requires: Valid read on current Referral In record (for ALREUDT5/ALREDREC)*
+.*           SAVEUDT1 - Date Referral Accepted from first linked episode     *
+.*                      referral (loaded in FRSTLINK).                       *
+.* Returns:  ACKNDATE - Updated Referral In Receipt Acknowledgement Date     *
+.*****************************************************************************
+.
+.         If the Receipt Acknowledgement Date is blank for the record we are
+.         processing, then use the Receipt Acknowledgement Date for the
+.         current episode record.  If that is also blank, then use the
+.         Date Referral Accepted Date for the first linked Episode (from
+.         FEPS0000).  If that is also blank, then use the current Referral In
+.         Received Date.
+.
+DEFRACKN  MOVE      ALREUDT5,ACKNDATE            * yes -default to current value
+          MATCH     SP8,ACKNDATE                 * blank date still ?
+          GOTO      DEFRAC99 IF NOT EQUAL        * no
+.
+          MOVE      SAVEUDT1,ACKNDATE            * load ref acc date
+.
+          MATCH     SP8,ACKNDATE                 * blank date still ?
+          GOTO      DEFRAC99 IF NOT EQUAL        * no
+.
+          MOVE      ALREDREC,ACKNDATE            * default to ref in rec'd date
+.
+DEFRAC99  RETURN
+.
+.*****************************************************************************
+.*                              FRSTLNKK                                     *
+.*       Find the first linked Episode record for a Referral In so           *
+.*       that we can get the referral in reason. The first linked episode    *
+.*       has the oldest referral date.                                       *
+.*****************************************************************************
+.*       Any change maigh also need to be made in FRSTLINK and FRSTLKKK      *
+.*****************************************************************************
+.* Requires: VISITNUM - Referral In visit number                             *
+.* Returns : SAVERIRD - Referral (In) Reason Department                      *
+.*           SAVERIRS - Referral (In) Reason Code (problem code)             *
+.*           EXIT  0 = Ok to continue                                        *
+.*                 1 = Error repositioning on current referral record        *
+.*****************************************************************************
+FRSTLNKK  MOVE      SP8,SAVEUDT1                 * initialise saved ref acc dat
+          MOVE      SP8,SAVERDAT                 * initialise ref date
+          MOVE      SP70,SAVERIRD     * Referral (In) Reason Department
+          MOVE      SP70,SAVERIRS     * Referral (In) Reason Code (problem code)
+.
+          PACK      KEY16,VISITNUM,SP20
+          CALL      RSALRLN1                     * position before visit
+FRSTLK50  CALL      RKALRLN1                     * read next record
+          BRANCH    OVRCD,FRSTLK90               * eof - finished
+.
+          MATCH     VISITNUM,ALRLVISN            * same Ref. In visit still ?
+          GOTO      FRSTLK90 IF NOT EQUAL        * no - finished
+.
+          MOVE      ALRLLNKV,KEY8
+          CALL      RDALREF1                     * episode record found ?
+          BRANCH    OVRCD,FRSTLK50               * no - get next record
+.
+FRSTLK70  MATCH     SP8,ALRERDAT                 * blank referral date ?
+          GOTO      FRSTLK50 IF EQUAL            * yes - get next record
+.
+          MATCH     SP8,SAVERDAT                 * blank saved ref. date ?
+          GOTO      FRSTLK80 IF EQUAL            * yes - load dates
+.
+          MATCH     ALRERDAT,SAVERDAT            * saved ref.date < ref. date ?
+          GOTO      FRSTLK50 IF LESS             * yes - get next record
+.
+          MATCH     SAVERDAT,ALRERDAT            * ref.date < saved ref. date ?
+          GOTO      FRSTLK80 IF LESS             * yes - load dates
+.
+.         The saved referral date and the referral date of this episode
+.         are the same, so check if the saved referral acccepted date is blank
+.
+          MATCH     SP8,SAVEUDT1                 * blank saved ref acc date ?
+          GOTO      FRSTLK50 IF NOT EQUAL        * no - get next record
+          GOTO      FRSTLK81                     * yes - save date
+.
+.         Save record dates
+.
+FRSTLK80  MOVE      ALRERDAT,SAVERDAT            * save referral date
+FRSTLK81  MOVE      ALREUDT1,SAVEUDT1            * save referral accepted date
+.
+.         First linked episodes problem code and department
+.         This will be used for the referral in reason.
+.
+          MOVE      ALREDEPT,SAVERIRD     * Referral (In) Reason Department
+          MOVE      ALREPRO1,SAVERIRS     * Referral (In) Reason Code (problem)
+.
+          GOTO      FRSTLK50                     * get next record
+.
+FRSTLK90  MOVE      ZERO,EXIT
+          GOTO      FRSTLK99
+.
+FRSTLK91  MOVE      ONE,EXIT
+.
+FRSTLK99  RETURN
+.
+.*****************************************************************************
+.*                              FRSTLKKK                                     *
+.*       Find the first linked Episode record for a Referral In so           *
+.*       that we can get the referral in reason. The first linked episode    *
+.*       has the oldest referral date. Restore referral record on exit       *
+.*****************************************************************************
+.*       Any change maigh also need to be made in FRSTLINK and FRSTLKKK      *
+.*****************************************************************************
+.* Requires: VISITNUM - Referral In visit number                             *
+.* Returns : SAVERIRD - Referral (In) Reason Department                      *
+.*           SAVERIRS - Referral (In) Reason Code (problem code)             *
+.*           EXIT  0 = Ok to continue                                        *
+.*                 1 = Error repositioning on current referral record        *
+.*****************************************************************************
+FRSTLKKK  MOVE      SP8,SAVEUDT1                 * initialise saved ref acc dat
+          MOVE      SP8,SAVERDAT                 * initialise ref date
+          MOVE      SP70,SAVERIRD     * Referral (In) Reason Department
+          MOVE      SP70,SAVERIRS     * Referral (In) Reason Code (problem code)
+.
+          PACK      KEY16,VISITNUM,SP20
+          CALL      RSALRLN1                     * position before visit
+FRSTKK50  CALL      RKALRLN1                     * read next record
+          BRANCH    OVRCD,FRSTKK90               * eof - finished
+.
+          MATCH     VISITNUM,ALRLVISN            * same Ref. In visit still ?
+          GOTO      FRSTKK90 IF NOT EQUAL        * no - finished
+.
+          MOVE      ALRLLNKV,KEY8
+          CALL      RDALREF1                     * episode record found ?
+          BRANCH    OVRCD,FRSTKK50               * no - get next record
+.
+FRSTKK70  MATCH     SP8,ALRERDAT                 * blank referral date ?
+          GOTO      FRSTKK50 IF EQUAL            * yes - get next record
+.
+          MATCH     SP8,SAVERDAT                 * blank saved ref. date ?
+          GOTO      FRSTKK80 IF EQUAL            * yes - load dates
+.
+          MATCH     ALRERDAT,SAVERDAT            * saved ref.date < ref. date ?
+          GOTO      FRSTKK50 IF LESS             * yes - get next record
+.
+          MATCH     SAVERDAT,ALRERDAT            * ref.date < saved ref. date ?
+          GOTO      FRSTKK80 IF LESS             * yes - load dates
+.
+.         The saved referral date and the referral date of this episode
+.         are the same, so check if the saved referral acccepted date is blank
+.
+          MATCH     SP8,SAVEUDT1                 * blank saved ref acc date ?
+          GOTO      FRSTKK50 IF NOT EQUAL        * no - get next record
+          GOTO      FRSTKK81                     * yes - save date
+.
+.         Save record dates
+.
+FRSTKK80  MOVE      ALRERDAT,SAVERDAT            * save referral date
+FRSTKK81  MOVE      ALREUDT1,SAVEUDT1            * save referral accepted date
+.
+.         First linked episodes problem code and department
+.         This will be used for the referral in reason.
+.
+          MOVE      ALREDEPT,SAVERIRD     * Referral (In) Reason Department
+          MOVE      ALREPRO1,SAVERIRS     * Referral (In) Reason Code (problem)
+.
+          GOTO      FRSTKK50                     * get next record
+.
+.         Reposition back on the current referral record for this visit
+.
+FRSTKK90  MOVE      VISITNUM,KEY8
+          CALL      RDALREF1
+          BRANCH    OVRCD,FRSTKK91
+.
+          MOVE      ZERO,EXIT
+          GOTO      FRSTKK99
+.
+FRSTKK91  MOVE      ONE,EXIT
+.
+FRSTKK99  RETURN

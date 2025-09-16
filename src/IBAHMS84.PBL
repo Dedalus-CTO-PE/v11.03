@@ -1,0 +1,1250 @@
+.*******************************************************************************
+.* System         : AN-SNAP                                                    *
+.* Program        : IBAHMS84.PBL                                               *
+.* Name           : AN-SNAP Discharge Destination Independence Report          *
+.*******************************************************************************
+.* Date           : 23/08/2013                                                 *
+.* Author         : Don Nguyen                                                 *
+.* Function       : Report showing the number of patients who have returned    *
+.*                  to the same level of pre-episode accommodation or have     *
+.*                  greater Independence. Also reports those patients with     *
+.*                  reduced Independence.                                      *
+.*                                                                             *
+.* Modifications  :                                                            *
+.*                                                                             *
+.*      V10.11.02   12/09/2017  Ebon Clements    TSK 0843726 - 0830476         *
+.*                  Only check carer status post/prior for old layout- EXTP3000*
+.*      V10.11.01   08/08/2017  Ania P           TSK 0830476                   *
+.*                  Changed COMPDATE value.                                    *
+.*      V10.10.02   12/04/2017  Peter Vela       TSK 0830476                   *
+.*                  Fixed date comparison in EXTP0000                          *
+.*      V10.10.01   03/03/2017  Ania P           TSK 0830476                   *
+.*                  Changes for new layout post 2016                           *
+.*      V10.08.02   18/08/2016  Ebon Clements    TSK 0304921                   *
+.*                  Fixed skip of visit for selected DDEST and DSTAT           *
+.*      V10.08.01   12/08/2016  Ebon Clements    TSK 0304921                   *
+.*                  Read discharge record prior to day case test -  EXTP2000   *
+.*      V10.04.02   13/06/2014  Steve Armstrong  CAR 301639                    *
+.*                  Moved calls to TFILENAM into INIT0000                      *
+.*      V10.04.01   29/05/2014  Don Nguyen       CAR 299692                    *
+.*                  Modified EXTP3000 to work with PTCNDRSM; skip patient      *
+.*                  if TCINDC5 = 1,3,4,5,6 or 8.                               *
+.*******************************************************************************
+.*      V10.03.01   28/08/2013  Don Nguyen       CAR 283001                    *
+.*                  Corrected output values for columns; ind 1 value instead.  *
+.*                  Adjusted table output to include new column for 'Mode of   *
+.*                  Episode End' description. Also appended description to the *
+.*                  warning messages.                                          *
+.*      V10.03.00   23/08/2013  Don Nguyen       CAR 283001                    *
+.*                  Created Report                                             *
+.*******************************************************************************
+.
+          INC       STD001FD                     * Standard Include
+.
+          INC       IBACONFD/INC                 * Control File
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       PATCODFD/INC                 * Category Codes
+          INC       PATCONFD/INC                 * Control File
+          INC       PATFN1FD/INC                 * Patient Health Fund File
+          INC       PATDSCFD/INC                 * Patient Discharge File
+          INC       PATHSPFD/INC                 * Hospital File
+          INC       PATMA1FD/INC                 * Patient Master File
+          INC       PATMI1FD/INC                 * Patient Admission File
+          INC       PATTRNFD/INC                 * Patient Transfer File
+          INC       PATVISFD/INC                 * Patient Visit File
+          INC       PMSUPGFD/INC                 * Program Details File
+          INC       PMSAPGFD/INC                 * Program Details Ext File
+          INC       PMSVX1FD/INC                 * Patient Visit Ext File
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+.-------------------------------------------------------------------------------
+.         Temporary file 1 - Patients with Increased or Equal Independence
+.
+TEMP1     IFILE     SQL, FIXED=28, KEY="D1-8,9-16"
+.
+.Name     Type     Size    Physical   Start       Description
+.----     ----     ----    --------   -----       -----------
+X1URNUMB  DIM       8         8         1         Patient U/R Number
+X1ADMNUM  DIM       8         8         9         Patient Visit Number
+X1ACCPRI  DIM       1         1        17         Accom Prior score
+X1ACCPOS  DIM       1         1        18         Accom Post score
+X1CARPRI  DIM       1         1        19         Carer Prior score
+X1CARPOS  DIM       1         1        20         Carer Post score
+X1TOTPRI  DIM       2         2        21         Total Prior score
+X1TOTPOS  DIM       2         2        23         Total Post score
+X1MODEPE  DIM       3         3        25         Mode of Episode End (Cat pw)
+.End of record                         28
+.
+.-------------------------------------------------------------------------------
+.         Temporary file 2 - Patients with Reduced Independence
+.
+TEMP2     IFILE     SQL, FIXED=28, KEY="D1-8,9-16"
+.
+.Name     Type     Size    Physical   Start       Description
+.----     ----     ----    --------   -----       -----------
+X2URNUMB  DIM       8         8         1         Patient U/R Number
+X2ADMNUM  DIM       8         8         9         Patient Visit Number
+X2ACCPRI  DIM       1         1        17         Accom Prior score
+X2ACCPOS  DIM       1         1        18         Accom Post score
+X2CARPRI  DIM       1         1        19         Carer Prior score
+X2CARPOS  DIM       1         1        20         Carer Post score
+X2TOTPRI  DIM       2         2        21         Total Prior score
+X2TOTPOS  DIM       2         2        23         Total Post score
+X2MODEPE  DIM       3         3        25         Mode of Episode End (Cat pw)
+.End of record                         28
+.
+.-------------------------------------------------------------------------------
+.         Temporary file 3 - Patients without Accomm & Carer details entered
+.
+TEMP3     IFILE     SQL, FIXED=20, KEY="D1-8,9-16"
+.
+.Name     Type     Size    Physical   Start       Description
+.----     ----     ----    --------   -----       -----------
+XXXXURNO  DIM       8         8         1         Patient U/R Number
+XXXXADMN  DIM       8         8         9         Patient Visit Number
+XXXXMODE  DIM       3         3        17         Mode of Episode End (Cat pw)
+.End of record                         20
+.
+.-------------------------------------------------------------------------------
+.                           Variables
+.-------------------------------------------------------------------------------
+CMDLINE   DIM       50                      * Command Line
+DATEFROM  DIM       8                       * Input From Date
+DATETO    DIM       8                       * Input To Date
+DIM5      DIM       5
+DISPNAME  DIM       60                      * for NAMSTR00
+FNAME1    DIM       8                       * temporary file name
+FNAME2    DIM       8                       * temporary file name
+FNAME3    DIM       8                       * temporary file name
+HOSPAPPR  DIM       10                      * Hospital Approval Number
+HOSPCODE  DIM       3                       * Hospital Code
+HOSPNAME  DIM       40                      * Hospital Name
+INCLDAYC  DIM       1                       * Include Day Cases
+INDICVAL  FORM      5.3                     * Clinical Indicator Value
+INDPRINT  FORM      1.3                     * Clinical Indicator Value (decimal)
+ISNEWLO   FORM      1                       * New Layout
+NAME35    DIM       35                      * for NAMSTR00
+PATFNAME  DIM       35                      * Patient Full Name
+PRIRTOTL  FORM      2                       * Prior total score (Accomm & Carer)
+POSTTOTL  FORM      2                       * Post total score (Accomm & Carer)
+TBLNUMBR  FORM      1                       * Table (temp file) to print from
+TODAY     DIM       8                       * Today's Date
+TOTINCRI  FORM      5                       * Total with increased independence
+TOTREHDI  FORM      5                       * Total Rehab Discharges
+.-------------------------------------------------------------------------------
+.                            Constants
+.-------------------------------------------------------------------------------
+CATpy     INIT      "py"
+CATpz     INIT      "pz"
+CATpw     INIT      "pw"
+CATar     INIT      "ar"
+CATas     INIT      "as"
+CATD      INIT      "D "
+CATDD     INIT      "DD"
+COMPDATE  INIT      "20170101"
+DOWNCASE  INIT      "AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz"
+.
+PRGID     INIT      "IBAHMS84"
+PRGNAM    INIT      "Discharge Destination Independence Report"
+VERSION   INIT      "V11.03.00"
+.
+.******************************************************************************
+.*                           MAIN0000                                         *
+.*                                                                            *
+.*        Main program flow control                                           *
+.******************************************************************************
+MAIN0000  CALL      INIT0000                     * Initialise - begin descent
+.
+MAIN1000  IF        IBCNMHOS=1
+            DISPLAY   *P25:6,*EL:
+                      *P25:7,*EL:
+                      *P25:8,*EL:
+                      *P25:9,*EF;
+            CALL      GHOS0000                   * Get Multi Hospital Id
+            BRANCH    EXIT,MAIN9999
+          ELSE
+            DISPLAY   *P1:6,*EL:
+                      *P25:7,*EL:
+                      *P25:8,*EL:
+                      *P25:9,*EF;
+            PACK      HOSPAPPR,CAPPRVNO,SP70     * Hospital Approval Number
+            PACK      HOSPNAME,CONAME,SP70       * Hospital Name
+          ENDIF
+.
+          CALL      GSTD0000                     * Keyin the start date
+          BRANCH    EXIT,MAIN9999                * Exit if nothing input
+.
+          CALL      GEND0000                     * Keyin the end date
+          BRANCH    EXIT,MAIN1000                * Exit if nothing input
+.
+          CALL      GDAY0000                     * Keyin Include day cases
+          BRANCH    EXIT,MAIN1000                * Nothing input
+.
+          CALL      GCON0000                     * OK to continue
+          BRANCH    EXIT,MAIN1000                * restart if no selected
+.
+          CALL      CRET0000                     * Create temporary files
+.
+          CALL      EXTP0000                     * Extract Rehab Discharges
+                                                 * with Accommodation and Carer
+                                                 * details entered (Prior/Post)
+.
+          CALL      PRNT0000                     * Print the report
+.
+          CALL      KILL0000                     * Delete temporary files
+.
+          GOTO      MAIN1000                     * Next run
+.
+MAIN9999  CHAIN     PGM                          * Return from the nine circles
++
+.******************************************************************************
+.*                           INIT0000                    Called by : MAIN0000 *
+.*                                                                            *
+.*        Initialisation procedure                                            *
+.******************************************************************************
+INIT0000  CALL      DISPHEAD
+.
+          DISPLAY   *P56:24,"Opening patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patdschf";
+          OPEN      PATDSCH1,"patdschf"
+.
+          DISPLAY   *P64:24,"patfn1af";
+          OPEN      PATFN1A1,"patfn1af"
+.
+          DISPLAY   *P64:24,"pathspaf";
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+.
+          DISPLAY   *P64:24,"patmx1af";
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"
+.
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A3,"patmi1af"
+.
+          DISPLAY   *P64:24,"pattranf";
+          OPEN      PATTRAN2,"pattranf"
+.
+          DISPLAY   *P64:24,"patvisaf";
+          OPEN      PATVISA2,"patvisaf"
+.
+          DISPLAY   *P64:24,"pmsupgaf";
+          OPEN      PMSUPGA1,"pmsupgaf"
+.
+          DISPLAY   *P64:24,"pmsapgaf";
+          OPEN      PMSAPGA1,"pmsapgaf"
+.
+          DISPLAY   *P64:24,"pmsvx1af";
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS        * 1 = Multi Hospital
+.
+          READ      CONTROLF,TEN;*79,CAPPRVNO         * Hospital Approval Number
+.
+          READ      CONTROLF,TWO;*4,CONAME            * Company Name
+.
+          READ      CONTROLF,TWENTY1;*45,PTCNDRSM     * Separation mode in PMS99
+.                                                     *   1 = DSTAT, 2 = DDEST
+.
+          CALL      IBACLOCK
+          PACK      TODAY,CCC,CYY,CMM,CDD
+          REP       " 0",TODAY
+.
+          DISPLAY   *P1:6,*EL,"Hospital Id           : ";
+          DISPLAY   *P1:7,"From Date             : ":
+                    *P1:8,"To   Date             : ":
+                    *P1:9,"Include Day Cases Y/N : ";
+.
+          MOVE      ZERO,TOTREHDI           * Init no of Rehab Discharges
+          MOVE      ZERO,TOTINCRI           * Total with increased independence
+          MOVE      ZERO,INCLDAYC           * Include Day Cases Flag
+          MOVE      ZERO,CPAGENO            * Init Page Count
+          CLOCK     TIME,CTIMEIS            * Get the starting time
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,FNAME1
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,FNAME2
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,FNAME3
+.
+INIT9999  RETURN
++
+.*******************************************************************************
+.*                           GHOS0000                      Called by: MAIN0000 *
+.*                                                                             *
+.*        Get Hospital ID                                                      *
+.*******************************************************************************
+GHOS0000  MOVE      ZERO,EXIT
+          DISPLAY   *P25:6,*EL:
+                    *P25:7,*EL:
+                    *P25:8,*EL:
+                    *P25:9,*EF;
+.
+          MOVE      SP70,HOSPCODE
+          MOVE      SP70,PTHSHOSP
+          MOVE      TWENTY5,ECOL                 * Column of key in
+          MOVE      SIX,EVERT                    * Row of key in
+          MOVE      SP3,CKYIDEF3                 * Defualt value
+          OPEN      PATHSPA1,"pathspaf"
+.
+          CALL      PATHSPKY
+          BRANCH    EXIT,GHOS98000,GHOS98000
+.
+          PACK      HOSPCODE,KEY3,SP70           * Hospital Code
+          PACK      HOSPAPPR,PTHSAPPR,SP70       * Hospital Approval Number
+          PACK      HOSPNAME,PTHSNAME,SP70       * Hospital Name
+.
+          DISPLAY   *P25:6,*V2LON,PTHSNAME;
+          MOVE      ZERO,EXIT
+          GOTO      GHOS9999
+.
+GHOS98000  MOVE     ONE,EXIT
+.
+GHOS9999  RETURN
++
+.******************************************************************************
+.*                          GSTD0000                     Called by : MAIN0000 *
+.*                                                                            *
+.*        Get the start date of the report.                                   *
+.*                                                                            *
+.*          Return  EXIT = 1  if a nothing was input                          *
+.******************************************************************************
+GSTD0000  MOVE      ZERO,EXIT
+.
+          MOVE      SEVEN,CVERT                  * Line for keyin of from date
+          MOVE      TWENTY5,CCOL                    * Col for keyin of from date
+          MOVE      CVERT,EVERT                  * Col for error message
+          MOVE      "40",ECOL                    * Col for error message
+          MOVE      ZERO,CHIGHLT                 * No highlight
+          MOVE      ONE,CDEFDTE
+.
+          UNPACK    SP6,CDAY,CMON,CYEAR          * Initialise date
+          MOVE      SP8,DATEFROM
+          MOVE      CCC,CCENT                    * Initialise century
+.
+          CALL      KEYDATE                      * Key in the date
+          BRANCH    OVRCD,GSTD9000
+.
+          PACK      DATEFROM,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",DATEFROM
+          MATCH     DATEFROM,TODAY
+          GOTO      GSTD9999 IF NOT LESS
+.
+          DISPLAY   *P1:24,*EL,*B,"Date May Not be Greater than Today's ":
+                    "Date.  ";
+          CALL      HITENTER
+          GOTO      GSTD0000
+.
+GSTD9000  MOVE      ONE,EXIT
+.
+GSTD9999  RETURN
++
+.******************************************************************************
+.*                           GEND0000                    Called by : MAIN0000 *
+.*                                                                            *
+.*        Get the end date of the report.                                     *
+.*                                                                            *
+.*          Return  EXIT = 1  if nothing was input                            *
+.******************************************************************************
+GEND0000  MOVE      ZERO,EXIT
+.
+          MOVE      EIGHT,CVERT                  * Line for keyin of to date
+          MOVE      TWENTY5,CCOL                    * Col for keyin of to date
+          MOVE      CVERT,EVERT                  * Col for error message
+          MOVE      "40",ECOL                    * Col for error message
+          MOVE      ZERO,CHIGHLT                 * No highlight
+          MOVE      ONE,CDEFDTE
+.
+          MOVE      SP8,DATETO
+.
+          CALL      KEYDATE                      * Key in the date
+          BRANCH    OVRCD,GEND9000
+.
+          PACK      DATETO,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",DATETO
+          MATCH     DATETO,TODAY
+          GOTO      GEND2000 IF NOT LESS
+.
+          DISPLAY   *P1:24,*EL,*B,"Date May Not be Greater than Today's ":
+                    "Date.  ";
+          CALL      HITENTER
+          GOTO      GEND0000
+.
+GEND2000  MATCH     DATEFROM,DATETO
+          GOTO      GEND9999 IF NOT LESS
+.
+          DISPLAY   *P1:24,*EL,*B,"To Date May Not be Less than From ":
+                    "Date.  ";
+          CALL      HITENTER
+          GOTO      GEND0000
+.
+GEND9000  MOVE      ONE,EXIT
+.
+GEND9999  RETURN
++
+.******************************************************************************
+.*                           GDAY0000                    Called by : MAIN0000 *
+.*                                                                            *
+.*        Include/Exclude Day cases from report?                              *
+.******************************************************************************
+GDAY0000  MOVE      ZERO,EXIT
+.
+GDAY1000  KEYIN     *P25:9,"_",*P25:9,*V2LON,ANS;
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANS,ANSY
+          IF        @EQUAL
+            MOVE      ONE,INCLDAYC
+            GOTO      GDAY9999
+          ENDIF
+.
+          MATCH     ANS,ANSN
+          IF        @EQUAL
+            MOVE      ZERO,INCLDAYC
+            GOTO      GDAY9999
+          ENDIF
+.
+          BEEP
+          GOTO      GDAY1000
+.
+GDAY9999  RETURN
++
+.******************************************************************************
+.*                           GCON0000                    Called by : MAIN0000 *
+.*                                                                            *
+.*        Ok. to continue (Y/N)                                               *
+.******************************************************************************
+GCON0000  MOVE      ZERO,EXIT
+          DISPLAY   *P1:24,*EL,"Ok to Continue (":
+                    *V2LON,ANSY,*HOFF,SLASH,*V2LON,ANSN,*HOFF,") ? ";
+.
+GCON1000  KEYIN     *P24:24,"_",*P24:24,*V2LON,ANS;
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANS,ANSY
+          GOTO      GCON9999 IF EQUAL
+.
+          MATCH     ANS,ANSN
+          GOTO      GCON9000 IF EQUAL
+.
+          BEEP
+          GOTO      GCON1000
+.
+GCON9000  MOVE      ONE,EXIT
+.
+GCON9999  RETURN
++
+.******************************************************************************
+.*                           CRET0000                    Called by : MAIN0000 *
+.*                                                                            *
+.*        Create the temporary files                                          *
+.******************************************************************************
+CRET0000  CALL      KILL0000                     * Remove any existing files
+.
+          CLEAR     CMDLINE                      * Create temporary file
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAME1,CMDLINE
+          APPEND    " 28 D1-8,9-16",CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+          CLEAR     CMDLINE                      * Create temporary file
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAME2,CMDLINE
+          APPEND    " 28 D1-8,9-16",CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+          CLEAR     CMDLINE                      * Create temporary file
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAME3,CMDLINE
+          APPEND    " 20 D1-8,9-16",CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+          OPEN      TEMP1,FNAME1                 * Open temporary file 1
+          OPEN      TEMP2,FNAME2                 * Open temporary file 2
+          OPEN      TEMP3,FNAME3                 * Open temporary file 3
+.
+CRET9999  RETURN
++
+.******************************************************************************
+.*                           KILL0000                    Called by : MAIN0000 *
+.*                                                                   CRET0000 *
+.*        Delete the temporary files                                          *
+.******************************************************************************
+KILL0000  CLOSE     TEMP1                        * ensure temporary file closed
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAME1,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID               * remove temporary file
+.
+          CLOSE     TEMP2                        * ensure temporary file closed
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAME2,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID               * remove temporary file
+.
+          CLOSE     TEMP3                        * ensure temporary file closed
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAME3,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID               * remove temporary file
+.
+KILL9999  RETURN
++
+.******************************************************************************
+.*                           CLFVAR00                    Called by : EXTP0000 *
+.*                                                                            *
+.*        Clears file vars                                                    *
+.******************************************************************************
+CLFVAR00  UNPACK    SP70,X1URNUMB,X1ADMNUM,X1ACCPRI,X1ACCPOS,X1CARPRI,X1CARPOS:
+                         X1TOTPRI,X1TOTPOS,X1MODEPE
+.
+          UNPACK    SP70,X2URNUMB,X2ADMNUM,X2ACCPRI,X2ACCPOS,X2CARPRI,X2CARPOS:
+                         X2TOTPRI,X2TOTPOS,X2MODEPE
+.
+          UNPACK    SP70,XXXXURNO,XXXXADMN,XXXXMODE
+.
+CLFVAR99  RETURN
++
+.******************************************************************************
+.*                           EXTP0000                    Called by : MAIN0000 *
+.*                                                                            *
+.*        Process all Programs for the period and extract all Patients that   *
+.*        have been discharged with Accommodation & Carer details             *
+.*        (Prior/Post Program).                                               *
+.******************************************************************************
+EXTP0000  DISPLAY   *P1:24,*EL,*P10:24,"Adm. No :":
+                    *P58:24,"Scanning:";
+.
+          MATCH     COMPDATE,DATEFROM
+          IF        @LESS
+            MOVE      ZERO,ISNEWLO
+          ELSE
+            MOVE      ONE,ISNEWLO
+          ENDIF
+.
+          PACK      KEY31,SP70              * Read thru Program Details
+          CALL      RDPMUPG1
+EXTP1000  CALL      RKPMUPG1
+          BRANCH    OVRCD,EXTP9999
+.
+.         Is the program completed?
+.
+          MATCH     SP70,PMUGENDD           * Program End Date entered?
+          GOTO      EXTP1000 IF EQUAL       * No; get next Program
+.
+.         Is the program completed in the selected date range?
+.
+          MATCH     DATEFROM,PMUGENDD       * Program end before start range?
+          GOTO      EXTP1000 IF LESS        * Yes; get next Program
+.
+          MATCH     PMUGENDD,DATETO         * Program end after end range?
+          GOTO      EXTP1000 IF LESS        * Yes; get next Program
+.
+          PACK      KEY24,PMUGURNO,PMUGSDAT,SP70
+          CALL      RDSVISA2
+EXTP2000  CALL      RDKVISA2
+          BRANCH    OVRCD,EXTP1000
+.
+          MATCH     PVIURNO,PMUGURNO
+          GOTO      EXTP1000 IF NOT EQUAL
+.
+          MATCH     SP70,PMUGEDAT
+          IF        !@EQUAL
+            MATCH     PVIDATE,PMUGEDAT      * check Expiry Date
+            GOTO      EXTP2000 IF LESS
+          ENDIF
+.
+          COMPARE   THREE,PVITYPE           * Inpatient?
+          GOTO      EXTP2000 IF NOT EQUAL   * No; get next visit
+.
+          PACK      KEY8,PVIBILL
+          CALL      RDPTMIS1
+          BRANCH    OVRCD,EXTP2000
+.
+          COMPARE   THREE,ASTAT             * Discharged?
+          GOTO      EXTP2000 IF NOT EQUAL   * No; get next visit
+.
+          PACK      KEY8,PVIBILL,SP70       * Read Discharge File
+          CALL      RDDSCH1
+          BRANCH    OVRCD,EXTP2000
+.
+.         Include Day Cases?
+.
+          MATCH     "1",INCLDAYC
+          GOTO      EXTP2500 IF EQUAL
+.
+          MATCH     ADATE,DDATE
+          GOTO      EXTP2000 IF EQUAL
+.
+EXTP2500  IF        IBCNMHOS=1
+            MATCH     PMVXMHOS,HOSPCODE     * Visit is for same hospital?
+            GOTO      EXTP2000 IF NOT EQUAL * No; get next visit
+          ENDIF
+.
+          MATCH     PMUGATYP,ATYPE          * Same Admission Type (Cat A)?
+          GOTO      EXTP2000 IF NOT EQUAL   * No; get next visit
+.
+          MATCH     SP70,PMUGCLAM           * Claim Code?
+          IF        !@EQUAL
+            MATCH     PMUGCLAM,ACLAIM       * Matches Admission Claim Code?
+            GOTO      EXTP2000 IF NOT EQUAL * No; get next visit
+          ENDIF
+.
+          MATCH     SP70,PMUGFUND           * Health Fund?
+          GOTO      EXTP3000 IF EQUAL       * No; skip check
+.
+          MATCH     PMUGFUND,AFUNDH         * Matches Admission Health Fund?
+          GOTO      EXTP2000 IF NOT EQUAL   * No; get next visit
+.
+          PACK      KEY14,AFUNDH,AFNDTB,SP10
+          CALL      RDFUND1
+          BRANCH    OVRCD,EXTP2000
+.
+          MATCH     PMUGTABT,PTHFBCAT       * Matches Health Fund Table Type?
+          GOTO      EXTP2000 IF NOT EQUAL   * No; get next visit
+.
+.         Found a matching visit for this program...
+.
+EXTP3000  DISPLAY   *P20:24,*V2LON,AURNO," ",DAADMNO;
+.
+.         Exclude patients with a particular type of Separation mode
+.
+          COMPARE   ONE,PTCNDRSM
+          IF        @EQUAL
+            PACK      KEY5,CATD,DSTAT,SP70
+            CALL      RDCODE1
+            IF        OVRCD=0
+              MOVE      ZERO,F1
+              MOVE      TCINDC5,F1
+              IF        F1=1 | F1=3 | F1=4 | F1=5 | F1=6 | F1=8
+                GOTO      EXTP2000     * Skip patient
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          COMPARE   TWO,PTCNDRSM
+          IF        @EQUAL
+            PACK      KEY5,CATDD,DDEST,SP70
+            CALL      RDCODE1
+            IF        OVRCD=0
+              MOVE      ZERO,F1
+              MOVE      TCINDC5,F1
+              IF        F1=1 | F1=3 | F1=4 | F1=5 | F1=6 | F1=8
+                GOTO      EXTP2000     * Skip patient
+              ENDIF
+            ENDIF
+          ENDIF
+.
+.         Read Patient Program extended details
+.
+          PACK      KEY31,PMUGURNO,PMUGATYP,PMUGCLAM,PMUGFUND,PMUGTABT,PMUGEDAT
+          CALL      RDPMAPG1
+          BRANCH    OVRCD,EXTP1000
+.
+          MOVE      ZERO,PRIRTOTL
+          MOVE      ZERO,POSTTOTL
+          CALL      CLFVAR00
+.
+          MATCH     SP70,PMAGACPA           * Accomm prior discharge?
+          GOTO      EXTP6000 IF EQUAL       * No; write to temp file 3
+.
+          MATCH     SP70,PMAGACPD           * Accomm post discharge?
+          GOTO      EXTP6000 IF EQUAL       * No; write to temp file 3
+.
+          IF        ISNEWLO = ZERO
+            MATCH     SP70,PMAGLSPA         * Carer Status prior discharge?
+            GOTO      EXTP6000 IF EQUAL     * No; write to temp file 3
+.
+            MATCH     SP70,PMAGLSPD         * Carer Status post discharge?
+            GOTO      EXTP6000 IF EQUAL     * No; write to temp file 3
+          ENDIF
+.
+.         Get Prior values...
+.
+          PACK      KEY5,CATpy,PMAGACPA,SP70   * Get Accomm Prior (Cat py)
+          CALL      RDCODE1
+          BRANCH    OVRCD,EXTP6000
+.
+          MOVE      ZERO,F1
+          MOVE      TCINDC1,F1
+          MOVE      F1,X1ACCPRI
+          MOVE      F1,X2ACCPRI
+          ADD       F1,PRIRTOTL
+.
+EXTP3100  PACK      KEY5,CATar,PMAGLSPA,SP70   * Get Carer Status Prior (Cat ar)
+          CALL      RDCODE1
+          BRANCH    OVRCD,EXTP6000
+ 
+          IF        ISNEWLO = ZERO
+            MOVE      ZERO,F1
+            MOVE      TCINDC1,F1
+            MOVE      F1,X1CARPRI
+            MOVE      F1,X2CARPRI
+            ADD       F1,PRIRTOTL
+          ENDIF
+.
+.         Get Post values...
+.
+EXTP3200  PACK      KEY5,CATpz,PMAGACPD,SP70   * Get Accomm Post (Cat pz)
+          CALL      RDCODE1
+          BRANCH    OVRCD,EXTP6000
+.
+          MOVE      ZERO,F1
+          MOVE      TCINDC1,F1
+          MOVE      F1,X1ACCPOS
+          MOVE      F1,X2ACCPOS
+          ADD       F1,POSTTOTL
+.
+EXTP3300  PACK      KEY5,CATas,PMAGLSPD,SP70   * Get Carer Status Post (Cat as)
+          CALL      RDCODE1
+          BRANCH    OVRCD,EXTP6000
+ 
+          IF        ISNEWLO = ZERO
+            MOVE      ZERO,F1
+            MOVE      TCINDC1,F1
+            MOVE      F1,X1CARPOS
+            MOVE      F1,X2CARPOS
+            ADD       F1,POSTTOTL
+          ENDIF
+.
+.         Compare Prior score against Post score
+.
+EXTP3400  COMPARE   PRIRTOTL,POSTTOTL
+          IF        @LESS | @EQUAL
+            GOTO      EXTP4000
+          ELSE
+            GOTO      EXTP5000
+          ENDIF     
+.
+.         Write to temp file 1 (Patients where Post total Less Than or Equal 
+.         to Prior total)
+.
+EXTP4000  ADD       ONE,TOTINCRI
+          PACK      KEY16,AURNO,DAADMNO
+          CALL      RDTEMP1
+          IF        OVRCD=1
+            MOVE      AURNO,X1URNUMB
+            MOVE      DAADMNO,X1ADMNUM
+            MOVE      PRIRTOTL,X1TOTPRI
+            MOVE      POSTTOTL,X1TOTPOS
+            MOVE      PMAGMEEN,X1MODEPE
+.
+            CALL      WRTEMP1               * Write to temp file 1
+            ADD       ONE,TOTREHDI          * Increment Total Rehab Discharges
+          ENDIF
+          GOTO      EXTP1000
+.
+.         Write to temp file 2 (Post total value greater than Prior total)
+.
+EXTP5000  PACK      KEY16,AURNO,DAADMNO
+          CALL      RDTEMP2
+          IF        OVRCD=1
+            MOVE      AURNO,X2URNUMB
+            MOVE      DAADMNO,X2ADMNUM
+            MOVE      PRIRTOTL,X2TOTPRI
+            MOVE      POSTTOTL,X2TOTPOS
+            MOVE      PMAGMEEN,X2MODEPE
+.
+            CALL      WRTEMP2               * Write to temp file 2
+            ADD       ONE,TOTREHDI          * Increment Total Rehab Discharges
+          ENDIF
+          GOTO      EXTP1000
+.
+.         Write to temp file 3 (no Accomm or Carer details entered)
+.
+EXTP6000  PACK      KEY16,AURNO,DAADMNO
+          CALL      RDTEMP3
+          IF        OVRCD=1
+            MOVE      AURNO,XXXXURNO
+            MOVE      DAADMNO,XXXXADMN
+            MOVE      PMAGMEEN,XXXXMODE
+.
+            CALL      WRTEMP3
+            ADD       ONE,TOTREHDI          * Increment Total Rehab Discharges
+          ENDIF
+          GOTO      EXTP1000
+.
+EXTP9999  RETURN
++
+.******************************************************************************
+.*                           HEAD0000                     Called by: PRNT0000 *
+.*                                                                            *
+.*        Print Report standard page heading                                  *
+.******************************************************************************
+HEAD0000  CALL      HEAD132                      * Standard heading
+.
+          UNPACK    DATEFROM,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          PRINT     *N,*17,"Hospital : ",HOSPNAME
+          PRINT     *N,*15,"Date Range : ",CPCDATE," to ";
+.
+          UNPACK    DATETO,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          PRINT     CPCDATE,*N
+          ADD       FOUR,CLNO
+.
+HEAD9999  RETURN
++
+.******************************************************************************
+.*                           COLHED00           Called by: TBHDIN00,TBHDDE00  *
+.*                                                                            *
+.*        Print column header row                                             *
+.******************************************************************************
+COLHED00  BRANCH    ISNEWLO,COLHED50
+.
+          PRINT     *1,"| U/R Number",*14,"| Patient Name":
+                    *51,"| Prior",*59,"| Post":
+                    *67,"| Accom",*75,"| Carer":
+                    *83,"| Accom",*91,"| Carer",*99,"| Mode of Episode End":
+                    *132,"|"
+.
+          PRINT     *1,"|",*14,"|":
+                    *51,"| Score",*59,"| Score":
+                    *67,"| Prior",*75,"| Prior":
+                    *83,"| Post",*91,"| Post",*99,"|",*132,"|"
+.
+          ADD       TWO,CLNO
+          GOTO      COLHED99
+.
+COLHED50  PRINT     *1,"| U/R Number",*14,"| Patient Name":
+                    *51,"| Prior",*59,"| Post":
+                    *67,"| Accom",*75,"| Accom":
+                    *83,"| Mode of Episode End",*132,"|"
+.
+          PRINT     *1,"|",*14,"|":
+                    *51,"| Score",*59,"| Score":
+                    *67,"| Prior",*75,"| Post ",*83,"|",*132,"|"
+.
+COLHED99  RETURN
++
+.******************************************************************************
+.*                           TBHDIN00                     Called by: PRNT0000 *
+.*                                                                            *
+.*        Print heading for first table (Improved or Equal Independence)      *
+.******************************************************************************
+TBHDIN00  CALL      UND132
+          PRINT     *1,"|":
+                    *20,"Patients with Improved or Equal Independence at Discharge",*132,"|"
+          ADD       ONE,CLNO
+          CALL      UND132
+          CALL      COLHED00           * Print table column header row
+          CALL      UND132
+.
+TBHDIN99  RETURN
++
+.******************************************************************************
+.*                           TBHDDE00                     Called by: PRNT0000 *
+.*                                                                            *
+.*        Print heading for second table (Reduced Independence)               *
+.******************************************************************************
+TBHDDE00  CALL      UND132
+          PRINT     *1,"|":
+                    *20,"Patients with Reduced Independence at Discharge":
+                    *132,"|"
+          ADD       ONE,CLNO
+          CALL      UND132
+          CALL      COLHED00           * Print table column header row
+          CALL      UND132
+.
+TBHDDE99  RETURN
++
+.******************************************************************************
+.*                           PRTR0000                     Called by: PRNT0000 *
+.*                                                                            *
+.*        Print table row of values from the temp file                        *
+.*                                                                            *
+.*          Params : TBLNUMBR - The table (temp file) number; 1 or 2          *
+.*                   PATFNAME - Patient Full Name                             *
+.******************************************************************************
+PRTR0000  MOVE      SP70,TDESC
+.
+          COMPARE   ONE,TBLNUMBR
+          GOTO      PRTR1000 IF NOT EQUAL
+.
+          PACK      KEY5,CATpw,X1MODEPE,SP70     * Mode of Episode End (Cat pw)
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRTR9999
+.
+          IF        ISNEWLO=ONE
+            PRINT     *1,"|",*4,X1URNUMB:
+                      *14,"|",*16,PATFNAME:
+                      *51,"|",*55,X1TOTPRI:
+                      *59,"|",*63,X1TOTPOS:
+                      *67,"|",*71,X1ACCPRI:
+                      *75,"|",*79,X1ACCPOS:
+                      *83,"|",*87,TDESC:
+                      *132,"|"
+          ELSE
+            PRINT     *1,"|",*4,X1URNUMB:
+                      *14,"|",*16,PATFNAME:
+                      *51,"|",*55,X1TOTPRI:
+                      *59,"|",*63,X1TOTPOS:
+                      *67,"|",*71,X1ACCPRI:
+                      *75,"|",*79,X1CARPRI:
+                      *83,"|",*87,X1ACCPOS:
+                      *91,"|",*95,X1CARPOS:
+                      *99,"|",*101,TDESC:
+                      *132,"|"
+          ENDIF
+.  
+          ADD       ONE,CLNO
+          GOTO      PRTR9999
+.
+PRTR1000  COMPARE   TWO,TBLNUMBR
+          GOTO      PRTR9999 IF NOT EQUAL
+.
+          PACK      KEY5,CATpw,X2MODEPE,SP70     * Mode of Episode End (Cat pw)
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRTR9999
+.
+          IF        ISNEWLO=ONE
+            PRINT     *1,"|",*4,X2URNUMB:
+                      *14,"|",*16,PATFNAME:
+                      *51,"|",*55,X2TOTPRI:
+                      *59,"|",*63,X2TOTPOS:
+                      *67,"|",*71,X2ACCPRI:
+                      *75,"|",*79,X2ACCPOS:
+                      *83,"|",*87,TDESC:
+                      *132,"|"
+          ELSE
+            PRINT     *1,"|",*4,X2URNUMB:
+                      *14,"|",*16,PATFNAME:
+                      *51,"|",*55,X2TOTPRI:
+                      *59,"|",*63,X2TOTPOS:
+                      *67,"|",*71,X2ACCPRI:
+                      *75,"|",*79,X2CARPRI:
+                      *83,"|",*87,X2ACCPOS:
+                      *91,"|",*95,X2CARPOS:
+                      *99,"|",*101,TDESC:
+                      *132,"|"
+          ENDIF
+.
+          ADD       ONE,CLNO
+.
+PRTR9999  RETURN
++
+.******************************************************************************
+.*                           PRNT0000                     Called by: MAIN0000 *
+.*                                                                            *
+.*        Print list of patients with Rehab Programs that have Accommodation  *
+.*        and Carer details entered (prior/post Program).                     *
+.*        Also print associated scores for each Patient.                      *
+.******************************************************************************
+PRNT0000  DISPLAY   *P1:24,*EL,*P10:24,"Printing: ";
+.
+.         Print first table of Patients (with improved or equal Independence)
+.
+          CALL      HEAD0000
+          PRINT     *N,"Total No Of Rehabilitation Patients with improved":
+                       " independence",*67,":",*70,TOTINCRI
+          PRINT     *N,"Total No Of Rehabilitation Discharges for the":
+                       " period",*67,":",*70,TOTREHDI,*N,*N
+          ADD       SIX,CLNO
+.
+          CALL      TBHDIN00
+.
+          MOVE      ONE,TBLNUMBR
+          PACK      KEY16,SP70         * Position on first temporary file
+          CALL      RDSTEMP1
+PRNT1000  CALL      RDKTEMP1           * Get the next record
+          BRANCH    OVRCD,PRNT2000     * End of file reached
+.
+          DISPLAY   *P20:24,*V2LON,X1URNUMB," ",X1ADMNUM
+.
+          PACK      KEY8,X1URNUMB
+          CALL      RDMAST1            * Read a master file record
+          BRANCH    OVRCD,PRNT1000
+.
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,PATFNAME
+.
+          COMPARE   "60",CLNO          * New page?
+          IF        !@LESS
+            CALL      HEAD0000
+            CALL      TBHDIN00
+          ENDIF
+.
+          CALL      PRTR0000           * Print table row
+          GOTO      PRNT1000           * Get next record
+.
+.         Print 2nd table of Patients (with reduced Independence)
+.
+PRNT2000  CALL      UND132
+          COMPARE   "60",CLNO          * New page?
+          IF        !@LESS
+            CALL      HEAD0000
+            CALL      TBHDDE00
+          ELSE
+            COMPARE   "53",CLNO
+            IF        @LESS
+              PRINT     *N,*N
+              ADD       TWO,CLNO
+              CALL      TBHDDE00
+            ELSE
+              CALL      HEAD0000
+              CALL      TBHDDE00
+            ENDIF
+          ENDIF
+.
+          MOVE      TWO,TBLNUMBR
+          PACK      KEY16,SP70
+          CALL      RDSTEMP2
+PRNT2100  CALL      RDKTEMP2
+          BRANCH    OVRCD,PRNT3000
+.
+          DISPLAY   *P20:24,*V2LON,X2URNUMB," ",X2ADMNUM
+.
+          PACK      KEY8,X2URNUMB
+          CALL      RDMAST1            * Read a master file record
+          BRANCH    OVRCD,PRNT1000
+.
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,PATFNAME
+.
+          COMPARE   "60",CLNO          * New page?
+          IF        !@LESS
+            CALL      HEAD0000
+            CALL      TBHDDE00
+          ENDIF
+.
+          CALL      PRTR0000           * Print table row
+          GOTO      PRNT2100           * Get next record
+.
+PRNT3000  CALL      UND132
+          COMPARE   "60",CLNO          * New page?
+          IF        !@LESS
+            CALL      HEAD0000
+          ENDIF
+.
+          MOVE      TOTINCRI,INDICVAL
+          DIV       TOTREHDI,INDICVAL
+          MOVE      INDICVAL,INDPRINT
+          MOVE      INDPRINT,DIM5
+          REP       " 0",DIM5
+.
+          COMPARE   "57",CLNO
+          IF        !@LESS
+            CALL      HEAD0000
+          ENDIF
+          PRINT     *N,*N,"Clinical Indicator"
+          ADD       THREE,CLNO
+.
+          COMPARE   "58",CLNO
+          IF        !@LESS
+            CALL      HEAD0000
+          ENDIF
+          PRINT     *N,"Total Numerator",*27,"=",*30,TOTINCRI 
+          ADD       TWO,CLNO
+.
+          COMPARE   "58",CLNO
+          IF        !@LESS
+            CALL      HEAD0000
+          ENDIF
+          PRINT     *N,"Total Denominator",*27,"=",*30,TOTREHDI 
+          ADD       TWO,CLNO
+.
+          COMPARE   "58",CLNO
+          IF        !@LESS
+            CALL      HEAD0000
+          ENDIF
+          PRINT     *N,"Clinical Indicator Value",*27,"=",*30,DIM5
+          ADD       TWO,CLNO
+.
+          COMPARE   "58",CLNO
+          IF        !@LESS
+            CALL      HEAD0000
+          ENDIF
+          PRINT     *N
+          ADD       ONE,CLNO
+.
+PRNT4000  PACK      KEY16,SP70
+          CALL      RDSTEMP3
+PRNT4100  CALL      RDKTEMP3
+          BRANCH    OVRCD,PRNT9000
+.
+          COMPARE   "58",CLNO          * Need 2 lines for Patient warning
+          IF        !@LESS
+            CALL      HEAD0000
+          ENDIF
+.
+          IF        ISNEWLO = ZERO
+            PRINT     *1,"*** Warning: U/R Number ",XXXXURNO," has a":
+                         " Therapy End Date but missing prior/post":
+                         " accommodation or carer status fields."
+          ELSE
+            PRINT     *1,"*** Warning: U/R Number ",XXXXURNO," has a":
+                         " Therapy End Date but missing prior/post":
+                         " accommodation."
+          ENDIF
+          ADD       ONE,CLNO
+.
+          MOVE      SP70,TDESC
+          PACK      KEY5,CATpw,XXXXMODE,SP70     * Mode of Episode End (Cat pw)
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRNT4100
+.
+          PRINT     *34,TDESC
+          ADD       ONE,CLNO
+          GOTO      PRNT4100
+.
+PRNT9000  COMPARE   "60",CLNO          * New page?
+          IF        !@LESS
+            CALL      HEAD0000
+          ENDIF
+.
+          IF        CPAGENO > 0
+            PRINT     *N,*N,"*** End of Report ***"
+          ENDIF
+.
+PRNT9999  RETURN
++
+.******************************************************************************
+.*        I/O routines for temp file 1                                        *
+.******************************************************************************
+RDATEMP1  RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READ      TEMP1,KEY16;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDSTEMP1  RESET     KEY16
+          READ      TEMP1,KEY16;;
+          RETURN
+.
+RDKTEMP1  MOVE      ZERO,OVRCD
+          READKS    TEMP1;X1URNUMB,X1ADMNUM,X1ACCPRI,X1ACCPOS:
+                          X1CARPRI,X1CARPOS,X1TOTPRI,X1TOTPOS,X1MODEPE
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP1   RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READ      TEMP1,KEY16;X1URNUMB,X1ADMNUM,X1ACCPRI,X1ACCPOS:
+                                X1CARPRI,X1CARPOS,X1TOTPRI,X1TOTPOS,X1MODEPE
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   RESET     KEY16
+          WRITE     TEMP1,KEY16;X1URNUMB,X1ADMNUM,X1ACCPRI,X1ACCPOS:
+                                X1CARPRI,X1CARPOS,X1TOTPRI,X1TOTPOS,X1MODEPE
+          RETURN
++
+.******************************************************************************
+.*        I/O routines for temp file 2                                        *
+.******************************************************************************
+RDATEMP2  RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READ      TEMP2,KEY16;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDSTEMP2  RESET     KEY16
+          READ      TEMP2,KEY16;;
+          RETURN
+.
+RDKTEMP2  MOVE      ZERO,OVRCD
+          READKS    TEMP2;X2URNUMB,X2ADMNUM,X2ACCPRI,X2ACCPOS:
+                          X2CARPRI,X2CARPOS,X2TOTPRI,X2TOTPOS,X2MODEPE
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP2   RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READ      TEMP2,KEY16;X2URNUMB,X2ADMNUM,X2ACCPRI,X2ACCPOS:
+                                X2CARPRI,X2CARPOS,X2TOTPRI,X2TOTPOS,X2MODEPE
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP2   RESET     KEY16
+          WRITE     TEMP2,KEY16;X2URNUMB,X2ADMNUM,X2ACCPRI,X2ACCPOS:
+                                X2CARPRI,X2CARPOS,X2TOTPRI,X2TOTPOS,X2MODEPE
+          RETURN
++
+.******************************************************************************
+.*        I/O routines for temp file 3                                        *
+.******************************************************************************
+RDATEMP3  RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READ      TEMP3,KEY16;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDSTEMP3  RESET     KEY16
+          READ      TEMP3,KEY16;;
+          RETURN
+.
+RDKTEMP3  MOVE      ZERO,OVRCD
+          READKS    TEMP3;XXXXURNO,XXXXADMN,XXXXMODE
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP3   RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READ      TEMP3,KEY16;XXXXURNO,XXXXADMN,XXXXMODE
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP3   RESET     KEY16
+          WRITE     TEMP3,KEY16;XXXXURNO,XXXXADMN,XXXXMODE
+          RETURN
++
+.
+.*******************************************************************************
+.
+          INC       STD001IO                     * System Standard Routines
+.
+          INC       CLPATHSP                     * Clear Hospital Table variables
+          INC       CLPATDSC                     * Clear Disharge Record
+          INC       NAMSTRCD
+          INC       PATHSPKY                     * Keyin of a Hospital Id/code
+          INC       TFILENAM                     * Generate Temp File Name
+.
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATCODIO/INC                 * Category Codes
+          INC       PATFN1IO/INC                 * Patient Discharge File
+          INC       PATDSCIO/INC                 * Patient Discharge File
+          INC       PATHSPIO/INC                 * Hospital File
+          INC       PATMA1IO/INC                 * Patient Master File
+          INC       PATMI1IO/INC                 * Patient Admission File
+          INC       PATTRNIO/INC                 * Patient Transfer File
+          INC       PATVISIO/INC                 * Patient Visit File
+          INC       PMSUPGIO/INC                 * Program Details File
+          INC       PMSAPGIO/INC                 * Program Details Ext File
+          INC       PMSVX1IO/INC                 * Patient Visit Ext File
+          INC       WEBERRIO/INC                 * Web Server Error Logging

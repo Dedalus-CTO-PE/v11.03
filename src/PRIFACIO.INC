@@ -1,0 +1,87 @@
+.
+.  Mods : 08/10/92  Steve Armstrong
+.         Modified PRFADEBT for change from FORM to DIM in FD
+.--------------------------------------------------------------
+RSPRFA1   RESET     KEY18
+          READ      PRIFACT1,KEY18;;
+          RETURN
+.
+RAPRFA1   RESET     KEY18
+          MOVE      ZERO,OVRCD
+          READ      PRIFACT1,KEY18;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRFA1   RESET     KEY18
+          MOVE      ZERO,OVRCD
+          READ      PRIFACT1,KEY18;PRFADATE,PRFADEBT,DPRFASCN,PRFAACTN:
+                                   PRFACOMM,PRFAMPRA,PRFASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRFASCN,PRFASCAN
+          RETURN
+.
+RKPRFA1   MOVE      ZERO,OVRCD
+          READKS    PRIFACT1;PRFADATE,PRFADEBT,DPRFASCN,PRFAACTN:
+                             PRFACOMM,PRFAMPRA,PRFASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRFASCN,PRFASCAN
+          RETURN
+.
+RPPRFA1   MOVE      ZERO,OVRCD
+          READKP    PRIFACT1;PRFADATE,PRFADEBT,DPRFASCN,PRFAACTN:
+                             PRFACOMM,PRFAMPRA,PRFASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRFASCN,PRFASCAN
+          RETURN
+.
+UPPRFA1   MOVE      PRFASCAN,DPRFASCN
+          UPDATE    PRIFACT1;PRFADATE,PRFADEBT,DPRFASCN,PRFAACTN:
+                             PRFACOMM,PRFAMPRA,PRFASPAR
+          RETURN
+.
+WRPRFA1   RESET     KEY18
+          MOVE      PRFASCAN,DPRFASCN
+          WRITE     PRIFACT1,KEY18;KEY18,PRFAACTN,PRFACOMM,PRFAMPRA,PRFASPAR 
+          RETURN
+.
+DEPRFA1   RESET     KEY18
+          DELETE    PRIFACT1,KEY18
+          RETURN
+.
+RSPRFA2   RESET     KEY18
+          READ      PRIFACT2,KEY18;;
+          RETURN
+.
+RAPRFA2   RESET     KEY18
+          MOVE      ZERO,OVRCD
+          READ      PRIFACT2,KEY18;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRFA2   RESET     KEY18
+          MOVE      ZERO,OVRCD
+          READ      PRIFACT2,KEY18;PRFADATE,PRFADEBT,DPRFASCN,PRFAACTN:
+                                   PRFACOMM,PRFAMPRA,PRFASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRFASCN,PRFASCAN
+          RETURN
+.
+RKPRFA2   MOVE      ZERO,OVRCD
+          READKS    PRIFACT2;PRFADATE,PRFADEBT,DPRFASCN,PRFAACTN:
+                             PRFACOMM,PRFAMPRA,PRFASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRFASCN,PRFASCAN
+          RETURN
+.
+RPPRFA2   MOVE      ZERO,OVRCD
+          READKP    PRIFACT2;PRFADATE,PRFADEBT,DPRFASCN,PRFAACTN:
+                             PRFACOMM,PRFAMPRA,PRFASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRFASCN,PRFASCAN
+          RETURN
+.
+UPPRFA2   MOVE      PRFASCAN,DPRFASCN
+          UPDATE    PRIFACT2;PRFADATE,PRFADEBT,DPRFASCN,PRFAACTN:
+                             PRFACOMM,PRFAMPRA,PRFASPAR
+          RETURN
+.

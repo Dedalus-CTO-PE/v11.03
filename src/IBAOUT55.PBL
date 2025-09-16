@@ -1,0 +1,1637 @@
++
+.**********************************************************************
+.* System   :  OUTPATIENTS SYSTEM                                     *
+.* Program  :  IBAOUT55                                               *
+.* Desc     :  OUTPATIENT CLINIC STATISTICS REPORT                    *
+.**********************************************************************
+.* Date     :  08/03/90                                               *
+.* Author   :  D.Di.Paola                                             *
+.* Comments :  This program prints outpatient clinic statistics from  *
+.*          :  the clinic open sessions file. Written for SRF 103541. *
+.* Mods     :                                                         *
+.**********************************************************************
+.*        V11.03.01 14/06/2023  Bella Turco      TSK 0933691          *
+.*                  Fixed misspelling of Attendence                   *
+.*        V11.02.01 09/02/2022  Thanh T          TSK 0905641          *
+.*                  Recompiled as OUTMA1FD changes                    *
+.*        V10.05.01 15/07/2014  Ebon Clements      CAR 261630         *
+.*                  Removed port number from temp file name           *
+.*        V5.08.B01 08/01/2000  Steve Armstrong                       *
+.*                  Mods to use PATSTRYR to determine start of year   *
+.*                  date                                              *
+.**********************************************************************
+.*        V5.07.01  01/07/1999  Jill Habasque SRF 645732              *
+.*                  Removed line feed after call to HEAD132           *
+.*            V5.07.B03 18/01/1999  Nicole Harrington                 *
+.*                      Mods to use HEAD132                           *
+.*            V5.07.B02 09/12/1998  Jim Stathopoulos                  *
+.*                      Fixed Generated Date                          *
+.*            V5.07.B01 02/11/1998  Jim Stathopoulos                  *
+.*                      507 Changes                                   *
+.**********************************************************************
+.*             V5.01.02 02/03/93 ROD                                  *
+.*                      recompiled for new outma1af                   *
+.*             V5.01.03 24/03/93 J.Tan   SRF 121287                   *
+.*                      Changed size of temp variables for book/attd. *
+.*             V5.01.01 14/09/90 D.Di.Paola    SRF 106470             *
+.*                      Copied from version 5. Revamped for v5.01...  *
+.**********************************************************************
+.
+.$$$$$
+. Outpatient Clinic Statistics Report (IBAOUT55).
+.________________________________________________ 
+.
+. - Initialization
+.        - Display Header
+.        - Open Files 
+.               CONTROLF
+.               OUTCTYA1
+.               OUTSESA2
+.               OUTMA1A1
+.               OUTCLIA1
+.               OUTUSEA1
+.               TRKHIST2
+.               PATDO1A1
+.               PATCODE1
+.        - Read CONTROLF sector 88, position *70 (start of financial year)
+.
+.        - Clear Variables
+.
+.        - Input and Validate Date Ranges
+.
+. - Processing Options
+.        - 0. Exit
+.        - 1. Summary Report 
+.        - 2. Detailed Report
+.
+.        - Determine Report Headers By Option 1 = Summary 
+.                                             2 = Detailed
+.
+.        - Create TEMP file for report details (OUT55AXX.txt)
+.              - TEMP1 = Detailed
+.              - TEMP2 = Summary
+.        - Extraction Loop
+.              - Read OUTSESA2
+.                     - check if record exists within date ranges
+.                        and correct site id.
+.                     - if OK, extract relevant session details
+.                
+.              - Read OUTMA1A1
+.                     - check if record exists
+.                     - if OK, extract clinic type information
+.
+.              - Branch On Options
+.                   - Option 1 = Summary
+.                            2 = Detailed
+.                     - clear tempfile variables      
+.
+.              - Read TEMP2    
+.                     - check if record exists
+.                     - if OK, increment totals and add hours
+.              - Update TEMP1 or 2 (OUT55AXX.dat)
+.                     - if NOT, get current totals 
+.              - Write  TEMP1 or 2 (OUT55AXX.dat)
+.
+.              - Clear working variables
+.        - END
+.
+.        - Call Print Module
+.                     - "1" = Summary Report
+.                     - "2" = Detailed Report
+.              - Clear Variables
+.              - Read TEMP1 or TEMP2   (OUT55AXX.dat)
+.              - Extract Relevant Details 
+.              - Read OUTCTYA1
+.                     - check if record exists
+.                     - IF OK, get clinic type description
+.              - Read OUTCLIA1
+.                     - check if record exists
+.                     - IF OK, get clinic id else,
+.              - Read PATDO1A1
+.                     - check if record exists
+.                     - IF OK, get doctors description
+.              - Detailed
+.                     - same as above except;
+.                     - Read OUTUSEA1
+.                           - check if record exists
+.                           - IF OK, get actual session start and end times
+.                     - Read OUTMA1A1
+.                           - check if record exists
+.                           - IF OK, get scheduled clinic times
+.              - Call Format Doctors Name Routine
+.              - calculate percentage totals 
+.              - print details
+.
+.        - Print Totals Routine
+.              - Print subtotals and grand totals
+.
+.        - END
+.
+. - END
+.$$$$$
+.
+          INC       STD001FD
+.
+          INC       IBASEQFD/INC
+          INC       OUTCLIFD/INC              * outpatients clinic id file
+          INC       OUTCTYFD/INC              * outpatients clinic type file
+          INC       OUTMA1FD/INC              * outpatients master file
+          INC       OUTSESFD/INC              * outpatients clinic sessions
+          INC       OUTUSEFD/INC              * outpatients clinic sessions
+.
+          INC       PATCODFD/INC              * patient codes file
+          INC       PATCONFD/INC              * patient control file
+          INC       PATDO1FD/INC              * patient doctor file
+          INC       PATDRGFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+.------------------------------------------------------
+.                  Temporary file definition 
+.------------------------------------------------------
+.
+SORT1      INIT       "u1-12"
+SORT2      INIT       "u1-25"
+SORTKEY    DIM        5
+TEMPFILE   IFILE      SQL, FIXED=81, KEY=SORTKEY
+.
+.NAME      TYPE       LENGTH    PHYSICAL  START     DESCRIPTION
+.----      ----       ------    --------  -----     -----------
+.OMATYP    DIM        6          6        1         * clinic type
+.OSECLIN   DIM        6          6        7         * Clinic id
+.OSEDATE   DIM        8          8        13        * Usage date (ccyymmdd)
+.OSESTRT   DIM        5          5        21        * session start time
+TACTHRS    DIM        5          5        26        * total actual hours
+THRSSCHD   DIM        5          5        31        * total scheduled hours
+TSLOTSCH   FORM       6          4        36        * total slots scheduled
+TSLOTBOK   FORM       6          4        40        * total slots booked
+TOTBOOK    FORM       6          4        44        * total no. of bookings
+TOTATTD    FORM       6          4        47        * total no. of attendences
+TOTATTN    FORM       6          4        51        * total attendances new.
+TOTATTR    FORM       6          4        55        * total attendances revisit
+TOTATTO    FORM       6          4        59        * total attendances other
+TOTBOKN    FORM       6          4        63        * total bookings new
+TOTBOKR    FORM       6          4        67        * total bookings revisit
+TOTBOKO    FORM       6          4        71        * total bookings other
+TSLOTATD   FORM       6          4        75        * total slots attended
+.OMAREG    DIM        1          1        79        * Registrar's Clinic y/n
+.DOSEDAY   DIM        1          1        80        * day indicator
+.
+.                       end of record =   81
+.
+.**********************************************************************
+.*                         CONSTANTS                                  *
+.**********************************************************************
+.
+CODECV     INIT       "CV"
+HEADER1    INIT       "Summary "
+HEADER2    INIT       "Detailed"
+.
+.**********************************************************************
+.*                         GLOBAL VARIABLES                           *
+.**********************************************************************
+.
+CALCPERC   FORM       6.2                 * percentage variable
+CMDLINE    DIM        50
+CSTRTYR   DIM       8                            * for PATSTRYR
+.
+DIM2A1     DIM        2
+DIM2A2     DIM        2
+DIM2B1     DIM        2
+DIM2B2     DIM        2
+.
+DIM3B1     DIM        3               * HHH
+DIM5A      DIM        5
+DIM5B      DIM        5
+.
+DIM13      DIM        13
+DIM14      DIM        14
+DIM17      DIM        17
+DIM25      DIM        25
+DIM27      DIM        27
+.
+ENDDATE    DIM        10                  * parameter end date
+ENDTIME    DIM        5
+ENDTIME6   DIM        6                   * HHH:MM 
+. 
+FORM2A1    FORM       2
+FORM2A2    FORM       2
+FORM2B1    FORM       2
+FORM2B2    FORM       2
+FORM4B     FORM       4
+FORM4C     FORM       4
+FORM4D     FORM       4
+.
+FORM3B1    FORM       3                    * HHH      * grand total hrs
+.
+FNAMER     DIM        8
+.
+GSLOTSCH   FORM       6                    * grand total slots scheduled
+GSLOTBOK   FORM       6                    * grand total slots booked
+GTOTBOOK   FORM       5                    * grand total no. of booking
+GTOTATTD   FORM       5                    * grand total no. of attendees
+GTOTBNEW   FORM       5                    * grand total no. bookings new
+GTOTBREV   FORM       5                    * grand total no. bookings revisits
+GTOTBSPC   FORM       5                    * grand total no. bookings spec/oth
+GTOTANEW   FORM       5                    * grand total no. attendances new
+GTOTAREV   FORM       5                    * grand total no. attendances revisit
+GTOTASPC   FORM       5                    * grand total no. attendances spc/oth
+GRSLTSCH   FORM       6                    * grand total slots scheduled 
+GRSLTATD   FORM       6                    * grand total slots attended
+GRHRSACT   DIM        6                    * grand total actual hours
+GRHRSCHD   DIM        6                    * grand total scheduled hours
+.
+GRANTIME   DIM        6                    * grand total result time HHH:MM
+.
+.
+LINECNT    FORM       2
+.
+NAMEDIM    DIM        25
+NEXTREC    FORM       1
+.
+OPENDATE   DIM        10
+.
+PAGENO     FORM       8
+PATSTCUR  DIM       4                            * for PATSTRYR
+PERBOOK    FORM       6                  * % booked
+PERATTD    FORM       6                  * % attended
+PERUSGE    FORM       6                  * % clinic usage
+.
+RECOUNT    FORM       1
+REGTYPE    DIM        3
+RESLTIME   DIM        5
+.
+SAVDIM27   DIM        27
+SAVTYPE    DIM        6
+STRTDATE   DIM        10                 * parameter start date
+SEQTYPE    DIM        8
+STARTIME   DIM        5
+.
+TEMPF2     FORM       2
+TEMPF3     FORM       3
+TEMPH3     FORM       3                  * HHH
+TIMEIS     DIM        8
+.
+VENDDATE   DIM        8                  * end date range
+VSTRDATE   DIM        8                  * start date range
+.
+VENDSITE   DIM        6                  * end site range
+VSTRSITE   DIM        6                  * start site range
+.
+PRGID     INIT       "IBAOUT55"
+PRGNAM    INIT      "Outpatient Clinic Statistics Report"
+VERSION   INIT      "V11.03.01"
++
+.**********************************************************************
+.*                           MAINLINE                                 *
+.*                      controlling logic                             *
+.**********************************************************************
+ML0000     CALL       INIT0000                      * intialization
+ML0200     CALL       CLR0000                       * clear input variables
+           CALL       OPTN0000                      * option screen
+           BRANCH     EXIT,ML9999
+           CALL       CREA0000                      * create tempfile
+           BRANCH     OPTION,ML1000,ML1000
+           GOTO       ML0200 
+.
+ML1000     CALL       DATE0000                      * input date range
+           BRANCH     EXIT,ML0200
+           CALL       CONT0000                      * continue yes,no,cancel
+           BRANCH     EXIT,ML0200,ML9999 
+           CALL       EXTR0000                      * extract & write to tmpfile
+           BRANCH     EXIT,ML9999
+           BRANCH     OPTION,ML2000,ML3000
+.
+.--------- print "1" = Summary Report ------
+.
+ML2000     CALL       PRTS0000                      * print "1" = Summary
+           GOTO       ML0200
+.
+.--------- print "2" = Detailed Report ------
+.
+ML3000     CALL       PRTD0000                      * print "2" = Detailed
+           GOTO       ML0200
+.
+ML9999     CALL       KILL0000                      * delete temp file
+           CHAIN      PGM                           * exit program
++
+.**********************************************************************
+.*                           INIT0000                                 *
+.*                   call header routine and open files               *
+.**********************************************************************
+INIT0000    CALL      DISPHEAD                        * display header
+            DISPLAY   *P63:24,"Opening ";
+.
+            PACK      CFNAME,UID,FILCTYA1             * clinic type file
+            DISPLAY   *P71:24,CFNAME
+            OPEN      OUTCTYA1,CFNAME
+.
+            PACK      CFNAME,UID,FILSESA2             * clinic sessions file
+            DISPLAY   *P71:24,CFNAME
+            OPEN      OUTSESA2,CFNAME
+.
+            PACK      CFNAME,UID,FILMA1A1             * clinic master file
+            DISPLAY   *P71:24,CFNAME
+            OPEN      OUTMA1A1,CFNAME
+.
+            PACK      CFNAME,UID,FILCLIA1             * clinic file
+            DISPLAY   *P71:24,CFNAME
+            OPEN      OUTCLIA1,CFNAME
+.
+            PACK      CFNAME,UID,FILUSEA1             * used session file
+            DISPLAY   *P71:24,CFNAME
+            OPEN      OUTUSEA1,CFNAME
+.
+            DISPLAY   *P71:24,"patdrgaf"
+            OPEN      PATDRGA2,"patdrgaf"
+.
+            DISPLAY   *P71:24,"patdo1af"              * patient doctor file
+            OPEN      PATDO1A1,"patdo1af"
+.
+            DISPLAY   *P71:24,"patcodes";
+            OPEN      PATCODE1,"patcodes"             * patient codes file
+.
+            CALL      TFILENAM                * Get temp file name
+            MOVE      TFILNAME,FNAMER
+.
+INIT9999    RETURN
+.
++
+.***********************************************************************
+.*                             CREA0000                                *
+.*                    create tempfile for details                      *
+.***********************************************************************
+CREA0000
+            DISPLAY   *P40:23,*EL,*V2LON,"Creating Temporary File - ":
+                                        "Please Wait",*HOFF;
+.
+            CALL      KILL0000                   * Delete temp file
+.
+.---------- build tempfile ----------
+.
+            CLEAR     CMDLINE
+            APPEND    "isbuild ",CMDLINE                 * build tempfile
+            APPEND    FNAMER,CMDLINE
+            APPEND    " 81 ",CMDLINE
+            APPEND    SORTKEY,CMDLINE
+            RESET     CMDLINE
+.
+            EXECUTE   CMDLINE,TASKID
+            OPEN      TEMPFILE,FNAMER
+.
+            DISPLAY   *P1:23,*EL;                    * clear message line
+.
+CREA9999    RETURN
++
++
+.***********************************************************************
+.*                             KILL0000                                *
+.*                    delete tempfile                                  *
+.***********************************************************************
+KILL0000  CLEAR     CMDLINE                        * erase filename
+          CLOSE     TEMPFILE
+          APPEND    "iserase ",CMDLINE             * ie.
+          APPEND    FNAMER,CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+KILL9999  RETURN
++
+.**********************************************************************
+.*                           CLR0000                                  *
+.*                       clear input variables                        *
+.**********************************************************************
+CLR0000   MOVE      ZERO,PAGENO
+          MOVE      SP5,STARTIME
+          MOVE      SP5,ENDTIME 
+          MOVE      SP6,ENDTIME6
+          MOVE      SP10,STRTDATE              * print date on report
+          MOVE      SP10,ENDDATE 
+          MOVE      SP3,REGTYPE
+.
+          MOVE      SP6,GRHRSACT
+          MOVE      SP6,GRHRSCHD
+.
+          CALL      CLRT0000                      * clear tempfile variables
+          CALL      CLRF0000                      * clear session file vars.
+.
+CLR9999   RETURN
+.
+.**********************************************************************
+.*                           CLRT0000                                 *
+.*                       clear tempfile variables                     *
+.**********************************************************************
+CLRT0000  MOVE      SP5,TACTHRS
+          MOVE      SP5,THRSSCHD
+          MOVE      ZERO,TSLOTSCH
+          MOVE      ZERO,TSLOTBOK
+          MOVE      ZERO,TOTBOOK 
+          MOVE      ZERO,TOTATTD
+          MOVE      ZERO,TOTATTN
+          MOVE      ZERO,TOTATTR
+          MOVE      ZERO,TOTATTO
+          MOVE      ZERO,TOTBOKN
+          MOVE      ZERO,TOTBOKR
+          MOVE      ZERO,TOTBOKO
+          MOVE      ZERO,TSLOTATD
+.
+CLRT9999  RETURN
+.
+.***********************************************************************
+.*                       CLRF0000                                      *
+.*                Clear session file variables                         *
+.***********************************************************************
+CLRF0000
+          UNPACK    SP30,OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY
+          MOVE      SP5,OSETIMES
+          MOVE      SP5,OSETIMEU
+          MOVE      ZERO,OSESLOTS
+          MOVE      ZERO,OSESLOTB
+          MOVE      ZERO,OSEBNEW
+          MOVE      ZERO,OSEBRV
+          MOVE      ZERO,OSEBSPC
+          MOVE      ZERO,OSEANEW
+          MOVE      ZERO,OSEARV
+          MOVE      ZERO,OSEASPC
+          MOVE      SP6,OMATYP 
+          MOVE      SP1,OMAREG
+          MOVE      SP1,DOSEDAY
+          RETURN
+.
+.**********************************************************************
+.*                           OPTN0000                                 *
+.*                    select option screen                            *
+.**********************************************************************
+OPTN0000    MOVE       FALSE,EXIT
+            MOVE       "80",LINECNT
+.
+            HLINE      *G37,2,58,80
+            DISPLAY    *P1:3,*EF:
+                       *P1:4,*V2LON,"0 ",*HOFF,"= Exit":
+                       *P1:5,*V2LON,"1 ",*HOFF,"=":
+                       *P1:6,*V2LON,"2 ",*HOFF,"=":
+                       *P5:5,"Summary ":
+                       *P5:6,"Detailed":
+                       *P1:8,"Please Select : ";
+.
+OPTN1000    KEYIN      *P17:8,*V2LON,OPTION,*HOFF
+            COMPARE    ZERO,OPTION
+            GOTO       OPTN9000 IF EQUAL
+            COMPARE    "3",OPTION   
+            GOTO       OPTN0000 IF NOT LESS
+.
+.-------- determine header -----
+.
+            UNPACK     SP30,SEQTYPE
+            LOAD       SEQTYPE,OPTION,HEADER1,HEADER2
+            DISPLAY    *P58:2,*V2LON,"- ",*+,SEQTYPE,SP1;
+.
+.-------- determine which key to use according to option chosen ------
+.
+            LOAD       SORTKEY,OPTION,SORT1,SORT2
+            GOTO       OPTN9999
+. 
+OPTN9000    MOVE       TRUE,EXIT                * set exit flag
+.
+OPTN9999    RETURN
++
+.***************************************************************************
+.*                                 CONT0000                                *
+.*                           Ok To Continue    Y/N/C                       *
+.***************************************************************************
+CONT0000    MOVE       FALSE,EXIT
+            CALL       CONTQST
+            MATCH      "1",ANS                       * 1 = yes 
+            GOTO       CONT9999 IF EQUAL
+            MATCH      "2",ANS                       * 2 = no
+            GOTO       CONT9000 IF EQUAL
+            MATCH      "3",ANS                       * 3 = cancel
+            GOTO       CONT8000 IF EQUAL
+            GOTO       CONT0000
+.
+CONT8000    MOVE       TWO,EXIT                     * cancel flag
+            GOTO       CONT9999
+.
+CONT9000    MOVE      TRUE,EXIT                     * no
+.
+CONT9999    DISPLAY   *P1:24,*EL;
+            RETURN
++
+.***************************************************************************
+.*                               DATE0000                                  *
+.*                          accept date range                              *
+.***************************************************************************
+.
+.---------- keyin first date range -------
+.
+DATE0000  MOVE      FALSE,EXIT
+.
+          CALL      PATSTRYR                     * get start of year date
+.
+          DISPLAY   *P1:10,*EF,"Generate Report from : "
+          UNPACK    CSTRTYR,CCENT,CYEAR,CMON,CDAY
+          MOVE      ZERO,CHIGHLT
+          MOVE      TWENTY2,CCOL
+          MOVE      TEN,CVERT
+          CALL      KEYDATE  
+          BRANCH    OVRCD,DATE9000
+          PACK      VSTRDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",VSTRDATE
+.
+.-------- keyin 2nd date range -------
+.
+          DISPLAY   *P33:10,"to "
+          UNPACK    CDATE,CDAY,ANS,CMON,ANS,CCENT,CYEAR
+          MOVE      "36",CCOL
+          CALL      KEYDATE 
+          BRANCH    OVRCD,DATE0000
+          PACK      VENDDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",VENDDATE
+.
+          MATCH     VENDDATE,VSTRDATE
+          GOTO      DATE9999 IF EQUAL
+          GOTO      DATE9999 IF LESS
+          DISPLAY   *P1:24,*B,"Invalid Date Range - Hit <",*V2LON,"ENTER",*HOFF:
+                    "> To Continue ";
+          KEYIN     ANS;
+          DISPLAY   *P1:24,*EL;
+          GOTO      DATE0000
+.
+DATE9000  MOVE      TRUE,EXIT                     * invalid date on 1st range
+DATE9999  RETURN
++
+.************************************************************************
+.*                           EXTR0000                                   *
+.*                    Extraction Routine                                *
+.*            Read necessary files and Extract relevant information     * 
+.************************************************************************
+EXTR0000  MOVE      FALSE,EXIT
+          MOVE      TRUE,RECOUNT
+          MOVE      SP6,SAVTYPE
+          DISPLAY   *P35:24,*V2LON,"Scanning :",*HOFF;
+          PACK      KEY25,VSTRDATE,SP30        * read with 2nd index
+          CALL      RDSSESA2                   * position on open sessions file
+.
+EXTR1000  CALL      RDKSESA2                   * read key sequential
+          BRANCH    OVRCD,EXTR9000
+.
+.-------- validate date ranges ------------
+.
+          MATCH     VSTRDATE,OSEDATE              * test if 1st date 
+          GOTO      EXTR1000 IF LESS              * is within range 
+.
+          MATCH     OSEDATE,VENDDATE              * check if 2nd date    
+          GOTO      EXTR9999 IF LESS              * is within range 
+.
+.-------- validate site -----
+.
+          MATCH     IDDD,OSESITE                  * match site to site id 
+          GOTO      EXTR1000 IF NOT EQUAL         * if not equal, read next rec.
+.
+.-------- read clinic master to get clinic type -----
+.
+          PACK      KEY18,OSESITE,OSECLIN,DOSEDAY,OSESTRT
+          CALL      RDMASA1                       * full read
+          BRANCH    OVRCD,EXTR1000
+.
+          UNPACK    OSEDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          DISPLAY   *P46:24,OSECLIN,SP5,CPCDATE;
+.
+          BRANCH    OPTION,EXTR2000,EXTR2100   *"1" = Summary, "2" = Detailed
+.
+.-------- "1" = Summary Report ------
+.
+EXTR2000  CALL      WRTS0000                   * write to tempfile "1" Summary
+          GOTO      EXTR8000
+.
+.-------- "2" = Detailed Report ------
+.
+EXTR2100  CALL      CALT0000                   * calculate and accum. totals
+          CALL      WRTD0000                   * write to tempfile "2" Detailed
+.
+.------- clear working variables -----
+.
+EXTR8000  
+          CALL      CLRF0000                   * clear session file variables
+.
+          MOVE      FALSE,RECOUNT
+          GOTO      EXTR1000                         * re-loop
+.
+EXTR9000  COMPARE   ONE,RECOUNT
+          GOTO      EXTR9999 IF NOT EQUAL
+          DISPLAY   *P1:24,*B,*EL,"Details Not On File - Hit ":
+                               "<",*V2LON,"ENTER",*HOFF,"> to continue ";
+          KEYIN     ANS;
+          MOVE      TRUE,EXIT
+.
+.-------- No report details, print header and final line -----
+.
+          BRANCH    OPTION,EXTR9500,EXTR9600
+EXTR9500  CALL      PRTS8000                     * print report header -Summary
+          PRINT      *N,*N,"**** END OF REPORT ****";
+          GOTO      EXTR9999
+EXTR9600  CALL      PRTD8000                     * print report header -Detailed
+          PRINT      *N,*N,"**** END OF REPORT ****";
+.
+EXTR9999  RETURN
+.
+.*************************************************************************
+.*   "1"= Summary              WRTS0000                                  *
+.*                      Accumulate totals for summary  report            *
+.*************************************************************************
+WRTS0000  CALL      CLRT0000                       * clear tempfile vars.
+          PACK      KEY12,OMATYP,OSECLIN
+          CALL      RDTEMP2                        * check if exists
+          BRANCH    OVRCD,WRTS2000                 * if not then write
+.
+.------ if exists then accumulate totals because the report is a summary ----
+.
+          ADD       OSESLOTS,TSLOTSCH      * total slots scheduled
+          ADD       OSESLOTB,TSLOTBOK      * total slots booked
+          ADD       OSEBNEW,TOTBOKN        * total bookings new
+          ADD       OSEBRV,TOTBOKR         * total bookings revisits
+          ADD       OSEBSPC,TOTBOKO        * total other bookings
+          ADD       OSEANEW,TOTATTN        * total attendances new
+          ADD       OSEARV,TOTATTR         * total attendences revisits
+          ADD       OSEASPC,TOTATTO        * total attendences other
+.
+.-------- get total no. of bookings ----
+.
+          ADD       OSEBNEW,TOTBOOK        * total no. of bookings
+          ADD       OSEBRV,TOTBOOK
+          ADD       OSEBSPC,TOTBOOK
+.
+.-------- get total no. of attendances ------
+.
+          ADD       OSEANEW,TOTATTD        * total no. of attendances
+          ADD       OSEARV,TOTATTD
+          ADD       OSEASPC,TOTATTD
+.
+.-------- get total slots attended ------------
+.
+          ADD       OSEANEW,TSLOTATD       * total slots attended
+          ADD       OSEARV,TSLOTATD
+          ADD       OSEASPC,TSLOTATD
+.       
+.-------- calculate times for scheduled hours -----------
+.
+          MATCH     SP5,OSETIMES
+          GOTO      WRTS1000 IF EQUAL
+          MOVE      OSETIMES,STARTIME              * set up input parameters
+          MOVE      THRSSCHD,ENDTIME
+.
+          CALL      ADDH0000                       * call add hours routine
+          MOVE      RESLTIME,THRSSCHD              * get result
+.
+.-------- calculate times for actual hours -----------
+.
+WRTS1000  MATCH     SP5,OSETIMEU 
+          GOTO      WRTS1500 IF EQUAL
+          MOVE      OSETIMEU,STARTIME              * set up input parameters
+          MOVE      TACTHRS,ENDTIME
+.
+          CALL      ADDH0000                       * call add hours routine
+          MOVE      RESLTIME,TACTHRS               * get result
+.
+WRTS1500 
+          CALL      UPTEMP2                        * update tempfile
+          GOTO      WRTS9999
+.
+.-------- get totals and write to tempfile ------
+.
+WRTS2000  CALL      CALT0000                       * accumulate totals
+          CALL      WRTEMP2                        * write to temp file
+WRTS9999  RETURN
+.
+.*************************************************************************
+.*   "2"= Detailed             WRTD0000                                  *
+.*                      write to tempfile for detailed report            *
+.*************************************************************************
+WRTD0000
+          PACK      KEY25,OMATYP,OSECLIN,OSEDATE,OSESTRT
+          CALL      WRTEMP1                        * write to temp file
+WRTD9999  RETURN
+.
+.*************************************************************************
+.*  "1" = Summary              PRTS0000                                  *
+.*                  print clinic open sessions statistics                *
+.*************************************************************************
+PRTS0000  
+          DISPLAY   *P31:24,*EL,*V2LON,"Clinic : ",*HOFF;
+          DISPLAY   *P50:24,*V2LON,"Provider : ",*HOFF;
+          CALL      CLRT0000                  * clear tempfile variables
+          MOVE      SP6,SAVTYPE
+          PACK      KEY12,SP30
+          CALL      RSTEMP2
+PRTS1000  CALL      RKTEMP2
+          BRANCH    OVRCD,PRTS9000
+          MATCH     SP6,SAVTYPE
+          GOTO      PRTS1500 IF EQUAL
+PRTS1200  
+          MATCH     OMATYP,SAVTYPE
+          CALL      PTOS0000 IF NOT EQUAL      * diff. clinic type, print totals
+          GOTO      PRTS2000
+PRTS1500  
+          MOVE      OMATYP,SAVTYPE             * move to save type
+          GOTO      PRTS1200
+.
+.-------- get clinic type description ------
+.
+PRTS2000
+          MOVE      "Unknown Clinic Type           ",OCTDESC
+          PACK      KEY12,IDDD,OMATYP
+          CALL      RDCTYA1
+.
+.-------- get clinic id description ------
+.
+          PACK      KEY20,IDDD,OSECLIN,OSEDATE
+          CALL      RDCLIA1
+          IF        OVRCD = 1
+            CALL      RDPCLIA1
+            IF        OVRCD = 0
+              MATCH     IDDD,OCASITE
+              IF        !@EQUAL
+                MOVE      ONE,OVRCD
+              ELSE
+                MATCH     OSECLIN,OCACLIN
+                IF        !@EQUAL
+                  MOVE      ONE,OVRCD
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+          IF        OVRCD = 1
+            MOVE      "Unknown clinic",OCADESC
+            PACK      OCADESC,OCADESC,SP30
+          ENDIF
+          BRANCH    OVRCD,PRTS2600
+.
+          MATCH     SP6,OCADOCT                    * no doctor, default to desc.
+          GOTO      PRTS2600 IF EQUAL
+.
+.-------- get doctor description if doctor code on file ----
+.
+          MOVE      "Unknown Doctor Code           ",OCADESC
+          PACK      KEY6,OCADOCT
+          CALL      RDDOCT1
+          BRANCH    OVRCD,PRTS2600
+.
+          CALL      FDOC0000                      * format doctor's name
+PRTS2600  CALL      TOTL0000                      * increment grand totals 
+.
+.-------- calculate running percentage totals ---------
+.
+          MOVE      ZERO,PERBOOK                * clear percentage vars.
+          MOVE      ZERO,PERATTD
+          MOVE      ZERO,PERUSGE
+.
+          COMPARE   ZERO,TSLOTSCH               * if zero, skip calcn.
+          GOTO      PRTS2650 IF EQUAL
+          MOVE      TSLOTBOK,CALCPERC           * move to % booked variable
+          DIV       TSLOTSCH,CALCPERC           * divide by total slots booked
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERBOOK            * move to form 6
+.
+PRTS2650  COMPARE   ZERO,TOTBOOK                * if zero, skip calcn.
+          GOTO      PRTS2660 IF EQUAL
+          MOVE      TOTATTD,CALCPERC          * move to % attendences variable
+          DIV       TOTBOOK,CALCPERC          * divide by subtotal no. bookings
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERATTD            * move to form 6
+.
+PRTS2660  COMPARE   ZERO,TSLOTSCH               * if zero, skip calcn.
+          GOTO      PRTS2670 IF EQUAL
+          MOVE      TSLOTATD,CALCPERC           * move to % clinic usage
+          DIV       TSLOTSCH,CALCPERC           * divide by subtotal attended 
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERUSGE            * move to form 6
+.
+.------- unpack start date and end date to print on report -------
+.
+PRTS2670
+          UNPACK    VSTRDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                   * call format date routine
+          MOVE      CPCDATE,STRTDATE
+.
+          UNPACK    VENDDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                   * call format date routine
+          MOVE      CPCDATE,ENDDATE
+.
+.------- print relevant details ------
+.
+PRTS3000  
+          MOVE      OCADESC,DIM17
+          DISPLAY   *P40:24,OSECLIN,*P61:24,DIM17;
+          CLOCK     TIME,TIMEIS
+          COMPARE   "50",LINECNT
+          CALL      PRTS8000 IF NOT LESS
+.
+          PRINT     *N,"|",*3,OCTDESC,*39,"|",*44,THRSSCHD:
+                          *53,"|",*58,TSLOTSCH,*64,PERBOOK,"%",*72,"|":
+                          *76,TOTBOOK,*82,TOTBOKN,*88,TOTBOKR,*94,TOTBOKO:
+                          *101,"|",*102,PERATTD,"%",*110,"|":
+                          *117,TSLOTSCH,*124,PERUSGE,"%",*132,"|":
+                    *N,"|",*5,OCADESC,*39,"|",*44,TACTHRS:
+                          *53,"|",*58,TSLOTBOK,*67,"FILL",*72,"|":
+                          *76,TOTATTD,*82,TOTATTN,*88,TOTATTR,*94,TOTATTO:
+                          *101,"|",*110,"|":
+                          *117,TSLOTATD,*132,"|";
+          CALL      LNPR0000                     * print line
+          ADD       "3",LINECNT
+          GOTO      PRTS1000
+.
+PRTS8000    MOVE       ONE,CNOUNDLN
+            ADD        ONE,PAGENO 
+            MOVE       SEQTYPE,CPHDROPT
+            CALL       IBACLOCK
+            CALL       HEAD132 
+.
+            PRINT      *N,*40,"Date Range From ",STRTDATE," TO ",ENDDATE:
+                       *N,*N,"*------------------------------":
+                             "----------------------------------------":
+                             "----------------------------------------":
+                             "--------------------*":
+                       *N,"|",*3,"Outpatient Clinic",*39,"|":
+                          *41,"Sched Hrs.",*53,"|":
+                          *55,"Tot Slots Sched",*72,"|":
+                          *74,"No. Of Bookings",*101,"|":
+                          *103,"Attend",*110,"|":
+                          *112,"Tot. Slots Sched",*132,"|":
+                       *N,"|",*39,"|":
+                          *41,"Actual Hrs.",*53,"|":
+                          *55,"Tot Slots Booked",*72,"|":
+                          *74,"No. Of Attendances",*101,"|":
+                          *103,"Rate",*110,"|":
+                          *112,"Tot. Slots Attended",*132,"|":
+                       *N,"|",*39,"|",*44,"HH:MM",*53,"|",*72,"|":
+                          *79,"TOT",*85,"NEW",*91,"REV",*97,"OTH":
+                          *101,"|",*110,"|",*112,"( Clinic Usage )":
+                          *132,"|":
+                       *N,"*---------------------------------------":
+                          "----------------------------------------":
+                          "----------------------------------------":
+                          "-----------*";
+            MOVE       "6",LINECNT
+            RETURN     
+.
+.--------- end of file therefore print total for last record ------
+.
+PRTS9000    CALL    PTOS0000                  * print total line
+            PRINT      *N,*N,"**** END OF REPORT ****";
+.
+PRTS9999    RETURN
+.
+.*************************************************************************
+.* "1" = Summary               PTOS0000                                  *
+.*                  print totals specific clinic type                    *
+.*************************************************************************
+PTOS0000
+          MOVE      OMATYP,SAVTYPE                 * store next clinic type
+          COMPARE   "50",LINECNT
+          CALL      PRTS8000 IF NOT LESS
+.
+.-------- calculate grand total percentages -----
+.
+          MOVE      ZERO,PERBOOK                * clear percentage vars.
+          MOVE      ZERO,PERATTD
+          MOVE      ZERO,PERUSGE
+.
+          COMPARE   ZERO,GSLOTSCH               * if zero skip calcn.
+          GOTO      PTOS0500 IF EQUAL
+          MOVE      GSLOTBOK,CALCPERC           * move to % booked variable
+          DIV       GSLOTSCH,CALCPERC           * divide by total slots sched.
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERBOOK            * move to form 6
+.
+PTOS0500  COMPARE   ZERO,GTOTBOOK               * if zero skip caln.
+          GOTO      PTOS0600 IF EQUAL
+          MOVE      GTOTATTD,CALCPERC           * move to % attendences variable
+          DIV       GTOTBOOK,CALCPERC           * divide by total no. bookings
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERATTD            * move to form 6
+.
+PTOS0600  COMPARE   ZERO,GRSLTSCH               * if zero skip calcn.
+          GOTO      PTOS0700 IF EQUAL 
+          MOVE      GRSLTATD,CALCPERC           * move to % clinic usage
+          DIV       GRSLTSCH,CALCPERC           * divide by grand tot. sched. 
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERUSGE            * move to form 6
+.
+PTOS0700
+          CMATCH    "0",GRHRSCHD
+          GOTO      PTOS0750 IF NOT EQUAL
+          CMOVE     SP1,GRHRSCHD
+PTOS0750
+          CMATCH    "0",GRHRSACT
+          GOTO      PTOS0800 IF NOT EQUAL
+          CMOVE     SP1,GRHRSACT
+          
+PTOS0800  PRINT     *N,"|",*3,OCTDESC,*39,"|",*43,GRHRSCHD:
+                          *53,"|",*58,GSLOTSCH,*64,PERBOOK,"%",*72,"|":
+                          *77,GTOTBOOK,*83,GTOTBNEW,*89,GTOTBREV,*95,GTOTBSPC:
+                          *101,"|",*102,PERATTD,"%",*110,"|":
+                          *117,GRSLTSCH,*124,PERUSGE,"%",*132,"|":
+                     *N,"|",*5,"*** TOTAL ***",*39,"|",*43,GRHRSACT:
+                          *53,"|",*58,GSLOTBOK,*67,"FILL",*72,"|":
+                          *77,GTOTATTD,*83,GTOTANEW,*89,GTOTAREV,*95,GTOTASPC:
+                          *101,"|",*110,"|":
+                          *117,GRSLTATD,*132,"|";
+          CALL       LNPR0000                     * print line
+          ADD        "3",LINECNT
+.
+.--------- clear totals  -----
+.
+          MOVE      SP6,GRHRSCHD
+          MOVE      SP6,GRHRSACT
+          MOVE      ZERO,GSLOTSCH
+          MOVE      ZERO,GSLOTBOK
+          MOVE      ZERO,GTOTBOOK
+          MOVE      ZERO,GTOTATTD
+          MOVE      ZERO,GTOTBNEW
+          MOVE      ZERO,GTOTBREV
+          MOVE      ZERO,GTOTBSPC
+          MOVE      ZERO,GTOTANEW
+          MOVE      ZERO,GTOTAREV
+          MOVE      ZERO,GTOTASPC
+          MOVE      ZERO,GRSLTSCH
+          MOVE      ZERO,GRSLTATD
+          MOVE      ZERO,PERATTD
+          MOVE      ZERO,PERBOOK
+          MOVE      ZERO,PERUSGE
+.
+PTOS9999  RETURN
+.
+.*************************************************************************
+.*                            PRTD0000                                   *
+.*       Read from tempfile and print "2" Detailed report                *
+.*************************************************************************
+PRTD0000  CALL      CLRT0000
+          DISPLAY   *P31:24,*V2LON,*EL,"Clinic : ",*P49:24,"Date : ",*HOFF;
+          MOVE      SP6,SAVTYPE
+          MOVE      SP30,SAVDIM27
+          PACK      KEY25,SP30
+          CALL      RSTEMP1
+PRTD1000  CALL      RKTEMP1
+          BRANCH    OVRCD,PRTD9000
+          MATCH     SP6,SAVTYPE
+          GOTO      PRTD1500 IF EQUAL
+PRTD1200  MATCH     OMATYP,SAVTYPE
+          CALL      PTOD0000 IF NOT EQUAL      * diff. clinic type, print totals
+          GOTO      PRTD2000
+PRTD1500  MOVE      OMATYP,SAVTYPE             * move to save type
+          GOTO      PRTD1200
+.
+.-------- get clinic type description ------
+.
+PRTD2000
+          MOVE      "Unknown Clinic Type           ",OCTDESC
+          PACK      KEY12,IDDD,OMATYP
+          CALL      RDCTYA1
+.
+.-------- get clinic id description ------
+.
+          PACK      KEY20,IDDD,OSECLIN,OSEDATE
+          CALL      RDCLIA1
+          IF        OVRCD = 1
+            CALL      RDPCLIA1
+            IF        OVRCD = 0
+              MATCH     IDDD,OCASITE
+              IF        !@EQUAL
+                MOVE      ONE,OVRCD
+              ELSE
+                MATCH     OSECLIN,OCACLIN
+                IF        !@EQUAL
+                  MOVE      ONE,OVRCD
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+          IF        OVRCD = 1
+            MOVE      "Unknown clinic",OCADESC
+            PACK      OCADESC,OCADESC,SP30
+          ENDIF
+          BRANCH    OVRCD,PRTD2600
+.
+          MATCH     SP6,OCADOCT                    * no doctor, default to desc.
+          GOTO      PRTD2600 IF EQUAL
+.
+.-------- get doctor description if doctor code on file ----
+.
+          MOVE      "Unknown Doctor Code           ",OCADESC
+          PACK      KEY6,OCADOCT
+          CALL      RDDOCT1
+          BRANCH    OVRCD,PRTD2600
+.
+          CALL      FDOC0000                      * format doctor's name
+PRTD2600  CALL      TOTL0000                      * increment grand totals 
+.
+.-------- calculate running percentage totals ---------
+.
+          MOVE      ZERO,PERBOOK               * clear percentage vars.
+          MOVE      ZERO,PERATTD
+          MOVE      ZERO,PERUSGE
+.        
+          COMPARE   ZERO,TSLOTSCH            * if slots = "0", skip calculation
+          GOTO      PRTD2650 IF EQUAL
+          MOVE      TSLOTBOK,CALCPERC           * move to % booked variable
+          DIV       TSLOTSCH,CALCPERC           * divide by total slots booked
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERBOOK            * move to form 6
+.
+PRTD2650  COMPARE   ZERO,TOTBOOK              * if slots = "0", skip calculation
+          GOTO      PRTD2670 IF EQUAL
+          MOVE      TOTATTD,CALCPERC          * move to % attendences variable
+          DIV       TOTBOOK,CALCPERC          * divide by subtotal no. bookings
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERATTD            * move to form 6
+.
+PRTD2670  COMPARE   ZERO,TSLOTSCH             * if slots = "0", skip calculation
+          GOTO      PRTD2680 IF EQUAL         
+          MOVE      TSLOTATD,CALCPERC           * move to % clinic usage
+          DIV       TSLOTSCH,CALCPERC           * divide by subtotal attended 
+          MULT      "100",CALCPERC 
+          MOVE      CALCPERC,PERUSGE            * move to form 6
+.
+.-------- truncate descriptions -------
+.
+PRTD2680 
+          MOVE      OCTDESC,DIM14               * clinic id
+          MOVE      OCADESC,DIM13               * provider
+          PACK      DIM27,DIM14,DIM13
+          MATCH     SP30,SAVDIM27
+          GOTO      PRTD2750 IF EQUAL
+PRTD2700  MATCH     DIM27,SAVDIM27
+          GOTO      PRTD2750 IF NOT EQUAL
+          UNPACK    SP30,DIM14,DIM13
+          GOTO      PRTD2780
+PRTD2750  MOVE      DIM27,SAVDIM27
+.
+PRTD2780  UNPACK    OSEDATE,XCENT,XYEAR,XMON,XDAY
+.
+.------- unpack start date and end date to print on report -------
+.------- date parameters -----
+.
+          UNPACK    VSTRDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                   * call format date routine
+          MOVE      CPCDATE,STRTDATE
+.
+          UNPACK    VENDDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                   * call format date routine
+          MOVE      CPCDATE,ENDDATE
+.
+.------- get registar's clinic ------
+.
+          MOVE      SP3,REGTYPE               * clear working variable
+          MATCH     SP1,OMAREG
+          GOTO      PRTD2900 IF EQUAL
+          MATCH     ANSY,OMAREG               * match yes to registrar's clinic
+          GOTO      PRTD2800 IF NOT EQUAL
+          MOVE      "Yes",REGTYPE
+          GOTO      PRTD2900
+.
+.------- No -------
+.
+PRTD2800  MOVE      "No ",REGTYPE              * No
+.
+.-------- Read outpatients used session file to get actual start & end times ---
+.
+PRTD2900  UNPACK    SP10,OUSACST,OUSACEND
+          PACK      KEY25,IDDD,OSECLIN,OSEDATE,OSESTRT
+          CALL      RDUSEA1                         * full read
+.
+.------- read outpatients clinic master file to get scheduled clinic times ----
+.
+          UNPACK    SP10,OMASTART,OMAEND
+          PACK      KEY18,IDDD,OSECLIN,DOSEDAY,OSESTRT
+          CALL      RDMASA1
+.
+.------- print relevant details ------
+.
+PRTD3000  DISPLAY   *P40:24,OSECLIN,*P56:24,XDAY,SLASH,XMON,SLASH,XCENT,XYEAR;
+          CLOCK      TIME,TIMEIS
+          COMPARE    "50",LINECNT
+          CALL       PRTD8000 IF NOT LESS
+.
+          MOVE       TOTBOOK,FORM4A
+          MOVE       TOTBOKN,FORM4B
+          MOVE       TOTBOKR,FORM4C
+          MOVE       TOTBOKO,FORM4D
+.
+          PRINT      *N,"|",*3,DIM14,*18,"|",*20,XDAY,SLASH,XMON:
+                          *26,"|",*28,REGTYPE,*32,"|":
+                          *34,OMASTART,"-",OMAEND,*46,"|":
+                          *52,THRSSCHD:
+                          *63,"|",*67,TSLOTSCH,*75,PERBOOK,"%",*82,"|":
+                          *84,FORM4A,*88,FORM4B,*92,FORM4C,*96,FORM4D:
+                          *101,"|",*103,PERATTD,"%",*110,"|",*114,TSLOTSCH:
+                          *124,PERUSGE,"%",*132,"|";
+.
+          MOVE       TOTATTD,FORM4A
+          MOVE       TOTATTN,FORM4B
+          MOVE       TOTATTR,FORM4C
+          MOVE       TOTATTO,FORM4D
+.       
+          PRINT      *N,"|",*4,DIM13,*18,"|",*20:
+                          *26,"|",*32,"|",*34,OUSACST,"-",*40,OUSACEND:
+                          *46,"|",*52,TACTHRS:
+                          *63,"|",*67,TSLOTBOK,*77,"FILL",*82,"|":
+                          *84,FORM4A,*88,FORM4B,*92,FORM4C,*96,FORM4D:
+                          *101,"|",*110,"|",*114,TSLOTATD,*132,"|";
+          CALL       LNPR0000                     * print line
+          ADD        "3",LINECNT
+          GOTO       PRTD1000
+.
+PRTD8000  MOVE       ONE,CNOUNDLN 
+          ADD        ONE,PAGENO 
+          MOVE       SEQTYPE,CPHDROPT
+          CALL       IBACLOCK
+          CALL       HEAD132
+.
+          PRINT       *N,*40,"Date Range From ",STRTDATE," TO ",ENDDATE:
+                      *N,*N,"*------------------------------":
+                            "----------------------------------------":
+                            "----------------------------------------":
+                            "--------------------*":
+                      *N,"|",*3,"Clinic",*18,"|":
+                         *20,"Date",*26,"|",*28,"Reg",*32,"|":
+                        *34,"Sched Clin.",*46,"|":
+                         *48,"Dr. Sched Hrs.",*63,"|":
+                         *65,"Tot Slots Sched",*82,"|":
+                         *85,"No. Of Bookings",*101,"|":
+                         *103,"Attend",*110,"|":
+                         *112,"Tot. Slots Sched",*132,"|":
+                      *N,"|",*4,"Provider",*18,"|":
+                         *26,"|",*32,"|",*34,"Actual",*46,"|":
+                         *52,"Actual",*63,"|":
+                         *65,"Tot Slots Booked",*82,"|":
+                         *85,"No. Of Attend.",*101,"|":
+                         *103,"Rate",*110,"|":
+                         *112,"Tot. Slots Attended",*132,"|":
+                      *N,"|",*18,"|",*26,"|",*32,"|",*46,"|",*52,"HH:MM":
+                         *63,"|",*82,"|":
+                         *85,"TOT",*89,"NEW",*93,"REV",*97,"OTH":
+                         *101,"|",*110,"|":
+                         *132,"|":
+                      *N,"*---------------------------------------":
+                         "----------------------------------------":
+                         "----------------------------------------":
+                         "-----------*";
+           MOVE       "6",LINECNT
+           RETURN
+.
+.-------- report details completed, now print total lines -----
+.
+PRTD9000  CALL      PTOD0000                         * print total line
+          PRINT      *N,*N,"**** END OF REPORT ****";
+.
+PRTD9999  RETURN
+.
+.*************************************************************************
+.*  "2" = Detailed             PTOD0000                                  *
+.*                  print totals specific clinic type                    *
+.*************************************************************************
+PTOD0000  
+          MOVE      OMATYP,SAVTYPE                 * store next clinic type
+          COMPARE   "50",LINECNT
+          CALL      PRTD8000 IF NOT LESS
+.
+.-------- calculate grand total percentages -----
+.
+          MOVE      ZERO,PERBOOK                * clear percentage vars.
+          MOVE      ZERO,PERATTD
+          MOVE      ZERO,PERUSGE
+.
+          COMPARE   ZERO,GSLOTSCH               * if zero, skip calcn.
+          GOTO      PTOD0500 IF EQUAL
+          MOVE      GSLOTBOK,CALCPERC           * move to % booked variable
+          DIV       GSLOTSCH,CALCPERC           * divide by total slots sched.
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERBOOK            * move to form 6
+.
+PTOD0500  COMPARE   ZERO,GTOTBOOK               * if zero, skip calcn.
+          GOTO      PTOD0600 IF EQUAL
+          MOVE      GTOTATTD,CALCPERC           * move to % attendences variable
+          DIV       GTOTBOOK,CALCPERC           * divide by total no. bookings
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERATTD            * move to form 6 
+.
+PTOD0600  COMPARE   ZERO,GRSLTSCH               * if zero, skip calcn.
+          GOTO      PTOD0700 IF EQUAL
+          MOVE      GRSLTATD,CALCPERC           * move to % clinic usage
+          DIV       GRSLTSCH,CALCPERC           * divide by grand tot. sched. 
+          MULT      "100",CALCPERC
+          MOVE      CALCPERC,PERUSGE
+.
+PTOD0700  PACK      DIM25,OCTDESC 
+          CMATCH    "0",GRHRSCHD               * remove leading zero
+          GOTO      PTOD0750 IF NOT EQUAL
+          CMOVE     SP1,GRHRSCHD
+.
+PTOD0750  CMATCH    "0",GRHRSACT               * remove leading zero
+          GOTO      PTOD0800 IF NOT EQUAL
+          CMOVE     SP1,GRHRSACT
+.
+PTOD0800  MOVE      GTOTBOOK,FORM4A
+          MOVE      GTOTBNEW,FORM4B
+          MOVE      GTOTBREV,FORM4C
+          MOVE      GTOTBSPC,FORM4D
+.
+          PRINT     *N,"|",*18,DIM25,*46,"|",*51,GRHRSCHD:
+                          *63,"|",*67,GSLOTSCH,*75,PERBOOK,"%",*82,"|":
+                          *84,FORM4A,*88,FORM4B,*92,FORM4C,*96,FORM4D:
+                          *101,"|",*103,PERATTD,"%",*110,"|":
+                          *114,GRSLTSCH,*124,PERUSGE,"%",*132,"|";
+.
+          MOVE      GTOTATTD,FORM4A
+          MOVE      GTOTANEW,FORM4B
+          MOVE      GTOTAREV,FORM4C
+          MOVE      GTOTASPC,FORM4D
+.
+          PRINT     *N,"|",*18,"*** TOTAL ***",*46,"|":
+                          *51,GRHRSACT,*63,"|",*67,GSLOTBOK:
+                          *77,"FILL":
+                          *82,"|",*84,FORM4A,*88,FORM4B,*92,FORM4C:
+                          *96,FORM4D,*101,"|",*110,"|":
+                          *114,GRSLTATD,*132,"|";
+          CALL       LNPR0000                     * print line
+          ADD        "3",LINECNT
+.
+.--------- clear totals  -----
+.
+          MOVE      SP6,GRHRSCHD
+          MOVE      SP6,GRHRSACT
+          MOVE      ZERO,GSLOTSCH
+          MOVE      ZERO,GSLOTBOK
+          MOVE      ZERO,GTOTBOOK
+          MOVE      ZERO,GTOTATTD
+          MOVE      ZERO,GTOTBNEW
+          MOVE      ZERO,GTOTBREV
+          MOVE      ZERO,GTOTBSPC
+          MOVE      ZERO,GTOTANEW
+          MOVE      ZERO,GTOTAREV
+          MOVE      ZERO,GTOTASPC
+          MOVE      ZERO,GRSLTSCH
+          MOVE      ZERO,GRSLTATD
+          MOVE      ZERO,PERATTD
+          MOVE      ZERO,PERBOOK
+          MOVE      ZERO,PERUSGE
+.
+PTOD9999  RETURN
+.
+.*************************************************************************
+.*                             TOTL0000                                  *
+.*                      Increment grand totals for clinic type           *
+.*************************************************************************
+TOTL0000  ADD       TSLOTSCH,GSLOTSCH
+          ADD       TSLOTBOK,GSLOTBOK
+          ADD       TOTBOOK,GTOTBOOK
+          ADD       TOTATTD,GTOTATTD
+          ADD       TOTBOKN,GTOTBNEW
+          ADD       TOTBOKR,GTOTBREV
+          ADD       TOTBOKO,GTOTBSPC
+          ADD       TOTATTN,GTOTANEW
+          ADD       TOTATTR,GTOTAREV
+          ADD       TOTATTO,GTOTASPC
+          ADD       TSLOTSCH,GRSLTSCH
+          ADD       TSLOTATD,GRSLTATD
+.
+.-------- calculate grand totals for scheduled hours ------
+.
+          MATCH     SP5,THRSSCHD
+          GOTO      TOTL1000 IF EQUAL
+          MOVE      THRSSCHD,STARTIME
+          MOVE      GRHRSCHD,ENDTIME6
+          CALL      GDDH0000                     * call grand hours routine
+          MOVE      GRANTIME,GRHRSCHD
+.
+.-------- calculate grand totals for actual hours ------
+.
+TOTL1000  MATCH     SP5,TACTHRS
+          GOTO      TOTL9999 IF EQUAL
+          MOVE      TACTHRS,STARTIME
+          MOVE      GRHRSACT,ENDTIME6
+          CALL      GDDH0000                     * call grand hours routine
+          MOVE      GRANTIME,GRHRSACT
+TOTL9999  RETURN
+.
+.**************************************************************************
+.*                             GDDH0000                                   *
+.*                      Grand total hours                                 *
+.*              Accumulate scheduled hours and actual hours for g. totals *
+.*      N.B. - Input variables;                                           *
+.*                               STARTIME     DIM   5    * add variable   *
+.*                               ENDTIME6     DIM   6    * 2nd add var.   *
+.*           - Output variable;                                           *
+.*                               GRANTIME     DIM   6    * result variable*
+.**************************************************************************
+.
+GDDH0000  
+          MOVE      SP6,GRANTIME               * clear result variable
+          MOVE      ZERO,TEMPF3                * clear temp form field
+          UNPACK    SP30,DIM2A1,DIM2A2,DIM3B1,DIM2B2    * move sp. to work var
+          MOVE      ZERO,FORM2A1
+          MOVE      ZERO,FORM2A2
+          MOVE      ZERO,FORM3B1
+          MOVE      ZERO,FORM2B2
+.
+          ENDSET    STARTIME                   * reset pointers
+          APPEND    SP5,STARTIME
+          RESET     STARTIME
+.
+          ENDSET    ENDTIME6                   * reset pointers
+          APPEND    SP6,ENDTIME6
+          RESET     ENDTIME6
+.
+.-------- unpack variables ------
+.
+          UNPACK    STARTIME,DIM2A1,ANS,DIM2A2      * HH:MM 
+          UNPACK    ENDTIME6,DIM3B1,ANS,DIM2B2       * HHH:MM
+          MOVE      DIM2A2,FORM2A2                  * MM to form
+          MOVE      DIM2A1,FORM2A1                  * HH to form
+          MOVE      DIM3B1,FORM3B1                  * HHH to form
+          MOVE      DIM2B2,TEMPF3                   * MM to form
+.
+          ADD       FORM2A2,TEMPF3              * add start MM to end MM
+          COMPARE   SIXTY,TEMPF3                * check if > 60 minutes
+          GOTO      GDDH2000 IF LESS            * if less, OK
+.
+.-------- if minutes add up > "60" then subtract "60" to get difference ----
+.
+          SUB       "60",TEMPF3                * subtract 60 from minutes
+          ADD       ONE,FORM3B1                * add 1 to the hour
+.
+GDDH2000 
+          MOVE      FORM2A1,TEMPH3             * HHH
+          ADD       FORM3B1,TEMPH3             * add hours together
+. 
+          MOVE      TEMPH3,DIM3B1               * move result hour to dim
+          MOVE      TEMPF3,FORM2B2          
+          MOVE      FORM2B2,DIM2B2              * move result minutes to dim
+.
+          PACK      GRANTIME,DIM3B1,COLON,DIM2B2    * pack time
+          REPLACE   " 0",GRANTIME                   * replace spaces with zero
+.
+.--------- clear working variables ------
+.
+          MOVE      SP5,STARTIME
+          MOVE      SP6,ENDTIME6
+.
+GDDH9999  RETURN
+.
+.**************************************************************************
+.*                             ADDH0000                                   *
+.*              Accumulate scheduled hours and actual hours               *
+.*      N.B. - Input variables;                                           *
+.*                               STARTIME     DIM   5    * add variable   *
+.*                               ENDTIME      DIM   5    * 2nd add var.   *
+.*           - Output variable;                                           *
+.*                               RESLTIME     DIM   5    * result variable*
+.**************************************************************************
+.
+ADDH0000  
+          MOVE      SP5,RESLTIME               * clear result variable
+          MOVE      ZERO,TEMPF3                * clear temp form field
+          UNPACK    SP30,DIM2A1,DIM2A2,DIM2B1,DIM2B2    * move sp. to work var
+          MOVE      ZERO,FORM2A1
+          MOVE      ZERO,FORM2A2
+          MOVE      ZERO,FORM2B1
+          MOVE      ZERO,FORM2B2
+.
+          ENDSET    STARTIME                   * reset pointers
+          APPEND    SP5,STARTIME
+          RESET     STARTIME
+.
+          ENDSET    ENDTIME                    * reset pointers
+          APPEND    SP5,ENDTIME
+          RESET     ENDTIME
+.
+.-------- unpack variables ------
+.
+          UNPACK    STARTIME,DIM2A1,ANS,DIM2A2      * HH:MM 
+          UNPACK    ENDTIME,DIM2B1,ANS,DIM2B2       * HH:MM
+          MOVE      DIM2A2,FORM2A2                  * MM to form
+          MOVE      DIM2A1,FORM2A1                  * HH to form
+          MOVE      DIM2B1,FORM2B1                  * HH to form
+          MOVE      DIM2B2,TEMPF3                   * MM to form
+.
+          ADD       FORM2A2,TEMPF3              * add start MM to end MM
+          COMPARE   SIXTY,TEMPF3                * check if > 60 minutes
+          GOTO      ADDH2000 IF LESS            * if less, OK
+.
+.-------- if minutes add up > "60" then subtract "60" to get difference ----
+.
+          SUB       "60",TEMPF3                * subtract 60 from minutes
+          ADD       ONE,FORM2B1                * add 1 to the hour
+.
+ADDH2000 
+          MOVE      FORM2A1,TEMPF2
+          ADD       FORM2B1,TEMPF2             * add hours together
+. 
+          MOVE      TEMPF2,DIM2B1               * move result hour to dim
+          MOVE      TEMPF3,FORM2B2          
+          MOVE      FORM2B2,DIM2B2              * move result minutes to dim
+.
+          PACK      RESLTIME,DIM2B1,COLON,DIM2B2    * pack time
+          REPLACE   " 0",RESLTIME                   * replace spaces with zero
+.
+.--------- clear working variables ------
+.
+          MOVE      SP5,STARTIME
+          MOVE      SP5,ENDTIME
+.
+ADDH9999  RETURN
+.
+.*************************************************************************
+.*                             CALT0000                                  *
+.*             Calculate and accumulate totals for report                *
+.*************************************************************************
+.
+CALT0000  CALL      CLRT0000               * clear tempfile totals
+          MOVE      OSESLOTS,TSLOTSCH      * total slots scheduled
+          MOVE      OSESLOTB,TSLOTBOK      * total slots booked
+          MOVE      OSETIMES,THRSSCHD      * total time scheduled
+          MOVE      OSETIMEU,TACTHRS       * total actual hours
+          MOVE      OSEBNEW,TOTBOKN        * total bookings new
+          MOVE      OSEBRV,TOTBOKR         * total bookings revisits
+          MOVE      OSEBSPC,TOTBOKO        * total other bookings
+          MOVE      OSEANEW,TOTATTN        * total attendances new
+          MOVE      OSEARV,TOTATTR         * total attendences revisits
+          MOVE      OSEASPC,TOTATTO        * total attendences other
+.
+.-------- get total no. of bookings ----
+.
+          ADD       OSEBNEW,TOTBOOK        * total no. of bookings
+          ADD       OSEBRV,TOTBOOK
+          ADD       OSEBSPC,TOTBOOK
+.
+.-------- get total no. of attendances ------
+.
+          ADD       OSEANEW,TOTATTD        * total no. of attendances
+          ADD       OSEARV,TOTATTD
+          ADD       OSEASPC,TOTATTD
+.
+.-------- get total slots attended ------------
+.
+          ADD       OSEANEW,TSLOTATD       * total slots attended
+          ADD       OSEARV,TSLOTATD
+          ADD       OSEASPC,TSLOTATD
+.
+.-------- get times ------
+.
+          MOVE      OSETIMES,THRSSCHD      * sched. hours total
+          MOVE      OSETIMEU,TACTHRS       * actual hours total
+.
+CALT9999  RETURN 
+.
+.*************************************************************************
+.*                             FDOC0000                                  *
+.*                      Format doctors name                              *
+.*************************************************************************
+.
+FDOC0000  PACK      OCADESC,SP30
+          CLEAR     OCADESC
+.
+          MATCH     SP20,DSNAME
+          GOTO      FDOC3000 IF EQUAL   * No Surname
+          APPEND    DSNAME,OCADESC
+          RESET     OCADESC,30
+FDOC1000  CMATCH    SP1,OCADESC
+          GOTO      FDOC2000 IF NOT EQUAL
+          BUMP      OCADESC,-1
+          GOTO      FDOC1000
+FDOC2000  APPEND    COMMA,OCADESC
+          APPEND    SP1,OCADESC
+.
+FDOC3000  MATCH     SP30,DGNAME
+          GOTO      FDOC5000 IF EQUAL   * No given name
+          APPEND    DGNAME,OCADESC
+          RESET     OCADESC,30
+FDOC4000  CMATCH    SP1,OCADESC
+          GOTO      FDOC5000 IF NOT EQUAL
+          BUMP      OCADESC,-1
+          GOTO      FDOC4000
+FDOC5000  RESET     OCADESC
+FDOC9999  RETURN
++
+.**********************************************************************
+.*                         LNPR0000                                   *
+.*                          Line print                                *
+.**********************************************************************
+LNPR0000    PRINT      *N,"*----------------------------------------":
+                          "-----------------------------------------":
+                          "--------------------------------------":
+                          "-----------*";
+            RETURN
++
+.********************************************************************
+.*                  I/O SUBROUTINES FOR TEMPFILE                    *
+.********************************************************************
+.
+RATEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READ      TEMPFILE,KEY25;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READ      TEMPFILE,KEY25;;
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READ      TEMPFILE,KEY25;OMATYP,OSECLIN,OSEDATE,OSESTRT,TACTHRS:
+                                   THRSSCHD,TSLOTSCH,TSLOTBOK,TOTBOOK,TOTATTD:
+                                   TOTATTN,TOTATTR,TOTATTO,TOTBOKN,TOTBOKR:
+                                   TOTBOKO,TSLOTATD,OMAREG,DOSEDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READKS    TEMPFILE;OMATYP,OSECLIN,OSEDATE,OSESTRT,TACTHRS:
+                             THRSSCHD,TSLOTSCH,TSLOTBOK,TOTBOOK,TOTATTD:
+                             TOTATTN,TOTATTR,TOTATTO,TOTBOKN,TOTBOKR:
+                             TOTBOKO,TSLOTATD,OMAREG,DOSEDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY25
+          WRITE     TEMPFILE,KEY25;KEY25,TACTHRS:
+                                   THRSSCHD,TSLOTSCH,TSLOTBOK,TOTBOOK,TOTATTD:
+                                   TOTATTN,TOTATTR,TOTATTO,TOTBOKN,TOTBOKR:
+                                   TOTBOKO,TSLOTATD,OMAREG,DOSEDAY
+          RETURN
+.
+UPTEMP1
+          UPDATE    TEMPFILE;OMATYP,OSECLIN,OSEDATE,OSESTRT,TACTHRS:
+                             THRSSCHD,TSLOTSCH,TSLOTBOK,TOTBOOK,TOTATTD:
+                             TOTATTN,TOTATTR,TOTATTO,TOTBOKN,TOTBOKR:
+                             TOTBOKO,TSLOTATD,OMAREG,DOSEDAY
+          RETURN
+.
+.-------- 2nd index -------
+.
+RATEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      TEMPFILE,KEY12;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      TEMPFILE,KEY12;;
+          RETURN
+.
+RDTEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      TEMPFILE,KEY12;OMATYP,OSECLIN,OSEDATE,OSESTRT,TACTHRS:
+                                   THRSSCHD,TSLOTSCH,TSLOTBOK,TOTBOOK,TOTATTD:
+                                   TOTATTN,TOTATTR,TOTATTO,TOTBOKN,TOTBOKR:
+                                   TOTBOKO,TSLOTATD,OMAREG,DOSEDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READKS    TEMPFILE;OMATYP,OSECLIN,OSEDATE,OSESTRT,TACTHRS:
+                             THRSSCHD,TSLOTSCH,TSLOTBOK,TOTBOOK,TOTATTD:
+                             TOTATTN,TOTATTR,TOTATTO,TOTBOKN,TOTBOKR:
+                             TOTBOKO,TSLOTATD,OMAREG,DOSEDAY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          WRITE     TEMPFILE,KEY12;KEY12,OSEDATE,OSESTRT,TACTHRS:
+                                   THRSSCHD,TSLOTSCH,TSLOTBOK,TOTBOOK,TOTATTD:
+                                   TOTATTN,TOTATTR,TOTATTO,TOTBOKN,TOTBOKR:
+                                   TOTBOKO,TSLOTATD,OMAREG,DOSEDAY
+          RETURN
+.
+UPTEMP2
+          UPDATE    TEMPFILE;OMATYP,OSECLIN,OSEDATE,OSESTRT,TACTHRS:
+                             THRSSCHD,TSLOTSCH,TSLOTBOK,TOTBOOK,TOTATTD:
+                             TOTATTN,TOTATTR,TOTATTO,TOTBOKN,TOTBOKR:
+                             TOTBOKO,TSLOTATD,OMAREG,DOSEDAY
+          RETURN
+.
+          INC       STD001IO
+.
+          INC       PATSTRYR
+          INC       TFILENAM
+.
+          INC       IBASEQIO/INC
+          INC       OUTCLIIO/INC
+          INC       OUTCTYIO/INC
+          INC       OUTMA1IO/INC
+          INC       OUTSESIO/INC
+          INC       OUTUSEIO/INC
+.
+          INC       PATCODIO/INC
+          INC       PATDO1IO/INC
+          INC       PATDRGIO/INC
+          INC       WEBERRIO/INC

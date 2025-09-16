@@ -1,0 +1,45 @@
+.
+.  Mods : 08/10/92  Steve Armstrong
+.         Modified PRHODEBT for change from FORM to DIM in FD
+.--------------------------------------------------------------
+RSPRHO1   RESET     KEY10
+          READ      PRIHOLA1,KEY10;;
+          RETURN
+.
+RAPRHO1   RESET     KEY10
+          MOVE      ZERO,OVRCD
+          READ      PRIHOLA1,KEY10;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRHO1   RESET     KEY10
+          MOVE      ZERO,OVRCD
+          READ      PRIHOLA1,KEY10;PRHODEBT,DPRHOSCN,PRHOHOLD,PRHOSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRHOSCN,PRHOSCAN
+          RETURN
+.
+RKPRHO1   MOVE      ZERO,OVRCD
+          READKS    PRIHOLA1;PRHODEBT,DPRHOSCN,PRHOHOLD,PRHOSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRHOSCN,PRHOSCAN
+          RETURN
+.
+RPPRHO1   MOVE      ZERO,OVRCD
+          READKP    PRIHOLA1;PRHODEBT,DPRHOSCN,PRHOHOLD,PRHOSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRHOSCN,PRHOSCAN
+          RETURN
+.
+UPPRHO1   MOVE      PRHOSCAN,DPRHOSCN
+          UPDATE    PRIHOLA1;PRHODEBT,DPRHOSCN,PRHOHOLD,PRHOSPAR
+          RETURN
+.
+WRPRHO1   RESET     KEY10
+          WRITE     PRIHOLA1,KEY10;KEY10,PRHOHOLD,PRHOSPAR
+          RETURN
+.
+DEPRHO1   RESET     KEY10
+          DELETE    PRIHOLA1,KEY10
+          RETURN
+.

@@ -1,0 +1,68 @@
+.
+.
+. Program Name : EMRUNKIO
+.
+. Mods         : V6.06.01  09/03/1999  Nicole Harrington
+.                          Add read with locking 
+.                V6.06.00  10/02/1999  Nicole Harrington 
+.                          Ported from V5.07 
+.
+RSEMUNK1  RESET     KEY8
+          READ      EMRUNKA1,KEY8;;
+          RETURN
+.
+RAEMUNK1  RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READ      EMRUNKA1,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDEMUNK1  RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READ      EMRUNKA1,KEY8;DEMUNADM,EMUNDET1,EMUNDET2,EMUNSEX:
+                                  EMUNAGE,EMUNSNAM,EMUNGNAM,EMUNBDAT,EMUNSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DEMUNADM,EMUNADMN
+          RETURN
+.
+RLEMUNK1  RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READL     EMRUNKA1,KEY8;DEMUNADM,EMUNDET1,EMUNDET2,EMUNSEX:
+                                  EMUNAGE,EMUNSNAM,EMUNGNAM,EMUNBDAT,EMUNSPAR
+          GOTO      OVERLOCK IF LOCKED
+          GOTO      OVERCOND IF OVER
+          MOVE      DEMUNADM,EMUNADMN
+          RETURN
+.
+RKEMUNK1  MOVE      ZERO,OVRCD
+          READKS    EMRUNKA1;DEMUNADM,EMUNDET1,EMUNDET2,EMUNSEX:
+                                  EMUNAGE,EMUNSNAM,EMUNGNAM,EMUNBDAT,EMUNSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DEMUNADM,EMUNADMN
+          RETURN
+.
+RPEMUNK1  MOVE      ZERO,OVRCD
+          READKP    EMRUNKA1;DEMUNADM,EMUNDET1,EMUNDET2,EMUNSEX:
+                                  EMUNAGE,EMUNSNAM,EMUNGNAM,EMUNBDAT,EMUNSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DEMUNADM,EMUNADMN
+          RETURN
+.
+UPEMUNK1  MOVE      EMUNADMN,DEMUNADM
+          UPDATE    EMRUNKA1;DEMUNADM,EMUNDET1,EMUNDET2,EMUNSEX:
+                                  EMUNAGE,EMUNSNAM,EMUNGNAM,EMUNBDAT,EMUNSPAR
+          RETURN
+.
+WREMUNK1  MOVE      EMUNADMN,DEMUNADM
+          RESET     KEY8
+          WRITE     EMRUNKA1,KEY8;KEY8,EMUNDET1,EMUNDET2,EMUNSEX:
+                                  EMUNAGE,EMUNSNAM,EMUNGNAM,EMUNBDAT,EMUNSPAR
+          RETURN
+.
+DEEMUNK1  RESET     KEY8
+          DELETE    EMRUNKA1,KEY8
+          RETURN
+.
+ULEMUNK1  UNLOCK    EMRUNKA1
+          RETURN
+.

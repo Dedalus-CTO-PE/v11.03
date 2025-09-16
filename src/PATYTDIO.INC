@@ -1,0 +1,112 @@
+.
+. PATYTDIO.INC
+. ------------
+. Filename       :  patytdaf
+. Description    :  PRS/2 Trailer Record YTD IO
+. Keys           :  KEY8  KEY16
+. Modifications  :
+.         V5.07.01  22/11/1999  Greg Horvat
+.                   Added PTYDDTDL - Date deleted
+.                   07/08/95 Whirlpool
+.                            Added PTYDYUEP PTYDYUBD
+.
+RAPTYTD1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      PATYTDA1,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPTYTD1  RESET     KEY8
+          READ      PATYTDA1,KEY8;;
+          RETURN
+.
+RDPTYTD1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      PATYTDA1,KEY8;DPTYDADM,PTYDYADM,PTYDYSEP,PTYDYSTS,PTYDYBED:
+                                  PTYDYHAS,PTYDYHAB,PTYDYHAT,PTYDYPAS,PTYDYPAB:
+                                  PTYDYPAT,PTYDYPNS,PTYDYPNB,PTYDYPNT,PTYDYCOS:
+                                  PTYDYCOB,PTYDYCOT,PTYDYIES,PTYDYIEB,PTYDYIET:
+                                  PTYDYHNS,PTYDYHNB,PTYDYHNT,PTYDYH5S,PTYDYH5B:
+                                  PTYDYH5T,PTYDYP5S,PTYDYP5B,PTYDYP5T,PTYDYHCS:
+                                  PTYDYHCB,PTYDYHCT,PTYDYPCS,PTYDYPCB,PTYDYPCT:
+                                  PTYDYCNS,PTYDYCNB,PTYDYCNT,PTYDYINS,PTYDYINB:
+                                  PTYDYINT,PTYDYHSD,PTYDYPSD,PTYDYCSD,PTYDYISD:
+                                  PTYDYHCD,PTYDYPCD,PTYDFORM,PTYDYUEP,PTYDYUBD:
+                                  PTYDDTDL,PTYDHOSP,PTYDYOPS,PTYDYOPB,PTYDYOPT:
+                                  PTYDSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTYDADM,PTYDADMN
+          RETURN
+.
+RKPTYTD1  MOVE      ZERO,OVRCD
+          READKS    PATYTDA1;DPTYDADM,PTYDYADM,PTYDYSEP,PTYDYSTS,PTYDYBED:
+                             PTYDYHAS,PTYDYHAB,PTYDYHAT,PTYDYPAS,PTYDYPAB:
+                             PTYDYPAT,PTYDYPNS,PTYDYPNB,PTYDYPNT,PTYDYCOS:
+                             PTYDYCOB,PTYDYCOT,PTYDYIES,PTYDYIEB,PTYDYIET:
+                             PTYDYHNS,PTYDYHNB,PTYDYHNT,PTYDYH5S,PTYDYH5B:
+                             PTYDYH5T,PTYDYP5S,PTYDYP5B,PTYDYP5T,PTYDYHCS:
+                             PTYDYHCB,PTYDYHCT,PTYDYPCS,PTYDYPCB,PTYDYPCT:
+                             PTYDYCNS,PTYDYCNB,PTYDYCNT,PTYDYINS,PTYDYINB:
+                             PTYDYINT,PTYDYHSD,PTYDYPSD,PTYDYCSD,PTYDYISD:
+                             PTYDYHCD,PTYDYPCD,PTYDFORM,PTYDYUEP,PTYDYUBD:
+                             PTYDDTDL,PTYDHOSP,PTYDYOPS,PTYDYOPB,PTYDYOPT:
+                             PTYDSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTYDADM,PTYDADMN
+          RETURN
+.
+RPPTYTD1  MOVE      ZERO,OVRCD
+          READKP    PATYTDA1;DPTYDADM,PTYDYADM,PTYDYSEP,PTYDYSTS,PTYDYBED:
+                             PTYDYHAS,PTYDYHAB,PTYDYHAT,PTYDYPAS,PTYDYPAB:
+                             PTYDYPAT,PTYDYPNS,PTYDYPNB,PTYDYPNT,PTYDYCOS:
+                             PTYDYCOB,PTYDYCOT,PTYDYIES,PTYDYIEB,PTYDYIET:
+                             PTYDYHNS,PTYDYHNB,PTYDYHNT,PTYDYH5S,PTYDYH5B:
+                             PTYDYH5T,PTYDYP5S,PTYDYP5B,PTYDYP5T,PTYDYHCS:
+                             PTYDYHCB,PTYDYHCT,PTYDYPCS,PTYDYPCB,PTYDYPCT:
+                             PTYDYCNS,PTYDYCNB,PTYDYCNT,PTYDYINS,PTYDYINB:
+                             PTYDYINT,PTYDYHSD,PTYDYPSD,PTYDYCSD,PTYDYISD:
+                             PTYDYHCD,PTYDYPCD,PTYDFORM,PTYDYUEP,PTYDYUBD:
+                             PTYDDTDL,PTYDHOSP,PTYDYOPS,PTYDYOPB,PTYDYOPT:
+                             PTYDSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTYDADM,PTYDADMN
+          RETURN
+.
+UPPTYTD1  MOVE      PTYDADMN,DPTYDADM
+          UPDATE    PATYTDA1;DPTYDADM,PTYDYADM,PTYDYSEP,PTYDYSTS,PTYDYBED:
+                             PTYDYHAS,PTYDYHAB,PTYDYHAT,PTYDYPAS,PTYDYPAB:
+                             PTYDYPAT,PTYDYPNS,PTYDYPNB,PTYDYPNT,PTYDYCOS:
+                             PTYDYCOB,PTYDYCOT,PTYDYIES,PTYDYIEB,PTYDYIET:
+                             PTYDYHNS,PTYDYHNB,PTYDYHNT,PTYDYH5S,PTYDYH5B:
+                             PTYDYH5T,PTYDYP5S,PTYDYP5B,PTYDYP5T,PTYDYHCS:
+                             PTYDYHCB,PTYDYHCT,PTYDYPCS,PTYDYPCB,PTYDYPCT:
+                             PTYDYCNS,PTYDYCNB,PTYDYCNT,PTYDYINS,PTYDYINB:
+                             PTYDYINT,PTYDYHSD,PTYDYPSD,PTYDYCSD,PTYDYISD:
+                             PTYDYHCD,PTYDYPCD,PTYDFORM,PTYDYUEP,PTYDYUBD:
+                             PTYDDTDL,PTYDHOSP,PTYDYOPS,PTYDYOPB,PTYDYOPT:
+                             PTYDSPAR
+          RETURN
+.
+WRPTYTD1  RESET     KEY8
+          MOVE      PTYDADMN,DPTYDADM
+          WRITE     PATYTDA1,KEY8;DPTYDADM,PTYDYADM,PTYDYSEP,PTYDYSTS,PTYDYBED:
+                                  PTYDYHAS,PTYDYHAB,PTYDYHAT,PTYDYPAS,PTYDYPAB:
+                                  PTYDYPAT,PTYDYPNS,PTYDYPNB,PTYDYPNT,PTYDYCOS:
+                                  PTYDYCOB,PTYDYCOT,PTYDYIES,PTYDYIEB,PTYDYIET:
+                                  PTYDYHNS,PTYDYHNB,PTYDYHNT,PTYDYH5S,PTYDYH5B:
+                                  PTYDYH5T,PTYDYP5S,PTYDYP5B,PTYDYP5T,PTYDYHCS:
+                                  PTYDYHCB,PTYDYHCT,PTYDYPCS,PTYDYPCB,PTYDYPCT:
+                                  PTYDYCNS,PTYDYCNB,PTYDYCNT,PTYDYINS,PTYDYINB:
+                                  PTYDYINT,PTYDYHSD,PTYDYPSD,PTYDYCSD,PTYDYISD:
+                                  PTYDYHCD,PTYDYPCD,PTYDFORM,PTYDYUEP,PTYDYUBD:
+                                  PTYDDTDL,PTYDHOSP,PTYDYOPS,PTYDYOPB,PTYDYOPT:
+                                  PTYDSPAR
+          MOVE      DPTYDADM,PTYDADMN
+          RETURN
+.
+DEPTYTD1  RESET     KEY8
+          DELETE    PATYTDA1,KEY8
+          RETURN
++
+.
+

@@ -1,0 +1,1082 @@
+. Program  : ABFAEINV
+.
+. Function : This include produces the Next invoice for ABF Emergency
+.
+.            PROGFLAG is used to determine if the invoice is to be displayed,
+.            printed or just have the total calculated
+.
+.        IF PROGFLAG = 1  THEN WORK OUT THE AMOUNT TO BE INVOICED
+.
+.        IF PROGFLAG = 2  THEN DISPLAY NEXT INVOICE
+.
+.        IF PROGFLAG = 3  THEN PRINT NEXT INVOICE
+.
+.        IF PROGFLAG = 4  THEN UPDATE PATFINS WITH AMOUNTS TO BE INVOICED
+.
+.
+.*******************************************************************************
+. Modification : 
+.            V11.03.02 10/07/2023  J.Tan          TSK 0923703
+.                      Fixed Hospital Remoteness for multi hospital
+.            V11.03.01 30/05/2023  J.Tan          TSK 0923703
+.                      Mod to 6 decimal places in NWAU calculations
+.            V11.02.01 08/03/2022  J.Tan          TSK 0915626
+.                      Mod checking for blank AECC Class (EMVCMNCD)
+.            V11.01.09 11/11/2021  J.Tan          TSK 0913621
+.                      Mod for Multiple NEP Values
+.            V11.01.08 13/10/2021 J.Tan    TSK 0905305
+.                      Mod for Adjustment type 068 & 069
+.            V11.01.07 28/07/2021 J.Tan            TSK 0905305
+.                      Mod for 2021/2022 changes (AECC Class)
+.            V11.00.06 15/07/2020 J.Tan            TSK 0892319
+.                      Added Adjustment type 026 and 027 
+.            V11.00.05 30/06/2020  J.Tan           TSK 0886178
+.                      Mod to write to Invoice pending detail file (patinpaf)
+.            V11.00.04 29/06/2020  J.Tan           TSK 0893767
+.                      Mod cutoff date CALCFLAG to 01/01/2021
+.            V11.00.03 05/05/2020  J.Tan           TSK 0891341
+.                      Added TRAP prior WRPMABF
+.            V11.00.02 20/04/2020 J.Tan           TSK 0890733
+.                      Mod for new 2020 calculation
+.            V11.00.01 06/03/2020  J.Tan           TSK 0889110
+.                      Added RAPMABF prior WRPMABF
+.            V10.15.01 13/02/2020  J.Tan          Task 0888319
+.                      Added Patient Master files FD
+.            V10.14.03 29/11/2019  J.Tan           TSK 0857392
+.                      Mod for IBAHMS58 - ABF Comparison report
+.            V10.14.02 07/11/2018 J.Tan    TSK 0883903
+.                      Mod Calculate patient's age as at Attended date
+.            V10.14.01 16/09/2018 J.Tan    TSK 0857392
+.                      Fixed checking URG effective date
+.            V10.14.00 08/05/2018 J.Tan    TSK 0857392
+.                      Created
+.*******************************************************************************
+.
+          DEFPROC   ABFAEINV
+.
+          INC       PATCALAG/INC
+          INC       IBAPOSFD/INC
+          INC       PMSCIDFD/INC
+          INC       PMSVMTFD/INC
+          INC       EMRPWDFD/INC
+          INC       EMRURGFD/INC
+          INC       PMSABFFD/INC
+          INC       PMSADJFD/INC
+          INC       EMRVCDFD/INC
+          INC       PMSNEPFD/INC
+.
+          INC       EMRVISFD/INC
+          INC       PATMA1FD/INC
+          INC       PMSVX1FD/INC
+          INC       PMSPX2FD/INC
+          INC       PATHSPFD/INC
+.
+CALCFLAG  FORM      1
+AECNAECC  DIM       8
+NJAN      INIT      "January"
+NFEB      INIT      "February"
+NMAR      INIT      "March"
+NAPR      INIT      "April"
+NMAY      INIT      "May"
+NJUN      INIT      "June"
+NJUL      INIT      "July"
+NAUG      INIT      "August"
+NSEP      INIT      "September"
+NOCT      INIT      "October"
+NNOV      INIT      "November"
+NDEC      INIT      "December"
+.
+AEIV0000
+          CALL      EVAR0000                  * Initialise variables
+.
+          OPEN      PMSVMTA1,"pmsvmtaf"
+          OPEN      EMRPWDA1,"emrpwdaf"
+          OPEN      EMRPWDA2,"emrpwdaf"
+          OPEN      EMRURGA2,"emrurgaf"
+.
+          MATCH     "IBAHMS58",PRGID
+          IF        @EQUAL
+            OPEN      PMSABFA1,FNAMEP
+          ELSE
+            OPEN      PMSABFA1,"pmsabfaf"
+          ENDIF
+.
+          OPEN      PMSADJA1,"pmsadjaf"
+.
+          OPEN      EMRVISA1,"emrvisaf"
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,SEVENTY8;*66,AECNAECC
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          REP       " 0",AECNAECC
+.
+          PACK      KEY8,ADANUMB
+          CALL      RDEMVIS1
+          BRANCH    OVRCD,AEIV9100            * invalid admission
+.
+          MOVE      EMVIDATE,KEY8             * default to admission date
+          MATCH     SP70,EMVIDDAT
+          IF        !@EQUAL
+            MOVE      EMVIDDAT,KEY8           * Use discharge date
+          ENDIF
+.
+          MATCH     "20210101",KEY8
+          GOTO      AEIV1000 IF LESS
+.
+          MOVE      ONE,CALCFLAG
+          MATCH     "00000000",AECNAECC
+          GOTO      AEIV1000 IF EQUAL
+.
+          MATCH     AECNAECC,KEY8
+          GOTO      AEIV1000 IF LESS
+.
+          MOVE      TWO,CALCFLAG         * for 2021/2022
+          MATCH     "20210701",KEY8
+          GOTO      AEIV1000 IF LESS
+.
+          MOVE      THREE,CALCFLAG       * 2023/2024 ABF calculation
+.
+AEIV1000  MOVE      SP70,PMVXMHOS
+          PACK      KEY8,ADANUMB
+          CALL      RDPMVX11
+          BRANCH    OVRCD,AEIV9100            * invalid admission
+.
+          MOVE      ADAURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,AEIV9100            * missing master record
+          CALL      RDPMPX21
+          BRANCH    OVRCD,AEIV9100            * missing master record
+.
+          MOVE      EMVIDATE,AGEDATE          * patient's age as at attended
+          REP       " 0",AGEDATE
+          CALL      CALCAGE                   * recalculate patient's age
+          MOVE      PSAGEYRS,PSAGE
+.
+          CALL      RABF0000                  * Delete existing Patient ABF det.
+.
+          BRANCH    EMVISTAT,AEIV9999         * Current Patient only
+          COMPARE   FOUR,EMVISTAT
+          GOTO      AEIV9999 IF EQUAL         * Cancelled
+.
+          MATCH     SP70,EMVIDSTA             * Check for Episode End status
+          GOTO      AEIV9999 IF EQUAL         * not discharged
+.
+          MOVE      ZERO,FORM104
+          MOVE      "ee",KEY2
+          PACK      KEY5,KEY2,EMVIUC13
+          CALL      RDCODE1
+          IF        OVRCD=0
+            PACK      ADJMDESC,TDESC,SP70,SP70
+          ELSE
+            PACK      ADJMDESC,EMVIUC13,SP70,SP70
+          ENDIF
+          MOVE      "055",KEY3                * Type of Visit
+          CALL      TABF0000                  * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+          MOVE      "ED",KEY2
+          PACK      KEY5,KEY2,EMVIDSTA
+          CALL      RDCODE1
+          IF        OVRCD=0
+            PACK      ADJMDESC,TDESC,SP70,SP70
+          ELSE
+            PACK      ADJMDESC,EMVIDSTA,SP70,SP70
+          ENDIF
+          MOVE      "056",KEY3                * Episode end status
+          CALL      TABF0000                  * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+          MOVE      "AA",KEY2
+          PACK      KEY5,KEY2,EMVITRIG
+          CALL      RDCODE1
+          IF        OVRCD=0
+            PACK      ADJMDESC,TDESC,SP70,SP70
+          ELSE
+            PACK      ADJMDESC,EMVITRIG,SP70,SP70
+          ENDIF
+          MOVE      "057",KEY3                * Triage code
+          CALL      TABF0000                  * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+          IF        CALCFLAG>1
+            CALL      CCLS0000                * Use AECC class
+          ELSE
+            CALL      CURG0000                * Generate patient URG code
+          ENDIF
+          BRANCH    EXIT,AEIV9200
+.
+          CALL      SCNT0000                  * search for a valid Contract ID
+          BRANCH    EXIT,AEIV9100
+.
+          PACK      CONTRCID,CONTRCID,SP70
+          MATCH     SP70,CONTRCID
+          GOTO      AEIV9100 IF EQUAL         * Can not find Contract
+.
+          MOVE      CONTRCID,SAVCONTR
+          PACK      KEY12,CONTRCID,EMPWURGV,SP70
+          CALL      RDEMPWD1
+          BRANCH    OVRCD,AEIV9100
+.
+          MOVE      ONE,ABFFLAG
+          IF        PROGFLAG=3
+            MOVE      ONE,PRINTABF            * set PRINTABF for print ABF inv.
+          ENDIF
+          MOVE      EMPWPWEI,PWAMOUNT         * PW
+.
+          MOVE      "062",KEY3                * Patient PW
+          MOVE      EMPWPWEI,FORM104
+          CALL      TABF0000                  * Write to ABF Patient details
+.
+          MOVE      ZERO,FORM104
+          BRANCH    CALCFLAG,AEIV2000
+          GOTO      AEIV4000
+.
+AEIV2000  PACK      ADJMDESC,EMURURGV,SP2,EMURURGD,SP70
+          MOVE      "060",KEY3                * URG code/AECC class
+          CALL      TABF0000                  * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+          STRIP     PMVMMDES
+          CLEAR     ADJMDESC
+          APPEND    PMVMMCOD,ADJMDESC         * MDB Code
+          APPEND    " (",ADJMDESC
+          APPEND    PMVMMDES,ADJMDESC         * MDB Description
+          APPEND    ")",ADJMDESC
+          APPEND    SP70,ADJMDESC
+          RESET     ADJMDESC
+          
+          MOVE      "065",KEY3                * URG code
+          CALL      TABF0000                  * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+AEIV4000  CALL      EADJ0000                  * Get Adjustment value
+          CALL      MNPA0000                  * Check multiple NEP values
+          CALL      EABF0000                  * Calculate ABF amount
+          CALL      LABF0000 
+.
+          MOVE      ZERO,EXIT
+          GOTO      AEIV9999
+.
+AEIV9100  MOVE      ONE,EXIT
+          GOTO      AEIV9800
+.
+AEIV9200  MOVE      TWO,EXIT                  * No URG/AECC Class
+.
+AEIV9800  MOVE      ONE,NOFEE                 * No ABF charge setup
+          COMPARE   TWO,PROGFLAG
+          GOTO      AEIV9999 IF NOT EQUAL
+          COMPARE   ONE,WEBFLAG
+          GOTO      AEIV9999 IF NOT EQUAL
+.
+          IF        EXIT=2
+            IF        CALCFLAG>1
+              WRITE     HTMLFILE;"<tr><b>":
+                            "ABF Emergency AECC Class Not Setup.":
+                            "</b></tr>";
+            ELSE
+              WRITE     HTMLFILE;"<tr><b>":
+                            "ABF Emergency URG Not Setup.":
+                            "</b></tr>";
+            ENDIF
+            MOVE      ONE,EXIT
+            GOTO      AEIV9999
+          ENDIF
+.
+          IF        EXIT=1
+            WRITE     HTMLFILE;"<tr><b>":
+                          "ABF Emergency Department Price Weight Not Setup.":
+                          "</b></tr>";
+            GOTO      AEIV9999
+          ENDIF
+.
+AEIV9999  GOTO      NDAE9999
++
+.*******************************************************************************
+.         Initialise variables
+.*******************************************************************************
+EVAR0000   
+           MOVE     ZERO,ARESFLAG
+           MOVE     ZERO,ATREFLAG
+.
+           MOVE     ZERO,AINDAMNT
+           MOVE     ZERO,ARESAMNT
+           MOVE     ZERO,AECAAMNT
+           MOVE     ZERO,ATAAMNTS
+.
+           MOVE     ZERO,NEPAMNTS
+           MOVE     ZERO,PWAMOUNT
+           MOVE     ZERO,ABFCHRGE
+           MOVE     ZERO,ABFFLAG
+           MOVE     ZERO,PRINTABF
+           MOVE     ZERO,CALCFLAG
+           PACK     ADJMDESC,SP70,SP70
+.
+EVAR9999  RETURN
++
+.*******************************************************************************
+.         Generate Patient URG code
+.*******************************************************************************
+CURG0000  OPEN      EMRVCDA2,"emrvcdaf"
+          PACK      KEY17,ADANUMB,SP70
+          CALL      RSEMVCD2
+CURG1000  CALL      RKEMVCD2
+          BRANCH    OVRCD,CURG9000
+.
+          MATCH     DADANUMB,EMVCVIST
+          GOTO      CURG9000 IF NOT EQUAL
+.
+          COMPARE   FIVE,EMVCCSYS             * check for coding system emricdaf
+          GOTO      CURG1000 IF NOT EQUAL
+.
+.         Get Mapping MDB Code for ICD
+.
+          MOVE      "emricdaf",KEY8
+          PACK      KEY30,EMVCMNCD,SP70
+          MOVE      "MDB",PMVMMVSI           * Set ID
+          PACK      KEY41,KEY8,KEY30,PMVMMVSI
+          CALL      RDPMVMT1
+          BRANCH    OVRCD,CURG1000           * Next diagnosis code
+.
+          PACK      EMURMDBC,PMVMMCOD,SP70   * MDB Code
+          MOVE      EMVIDSTA,EMURESTA        * Episode End status
+          MOVE      EMVITRIG,EMURTRIA        * Triage code
+          MOVE      EMVIUC13,EMURVTYP        * Type of visit
+          PACK      EMUREDAT,EMVIDATE
+.
+.         Use MDB Code to get URG Code
+.
+          PACK      SKEY39,EMURESTA,EMURTRIA,EMURVTYP,EMURMDBC,SP70
+          PACK      KEY47,SKEY39,EMVIDATE,SP70
+          CALL      RDEMURG2
+          COMPARE   ZERO,OVRCD
+          GOTO      CURG6000 IF EQUAL
+.
+CURG2000  CALL      RKEMURG2
+          BRANCH    OVRCD,CURG1000
+.
+          PACK      KEY39,EMURESTA,EMURTRIA,EMURVTYP,EMURMDBC,SP70
+          MATCH     KEY39,SKEY39
+          GOTO      CURG1000 IF NOT EQUAL
+.
+          MATCH     EMVIDATE,EMUREDAT
+          GOTO      CURG2000 IF LESS
+.
+CURG6000  MOVE      ZERO,EXIT
+          GOTO      CURG9999
+.
+CURG9000  MOVE      ONE,EXIT
+CURG9999  RETURN
++
+.*******************************************************************************
+.         Get AECC class
+.*******************************************************************************
+CCLS0000  OPEN      EMRVCDA1,"emrvcdaf"
+          MOVE      "006",KEY3                * AECC Class
+          PACK      KEY14,ADANUMB,KEY3,Z70
+          CALL      RSEMVCD1
+CCLS1000  CALL      RPEMVCD1
+          BRANCH    OVRCD,CCLS9000
+.
+          MATCH     DADANUMB,EMVCVIST
+          GOTO      CCLS9000 IF NOT EQUAL
+.
+          MATCH     KEY3,EMVCTYPE             * check for coding type
+          GOTO      CCLS9000 IF NOT EQUAL
+.
+          MATCH     "1",EMVCDELE
+          GOTO      CCLS1000 IF EQUAL         * Deleted
+.
+          MATCH     SP70,EMVCMNCD
+          GOTO      CCLS1000 IF EQUAL
+.
+          PACK      EMURURGV,EMVCMNCD,SP70    * AECC Class
+          MOVE      ZERO,EXIT
+          GOTO      CCLS9999
+.
+CCLS9000  MOVE      ONE,EXIT
+CCLS9999  RETURN
++
+.*******************************************************************************
+.         Search for a Contract id
+.*******************************************************************************
+SCNT0000  PACK      KEY9,ADACOMP,PFUNDH,SP70
+          CALL      GETCNEFF               * Get Contract Effective From
+          BRANCH    EXIT,SCNT9000
+.
+          MOVE      EMVIDATE,CEFFDATE         * default to admission date
+          MATCH     SP70,EMVIDDAT
+          IF        !@EQUAL
+            MOVE      EMVIDDAT,CEFFDATE       * Use discharge date
+          ENDIF
+.
+.         Search for a valid Contract by looping PW file for the URG code 
+.
+          PACK      KEY12,EMURURGV,SP70
+          CALL      RSEMPWD2
+SCNT2000  CALL      RKEMPWD2
+          BRANCH    OVRCD,SCNT9000
+.
+          MATCH     EMPWURGV,EMURURGV          * Same URG code ?
+          GOTO      SCNT9000 IF NOT EQUAL
+.
+          MOVE      EMPWCNTR,KEY6
+          CALL      VALCONTR                * Validate Contract ID
+          BRANCH    EXIT,SCNT2000
+.
+          MOVE      EMPWCNTR,CONTRCID
+          MOVE      ZERO,EXIT
+          GOTO      SCNT9999
+.
+SCNT9000  MOVE      ONE,EXIT
+SCNT9999  RETURN
++
+.*******************************************************************************
+.         Get Adjustment value
+.*******************************************************************************
+EADJ0000  PACK      KEY9,CONTRCID,SP70
+          CALL      RSPMADJ1
+EADJ1000  CALL      RKPMADJ1
+          BRANCH    OVRCD,EADJ9999
+.
+          MATCH     CONTRCID,PMAJCNTR      * Same contract id ?
+          GOTO      EADJ9999 IF NOT EQUAL
+.
+          COMPARE   ZERO,PMAJADJV
+          GOTO      EADJ1000 IF EQUAL
+.
+          CALL      LADJ0000               * Check adjustment value
+          GOTO      EADJ1000
+.
+EADJ9999  RETURN
++
+.*******************************************************************************
+.         Adjustment
+.*******************************************************************************
+LADJ0000  MOVE      ZERO,ADJTYVAL
+          MOVE      PMAJADJT,ADJTYVAL         * Adjustment type
+.
+          BRANCH    ADJTYVAL,LADJ9999,LADJ9999,LADJ9999,LADJ9999,LADJ9999:
+                             LADJ1000,LADJ9999,LADJ1000,LADJ2000,LADJ9999:
+                             LADJ9999,LADJ9999,LADJ9999,LADJ9999,LADJ9999:
+                             LADJ9999,LADJ9999,LADJ9999,LADJ9999,LADJ9999:
+                             LADJ3000,LADJ3000,LADJ4000,LADJ4000
+.
+          MOVE      ADJTYVAL,F3
+          SUB       "24",F3
+          BRANCH    F3,LADJ8000,LADJ8000,LADJ8000   * NEP
+
+          GOTO      LADJ9999
+.
+LADJ1000  BRANCH    ARESFLAG,LADJ9999
+          CALL      ERES0000            * Patient resident remoteness
+          GOTO      LADJ9999
+.
+LADJ2000  CALL      EIND0000            * Indigenous adjustment
+          GOTO      LADJ9999
+.
+LADJ3000  CALL      EECA0000            * EMR Care age adjustment
+          GOTO      LADJ9999
+.
+LADJ4000  BRANCH    ATREFLAG,LADJ9999
+          CALL      ETRE0000            * Patient Treatment remoteness area adj.
+          GOTO      LADJ9999
+.
+LADJ8000  CALL      ENEP0000            * NEP
+          GOTO      LADJ9999
+.
+LADJ9999  RETURN
++
+.******************************************************************************
+.        Check for Claim code Multiple NEP Values
+.******************************************************************************
+MNPA0000  MATCH     SP70,ADACOMP
+          GOTO      MNPA9999 IF EQUAL
+.
+          MOVE      "CL",KEY2
+          PACK      KEY5,KEY2,ADACOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD,MNPA9999
+.
+          MOVE      ZERO,OVRCD               * assume file exists
+          TRAP      OVERCOND IF IO           * trap for error openning file
+          OPEN      PMSNEPA1,"pmsnepaf"      * open file
+          TRAPCLR   IO
+          BRANCH    OVRCD,MNPA9999           * open failed
+.
+          MOVE      " 1",DIM2                * Emergency
+          PACK      KEY58,CONTRCID,DIM2,KEY2,Z70
+          CALL      RSPMNEP1
+MNPA1000  CALL      RPPMNEP1
+          BRANCH    OVRCD,MNPA9999
+.
+          MATCH     PMNECNTR,CONTRCID        * Same contract id ?
+          GOTO      MNPA9999 IF NOT EQUAL
+.
+          MATCH     DIM2,PMNEVTYP            * Check for type of visit
+          GOTO      MNPA9999 IF NOT EQUAL
+.
+          MATCH     "1",PMNEACTV
+          GOTO      MNPA1000 IF EQUAL        * Inactive
+.
+          MATCH     KEY2,PMNECODE
+          IF        !@EQUAL
+            MATCH     SP70,PMNECODE          * check for blank Code set
+            GOTO      MNPA1000 IF NOT EQUAL
+          ENDIF
+.
+          CALL      INDA0000                 * Check indicators
+          BRANCH    EXIT,MNPA1000            * Check next record
+.
+MNPA9999  RETURN
++
+.******************************************************************************
+.        Check for Indicator number and value
+.        Exit = 1 (Not valid)
+.******************************************************************************
+INDA0000  MATCH     SP70,PMNEINDC
+          GOTO      INDA2000 IF EQUAL     * Blank Indicator number
+.
+          STRIP     PMNEINDC
+          MOVE      ZERO,F2
+          MOVE      PMNEINDC,F2
+.
+.         Check indicator number and value of patient claim code
+.
+          MOVE      SP70,KEY1
+          LOAD      KEY1,F2,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10:
+                            TCINDC11,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41
+.
+          STRIP     PMNEINDV
+          PACK      D1,PMNEINDV,SP70
+          MATCH     KEY1,D1
+          GOTO      INDA9000 IF NOT EQUAL
+.
+INDA2000  MOVE      PMNENEPP,NEPAMNTS  * NEP value Adjust.
+          MOVE      PMNENEPP,FORM104   * Adjustment value
+          MOVE      SP70,ADJMDESC
+          MOVE      "061",KEY3         * NEP adjust.
+          CALL      TABF0000           * Write to ABF Patient details
+          MOVE      ZERO,EXIT
+          GOTO      INDA9999
+.
+INDA9000  MOVE      ONE,EXIT
+INDA9999  RETURN
++
+.*******************************************************************************
+.         Deleting existing ABF Patient details
+.*******************************************************************************
+RABF0000  PACK      KEY19,ADANUMB,SP70
+          CALL      RSPMABF1
+RABF1000  CALL      RKPMABF1
+          BRANCH    OVRCD,RABF9999
+.
+          MATCH     DADANUMB,PMABADMN       * Same admission no ?
+          GOTO      RABF9999 IF NOT EQUAL
+.
+          MATCH     SP70,PMABINVN
+          GOTO      RABF9999 IF NOT EQUAL  * Invoice must be blank
+.
+          COMPARE   TWO,CALCFLAG
+          GOTO      RABF4000 IF LESS
+.
+.       Do not remove 060,065,067,068,069 adjustment, as they were calculated in
+.       ABFAECCL (AECC class Group)
+.
+          MATCH     "060",PMABADJT
+          GOTO      RABF1000 IF EQUAL
+          MATCH     "065",PMABADJT
+          GOTO      RABF1000 IF EQUAL
+          MATCH     "067",PMABADJT
+          GOTO      RABF1000 IF EQUAL
+          MATCH     "068",PMABADJT
+          GOTO      RABF1000 IF EQUAL
+          MATCH     "069",PMABADJT
+          GOTO      RABF1000 IF EQUAL
+.
+          PACK      KEY19,PMABADMN,PMABINVN,PMABADJT
+          CALL      DEPMABF1
+          GOTO      RABF1000
+.
+RABF4000  PACK      KEY19,PMABADMN,PMABINVN,PMABADJT
+          CALL      DEPMABF1
+          GOTO      RABF0000
+.
+RABF9999  RETURN
++
+.*******************************************************************************
+.         Calculate ABF amount
+.*******************************************************************************
+EABF0000  BRANCH    CALCFLAG,EABF6000,EABF7000,EABF7000
+.
+.         {PW x (1 + AInd + ARes) x (1 + AECA)} x NEP
+.
+          MOVE      ONE,F106A
+          ADD       AINDAMNT,F106A           * A_Ind
+          ADD       ARESAMNT,F106A           * A_Res
+.
+          MOVE      ONE,F106B
+          ADD       AECAAMNT,F106B           * + A_ECA
+.
+          MOVE      PWAMOUNT,FORM106         * PW
+          MULT      F106A,FORM106            * x (1+A_Ind+A_res)
+          MULT      F106B,FORM106            * x (1+A_ECA)
+.
+          GOTO      EABF8000
+.
+.         {PW x (1 + AInd + ARes + AECA) x  NEP
+.
+EABF6000  MOVE      ONE,F106A
+          ADD       AINDAMNT,F106A           * A_Ind
+          ADD       ARESAMNT,F106A           * A_Res
+          ADD       AECAAMNT,F106A           * + A_ECA
+.
+          MOVE      PWAMOUNT,FORM106         * PW
+          MULT      F106A,FORM106            * x (1+A_Ind+A_res+A_ECA)
+          GOTO      EABF8000
+.
+.         ABF calculation for 2021/2022 and 2023/2024
+.         {PW x (1 + ARes + AInd) x (1 + ATreat) x  NEP
+.
+EABF7000  MOVE      ONE,F106A
+          ADD       ARESAMNT,F106A           * A_Res
+          ADD       AINDAMNT,F106A           * A_Ind
+.
+          MOVE      ONE,F106B
+          ADD       ATAAMNTS,F106B           * A_Treat
+.
+          MOVE      PWAMOUNT,FORM106         * PW
+          MULT      F106A,FORM106            * x (1+A_Ind+A_res+A_ECA)
+          MULT      F106B,FORM106            * x (1+A_Treat)
+.
+EABF8000  IF        FORM106<0
+            MOVE      ZERO,FORM106
+          ENDIF
+          MOVE      FORM106,NWAUAMNT       * save NWAU amount with 6 decimal
+.
+          MOVE      SP70,KEY19
+          MOVE      NWAUAMNT,KEY19         * NWAU amount in 6 decimal places
+          SQUEEZE   KEY19
+          PACK      ADJMDESC,KEY19,SP70,SP20
+.
+          MOVE      FORM106,FORM104        * NWAU
+          MOVE      "053",KEY3
+          CALL      TABF0000               * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+          MULT      NEPAMNTS,FORM106       * NEP 
+          MOVE      FORM106,ABFCHRGE       * ABF Charge
+.
+          MOVE      ABFCHRGE,GROSSTOT
+          MOVE      GROSSTOT,NETTOT
+.
+EABF9999  RETURN
++
+.*******************************************************************************
+.         Check Indigenous Adjustment
+.*******************************************************************************
+EIND0000  MOVE      PMAJADJV,FORM104       * Adjustment value
+          MATCH     SP70,PMVXABRG          * Aboriginality
+          GOTO      EIND2000 IF EQUAL
+          PACK      KEY5,ANSV,ANSA,PMVXABRG
+          CALL      RDCODE1
+          BRANCH    OVRCD,EIND2000
+.
+          MATCH     "4",TCINDC2
+          GOTO      EIND2000 IF EQUAL
+          MATCH     "9",TCINDC2
+          GOTO      EIND2000 IF EQUAL
+.
+          MOVE      PMAJADJV,AINDAMNT  * Indigeneous value adjust.
+          MOVE      "021",KEY3
+          CALL      TABF0000           * Write to ABF Patient details
+          GOTO      EIND9999
+.
+EIND2000  MOVE      ZERO,FORM104
+          MOVE      ZERO,AINDAMNT      * Indigeneous value adjust.
+          MOVE      "021",KEY3
+          CALL      TABF0000           * Write to ABF Patient details
+.
+EIND9999  RETURN
++
+.*******************************************************************************
+.         Check Residential remoteness area adjustment
+.*******************************************************************************
+ERES0000  MOVE      PMAJADJV,FORM104       * Adjustment value
+.
+          OPEN      IBAPOST1,"ibapostf"
+          PACK      KEY45,PSUBRB,SP70
+          PACK      KEY56,PMVXPOST,KEY45,PADD4,SP70
+          CALL      RDIBPOS1
+          COMPARE   ZERO,OVRCD
+          GOTO      ERES1000 IF EQUAL
+.
+          PACK      KEY56,PMVXPOST,KEY45,SP70
+          CALL      RSIBPOS1
+          CALL      RKIBPOS1
+          BRANCH    OVRCD,ERES9999
+.
+          MATCH     PMVXPOST,IBPOPCOD
+          GOTO      ERES9999 IF NOT EQUAL     * Different postcode
+.
+ERES1000  MATCH     SP70,IBPORRAV
+          GOTO      ERES9999 IF EQUAL
+.
+          MATCH     "RA3  ",IBPORRAV
+          IF        @EQUAL
+            IF        ADJTYVAL=6
+                MOVE      "018",KEY3         * Patient remoteness area adjust.
+                CALL      TABF0000           * Write to ABF Patient details
+                MOVE      PMAJADJV,ARESAMNT  * Residential value adjust.
+                MOVE      ONE,ARESFLAG
+            ENDIF
+          ELSE
+            MATCH     "RA4  ",IBPORRAV
+            IF        @EQUAL
+              IF        ADJTYVAL=8
+                MOVE      "020",KEY3       * Patient remoteness area adjust.
+                CALL      TABF0000         * Write to ABF Patient details
+                MOVE      PMAJADJV,ARESAMNT  * Residential value adjust.
+                MOVE      ONE,ARESFLAG
+              ENDIF
+            ENDIF
+          ENDIF
+ERES9999  RETURN
++
+.*******************************************************************************
+.         EMR Care age adjustment - age 65 to 79 or over 79
+.*******************************************************************************
+EECA0000  MOVE      PMAJADJV,FORM104       * Adjustment value
+.
+          COMPARE   "65",PSAGE
+          GOTO      EECA9999 IF LESS
+          COMPARE   "80",PSAGE
+          GOTO      EECA2000 IF NOT LESS
+.
+          IF        ADJTYVAL=21
+            MOVE      PMAJADJV,AECAAMNT  * Residential value adjust.
+            MOVE      "034",KEY3       * Age b/w 65 to 79
+            CALL      TABF0000         * Write to ABF Patient details
+          ENDIF
+          GOTO      EECA9999
+.
+EECA2000  IF        ADJTYVAL=22
+            MOVE      PMAJADJV,AECAAMNT  * Residential value adjust.
+            MOVE      "035",KEY3       * Age over 79
+            CALL      TABF0000         * Write to ABF Patient details
+          ENDIF
+.
+EECA9999  RETURN
++
+.*******************************************************************************
+.         Patient Treatment remoteness (Hospital)
+.*******************************************************************************
+ETRE0000  MOVE      PMAJADJV,FORM104       * Adjustment value
+          UNPACK    SP70,KEY8,KEY45,KEY3
+.
+          READ      CONTROLF,TEN3;CHADD1,CHADD2,CHPOST
+          PACK      KEY8,CHPOST,SP70      * Postcode
+          PACK      KEY45,CHADD2,SP70     * Suburb
+.
+          OPEN      PATHSPA1,"pathspaf"
+          PACK      KEY3,SP70
+          CALL      RSPTHSP1
+          CALL      RKPTHSP1
+          BRANCH    OVRCD,ETRE1000
+.
+          IF        IBCNMHOS=1
+            PACK      KEY3,PMVXMHOS,SP70
+            CALL      RDPTHSP1
+          ENDIF
+.
+          PACK      KEY8,PTHSPCOD,SP7 0   * Postcode
+          PACK      KEY45,PTHSADD2,SP70   * Suburb
+          PACK      KEY3,PTHSADD3,SP70    * State
+.
+ETRE1000  OPEN      IBAPOST1,"ibapostf"
+          PACK      KEY56,KEY8,KEY45,KEY3,SP70
+          CALL      RDIBPOS1
+          COMPARE   ZERO,OVRCD
+          GOTO      ETRE2000 IF EQUAL
+.
+          PACK      KEY56,KEY8,KEY45,SP70
+          CALL      RSIBPOS1
+          CALL      RKIBPOS1
+          BRANCH    OVRCD,ETRE9999
+.
+          MATCH     KEY8,IBPOPCOD
+          GOTO      ETRE9999 IF NOT EQUAL     * Different postcode
+.
+ETRE2000  MATCH     SP70,IBPORRAV
+          GOTO      ETRE9999 IF EQUAL
+.
+          MATCH     "RA3  ",IBPORRAV
+          IF        @EQUAL
+            IF        ADJTYVAL=23
+              MOVE      "036",KEY3         * Pat.Treatment remoteness area adj
+              CALL      TABF0000           * Write to ABF Patient details
+              MOVE      PMAJADJV,ATAAMNTS  * Pat.Treatment value adjust.
+              MOVE      ONE,ATREFLAG
+            ENDIF
+          ELSE
+            MATCH     "RA4  ",IBPORRAV
+            IF        @EQUAL
+              IF        ADJTYVAL=24
+                MOVE      "037",KEY3       * Pat.Treatment remoteness area adj.
+                CALL      TABF0000         * Write to ABF Patient details
+                MOVE      PMAJADJV,ATAAMNTS  * Pat.Treatment value adjust.
+                MOVE      ONE,ATREFLAG
+              ENDIF
+            ENDIF
+          ENDIF
+.
+ETRE9999  RETURN
++
+.*******************************************************************************
+.         NEP Adjustment
+.*******************************************************************************
+ENEP0000  MOVE      "CL",KEY2
+          PACK      KEY5,KEY2,ADACOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD,ENEP9999
+.
+          MATCH     "B",TCINDC22
+          IF        @EQUAL
+            COMPARE   "26",ADJTYVAL
+            GOTO      ENEP8000 IF EQUAL
+          ENDIF
+.
+          MATCH     "C",TCINDC22
+          IF        @EQUAL
+            COMPARE   "27",ADJTYVAL
+            GOTO      ENEP8000 IF EQUAL
+          ENDIF
+.
+          MATCH     SP70,TCINDC22
+          GOTO      ENEP2000 IF EQUAL
+          MATCH     "A",TCINDC22
+          GOTO      ENEP9999 IF NOT EQUAL
+.
+ENEP2000  COMPARE   "25",ADJTYVAL
+          GOTO      ENEP9999 IF NOT EQUAL
+.
+ENEP8000  MOVE      PMAJADJV,NEPAMNTS  * NEP value Adjust.
+          MOVE      PMAJADJV,FORM104   * Adjustment value
+          MOVE      "061",KEY3         * NEP adjust.
+          CALL      TABF0000           * Write to ABF Patient details
+ENEP9999  RETURN
++
+.*******************************************************************************
+.         Write to ABF Patient details
+.*******************************************************************************
+TABF0000  MOVE      ADANUMB,PMABADMN         * Admission number
+          MOVE      SP70,PMABINVN            * Blank Inv.no for tobe invoiced
+          MOVE      KEY3,PMABADJT            * Type of adjustment
+.
+          PACK      KEY19,PMABADMN,PMABINVN,PMABADJT,SP70
+          CALL      RDPMABF1
+          BRANCH    OVRCD,TABF1000
+.
+          MOVE      FORM104,PMABADJV       * Value of adjustment
+          MATCH     SP70,ADJMDESC
+          IF        !@EQUAL
+            PACK      PMABCDES,ADJMDESC,SP70    * Description of adjustment
+          ENDIF
+.
+          PACK      PMABUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PMABUDAT
+          CLOCK     TIME,PMABUTIM
+          MOVE      WBSEUID,PMABUUID
+          CALL      UPPMABF1
+.
+          GOTO      TABF9999
+.
+TABF1000  CALL      CLPMSABF                 * Clear fields
+          MOVE      "1",PMABABFT             * Type of ABF Details
+          MOVE      " 1",PMABEPSN            * Episode Number
+          UNPACK    KEY19,PMABADMN,PMABINVN,PMABADJT
+          MOVE      FORM104,PMABADJV       * Value of adjustment
+          MATCH     SP70,ADJMDESC
+          IF        !@EQUAL
+            PACK      PMABCDES,ADJMDESC,SP70    * Description of adjustment
+          ENDIF
+.
+          PACK      PMABCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PMABCDAT
+          CLOCK     TIME,PMABCTIM
+          MOVE      WBSEUID,PMABUUID
+.
+          CALL      RAPMABF1
+          IF        OVRCD=1
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRPMABF1
+            TRAPCLR   IO
+          ENDIF
+.
+TABF9999  RETURN
++
+.******************************************************************************
+.        Display/Print ABF Charges
+.******************************************************************************
+LABF0000 BRANCH     PROGFLAG,LABF1000,LABF2000,LABF3000,LABF4000
+         GOTO       LABF9999
+.
+LABF1000 IF         INVDFLAG=1
+           MOVE       "1A",KEY2      * Record type ABF
+           PACK       KEY9,EMPWURGV,SP70  * URG Code
+           MOVE       GROSSTOT,FORM12D2
+           CALL       WAAE0000       * Update Invoice Pending details
+         ENDIF
+         GOTO       LABF9999
+.
+LABF2000 CALL       SSAB0000         * Display ABF Charges
+         GOTO       LABF9999
+.
+LABF3000 CALL       PABF0000         * Print ABF Charges
+.
+LABF4000 CALL       FABF0000         * Set up key for a call to PATCALF
+         GOTO       LABF9999
+.
+LABF9999 RETURN
++
+.******************************************************************************
+.        Display ABF Charges
+.******************************************************************************
+SSAB0000  REP       " 0",EMVIDATE
+          UNPACK    EMVIDATE,XCENT,XYEAR,XMON,XDAY
+.
+          MOVE      ZERO,FORM2
+          MOVE      XMON,FORM2
+          LOAD      MTHNAM3,FORM2,NJAN,NFEB,NMAR,NAPR,NMAY,NJUN,NJUL,NAUG:
+                                  NSEP,NOCT,NNOV,NDEC
+.
+          WRITE    HTMLFILE;"<tr>":
+                   "<td>&nbsp",XDAY,SP1,MTHNAM3,SP1,XCENT,XYEAR,"</td>":
+                   "<td>&nbsp",EMPWURGD,"</td>"
+.
+          WRITE    HTMLFILE;"<td align=right>&nbsp</td>":
+                            "<td align=right>&nbsp</td>":
+                            "<td align=right>&nbsp</td>":
+                            "<td align=right>&nbsp</td>":
+                            "<td align=right>&nbsp",GROSSTOT,"</td>":
+                            "</tr>";
+.
+SSAB9999 RETURN
++
+.******************************************************************************
+.        Print ABF Charges
+.******************************************************************************
+PABF0000  OPEN      AAEDTRE1,"aaedtref"
+          OPEN      AAEDTRE2,"aaedtref"
+.
+          MOVE      GROSSTOT,LINETOT
+          MOVE      GROSSTOT,LSTRATE
+          MOVE      ZERO,LINEGST             * No GST for ABF
+.
+          CALL      CLAAEDTR
+.
+          MOVE      ADANUMB,ATNUMB
+          MOVE      CNEXTINV,ATINVNO
+          MOVE      LINETOT,ATPATAMT
+          MOVE      LINETOT,ATREBPOR
+          PACK      ATDDESC,EMPWURGD,SP70
+          MOVE      EMVIDATE,ATDDATE
+          MOVE      "DB",ATTYPE
+          MOVE      "6",ATRECTYP              * for ABF record type
+          MOVE      ONE,ATSERVS
+          MOVE      PINVDTE,ATDTEFFD
+          REP       " 0",ATDTEFFD
+.
+PABF2000  CALL      NXTTRAN1                 * generate a new transaction no.
+.
+          PACK      ATCHGDTE,CCC,CYY,CMM,CDD
+          REP       " 0",ATCHGDTE
+          PACK      KEY31,ATRECTYP,ATCHGDTE,ATNUMB,ATTRANS,ATINVNO
+          CALL      RDADTRE2
+          COMPARE   ZERO,OVRCD
+          GOTO      PABF2000 IF EQUAL
+.
+          PACK      KEY22,ATNUMB,ATINVNO,ATTRANS
+          CALL      RDADTRE1
+          COMPARE   ZERO,OVRCD
+          GOTO      PABF2000 IF EQUAL
+.
+          PACK      KEY22,ATNUMB,ATINVNO,ATTRANS
+          CALL      WRDTRE1
+.
+.         Print ABF charge
+.
+          MOVE      LINETOT,XLINETOT
+          MOVE      LINEGST,XLINEGST
+          MOVE      ATSERVS,NODAYS         * Quantity
+          MOVE      ATPATPOR,LSTRATE
+          ADD       ATREBPOR,LSTRATE
+          MOVE      ATDDESC,DIM20
+          MOVE      ATDDATE,DFDATE
+          MOVE      ATITEMNO,KEY9
+          MOVE      TWO,RECFLAG
+.
+          MOVE      SP70,PMMIITEM
+          MOVE      ATDDESC,PMMIDESC
+          MOVE      SP70,PMMIDES2
+          MOVE      ONE,PMMISERV
+          CALL      PRLN0000               * Print item
+.
+PABF9999 RETURN
++
+.******************************************************************************
+.        Write ABF charges to Financial file
+.******************************************************************************
+FABF0000  MOVE      ABFCHRGE,LINETOT
+          PACK      PINVDTE WITH CCC,CYY,CMM,CDD
+          REP       " 0",PINVDTE
+.
+          MOVE      LINETOT,FINAMT
+          MOVE      "A",FINTYPE
+          PACK      FINCODE,ANSM,ADACOMP,SP20
+          MOVE      PINVDTE,FINDATE
+          REP       " 0",FINDATE
+          MOVE      ONE,FINSYS
+          MOVE      SP6,FINSITE
+          MOVE      ZERO,FGSTFLAG
+          CALL      GHSP0000          * Get hospital ID
+          CALL      PATCALF
+.
+FABF9999  RETURN
++
+          INC       CALCAGE
+          INC       CLPMSABF
+          INC       CLAAEDTR
+          INC       VALCONTR
+          INC       GETCNEFF
+.
+          INC       IBAPOSIO/INC
+          INC       PMSCIDIO/INC
+          INC       PMSVMTIO/INC
+          INC       EMRPWDIO/INC
+          INC       EMRURGIO/INC
+          INC       PMSABFIO/INC
+          INC       PMSADJIO/INC
+          INC       EMRVCDIO/INC
+          INC       PMSNEPIO/INC
+.
+          INC       EMRVISIO/INC
+          INC       PATMA1IO/INC
+          INC       PMSVX1IO/INC
+          INC       PMSPX2IO/INC
+          INC       PATHSPIO/INC
+          INC       IBAOVRIO/INC
+.
+NDAE9999  ENDPROC
++

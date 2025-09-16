@@ -1,0 +1,195 @@
+.***************************************************************************
+.* System    :   EMERGENCY                                                 *
+.* Program   :   FX862664                                                  *
+.* Desc      :   Migrate Triage/Discharge meth related data                *
+.***************************************************************************
+.* Date      :   08/02/2019                                                *
+.* Author    :   Ebon Clements                                             *
+.* Function  :   As an interim solution waheahth collected triage and      *
+.*               discharge meth realted information in EMVIUC34 (Cat YQ)   *
+.*               and EMVIUC35 (Cat YR). This fix will copy the details     *
+.*               to new category codes YU and YV to be stored in viscodaf  *
+.* Modifications  :                                                        *
+.*                                                                         *
+.* V10.14.00 08/02/2019  Ebon Clements      TSK 0862664                    *
+.*           Created program                                               *
+.***************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. ------------------------- 
+          INC       EMRVISFD/INC
+          INC       VISCODFD/INC
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+LOOPCNTR  FORM      8
+MIGCOUNT  FORM      8
+.
+PRGID     INIT      "FX862664"
+PRGNAM    INIT      "Migrate ED Meth. Related data"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialisation and open files
+.
+ML0100    CALL      OPTN0000               * select options
+          BRANCH    EXIT,ML9999            * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,ML1000         * proceed with clean up
+.
+ML1000    CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,ML2000:          * yes
+                          ML0100:          * no
+                          ML0100           * cancel
+.
+ML2000    CALL      PROC0000               * process
+.
+ML9999    CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          OPEN      EMRVISA1,"emrvisaf"
+          OPEN      VISCODA1,"viscodaf"
+.
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run clean up                           *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run clean-up
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.**************************************************************************
+.*                               PROC0000              Called by: ML0000  *
+.*                                                                        *
+.**************************************************************************
+.
+PROC0000  MOVE      ZERO,LOOPCNTR           * Loop counter 
+          MOVE      ZERO,MIGCOUNT           * Migrated record count        
+.
+          PACK      KEY8,SP70
+          CALL      RSEMVIS1
+PROC1000  CALL      RKEMVIS1                * Loop all ED visit records
+          BRANCH    OVRCD,PROC9000
+.
+          ADD       ONE, LOOPCNTR           
+.
+          IF        LOOPCNTR=1000
+            MOVE     ZERO,LOOPCNTR
+            DISPLAY  *P15:20,*V2LON,"Processing Visit Number: ",EMVIADMN
+          ENDIF
+.
+.         Don't migrate if both triage/discharge Meth related fields are blank
+.
+          MATCH     SP70,EMVIUC34           * Triage (cat YQ)
+          IF        @EQUAL
+            MATCH     SP70,EMVIUC35         * Discharge (cat YR)
+            GOTO      PROC1000 IF EQUAL
+          ENDIF
+.
+          ADD       ONE,MIGCOUNT             
+          CALL      CLVISCOD                     * Clear viscodaf vars
+.
+          MOVE      "01",VSCOTYPE                * ED visit
+          PACK      VSCOTKEY,EMVIADMN,SP70       * ED Visit Number
+.
+          PACK      VSCOCDAT,CCC,CYY,CMM,CDD     * Created Date
+          REP       " 0",VSCOCDAT
+          CLOCK     TIME,VSCOCTIM                * Created Time
+.
+          MATCH     SP70,EMVIUC34                * Triage Meth Related Blank
+          GOTO      PROC5000 IF EQUAL
+.
+          MOVE      "YU",VSCOCATG                * Triage Meth Related Cat
+          MOVE      EMVIUC34,VSCOCODE            * Triage Meth Related
+          PACK      KEY37,VSCOTYPE,VSCOTKEY,VSCOCATG,VSCOCODE,SP70
+          CALL      RAVSCOD1
+          IF        OVRCD=1
+            CALL      WRVSCOD1              * Write viscodaf record
+          ENDIF
+.
+PROC5000  MATCH     SP70,EMVIUC35                * Discharge Meth Related Blank
+          GOTO      PROC1000 IF EQUAL
+.
+          COMPARE   ONE,EMVISTAT                 * Not discharged
+          GOTO      PROC1000 IF EQUAL
+.
+          MOVE      "YV",VSCOCATG                * Discharge Meth Related Cat
+          MOVE      EMVIUC35,VSCOCODE            * Discharge Meth Related
+          PACK      KEY37,VSCOTYPE,VSCOTKEY,VSCOCATG,VSCOCODE,SP70
+          CALL      RAVSCOD1
+          IF        OVRCD=1
+            CALL      WRVSCOD1              * Write viscodaf record
+          ENDIF
+.
+          GOTO      PROC1000
+.
+PROC9000  DISPLAY   *P15:22,*EL,*V2LON,"Total Meth. Records Migrated : ":
+                    MIGCOUNT
+          DISPLAY   *P1:24,*EL;
+          CALL      HITENTER
+.
+PROC9999  RETURN
++
+.------------------------------------------------------------
+. Clear visit coding fields
+.------------------------------------------------------------
+CLVISCOD  MOVE      SP70,VSCOTYPE
+          MOVE      SP70,VSCOTKEY
+          MOVE      SP70,VSCOCATG
+          MOVE      SP70,VSCOCODE
+          PACK      VSCOTEXT,SP70,SP70,SP70
+          MOVE      SP70,VSCOCDAT
+          MOVE      SP70,VSCOCTIM
+          MOVE      SP70,VSCOCUID
+          MOVE      SP70,VSCODELT
+          MOVE      SP70,VSCODDAT
+          MOVE      SP70,VSCODTIM
+          MOVE      SP70,VSCODUID
+          PACK      VSCOSPAR,SP70,SP70
+.
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       EMRVISIO/INC
+          INC       VISCODIO/INC

@@ -1,0 +1,104 @@
+RSFMTR1   RESET     KEY10
+          READ      FMSTRNA1,KEY10;;
+          RETURN
+.
+RAFMTR1   RESET     KEY10
+          MOVE      ZERO,OVRCD
+          READ      FMSTRNA1,KEY10;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMTR1   RESET     KEY10
+          MOVE      ZERO,OVRCD
+          READ      FMSTRNA1,KEY10;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMTR1   MOVE      ZERO,OVRCD
+          READKS    FMSTRNA1;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMTR1   MOVE      ZERO,OVRCD
+          READKP    FMSTRNA1;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMTR1   UPDATE    FMSTRNA1;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          RETURN
+.
+WRFMTR1   RESET     KEY10
+          WRITE     FMSTRNA1,KEY10;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          RETURN
+.
+DEFMTR1   RESET     KEY10
+          DELETE    FMSTRNA1,KEY10
+          RETURN
+.
+RSFMTR2   RESET     KEY32
+          READ      FMSTRNA2,KEY32;;
+          RETURN
+.
+RAFMTR2   RESET     KEY32
+          MOVE      ZERO,OVRCD
+          READ      FMSTRNA2,KEY32;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMTR2   RESET     KEY32
+          MOVE      ZERO,OVRCD
+          READ      FMSTRNA2,KEY32;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMTR2   MOVE      ZERO,OVRCD
+          READKS    FMSTRNA2;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMTR2   MOVE      ZERO,OVRCD
+          READKP    FMSTRNA2;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMTR2   UPDATE    FMSTRNA2;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          RETURN
+.
+WRFMTR2   RESET     KEY32
+          WRITE     FMSTRNA2,KEY32;FMTRBAT,FMTRUNIQ,FMTRLEDG,FMTRACCT:
+                                  FMTRCRED,FMTRPDAT,FMTRTDAT,FMTRTYPE,FMTRDISS:
+                                  FMTRPPER,FMTRDOCR,FMTRAMT,FMTRORD,FMTRRESP:
+                                  FMTRDESC,FMTRSPAR
+          RETURN
+.
+DEFMTR2   RESET     KEY32
+          DELETE    FMSTRNA2,KEY32
+          RETURN
+.

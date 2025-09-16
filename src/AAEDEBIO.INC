@@ -1,0 +1,53 @@
+.
+.         INC       AAEDEBIO.PBL
+.
+.         FILE  I/O REQUESTS FOR COMMENTS FILE
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY10  DIM             10            KEY FOR AAEDETB1
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE THEAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+.
+.
+RDSDETB1 MOVE      ZERO,OVRCD
+         RESET     KEY10
+         READ      AAEDETB1,KEY10;;
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDDETB1  MOVE      ZERO,OVRCD
+         RESET     KEY10
+         READ      AAEDETB1,KEY10;DADBNUMB,DADBCLNO,ADBLINE,ADBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DADBNUMB,ADBNUMB
+         MOVE      DADBCLNO,ADBCLNO
+         RETURN  
+.
+RDKDETB1 MOVE      ZERO,OVRCD
+         READKS    AAEDETB1;DADBNUMB,DADBCLNO,ADBLINE,ADBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DADBNUMB,ADBNUMB
+         MOVE      DADBCLNO,ADBCLNO
+         RETURN  
+.
+WRDETB1  MOVE      ADBNUMB,DADBNUMB
+         MOVE      ADBCLNO,DADBCLNO
+         RESET     KEY10
+         WRITE     AAEDETB1,KEY10;DADBNUMB,DADBCLNO,ADBLINE,ADBSPARE
+         RETURN  
+.
+UPDETB1  MOVE      ADBNUMB,DADBNUMB
+         MOVE      ADBCLNO,DADBCLNO
+         UPDATE    AAEDETB1;DADBNUMB,DADBCLNO,ADBLINE,ADBSPARE
+         RETURN  
+.
+DEDETB1  RESET     KEY10
+         DELETE    AAEDETB1,KEY10
+         RETURN

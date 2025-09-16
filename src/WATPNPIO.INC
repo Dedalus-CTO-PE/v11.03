@@ -1,0 +1,120 @@
+.
+. WATPNPIO.INC
+. ------------
+. Filenames       : watpnpaf
+. Description     : Waiting Lists 'Procedure Not Performed file'
+.
+RSWTPNP1  RESET     KEY8
+          READ      WATPNPA1,KEY8;;
+          RETURN
+.
+RAWTPNP1  RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READ      WATPNPA1,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTPNP1  RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READ      WATPNPA1,KEY8;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTNPBOO,WTNPBOOK
+          MOVE      DWTNPCNT,WTNPCNT
+          RETURN
+.
+RKWTPNP1  MOVE      ZERO,OVRCD
+          READKS    WATPNPA1;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTNPBOO,WTNPBOOK
+          MOVE      DWTNPCNT,WTNPCNT
+          RETURN
+.
+RPWTPNP1  MOVE      ZERO,OVRCD
+          READKP    WATPNPA1;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTNPBOO,WTNPBOOK
+          MOVE      DWTNPCNT,WTNPCNT
+          RETURN
+.
+UPWTPNP1  MOVE      WTNPBOOK,DWTNPBOO
+          MOVE      WTNPCNT,DWTNPCNT
+          UPDATE    WATPNPA1;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          RETURN
+.
+WRWTPNP1  RESET     KEY8
+          MOVE      WTNPBOOK,DWTNPBOO
+          MOVE      WTNPCNT,DWTNPCNT
+          WRITE     WATPNPA1,KEY8;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          RETURN
+.
+DEWTPNP1  RESET     KEY8
+          DELETE    WATPNPA1,KEY8
+          RETURN
+.
+RSWTPNP2  RESET     KEY27
+          READ      WATPNPA2,KEY27;;
+          RETURN
+.
+RAWTPNP2  RESET     KEY27
+          MOVE      ZERO,OVRCD
+          READ      WATPNPA2,KEY27;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTPNP2  RESET     KEY27
+          MOVE      ZERO,OVRCD
+          READ      WATPNPA2,KEY27;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTNPBOO,WTNPBOOK
+          MOVE      DWTNPCNT,WTNPCNT
+          RETURN
+.
+RKWTPNP2  MOVE      ZERO,OVRCD
+          READKS    WATPNPA2;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTNPBOO,WTNPBOOK
+          MOVE      DWTNPCNT,WTNPCNT
+          RETURN
+.
+RPWTPNP2  MOVE      ZERO,OVRCD
+          READKP    WATPNPA2;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTNPBOO,WTNPBOOK
+          MOVE      DWTNPCNT,WTNPCNT
+          RETURN
+.
+UPWTPNP2  MOVE      WTNPBOOK,DWTNPBOO
+          MOVE      WTNPCNT,DWTNPCNT
+          UPDATE    WATPNPA2;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          RETURN
+.
+WRWTPNP2  RESET     KEY27
+          MOVE      WTNPBOOK,DWTNPBOO
+          MOVE      WTNPCNT,DWTNPCNT
+          WRITE     WATPNPA2,KEY27;DWTNPBOO,WTNPURNO,WTNPCODE,DWTNPCNT:
+                                  WTNPDRET,WTNPDCHG,WTNPOUTC,WTNPREAS:
+                                  WTNPCOMM,WTNPNCNT,WTNPSPAR
+          RETURN
+.
+DEWTPNP2  RESET     KEY27
+          DELETE    WATPNPA2,KEY27
+          RETURN
+.

@@ -1,0 +1,67 @@
+.
+.         INCLUDE NAME : LEGCMNIO.INC
+.
+.         FILE  I/O REQUESTS FOR LEGACY COMMENTS FILE
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY11 DIM              11            KEY FOR PATCMNT1
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE PATAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+.
+.
+RALGCMN1  MOVE      ZERO,OVRCD
+          RESET     KEY11
+          READ      LEGCMNT1,KEY11;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSLGCMN1  MOVE      ZERO,OVRCD
+          RESET     KEY11
+          READ      LEGCMNT1,KEY11;;
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RDLGCMN1  MOVE      ZERO,OVRCD
+          RESET     KEY11
+          READ      LEGCMNT1,KEY11;DLPCADMN,DLPCLNO,LPCLINE
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPCADMN,LQPCADMN
+          MOVE      LQPCADMN,LPCADMN
+          MOVE      DLPCLNO,LPCLNO
+          RETURN  
+.
+RKLGCMN1  MOVE      ZERO,OVRCD
+          READKS    LEGCMNT1;DLPCADMN,DLPCLNO,LPCLINE
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPCADMN,LQPCADMN
+          MOVE      LQPCADMN,LPCADMN
+          MOVE      DLPCLNO,LPCLNO
+          RETURN  
+.
+RPLGCMN1  MOVE      ZERO,OVRCD
+          READKP    LEGCMNT1;DLPCADMN,DLPCLNO,LPCLINE
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPCADMN,LQPCADMN
+          MOVE      LQPCADMN,LPCADMN
+          MOVE      DLPCLNO,LPCLNO
+          RETURN  
+.
+WRLGCMN1  RESET     KEY11
+          WRITE     LEGCMNT1,KEY11;KEY11,LPCLINE
+          RETURN  
+.
+UPLGCMN1  PACK      DLPCADMN,LPCADMN
+          MOVE      LPCLNO,DLPCLNO
+          UPDATE    LEGCMNT1;DLPCADMN,DLPCLNO,LPCLINE
+          RETURN  
+.
+DELGCMN1  RESET     KEY11
+          DELETE    LEGCMNT1,KEY11
+          RETURN

@@ -1,0 +1,173 @@
+.
+. PATEXAIO.INC
+. ------------
+. Filename     : patex1NN
+. Description  : File I/O requests for Extraction File A for Management 
+.                Analysis Generation
+. Variables    : OVRCD    FORM    1
+.                KEY8     DIM     8
+.
+.---------------------------------------------
+. OPEN ROUTINE FOR PATEX1FD
+. Requires : DIM2 (file number)
+.---------------------------------------------
+OPPTEXA1  PACK      KEY8,FILEX1A1,DIM2
+          REP       " 0",KEY8
+          TRAP      OEXAFAIL IF IO
+          OPEN      PATEX1A1,KEY8
+          TRAPCLR   IO
+          RETURN
+.
+OEXAFAIL  DISPLAY   *P1:24,*EL,*B,*V2LON,"** ",*BLINKON,"ERROR",*HOFF,*V2LON:
+                           " - Extraction File ",KEY8," does not exist **  ";
+          CALL      HITENTER
+          GOTO      OVERCOND
+.
+.
+.
+RAPTEXA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      PATEX1A1,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPTEXA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      PATEX1A1,KEY8;;
+          RETURN
+.
+RDPTEXA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      PATEX1A1,KEY8;DPTXAADM,PTXAADAT,PTXADDAT,PTXADAYC,PTXAPLOS:
+                                  PTXAALOS,PTXAPLVE,PTXAALVE,PTXAAWRD,PTXAABED:
+                                  PTXASWRD,PTXASBED,PTXADWRD,PTXADBED,PTXAATYP:
+                                  PTXASTYP,PTXADTYP,PTXASEX,PTXAPOST,PTXAMLGA:
+                                  PTXAPLGA,PTXARELG,PTXACONT,PTXARESI,PTXAMSTT:
+                                  PTXAAAGD,PTXAAAGM,PTXAAAGY,PTXASAGD,PTXASAGM:
+                                  PTXASAGY,PTXADAGD,PTXADAGM,PTXADAGY,PTXAPUS1:
+                                  PTXAPUS2,PTXAPUS3,PTXAPUS4,PTXAPUS5,PTXAPUS6:
+                                  PTXAPYN1,PTXAPYN2,PTXAPYN3,PTXADCSE,PTXADDTH:
+                                  PTXABADD,PTXAAADC,PTXAAADT,PTXASADC,PTXASADT:
+                                  PTXADADC,PTXADADT,PTXAARDC,PTXAARDT,PTXAATDC:
+                                  PTXAATDT,PTXASOUR,PTXAAHOS,PTXACLMC,PTXADIET:
+                                  PTXAACLS,PTXAACRE,PTXASCRE,PTXADCRE,PTXAADPT:
+                                  PTXASDPT,PTXADDPT,PTXAFUND,PTXAFTBL,PTXAAUS1:
+                                  PTXAAUS2,PTXAAUS3,PTXAAUS4,PTXAAUS5,PTXAAUS6:
+                                  PTXAAUS7,PTXAADIA,PTXADDIA,PTXADSTT,PTXADDST:
+                                  PTXADHOS,PTXADUS1,PTXADUS2,PTXADUS3,PTXADUS4:
+                                  PTXADUS5,PTXADRGC,PTXAMDCC,PTXAOPID,PTXARLOC:
+                                  PTXAABRG,PTXACADM,PTXAIRAD,PTXAIDUS,PTXAMHLS:
+                                  PTXAASUT,PTXAELPS,PTXAEMPL,PTXAREAD,PTXAUDIN:
+                                  PTXAUREA,PTXAUVTH,PTXAPLAN,PTXASPRE
+.
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTXAADM,PTXAADMN
+          RETURN
+.
+RKPTEXA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READKS    PATEX1A1;DPTXAADM,PTXAADAT,PTXADDAT,PTXADAYC,PTXAPLOS:
+                             PTXAALOS,PTXAPLVE,PTXAALVE,PTXAAWRD,PTXAABED:
+                             PTXASWRD,PTXASBED,PTXADWRD,PTXADBED,PTXAATYP:
+                             PTXASTYP,PTXADTYP,PTXASEX,PTXAPOST,PTXAMLGA:
+                             PTXAPLGA,PTXARELG,PTXACONT,PTXARESI,PTXAMSTT:
+                             PTXAAAGD,PTXAAAGM,PTXAAAGY,PTXASAGD,PTXASAGM:
+                             PTXASAGY,PTXADAGD,PTXADAGM,PTXADAGY,PTXAPUS1:
+                             PTXAPUS2,PTXAPUS3,PTXAPUS4,PTXAPUS5,PTXAPUS6:
+                             PTXAPYN1,PTXAPYN2,PTXAPYN3,PTXADCSE,PTXADDTH:
+                             PTXABADD,PTXAAADC,PTXAAADT,PTXASADC,PTXASADT:
+                             PTXADADC,PTXADADT,PTXAARDC,PTXAARDT,PTXAATDC:
+                             PTXAATDT,PTXASOUR,PTXAAHOS,PTXACLMC,PTXADIET:
+                             PTXAACLS,PTXAACRE,PTXASCRE,PTXADCRE,PTXAADPT:
+                             PTXASDPT,PTXADDPT,PTXAFUND,PTXAFTBL,PTXAAUS1:
+                             PTXAAUS2,PTXAAUS3,PTXAAUS4,PTXAAUS5,PTXAAUS6:
+                             PTXAAUS7,PTXAADIA,PTXADDIA,PTXADSTT,PTXADDST:
+                             PTXADHOS,PTXADUS1,PTXADUS2,PTXADUS3,PTXADUS4:
+                             PTXADUS5,PTXADRGC,PTXAMDCC,PTXAOPID,PTXARLOC:
+                             PTXAABRG,PTXACADM,PTXAIRAD,PTXAIDUS,PTXAMHLS:
+                             PTXAASUT,PTXAELPS,PTXAEMPL,PTXAREAD,PTXAUDIN:
+                             PTXAUREA,PTXAUVTH,PTXAPLAN,PTXASPRE
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTXAADM,PTXAADMN
+          RETURN
+.
+RPPTEXA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READKP    PATEX1A1;DPTXAADM,PTXAADAT,PTXADDAT,PTXADAYC,PTXAPLOS:
+                             PTXAALOS,PTXAPLVE,PTXAALVE,PTXAAWRD,PTXAABED:
+                             PTXASWRD,PTXASBED,PTXADWRD,PTXADBED,PTXAATYP:
+                             PTXASTYP,PTXADTYP,PTXASEX,PTXAPOST,PTXAMLGA:
+                             PTXAPLGA,PTXARELG,PTXACONT,PTXARESI,PTXAMSTT:
+                             PTXAAAGD,PTXAAAGM,PTXAAAGY,PTXASAGD,PTXASAGM:
+                             PTXASAGY,PTXADAGD,PTXADAGM,PTXADAGY,PTXAPUS1:
+                             PTXAPUS2,PTXAPUS3,PTXAPUS4,PTXAPUS5,PTXAPUS6:
+                             PTXAPYN1,PTXAPYN2,PTXAPYN3,PTXADCSE,PTXADDTH:
+                             PTXABADD,PTXAAADC,PTXAAADT,PTXASADC,PTXASADT:
+                             PTXADADC,PTXADADT,PTXAARDC,PTXAARDT,PTXAATDC:
+                             PTXAATDT,PTXASOUR,PTXAAHOS,PTXACLMC,PTXADIET:
+                             PTXAACLS,PTXAACRE,PTXASCRE,PTXADCRE,PTXAADPT:
+                             PTXASDPT,PTXADDPT,PTXAFUND,PTXAFTBL,PTXAAUS1:
+                             PTXAAUS2,PTXAAUS3,PTXAAUS4,PTXAAUS5,PTXAAUS6:
+                             PTXAAUS7,PTXAADIA,PTXADDIA,PTXADSTT,PTXADDST:
+                             PTXADHOS,PTXADUS1,PTXADUS2,PTXADUS3,PTXADUS4:
+                             PTXADUS5,PTXADRGC,PTXAMDCC,PTXAOPID,PTXARLOC:
+                             PTXAABRG,PTXACADM,PTXAIRAD,PTXAIDUS,PTXAMHLS:
+                             PTXAASUT,PTXAELPS,PTXAEMPL,PTXAREAD,PTXAUDIN:
+                             PTXAUREA,PTXAUVTH,PTXAPLAN,PTXASPRE
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTXAADM,PTXAADMN
+          RETURN
+.
+WRPTEXA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          WRITE     PATEX1A1,KEY8;KEY8,PTXAADAT,PTXADDAT,PTXADAYC,PTXAPLOS:
+                                  PTXAALOS,PTXAPLVE,PTXAALVE,PTXAAWRD,PTXAABED:
+                                  PTXASWRD,PTXASBED,PTXADWRD,PTXADBED,PTXAATYP:
+                                  PTXASTYP,PTXADTYP,PTXASEX,PTXAPOST,PTXAMLGA:
+                                  PTXAPLGA,PTXARELG,PTXACONT,PTXARESI,PTXAMSTT:
+                                  PTXAAAGD,PTXAAAGM,PTXAAAGY,PTXASAGD,PTXASAGM:
+                                  PTXASAGY,PTXADAGD,PTXADAGM,PTXADAGY,PTXAPUS1:
+                                  PTXAPUS2,PTXAPUS3,PTXAPUS4,PTXAPUS5,PTXAPUS6:
+                                  PTXAPYN1,PTXAPYN2,PTXAPYN3,PTXADCSE,PTXADDTH:
+                                  PTXABADD,PTXAAADC,PTXAAADT,PTXASADC,PTXASADT:
+                                  PTXADADC,PTXADADT,PTXAARDC,PTXAARDT,PTXAATDC:
+                                  PTXAATDT,PTXASOUR,PTXAAHOS,PTXACLMC,PTXADIET:
+                                  PTXAACLS,PTXAACRE,PTXASCRE,PTXADCRE,PTXAADPT:
+                                  PTXASDPT,PTXADDPT,PTXAFUND,PTXAFTBL,PTXAAUS1:
+                                  PTXAAUS2,PTXAAUS3,PTXAAUS4,PTXAAUS5,PTXAAUS6:
+                                  PTXAAUS7,PTXAADIA,PTXADDIA,PTXADSTT,PTXADDST:
+                                  PTXADHOS,PTXADUS1,PTXADUS2,PTXADUS3,PTXADUS4:
+                                  PTXADUS5,PTXADRGC,PTXAMDCC,PTXAOPID,PTXARLOC:
+                                  PTXAABRG,PTXACADM,PTXAIRAD,PTXAIDUS,PTXAMHLS:
+                                  PTXAASUT,PTXAELPS,PTXAEMPL,PTXAREAD,PTXAUDIN:
+                                  PTXAUREA,PTXAUVTH,PTXAPLAN,PTXASPRE
+          RETURN
+.
+UPPTEXA1  MOVE      PTXAADMN,DPTXAADM
+          UPDATE    PATEX1A1;DPTXAADM,PTXAADAT,PTXADDAT,PTXADAYC,PTXAPLOS:
+                             PTXAALOS,PTXAPLVE,PTXAALVE,PTXAAWRD,PTXAABED:
+                             PTXASWRD,PTXASBED,PTXADWRD,PTXADBED,PTXAATYP:
+                             PTXASTYP,PTXADTYP,PTXASEX,PTXAPOST,PTXAMLGA:
+                             PTXAPLGA,PTXARELG,PTXACONT,PTXARESI,PTXAMSTT:
+                             PTXAAAGD,PTXAAAGM,PTXAAAGY,PTXASAGD,PTXASAGM:
+                             PTXASAGY,PTXADAGD,PTXADAGM,PTXADAGY,PTXAPUS1:
+                             PTXAPUS2,PTXAPUS3,PTXAPUS4,PTXAPUS5,PTXAPUS6:
+                             PTXAPYN1,PTXAPYN2,PTXAPYN3,PTXADCSE,PTXADDTH:
+                             PTXABADD,PTXAAADC,PTXAAADT,PTXASADC,PTXASADT:
+                             PTXADADC,PTXADADT,PTXAARDC,PTXAARDT,PTXAATDC:
+                             PTXAATDT,PTXASOUR,PTXAAHOS,PTXACLMC,PTXADIET:
+                             PTXAACLS,PTXAACRE,PTXASCRE,PTXADCRE,PTXAADPT:
+                             PTXASDPT,PTXADDPT,PTXAFUND,PTXAFTBL,PTXAAUS1:
+                             PTXAAUS2,PTXAAUS3,PTXAAUS4,PTXAAUS5,PTXAAUS6:
+                             PTXAAUS7,PTXAADIA,PTXADDIA,PTXADSTT,PTXADDST:
+                             PTXADHOS,PTXADUS1,PTXADUS2,PTXADUS3,PTXADUS4:
+                             PTXADUS5,PTXADRGC,PTXAMDCC,PTXAOPID,PTXARLOC:
+                             PTXAABRG,PTXACADM,PTXAIRAD,PTXAIDUS,PTXAMHLS:
+                             PTXAASUT,PTXAELPS,PTXAEMPL,PTXAREAD,PTXAUDIN:
+                             PTXAUREA,PTXAUVTH,PTXAPLAN,PTXASPRE
+          RETURN
+.
+DEPTEXA1  RESET     KEY8
+          DELETE    PATEX1A1,KEY8
+          RETURN
++

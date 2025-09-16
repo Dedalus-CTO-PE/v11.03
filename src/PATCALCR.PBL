@@ -1,0 +1,180 @@
+.***************************************************************************
+.* Routine    :  PATCALCR                                                  *
+.* Desc       :  Calculate Revenue routine.                                *
+.***************************************************************************
+.* Date       :  09/06/1993                                                *
+.* Author     :  Glenn Berry                                               *
+.* Function   :  Calculate Revenue for all Invoices for a given            *
+.*               Admission Number.                                         *
+.*                                                                         *
+.* Parameters :  PVIBILL   FORM 8    -  Admission Number                   *
+.*                                                                         *
+.* Returns    :  EXIT      = 1       -  If PVIBILL record not found on     *
+.*                                      PATINVFD or PATMI1FD               * 
+.*               ACCREVNE  FORM 9.2  -  Total Accom. Revenue               *
+.*               THTREVNE  FORM 9.2  -  Total Theatre Revenue              *
+.*               OTHREVNE  FORM 9.2  -  Total Other Revenue                *
+.*               TOTPBDAY  FORM 6    -  Total Patient Bed Days             *
+.* Requirements                                                            * 
+.* ------------                                                            *
+.* Includes   :  PATINVFD, PATIOINV                                        *
+.*               PATMI1FD, PATIOMIS                                        *
+.*               PATDSCFD, PATIODSC                                        *
+.*               PATCODFD, PATIOCOD                                        *
+.*               PATDTRFD, PATIODTR                                        *
+.*               NHOSPDAY                                                  *
+.*                                                                         *
+.* Open files :  PATINVR3                                                  *
+.*               PATMI1A1                                                  *
+.*               PATDSCH1                                                  *
+.*               PATCODE1                                                  *
+.*               PATDTRA1                                                  *
+.*                                                                         *
+.* Mods       :                                                            *
+.*        V9.03.01  24/10/2003  J.Tan   CAR 44172                          *
+.*                  Mods for pmsmtiaf file                                 *
+.*        V5.01.01  05/07/1993  Glenn Berry                                *
+.*                  Changes for different patient types                    *
+.***************************************************************************
+.
+PATCALCR  MOVE      ZERO,EXIT                * initialize
+          MOVE      ZERO,ACCREVNE            * initialize
+          MOVE      ZERO,THTREVNE            * initialize
+          MOVE      ZERO,OTHREVNE            * initialize
+          MOVE      ZERO,TOTPBDAY            * initialize
+.
+          BRANCH    PVITYPE,PTCL1000:        * A&E
+                            PTCL1000:        * Outpatient
+                            PTCL2000         * Inpatient
+          GOTO      PTCL1200                 * Any other patient type
+.
+.---- A&E Patients & Outpatients
+PTCL1000  MOVE      ONE,TOTPBDAY
+          MOVE      ZERO,ACCREVNE
+          MOVE      ZERO,THTREVNE
+          GOTO      PTCL1500
+.
+.---- All other patients 
+PTCL1200  MOVE      ZERO,TOTPBDAY
+          MOVE      ZERO,ACCREVNE
+          MOVE      ZERO,THTREVNE
+          GOTO      PTCL1500
+.
+.-------- calculate OTHREVNE
+PTCL1500  PACK      KEY16,PVIBILL,SP8          
+          CALL      RDSINV3                  * pos read on first invoice 
+PTCL1510  CALL      RDKINV3                  * Read Next invoice
+          BRANCH    OVRCD,PTCL9999           * EOF
+.          
+          COMPARE   PVIBILL,PINVADM          * same admission no.?
+          GOTO      PTCL9999 IF NOT EQUAL    * no, end
+.
+          ASSIGN    (PINVAMT + PINVJOUR + OTHREVNE),OTHREVNE
+          GOTO      PTCL1510                 * loop
+.
+.---- Inpatients 
+PTCL2000
+.
+.-- calc TOTPBDAY
+          PACK      KEY8,PVIBILL
+          CALL      RDMISS1
+          BRANCH    OVRCD,PTCL9900
+          MOVE      ADATE,FROMDATE           * set FROMDATE as admisison date
+.
+          PACK      KEY8,PVIBILL
+          CALL      RDDSCH1                  * patient discharged?
+          IF        OVRCD=1
+            PACK      TODATE,CCC,CYY,CMM,CDD     * set TODATE as current date
+            REP       " 0",TODATE
+          ELSE
+            MOVE      DDATE,TODATE           * set TODATE as discharge date
+          ENDIF
+.
+          CALL      NHOSPDAY
+          MOVE      NBRDAYS,TOTPBDAY
+.
+.-- calc ACCREVNE,THTREVNE,OTHREVNE
+.
+          OPEN       PMSMTIA1,"pmsmtiaf"
+.
+          PACK       KEY22,PVIBILL,SP20
+          CALL       RDSDTRN1
+PTCL2500  CALL       RDKDTRN1                * Read next PATDTRFD record
+          BRANCH     OVRCD,PTCL4000          * EOF
+.
+          COMPARE    PVIBILL,TADMNO          * same admission no.?
+          GOTO       PTCL4000 IF NOT EQUAL
+.
+          BRANCH     TRECTYPE,PTCL2510:      * Accom
+                              PTCL2520:      * Theatre
+                              PTCL2530       * Misc.
+          COMPARE    TRECTYPE,SIX          
+          GOTO       PTCL2600 IF EQUAL       * Journal
+.
+          GOTO       PTCL2500              
+
+PTCL2510  ASSIGN     (TPATAMTT + ACCREVNE),ACCREVNE
+          GOTO       PTCL2500
+.
+PTCL2520  ASSIGN     (TPATAMTT + THTREVNE),THTREVNE
+          GOTO       PTCL2500
+.
+PTCL2530  ASSIGN     (TPATAMTT + OTHREVNE),OTHREVNE
+          GOTO       PTCL2500
+.
+PTCL2600  PACK      KEY5,ANSJ,SP1,TTYPE,SP1
+          CALL      RDCODE1
+          BRANCH    OVRCD,PTCL2500
+.
+          MATCH     SP1,TCINDC1
+          IF        @EQUAL
+            ASSIGN    (TPATAMTT + ACCREVNE),ACCREVNE
+            GOTO      PTCL2500
+          ENDIF
+.           
+          MATCH     "A",TCINDC1
+          IF        @EQUAL
+            ASSIGN    (TPATAMTT + ACCREVNE),ACCREVNE
+            GOTO      PTCL2500
+          ENDIF
+.           
+          MATCH     "T",TCINDC1
+          IF        @EQUAL
+            ASSIGN    (TPATAMTT + THTREVNE),THTREVNE
+            GOTO      PTCL2500
+          ENDIF
+.           
+          MATCH     "O",TCINDC1
+          IF        @EQUAL
+            ASSIGN     (TPATAMTT + OTHREVNE),OTHREVNE
+            GOTO       PTCL2500
+          ENDIF
+.           
+          GOTO      PTCL2500
+.
+.         Check for items in pmsmtiaf file
+.
+PTCL4000  PACK       KEY14,PVIBILL,SP20
+          CALL       RSPMMTI1
+PTCL4500  CALL       RKPMMTI1                * Read next record
+          BRANCH     OVRCD,PTCL9999          * EOF
+.
+          MOVE       PVIBILL,DPVIBILL
+          MATCH      DPVIBILL,PMMIVISN        * same admission no.?
+          GOTO       PTCL9999 IF NOT EQUAL
+.
+          MATCH      "2",PMMIRTYP
+          GOTO       PTCL4520 IF EQUAL        * Theatre
+          MATCH      "3",PMMIRTYP
+          GOTO       PTCL4530 IF EQUAL        * Misc.
+.
+PTCL4520  ASSIGN     (PMMIAMTT + THTREVNE),THTREVNE
+          GOTO       PTCL4500
+.
+PTCL4530  ASSIGN     (PMMIAMTT + OTHREVNE),OTHREVNE
+          GOTO       PTCL4500
+.
+PTCL9900  MOVE      ONE,EXIT
+.
+PTCL9999  RETURN
++

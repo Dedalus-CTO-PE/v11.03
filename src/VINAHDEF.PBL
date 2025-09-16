@@ -1,0 +1,574 @@
+.*----------------------------------------------------------------------
+.* Include Name  :   VINAHDEF.PBL
+.*
+.* Function      :   Common procedure to perform VINAH referral field 
+.*               :   defaults       
+.*               :   
+.*----------------------------------------------------------------------
+.  Modifications Done :
+.*----------------------------------------------------------------------
+.  V11.01.01  11/10/2021  Ebon Clements          TSK 0912546
+.             Added RIAUDFLG = 2 comment - Don't write any referral In before
+.             or after audits 
+.*----------------------------------------------------------------------
+.  V10.14.04  29/05/2019  Steve Armstrong        TSK 0869966
+.             Fixed setting of RIAUDFLG after "before" audit is written for a
+.             Referral-In record (removed ELSE before flag set).
+.  V10.14.03  24/05/2019  Ebon Clements          TSK 0868837
+.             Clear the episode patient ready for care date if the 
+.             priority is changed to a not ready priority  - VDEF3000
+.  V10.14.02  13/05/2019  Steve Armstrong        TSK 0869966
+.             Mods to only write audit records where necessary when
+.             called from ALLWEB02 - UPDREF00, otherwise, processing
+.             remains unchanged when called via other means.
+.             Also fixed Before audit records to be written before any
+.             field changes are made.
+.  V10.14.01  01/05/2019  Ebon Clements          TSK 0868837
+.             Added default the episode patient ready for care date - VDEF3000
+.  V10.11.03  18/12/2017  Ebon Clements          TSK 0846952
+.             Fixed VDEF5000 GOTO if new notified of first appointment
+.             date is less than the referral date
+.  V10.11.02  04/08/2017  Ebon Clements          TSK 0834265
+.             Update program referral triage status and date when
+.             episode referral triage status changes - VDEF7000
+.  V10.11.01  21/07/2017  Ebon Clements          TSK 0828866
+.             Update program referral triage status and date when
+.             episode referral priority changes - VDEF7000
+.  V10.10.01  23/05/2017  Ebon Clements          TSK 0828866
+.             Don't default date referral accepted for retrospectively
+.             entered referrals.
+.  V10.08.01  14/10/2016  Ebon Clements          TSK 0817582
+.             Fixed key for first linked appointment and use
+.             booking/contact date for retrospective booking/contacts - VDEF3000
+.  V10.05.00  08/12/2014  Ebon Clements          CAR 305618
+.             Created include
+.*----------------------------------------------------------------------
+. Requires : SAVVREFN - Referral Number
+.            SAVVPRTY - Original Referral Priority Prior to Update
+.            SAVVTRGS - Original Referral Triage Status Prior to Update
+.            VINAHFLG - Flag indicating if after audit records are written here
+.                       0 = After audits to be written
+.                       1 = After audits not to be written
+.            EPAUDFLG - Flag to indicate what Episode audits have been written
+.                       0 = No before record written
+.                       1 = Before record written
+.            RIAUDFLG - Flag to indicate what Referral In audits have been
+.                       written
+.                       0 = No before record written
+.                       1 = Before record written
+.                       2 = Don't write any referral In before or after audits
+. Returns  : EPAUDFLG - Flag to indicate if an after Episode audit needs
+.                       to be written
+.                       0 = No after audit record to be written
+.                       1 = After audit record to be written
+.            RIAUDFLG - Flag to indicate if an after Referral In audit needs
+.                       to be written
+.                       0 = No after audit record to be written
+.                       1 = After audit record to be written
+.            VINAHREF - VINAH Master Referral Linked Visit Number
+.                       Episode OR a VINAH Master Referral
+.*----------------------------------------------------------------------
+.
+          DEFPROC   VDEF0000
+.
+          INC       ALLCONFD/INC
+          INC       ALLENCFD/INC
+          INC       ALLLNKFD/INC
+          INC       ALLREFFD/INC
+          INC       ALLRLNFD/INC
+          INC       OUTBOAFD/INC
+          INC       OUTSITFD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+.
+CURRDATE  DIM       8             * Current date
+.
+DEFTDATE  DIM       8             * New referral in receipt acknowledgement date
+DEFTDAT1  DIM       8             * New notified of first appointment date
+.
+EXITFLAG  FORM      1             * exit flag (processing completed)
+.                                    0 = don't exit (keep processing)
+.                                    1 = exit (finished processing)
+.
+PROGMREF  DIM       8             * Program referral number
+.
+SAVEUDT1  DIM       8             * saved alreudt1 value
+.
+EPISPRTY  DIM       3             * Episide referral priority
+EPISTRGS  DIM       3             * Episode referral triage status (Cat ts)
+EPISTRGD  DIM       8             * Episode referral triage date (CCYYMMDD)
+EPISUDT1  DIM       8             * Episode referral date referral accepted
+.
+          READ      CONTROLF,EIGHTY;*250,PTCNHDPS
+          READ      CONTROLF,HUND06;*27,ALCNRAUD
+.
+          MOVE      SP8,VINAHREF
+.
+          COMPARE   THREE,PTCNHDPS               * Exit if not victoria
+          GOTO      VDEF9999 IF NOT EQUAL
+.
+          OPEN      ALLENCA1,"allencaf"
+          OPEN      ALLREFA1,"allrefaf"
+          OPEN      ALLRLNA1,"allrlnaf"
+          OPEN      ALLRLNA2,"allrlnaf"
+          OPEN      PATCODE1,"patcodes"
+          OPEN      ALLLNKA3,"alllnkaf"
+          OPEN      OUTSITA1,"outsitaf"
+.
+          MATCH     "1",ALCNRAUD
+          IF        @EQUAL
+            OPEN      ALLAUDRE,"allaudre"
+          ENDIF
+.
+          MOVE      SP70,DEFTDATE                * Clear default date
+          MOVE      SP70,DEFTDAT1                * Clear default date 1
+.
+          CALL      IBACLOCK 
+          PACK      CURRDATE,CCC,CYY,CMM,CDD     * Current date               
+          REP       " 0",CURRDATE              
+.
+          PACK      KEY8,SAVVREFN,SP70
+          CALL      RDALREF1                     * Read the referral
+          BRANCH    OVRCD,VDEF9000
+.
+          PACK      KEY5,ANSC,ANSG,ALREDEPT,SP70
+          CALL      RDCODE1                      * Read cat CG
+          BRANCH    OVRCD,VDEF9000
+.
+          MATCH     SP70,TCINDC8                 * Exit if not a VINAH
+          GOTO      VDEF9000 IF EQUAL            * department
+.
+          MATCH     "1",ALREUYN4                 * Is this a VINAH Program
+          GOTO      VDEF3000 IF NOT EQUAL        * (master) referral
+.
+. Process a VINAH Program (master) referral
+.
+. Check if we need to default the referral in receipt acknowledgement date
+.
+          MOVE      ALREVISN,VINAHREF            * save visit number
+.
+          MATCH     SP70,ALREUDT5                * Referral in receipt
+          GOTO      VDEF9000 IF NOT EQUAL        * acknowledgement date
+.
+          MATCH     "4",ALRESTAT                 * Cancelled
+          IF        @EQUAL
+            MOVE     ALREDCAN,DEFTDATE           * Use cancellation date
+            GOTO     VDEF1000
+          ENDIF
+.
+          MATCH     "5",ALRESTAT                 * Rejected 
+          IF        @EQUAL
+            MOVE     ALRESRDT,DEFTDATE           * Use rejection date
+            GOTO     VDEF1000
+          ENDIF
+.
+          MATCH     SP70,ALREPRTY                * Check that there is a 
+          GOTO      VDEF9000 IF EQUAL            * referral priority
+.
+          MATCH     SAVVPRTY,ALREPRTY            * Check if referral priority
+          GOTO      VDEF9000 IF EQUAL            * has changed or is an add
+. 
+          PACK      KEY5,ANSP,ANSR,ALREPRTY
+          CALL      RDCODE1                      * Read program referral 
+          BRANCH    OVRCD,VDEF9000               * priority
+.
+          MATCH     ANST,TCINDC2                 * Awaiting triage so exit
+          GOTO      VDEF9000 IF EQUAL            * as not acknowledged
+.
+          MATCH     ANSA,TCINDC3                 * Awaiting addition info
+          IF        @EQUAL
+            MOVE      ALRECDAT,DEFTDATE          * use created date
+            GOTO      VDEF1000
+          ENDIF
+.
+          MATCH     "1",THCSCOD
+          IF        !@EQUAL
+            MATCH     "2",THCSCOD                * Priority 1 or 2 so use first
+            GOTO      VDEF9000 IF NOT EQUAL      * linked referral date referral
+          ENDIF                                  * accepted
+.
+          MOVE      CURRDATE,DEFTDATE            * date referral accepted today
+.                                                * due to priority change
+          PACK      KEY16,SAVVREFN,SP70
+          CALL      RSALRLN1                     * Find first linked referral
+          CALL      RKALRLN1
+          BRANCH    OVRCD,VDEF1000
+.
+          MATCH     SAVVREFN,ALRLVISN            * Correct master referral
+          GOTO      VDEF1000 IF NOT EQUAL
+.
+          PACK      KEY8,ALRLLNKV,SP70
+          CALL      RDALREF1                     * read first linked episode
+          BRANCH    OVRCD,VDEF1000               * referral
+.
+          MATCH     SP70,ALREUDT1
+          IF        !@EQUAL
+            MOVE      ALREUDT1,DEFTDATE          * date referral accepted
+          ENDIF
+.
+VDEF1000  MATCH     SP70,DEFTDATE                * Is there a new referral in
+          GOTO      VDEF9000 IF EQUAL            * receipt acknowledgment date
+.                                                * to update
+          PACK      KEY8,SAVVREFN,SP70
+          CALL      RDALREF1                     * Re read program referral
+          BRANCH    OVRCD,VDEF9000
+.
+          MATCH     ALRERDAT,DEFTDATE            * Can't be before the
+          GOTO      VDEF9000 IF LESS             * referral date
+.
+          IF        RIAUDFLG = 0
+            MOVE      TWO,AUDTTYPE               * write before history record
+            CALL      WAALRE00
+.
+.           Set flag to indicate that a before audit record has been written
+.
+            MOVE      ONE,RIAUDFLG
+          ENDIF
+.
+          MOVE      DEFTDATE,ALREUDT5            * Referral in receipt
+.                                                * acknowledgment date
+          CALL      UPALREF1                     * Update Referral            
+.
+          CALL      PMIGTNID             * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      ONE,HL7TRGID
+          MOVE      "VINAHDEF",HL7INCLD
+          CALL      DGCLII13             * broadcast Update Ref. (REF^I13)
+.
+.         This is a simple straight forward Referral In update, so write
+.         the after audit here as we're assuming that no further audit records
+.         will be written after this by the calling program (certainly not
+.         via UPDREF00).
+.
+          IF        RIAUDFLG = 1
+            MOVE      THREE,AUDTTYPE               * write after history record
+            CALL      WAALRE00
+          ENDIF
+          GOTO      VDEF9000
+.
+. Process a VINAH Episode (internal) referral.
+.
+VDEF3000  MOVE      ZERO,EXITFLAG                * initialise exit flag
+          MOVE      SP8,SAVEUDT1                 * init. saved udt1 value
+.
+. Check if we need to default the episode patient ready for care date
+.
+          MATCH     SAVVPRTY,ALREPRTY            * Check if referral priority
+          GOTO      VDEF3500 IF EQUAL            * has changed or is an add
+.
+          PACK      KEY5,ANSP,ANSR,ALREPRTY
+          CALL      RDCODE1                      * Read episode referral
+          BRANCH    OVRCD,VDEF3500               * priority
+.
+          MATCH     "P",TCINDC4                  * Patient Ready for Care
+          IF        !@EQUAL
+            MATCH     SP70,ALREUDT2              * No need to clear date if 
+            GOTO      VDEF3500 IF EQUAL          * not ready and date is blank
+          ENDIF
+.
+          IF        EPAUDFLG = 0
+            MOVE      TWO,AUDTTYPE               * write before history record
+            CALL      WAALRE00
+.
+.           Set flag to indicate that a before audit record has been written
+.
+            MOVE      ONE,EPAUDFLG
+          ENDIF
+.
+          MATCH     "P",TCINDC4                  * Patient Ready for Care
+          IF        @EQUAL
+            MOVE      CURRDATE,ALREUDT2          * Ready so set to current date
+          ELSE
+            MOVE      SP70,ALREUDT2              * Not ready so clear date
+          ENDIF
+.
+          CALL      UPALREF1                     * Update Referral
+.
+          CALL      PMIGTNID             * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      FIVE,HL7TRGID
+          MOVE      "VINAHDEF",HL7INCLD
+          CALL      DGCLII13             * broadcast Update Ref. (REF^I13)
+.
+. Check if we need to default the notified of first appointment date
+.
+VDEF3500  MATCH     SP70,ALREUDT9                * Notified of first  
+          GOTO      VDEF6000 IF NOT EQUAL        * appointment date
+.
+          PACK      KEY24,SAVVREFN,SP70
+          CALL      RSALLNK3                     * Find first linked OP 
+          CALL      RKALLNK3                     * appointment
+          BRANCH    OVRCD,VDEF4000
+.
+          MATCH     SAVVREFN,ALLNVISN            * Correct episode referral
+          GOTO      VDEF4000 IF NOT EQUAL
+.
+          PACK      KEY6,ALLNSITE,SP70
+          CALL      RDSITA1
+          BRANCH    OVRCD,VDEF4000
+.
+          PACK      CFNAME,OSTFILE,FILBOKA1  * Get the name of the BOKA1 file
+          OPEN      OUTBOKA1,CFNAME
+.
+          PACK      KEY28,ALLNSITE,ALLNCLIN,ALLNDATE,ALLNSTRT,ALLNSLOT,SP70
+          CALL      RDBOKA1
+          BRANCH    OVRCD,VDEF4000  
+. 
+          UNPACK    OBABKDTE,DEFTDAT1            * Date OP booking created
+.
+          MATCH     DEFTDAT1,OBADATE             * Retrospective appointment
+          IF        @LESS
+            MOVE      OBADATE,DEFTDAT1           * Use booking date if earlier
+          ENDIF                                  * than date created
+.
+VDEF4000  PACK      KEY16,SAVVREFN,SP70
+          CALL      RSALENC1
+VDEF4100  CALL      RKALENC1                     * Read first contact
+          BRANCH    OVRCD,VDEF5000
+.
+          MATCH     SAVVREFN,ALENVISN            * Correct referral
+          GOTO      VDEF5000 IF NOT EQUAL
+.
+          MATCH     "1",ALENRSTA                 * Cancelled
+          GOTO      VDEF4100 IF EQUAL
+.
+          MATCH     ALRERDAT,ALENCDAT            * Date contact created
+          GOTO      VDEF5000 IF LESS
+.
+          MATCH     SP70,DEFTDAT1
+          IF        @EQUAL
+            MOVE      ALENCDAT,DEFTDAT1          * Contact created date
+          ELSE
+            MATCH     DEFTDAT1,ALENCDAT
+            IF        @LESS
+              MOVE      ALENCDAT,DEFTDAT1        * Use contact created date
+            ENDIF                                * instead of OP booking created
+          ENDIF                                  * date
+.
+          MATCH     DEFTDAT1,ALENSDAT            * Retrospective contact
+          IF        @LESS
+            MOVE      ALENSDAT,DEFTDAT1          * Use contact date if earlier
+          ENDIF 
+.
+VDEF5000  MATCH     SP70,DEFTDAT1                * Is there a new notified of
+          GOTO      VDEF6000 IF EQUAL            * First appointment booked date
+.
+          PACK      KEY8,SAVVREFN,SP70
+          CALL      RDALREF1                     * Re read episode referral
+          BRANCH    OVRCD,VDEF9000               * failed so finish now
+.
+          MATCH     ALRERDAT,DEFTDAT1            * Can't be before the
+          GOTO      VDEF6100 IF LESS             * referral date
+.
+          IF        EPAUDFLG = 0
+            MOVE      TWO,AUDTTYPE               * write before history record
+            CALL      WAALRE00
+.
+.           Set flag to indicate that a before audit record has been written
+.
+            MOVE      ONE,EPAUDFLG
+          ENDIF
+.
+          MOVE      DEFTDAT1,ALREUDT9            * Notified of first appointment
+.                                                * booked date
+          CALL      UPALREF1                     * Update Referral
+.
+          CALL      PMIGTNID             * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      TWO,HL7TRGID
+          MOVE      "VINAHDEF",HL7INCLD
+          CALL      DGCLII13             * broadcast Update Ref. (REF^I13)
+          GOTO      VDEF6100
+.
+. Check if we need to default the date referral accepted               
+.
+VDEF6000  PACK      KEY8,SAVVREFN,SP70
+          CALL      RDALREF1                     * Read episode referral
+          BRANCH    OVRCD,VDEF9000               * not found
+.
+VDEF6100  MOVE      ALREPRTY,EPISPRTY       * Episode referral priority
+          MOVE      ALREUDT1,EPISUDT1       * Episode date referral accepted
+          MOVE      ALRETRGS,EPISTRGS       * Episode referral triage status
+          MOVE      ALRETRGD,EPISTRGD       * Episode referral triage date
+.
+          MATCH     SP70,ALREUDT1                * Is the date referral accepted
+          GOTO      VDEF6900 IF NOT EQUAL        * populated
+.
+          MATCH     CURRDATE,ALRERDAT         * restrospective add referral
+          IF        @LESS
+            MATCH     SP70,SAVVPRTY           * Don't default date referral
+            GOTO      VDEF6900 IF EQUAL       * accepted 
+          ENDIF
+.
+          MATCH     SAVVPRTY,ALREPRTY         * Episode ref priority changed
+          IF        @EQUAL             
+            MATCH     SP70,ALREUDT9           * Notified of first appointment
+            IF        !@EQUAL  
+              MOVE      ALREUDT9,SAVEUDT1     * Set date referral accepted to 
+              GOTO      VDEF6500              * notified of first appointment
+            ENDIF
+            GOTO      VDEF6900
+          ENDIF
+.
+          PACK      KEY5,ANSP,ANSR,ALREPRTY
+          CALL      RDCODE1                      * Read priority
+          IF        OVRCD = 1
+            MOVE      ONE,EXITFLAG               * set flag to exit
+            GOTO      VDEF6900
+          ENDIF
+.
+          MATCH     "1",THCSCOD
+          IF        !@EQUAL
+            MATCH     "2",THCSCOD                * Priority 1 or 2 so set      
+            GOTO      VDEF6900 IF NOT EQUAL      * date referral accepted
+          ENDIF
+.
+          MATCH     SP70,ALREUDT9                * Notified of first appointment
+          IF        !@EQUAL
+            MATCH     CURRDATE,ALREUDT9          * Date referral accepted must 
+            GOTO      VDEF6900 IF LESS           * be less that notified of 
+          ENDIF                                  * first appointment
+.
+          MOVE      CURRDATE,SAVEUDT1            * Set date referral accepted
+.
+VDEF6500  IF        EPAUDFLG = 0
+            MOVE      TWO,AUDTTYPE               * write before history record
+            CALL      WAALRE00
+.
+.           Set flag to indicate that a before audit record has been written
+.
+            MOVE      ONE,EPAUDFLG
+          ENDIF
+.
+          MATCH     SP8,SAVEUDT1
+          IF        !@EQUAL
+            MOVE      SAVEUDT1,ALREUDT1          * set date referral accepted
+            MOVE      ALREUDT1,EPISUDT1          * save date referral accepted
+          ENDIF
+.
+          CALL      UPALREF1                     * Update episode referral
+.
+          CALL      PMIGTNID             * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      THREE,HL7TRGID
+          MOVE      "VINAHDEF",HL7INCLD
+          CALL      DGCLII13             * broadcast Update Ref. (REF^I13)
+.
+VDEF6900  IF        EPAUDFLG = 1
+            IF        VINAHFLG = 0
+              MOVE      THREE,AUDTTYPE           * write after history record
+              CALL      WAALRE00
+            ENDIF
+          ENDIF
+.
+          BRANCH    EXITFLAG,VDEF9000            * finished, so exit
+.
+. Check if we need to update the program referral priority/triage status or
+. referral in receipt acknowledgement date
+.
+VDEF7000  MATCH     SAVVPRTY,ALREPRTY
+          IF        @EQUAL
+            MATCH     SAVVTRGS,ALRETRGS          * Has episode referral priority
+            GOTO      VDEF9000 IF EQUAL          * or triage status changed
+          ENDIF
+.
+          PACK      KEY16,SAVVREFN,SP70
+          CALL      RSALRLN2                     * Find program referral
+          CALL      RKALRLN2
+          BRANCH    OVRCD,VDEF9000
+.
+          MATCH     SAVVREFN,ALRLLNKV            * Correct episode referral
+          GOTO      VDEF9000 IF NOT EQUAL
+.
+          MOVE      ALRLVISN,PROGMREF            * Program referral number
+.
+          PACK      KEY16,PROGMREF,SP70
+          CALL      RSALRLN1                     * Check if this is the first
+          CALL      RKALRLN1                     * linked episode referral
+          BRANCH    OVRCD,VDEF9000
+.
+          MATCH     PROGMREF,ALRLVISN            * Correct program referral
+          GOTO      VDEF9000 IF NOT EQUAL
+.
+          MATCH     SAVVREFN,ALRLLNKV            * First linked episode referral
+          GOTO      VDEF9000 IF NOT EQUAL
+.
+          PACK      KEY8,PROGMREF,SP70
+          CALL      RDALREF1                     * Read program referral
+          BRANCH    OVRCD,VDEF9000
+.
+          MATCH     EPISPRTY,ALREPRTY         * Has the priority changed
+          IF        @EQUAL
+            MATCH     EPISTRGS,ALRETRGS       * Has triage status changed
+            GOTO      VDEF9000 IF EQUAL
+          ENDIF
+.
+          IF        RIAUDFLG = 0
+            MOVE      TWO,AUDTTYPE            * write before history record
+            CALL      WAALRE00
+.
+.           Set flag to indicate that a before audit record has been written
+.
+            MOVE      ONE,RIAUDFLG
+          ENDIF
+.
+          MOVE      EPISPRTY,ALREPRTY    * Update program referral priority
+          MOVE      EPISTRGS,ALRETRGS    * Update program ref triage status
+          MOVE      EPISTRGD,ALRETRGD    * Update program ref triage date
+.
+          MATCH     SP70,ALREUDT5
+          IF        @EQUAL
+            MATCH     ALRERDAT,EPISUDT1
+            IF        !@LESS
+              MOVE      EPISUDT1,ALREUDT5     * Update program referral referral
+            ENDIF                             * in receipt acknowledgement date
+          ENDIF                               
+.
+          CALL      UPALREF1                  * Update program referral
+.
+          CALL      PMIGTNID             * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      FOUR,HL7TRGID
+          MOVE      "VINAHDEF",HL7INCLD
+          CALL      DGCLII13             * broadcast Update Ref. (REF^I13)
+.
+.         Check if we need to write an after audit record, but only if
+.         we are writing audits in VINAHDEF.  If not, save the Referral In
+.         visit number for update on return (ALLWEB02 - UPDREF00 only)
+.
+          IF        RIAUDFLG = 1
+            IF        VINAHFLG = 0
+              MOVE      THREE,AUDTTYPE           * write after history record
+              CALL      WAALRE00
+            ELSE
+              MOVE      ALREVISN,VINAHREF        * save the master referral no.
+            ENDIF
+          ENDIF
+.
+VDEF9000  CLOSE     ALLENCA1             
+          CLOSE     ALLREFA1
+          CLOSE     ALLRLNA1
+          CLOSE     ALLRLNA2
+          CLOSE     PATCODE1
+          CLOSE     ALLLNKA3
+          CLOSE     OUTSITA1
+          CLOSE     OUTBOKA1
+.
+          MATCH     "1",ALCNRAUD
+          IF        @EQUAL
+            CLOSE     ALLAUDRE
+          ENDIF
+          GOTO      VDEF9999
+.
+          INC       DGCLII13
+.
+          INC       ALLENCIO/INC
+          INC       ALLLNKIO/INC
+          INC       ALLREFIO/INC
+          INC       ALLRLNIO/INC
+          INC       IBAOVRIO/INC
+          INC       OUTBOAIO/INC
+          INC       OUTSITIO/INC
+          INC       PATCODIO/INC
+.
+VDEF9999  ENDPROC

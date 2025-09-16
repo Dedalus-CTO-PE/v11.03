@@ -1,0 +1,1756 @@
+.******************************************************************************
+.* System    :  PATIENT MANAGEMENT                                            *
+.* Program   :  IBAPMS27                                                      *
+.* Name      :  Theatre Case Mix Report                                       *
+.******************************************************************************
+.* Date      :  08/05/1991                                                    *
+.* Author    :  Justin Coates - Schlofty Long-Shlong Prong Dong               *
+.* Function  :  List the number of procedures for each theatre band.          *
+.* Modifications  :                                                           *
+.*        V11.00.01 06/03/2020  J.Tan          TSK 0838262                    *
+.*                  Added Effective from and to date to MBS Item file         *
+.*        V10.03.01 02/01/2013 Patrick Adair   CAR 261630                     *
+.*                  Removed port number from temp file name                   *
+.*        V10.01.01 03/02/2011 Jill Parkinson CAR 233088                      *
+.*                  Added pmsvx1af                                            *
+.*        V10.00.01 05/07/2010  J.Tan          CAR 222665                     *
+.*                  Mods checking for Credit notes                            *
+.*        V9.12.02  22/07/2009  J.Tan          CAR 196363                     *
+.*                  Removed checking for split invoice                        *
+.*        V9.12.01  07/07/2009  Ebon Clements  CAR 196363                     *
+.*                  Added read of pmsmtiaf for items not invoiced - EXTM0000  *
+.*        V9.03.00  20/07/2004  Lina Vo    CAR 51906                          *
+.*                  Ported from V6.12                                         *
+.*        V6.05.01  08/12/1998  Nicole Harrington                             *
+.*                  Removed CCENTRY                                           *
+.*        V5.01     21/05/1991  Graeme Williams                               *
+.*                  Fixed calculation of health fund band                     *
+.*        V5.02     12/06/1991  Graeme Williams                               *
+.*                  Made report return to asking for the option               *
+.*        V5.03     12/06/1991  Graeme Williams                               *
+.*                  If using MBS fee ranges, use class. 1 for band code       *
+.*        V5.04     05/02/1992  i chung          SRF 112939                   *
+.*                  Fixed problem with running over the end of year           *
+.*                                                                            *
+.*        V6.00.01  19/02/1992    Justin Coates                               *
+.*                  Fix read on health fund file (table = [0000    ])         *
+.*        V6.00.02  27/11/1992    Justin Coates  Quote 7442  SRF 112216       *
+.*                  Added new report options according to PTCNNTCM            *
+.*        V6.00.03  13/10/93      DIG                        SRF 125442       *
+.*                  Fixed problem with health fund defaulting to the same one *
+.*                  all of the time.                                          *
+.*        V6.04.01  21/01/98 J.Tan   SRF 621627                               *
+.*                  Mods to ignore insurance invoice instead of patient inv.  *
+.******************************************************************************
+.
+.$$$$$
+.         IBAPMS27.PBL        Theatre Case Mix Report
+.         ============        =======================
+.         OPNA0000 - Enter the report type
+.         DATE0000 - Enter the date range for the report
+.         SUDE0000 - Summary or Detailed question
+.         EXTA0000 - Extract admissions in the date range from PATDAYFD
+.         EXTB0000 - Extract all data about admissions from PATDTRFD
+.         REPT0000 - Produce the report
+.
+.$$$$$
+.
+          INC       STD001FD                * standard variables
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       PATCODFD/INC            * Codes file
+          INC       PATDAYFD/INC            * Day file
+          INC       PATDSCFD/INC            * Discharges file
+          INC       PATDTRFD/INC            * Patient Debtors Transactions file
+          INC       PATFN1FD/INC            * Health Funds file
+          INC       PATINVFD/INC            * Invoices file
+          INC       PATITMFD/INC            * MBS file
+          INC       PATMI1FD/INC            * Admissions file
+          INC       PMSVX1FD/INC            * Admissions file
+          INC       PMSMTIFD/INC            * Misc/Theatre charges
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+.         program variables
+.
+BANDCODE  DIM       3         * health fund banding code
+BANDFLAG  FORM      2         * health fund banding flag
+BANDTOTL  FORM      6         * total procedures for a band
+.
+CCYY      DIM       4         * century and year
+CDFRDATE  DIM       8         * starting date : ccyymmdd
+CDTODATE  DIM       8         * ending   date : ccyymmdd
+CFNAMEA   DIM       8         * temp file A
+CFNAMEB   DIM       8         * temp file A
+CMDLINE   DIM       80        * command line for executing TBL command
+COUNT     FORM      3         * counter of items
+CURRDATE  DIM       8         * current date
+CURRDMY   DIM       8         * current date ccyymmdd
+CURRATYP  DIM       3         * current admission type
+CURRINV   DIM       8         * current invoice number
+CURRSESS  DIM       2         * current session
+.
+DATE8     DIM       8         * general work date
+DTRDATE8  DIM       8         * dtr date as dim 8 ccyymmdd
+DXFRDATE  DIM       10        * starting date : dd/mm/ccyy
+DXTODATE  DIM       10        * ending   date : dd/mm/ccyy
+.
+FILEDATE  DIM       8         * temp patdayaf date - format ccyymmdd
+FORM8     FORM      8         * form version of admission number
+FRDATE8   DIM       8         * From Date as dim 8
+HEAD1     DIM       30        * heading line 1
+HEAD2     DIM       30        * heading line 2
+.
+MMDD      DIM       4         * month and day
+OPT       DIM       32        * the option to run
+PRNTATTL  FORM      1         * = 1 means admission type total printed
+PRNTCLAM  FORM      1         * = 1 means claim code printed
+PRNTFUND  FORM      1         * = 1 means fund printed
+PTCNNTCM  FORM      1         * using new report ??
+REPTFRMT  FORM      1         * the report format
+.                                 1 = summary  - health fund (ORIGINAL layout)
+.                                 2 = detailed - health fund
+.                                 3 = summary  - claim code - no health fund
+.                                 4 = detailed - claim code - no health fund
+.                                 5 = summary  - claim code - health fund
+.                                 6 = detailed - claim code - health fund
+TODATE6   DIM       8         * To Date as dim 8
+TODATE8   DIM       8         * To Date as dim 8
+.
+.         temp file definitions
+.
+TEMPA     IFILE     SQL, FIXED=9, KEY="U1-8"
+KEYA      INIT      " 9 U1-8"
+.
+.Name     Type      Length  Physical Start  Name
+.-------  ----      ------  -------- -----  -----------------------------------
+XADMISS   DIM       8            8       1  Admission Number
+. End of Record                          9
+.
+TEMPB     IFILE     SQL, FIXED=36, KEY="U1-3,4-6,7-12,13-15"
+KEYB      INIT      " 36 U1-3,4-6,7-12,13-15"
+.
+.Name     Type      Length  Physical Start  Name
+.-------  ----      ------  -------- -----  -----------------------------------
+XATYPE    DIM       3            3       1  Admission Type/Suggested Classif.
+XCLAIM    DIM       3            3       4  Claim Code
+XHFUND    DIM       6            6       7  Health fund code 
+XBAND     DIM       3            3      13  Theatre banding code
+XPROC1    FORM      6            4      16  Number of 1st procedures
+XPROC2    FORM      6            4      20  Number of 2nd procedures
+XPROC3    FORM      6            4      24  Number of 3rd procedures
+XPROC4    FORM      6            4      28  Number of 4th procedures
+XPROC5    FORM      6            4      32  Number of 5th procedures
+. End of Record                         36  
+.
+.         program constants
+.
+CATA      INIT      "A "      * admission type
+CATCL     INIT      "CL"      * claim code category
+CATTB     INIT      "TB"      * band code category
+OPT1      INIT      "By Claim Code (no Health Fund)  "
+OPT2      INIT      "By Claim Code (with Health Fund)"
+OPT3      INIT      "By Health Fund                  "
+.
+INVCODE   INIT      "Invalid Code : "
+ISBUILD   INIT      "isbuild "
+ISERASE   INIT      "iserase "
+.
+Z3        INIT      "zzz"
+Z6        INIT      "zzzzzz"
+ZERO4     INIT      "0000"
+ZERO8     INIT      "0000    "
+.
+PRGID     INIT      "IBAPMS27"
+PRGNAM    INIT      "THEATRE CASE MIX REPORT"
+VERSION   INIT      "V11.03.00"
++
+.*********************************************************************
+.*                  ML0000                                           *
+.*        Mainline Code / Controlling Logic                          *
+.*********************************************************************
+ML0000    CALL      INIT0000                * initialization
+.
+ML1000    CALL      OPTN0000                * enter the option
+          BRANCH    EXIT,ML9999             * exit
+.
+ML2000    CALL      DATE0000                * enter date range
+          BRANCH    EXIT,ML1000             * nothing entered
+.
+          CALL      SUDE0000                * see if summary or detailed
+          CALL      CONTQST
+          BRANCH    CEXIT,ML3000,ML2000,ML1000
+.
+ML3000    CALL      EXTA0000                * extract all the patients
+          CALL      EXTB0000                * get details for extracted patients
+.
+ML4000    CALL      REPT0000                * produce the report
+          CALL      DTPA0000                * delete temp file A
+          CALL      DTPB0000                * delete temp file B
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM
++
+.*********************************************************************
+.*                  INIT0000                    Called by : ML0000   *
+.*        Initialization and open files                              *
+.*********************************************************************
+INIT0000  CALL      DISPHEAD                * display program details
+          CALL      IBACLOCK
+          DISPLAY   *P56:24,"Opening patcodes";
+          OPEN      PATCODE1,"patcodes"     * codes file
+          DISPLAY   *P64:24,"patdschf";
+          OPEN      PATDSCH1,"patdschf"     * discharge file
+          DISPLAY   *P64:24,"patdtraf";
+          OPEN      PATDTRA1,"patdtraf"     * debtor file
+          DISPLAY   *P64:24,"patfn1af";
+          OPEN      PATFN1A1,"patfn1af"     * health fund file
+          DISPLAY   *P64:24,"patinvrf";
+          OPEN      PATINVR1,"patinvrf"     * invoice file
+          DISPLAY   *P64:24,"patitemn";
+          OPEN      PATITEM1,"patitemn"     * MBS item file
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"     * admission file
+          OPEN      PMSVX1A1,"pmsvx1af"     * admission file
+          DISPLAY   *P64:24,"pmsmtiaf";
+          OPEN      PMSMTIA1,"pmsmtiaf"     * misc/theatre charges file
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,TWENTY;*201,PTCNNTCM
+.
+.         set up KEYDATE input requirements
+.
+          MOVE      "1",CCANLDTE            * can cancel default
+          MOVE      "1",CDEFDTE             * enter once to accept default
+          MOVE      "0",CHIGHLT             * use highlighting
+.
+.         set up standard for "?" mark option
+.
+          MOVE      "1",CNEWDS              * new ? option
+.
+INIT9999  RETURN
++
+.*********************************************************************
+.*                  OPNA0000                    Called by : ML1000   *
+.*        Print report or not                                        *
+.*        Returns : EXIT = 1      exit selected                      *
+.*********************************************************************
+OPNA0000  DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,"0",*P1:5,"1",*HOFF:
+                    *P2:4," = Exit":
+                    *P2:5," = Print Report":
+                    *P1:7,"Select Option :";
+.
+OPNA1000  KEYIN     *P17:7,*DV,UNDLN1,*P17:7,*V2LON,MOPTION;
+.
+          COMPARE   ZERO,MOPTION
+          GOTO      OPNA9000 IF EQUAL       * exit
+.
+          BRANCH    MOPTION,OPNA8000
+          BEEP
+          GOTO      OPNA1000
+.
+OPNA8000  MOVE      ZERO,EXIT
+          MOVE      ONE,REPTFRMT            * set to report 1
+          PACK      OPT,SP20,SP20
+          GOTO      OPNA9999
+.
+OPNA9000  MOVE      ONE,EXIT
+.
+OPNA9999  RETURN
++
+.*********************************************************************
+.*        enter the type of report                                   *
+.*********************************************************************
+OPNB0000  DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,"0",*P1:5,"1",*P1:6,"2",*P1:7,"3",*HOFF:
+                    *P2:4," = Exit":
+                    *P2:5," = ",OPT1:
+                    *P2:6," = ",OPT2:
+                    *P2:7," = ",OPT3:
+                    *P1:9,"Select option : ";
+.
+OPNB1000  KEYIN     *P17:9,*DV,UNDLN1:
+                    *P17:9,*V2LON,MOPTION;
+.
+          COMPARE   ZERO,MOPTION
+          GOTO      OPNB9000 IF EQUAL       * exit
+.
+          BRANCH    MOPTION,OPNB8000,OPNB8000,OPNB8000
+          BEEP
+          GOTO      OPNB1000
+.
+OPNB8000  MOVE      ZERO,EXIT
+          LOAD      REPTFRMT,MOPTION,THREE,FIVE,ONE
+          LOAD      OPT,MOPTION,OPT1,OPT2,OPT3
+          GOTO      OPNB9999
+.
+OPNB9000  MOVE      ONE,EXIT
+.
+OPNB9999  RETURN
++
+.*********************************************************************
+.*                  DATE0000                    Called by : ML2000   *
+.*        Enter the date ranges                                      *
+.*        Returns : CDFRDATE      Starting Date                      *
+.*                : CDTODATE      Ending   Date                      *
+.*********************************************************************
+DATE0000  DISPLAY   *P1:10,*EF:
+                    *P1:11,"Starting Date : ":
+                    *P1:13,"Ending   Date : ";
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE           * get current date
+.
+          UNPACK    SP20,CDFRDATE,CDTODATE  * clear codes
+          UNPACK    SP20,DXFRDATE,DXTODATE  * clear descriptions
+.
+          MOVE      "11",CVERT              * row
+          MOVE      "17",CCOL               * column
+.
+DATE1000  UNPACK    SP6,CMON,CDAY,CYEAR
+          MOVE      CCC,CCENT               * have current century
+.
+.         enter the from date
+.
+          CALL      KEYDATE
+          BRANCH    CQUEST,DATE1000         * ? not allowed
+          BRANCH    OVRCD,DATE9100          * exit
+.
+          PACK      CDFRDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",CDFRDATE
+          MOVE      CDFRDATE,FRDATE8
+.
+          CALL      PACDATE
+          MOVE      CPCDATE,DXFRDATE        * formatted date
+.
+          MATCH     CURRDATE,CDFRDATE
+          GOTO      DATE2000 IF LESS        * entered < current -> OK
+.
+          DISPLAY   *P1:24,*EL,*B,"Date must be in the past.  ";
+          CALL      HITENTER 
+          GOTO      DATE1000
+.
+.         enter the to date
+.
+DATE2000  MOVE      "13",CVERT              * row
+          MOVE      "17",CCOL               * column
+          UNPACK    CDFRDATE,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    CQUEST,DATE2000         * ? not allowed
+.
+          PACK      CDTODATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",CDFRDATE
+          MOVE      CDTODATE,TODATE8
+.
+          CALL      PACDATE
+          MOVE      CPCDATE,DXTODATE        * formatted date
+.
+          MATCH     CURRDATE,CDTODATE
+          GOTO      DATE3000 IF LESS        * entered < current -> OK
+.
+          DISPLAY   *P1:24,*EL,*B,"Date must be in the past.  ";
+          CALL      HITENTER 
+          GOTO      DATE2000
+.
+DATE3000  MATCH     CDFRDATE,CDTODATE
+          GOTO      DATE9000 IF NOT LESS    * ending >= starting -> OK
+.
+          DISPLAY   *P1:24,*EL,*B:
+                    "Ending Date must be > or equal to Starting Date.  ";
+          CALL      HITENTER 
+          GOTO      DATE2000
+.
+DATE9000  MOVE      ZERO,EXIT               * continue
+          GOTO      DATE9999
+.
+DATE9100  MOVE      ONE,EXIT                * exit selected
+.
+DATE9999  RETURN
++
+.*********************************************************************
+.*                  EXTA0000                    Called by : ML3000   *
+.*        Loop over day file for the entered date and write the      *
+.*        Admission numbers to temp file A                           *
+.*********************************************************************
+EXTA0000  CALL      CTPA0000                * create temp file
+          UNPACK    CDFRDATE,CCYY,MMDD      * get ccyy and mmdd of starting date
+          UNPACK    CDTODATE,KEY4           * get ccyy of ending date
+.
+.         open the current file
+.
+EXTA1000  PACK      CFNAME,FILDAYA1,CCYY    * open starting file
+          REP       " 0",CFNAME
+          DISPLAY   *P64:24,CFNAME
+.
+          CLOSE     PATDAYA1                * close old file
+          MOVE      ZERO,OVRCD              * clear flag
+          TRAP      OVERCOND IF IO          * call overcond if no file
+          OPEN      PATDAYA1,CFNAME         * starting file
+          TRAPCLR   IO                      * clear the trap
+          BRANCH    OVRCD,EXTA3000          * get next years file
+.
+          DISPLAY   *P1:24,"Extracting Admission No : ";
+          PACK      KEY12,MMDD,SP8
+          CALL      RSPTDAY1                * positional read
+.
+EXTA2000  CALL      RKPTDAY1                * next read
+          BRANCH    OVRCD,EXTA3000          * end of current file
+.
+          DISPLAY   *P27:24,XADMISS;
+.
+          PACK      FILEDATE,CCYY,PTDYDATE
+          MATCH     FILEDATE,CDTODATE
+          GOTO      EXTA9999 IF LESS        * after end date
+.
+          MOVE      PTDYADMN,KEY8           * admission number is key
+          CALL      RATEMPA1
+          COMPARE   ZERO,OVRCD
+          GOTO      EXTA2000 IF EQUAL       * already exists
+          DISPLAY   *P27:24,*V2LON,XADMISS;
+.
+          MOVE      PTDYADMN,XADMISS        * set up admission number
+          MOVE      XADMISS,KEY8
+          CALL      WRTEMPA1
+          GOTO      EXTA2000
+.
+. ------- increment year by one and get open next day file -------
+.
+EXTA3000  UNPACK    CCYY,CCENT,CYEAR        * century and year of current file
+          MOVE      CYEAR,IYEAR             * get as a form
+          ADD       ONE,IYEAR               * get next year
+          MOVE      IYEAR,CYEAR             * reset year
+.
+          COMPARE   ZERO,IYEAR
+          GOTO      EXTA3100 IF NOT EQUAL   * not a new century
+.
+.         have a change in centuries
+.
+          MOVE      CCENT,ICENT             * get as a form
+          ADD       ONE,ICENT               * get next century
+          MOVE      ICENT,CCENT             * reset century
+.
+EXTA3100  PACK      CCYY,CCENT,CYEAR        * set new century and year 
+          REP       " 0",CCYY
+.
+          MATCH     CCYY,KEY4
+          GOTO      EXTA9999 IF LESS        * will be opening into the future
+          MOVE      SP4,MMDD                * set to start of file
+          GOTO      EXTA1000                * try and open it
+.
+EXTA9999  RETURN
++
+.*********************************************************************
+.*                  EXTB0000                    Called by : ML3000   *
+.*        Loop over temp file A and extract valid data to temp fileB *
+.*********************************************************************
+EXTB0000  CALL      CTPB0000                * create temp file B
+.
+. ------- loop over temp file A -------
+. 
+          DISPLAY   *P1:24,*EL,"Processing Admission No : ":
+                    *P40:24,"MBS item : ",*P65:24,"Band : ";
+          MOVE      SP8,KEY8                * clear key
+          CALL      RSTEMPA1                * positional read
+.
+EXTB1000  CALL      RKTEMPA1                * next read
+          BRANCH    OVRCD,EXTB9999          * finished temp file
+.
+          DISPLAY   *P27:24,XADMISS;        * read in admission number
+.
+          MOVE      XADMISS,KEY8            * admission number
+          CALL      RDMISS1                 * read admission file
+          BRANCH    OVRCD,EXTB1000          * invalid admission number
+.
+          MATCH     ADATE,TODATE8
+          GOTO      EXTB1000 IF LESS        * admitted after period
+.
+          CALL      RDDSCH1                 * read discharge file
+          BRANCH    OVRCD,EXTB1100          * no discharge record
+.
+          MATCH     FRDATE8,DDATE
+          GOTO      EXTB1000 IF LESS        * discharged before period
+.
+EXTB1100  DISPLAY   *P27:24,*V2LON,XADMISS; * valid admission number
+.
+.         Call function to read through PMSPTIFD   
+.
+          CALL      EXTM0000                
+.
+.         set up to read through PATDTRFD
+.
+          MOVE      SP2,CURRSESS            * current session
+          MOVE      SP8,CURRDMY             * current date of session
+          MOVE      SP8,CURRINV             * current invoice
+          MOVE      ZERO,COUNT              * clear count value
+          MOVE      XADMISS,KEY8
+          PACK      KEY22,KEY8,SP20         * start with admission number
+          CALL      RDSDTRN1                * positional read
+.
+. ------- loop over PATDTRFD for the admission number -------
+.
+EXTB2000  CALL      RDKDTRN1                * next read
+          BRANCH    OVRCD,EXTB1000          * end of file -> get next admission
+.
+          DISPLAY   *P51:24,TITEMNO;        * display item code
+.
+          MOVE      XADMISS,FORM8           * get as form
+          COMPARE   FORM8,TADMNO          
+          GOTO      EXTB1000 IF NOT EQUAL   * finished the admission number
+.
+          COMPARE   TWO,TRECTYPE
+          GOTO      EXTB2000 IF NOT EQUAL   * not a theatre charge
+.
+          MATCH     "1",PTDTCRST
+          GOTO      EXTB2000 IF EQUAL       * Fully credited note
+          MATCH     "2",PTDTCRST
+          GOTO      EXTB2000 IF EQUAL       * Credited by item
+.
+.         check that item is in selected period
+.
+          PACK      DTRDATE8,TFCENT,TFYEAR,TFMONTH,TFDAY  * invoice date
+          REP       " 0",DTRDATE8
+.
+          MATCH     FRDATE8,DTRDATE8
+          GOTO      EXTB2000 IF LESS        * dtr date before selected period
+.
+          MATCH     DTRDATE8,TODATE8
+          GOTO      EXTB2000 IF LESS        * dtr date after selected period
+.
+.         check that invoice isn't split
+.
+          MOVE      TREF,KEY8               * invoice number
+          CALL      RDINV1                  * read invoice file
+          BRANCH    OVRCD,EXTB2100          * no invoice number so OK
+.
+.         COMPARE   ONE,PINVTYP             * insurance invoice ?
+.         GOTO      EXTB2000 IF EQUAL       * a split invoice so ignore
+.
+.         check a valid MBS item
+.
+EXTB2100  PACK      KEY17,TITEMNO,DTRDATE8,SP70  * MBS item
+          CALL      PATITMRD                * read item file
+          BRANCH    OVRCD,EXTB2000          * invalid item
+.
+          DISPLAY   *P51:24,*V2LON,TITEMNO; * valid item code
+.
+. ------- determine if this is the first item for a theatre session -------
+.
+EXTB3000  MATCH     CURRINV,TREF
+          GOTO      EXTB3500 IF NOT EQUAL   * different invoice number
+.
+          MATCH     CURRDMY,DTRDATE8
+          GOTO      EXTB3500 IF NOT EQUAL   * different date
+.
+          MATCH     CURRSESS,TSESSION
+          GOTO      EXTB3500 IF NOT EQUAL   * different session
+.
+.         have the same key data so add one to COUNT
+.
+          ADD       ONE,COUNT               * add to procedure number
+          GOTO      EXTB4000
+.
+.         have a new procedure -> first item
+.
+EXTB3500  MOVE      ONE,COUNT               * reset procudure number
+          MOVE      TREF,CURRINV            * set current invoice
+          MOVE      DTRDATE8,CURRDMY        * set current date
+          MOVE      TSESSION,CURRSESS       * set current session
+.
+. ------- get the theatre band for the MBS item -------
+.
+EXTB4000  PACK      KEY14,AFUNDH,ZERO8      * health fund and "0000    "
+          CALL      RDFUND1                 * read health fund file
+          BRANCH    OVRCD,EXTB4200          * no health fund record
+          MOVE      HFBAND,BANDFLAG         * set up banding flag
+          GOTO      EXTB4300 
+.
+EXTB4200  PACK      KEY5,CATCL,ACLAIM       * use claim code
+          CALL      RDCODE1                 * read  codes file
+          BRANCH    OVRCD,EXTB4300          * invalid data
+          MOVE      TCFORM6,BANDFLAG        * set up banding flag
+.
+.         have banding flag, now get banding code
+.
+EXTB4300  COMPARE   ZERO,BANDFLAG
+          GOTO      EXTB4400 IF NOT EQUAL
+          MOVE      ONE,BANDFLAG            * use class. 1 for band code
+.
+EXTB4400  MOVE      SP3,BANDCODE            * clear the banding code
+          LOAD      BANDCODE,BANDFLAG,IBAND1,IBAND2,IBAND3,IBAND4,IBAND5,IBAND6:
+                                      IBAND7,IBAND8,IBAND9,IBAND10,IBAND11:
+                                      IBAND12,IBAND13,IBAND14,IBAND15,IBAND16
+.
+          DISPLAY   *P72:24,*V2LON,BANDCODE;     * display banding code
+.
+.         now update all values on temp file B
+.
+EXTB5000  COMPARE   ONE,REPTFRMT
+          CALL      TPBA0000 IF EQUAL       * process for layout 1
+          COMPARE   TWO,REPTFRMT
+          CALL      TPBB0000 IF EQUAL       * process for layout 2
+          COMPARE   THREE,REPTFRMT
+          CALL      TPBC0000 IF EQUAL       * process for layout 3
+          COMPARE   FOUR,REPTFRMT
+          CALL      TPBD0000 IF EQUAL       * process for layout 4
+          COMPARE   FIVE,REPTFRMT
+          CALL      TPBE0000 IF EQUAL       * process for layout 5
+          COMPARE   SIX,REPTFRMT
+          CALL      TPBF0000 IF EQUAL       * process for layout 6
+          GOTO      EXTB2000
+.
+EXTB9999  RETURN
++
+.********************************************************************
+.*                  EXTM0000                    Called by : EXTB0000 *
+.*        Loop over pmsmtiaf and extract valid data to temp fileB    *
+.*********************************************************************
+EXTM0000  MOVE      SP2,CURRSESS            * current session
+          MOVE      SP8,CURRDMY             * current date of session
+          MOVE      ZERO,COUNT              * clear count value
+.
+          PACK      KEY14,XADMISS,SP20      * start with admission number
+          CALL      RSPMMTI1                * positional read
+.
+. ------- loop over PMSMTIFD for the admission number -------
+.
+EXTM2000  CALL      RKPMMTI1                * next read
+          BRANCH    OVRCD,EXTM9999          * end of file -> get next admission
+.
+          DISPLAY   *P51:24,PMMIITEM;       * display item code
+.
+          MATCH     XADMISS,PMMIVISN
+          GOTO      EXTM9999 IF NOT EQUAL   * finished the admission number
+.
+          MATCH     "2",PMMIRTYP
+          GOTO      EXTM2000 IF NOT EQUAL   * not a theatre charge
+.
+.         check that item is in selected period
+.
+          MATCH     FRDATE8,PMMITDAT
+          GOTO      EXTM2000 IF LESS        * dtr date before selected period
+.
+          MATCH     PMMITDAT,TODATE8
+          GOTO      EXTM2000 IF LESS        * dtr date after selected period
+.
+.         check a valid MBS item
+.
+EXTM2100  PACK      KEY17,PMMIITEM,PMMITDAT,SP70 * MBS item
+          CALL      PATITMRD                * read item file
+          BRANCH    OVRCD,EXTM2000          * invalid item
+.
+          DISPLAY   *P51:24,*V2LON,PMMIITEM; * valid item code
+.
+. ------- determine if this is the first item for a theatre session -------
+.
+EXTM3000  MATCH     CURRDMY,PMMITDAT
+          GOTO      EXTM3500 IF NOT EQUAL   * different date
+.
+          MATCH     CURRSESS,PMMISESS
+          GOTO      EXTM3500 IF NOT EQUAL   * different session
+.
+.         have the same key data so add one to COUNT
+.
+          ADD       ONE,COUNT               * add to procedure number
+          GOTO      EXTM4000
+.
+.         have a new procedure -> first item
+.
+EXTM3500  MOVE      ONE,COUNT               * reset procudure number
+          MOVE      PMMITDAT,CURRDMY        * set current date
+          MOVE      PMMISESS,CURRSESS       * set current session
+.
+. ------- get the theatre band for the MBS item -------
+.
+EXTM4000  PACK      KEY14,AFUNDH,ZERO8      * health fund and "0000    "
+          CALL      RDFUND1                 * read health fund file
+          BRANCH    OVRCD,EXTM4200          * no health fund record
+          MOVE      HFBAND,BANDFLAG         * set up banding flag
+          GOTO      EXTM4300
+.
+EXTM4200  PACK      KEY5,CATCL,ACLAIM       * use claim code
+          CALL      RDCODE1                 * read  codes file
+          BRANCH    OVRCD,EXTM4300          * invalid data
+          MOVE      TCFORM6,BANDFLAG        * set up banding flag
+.
+.         have banding flag, now get banding code
+.
+EXTM4300  COMPARE   ZERO,BANDFLAG
+          GOTO      EXTM4400 IF NOT EQUAL
+          MOVE      ONE,BANDFLAG            * use class. 1 for band code
+.
+EXTM4400  MOVE      SP3,BANDCODE            * clear the banding code
+          LOAD      BANDCODE,BANDFLAG,IBAND1,IBAND2,IBAND3,IBAND4,IBAND5,IBAND6:
+                                      IBAND7,IBAND8,IBAND9,IBAND10,IBAND11:
+                                      IBAND12,IBAND13,IBAND14,IBAND15,IBAND16
+.
+          DISPLAY   *P72:24,*V2LON,BANDCODE;     * display banding code
+.
+.         now update all values on temp file B
+.
+EXTM5000  COMPARE   ONE,REPTFRMT
+          CALL      TPBA0000 IF EQUAL       * process for layout 1
+          COMPARE   TWO,REPTFRMT
+          CALL      TPBB0000 IF EQUAL       * process for layout 2
+          COMPARE   THREE,REPTFRMT
+          CALL      TPBC0000 IF EQUAL       * process for layout 3
+          COMPARE   FOUR,REPTFRMT
+          CALL      TPBD0000 IF EQUAL       * process for layout 4
+          COMPARE   FIVE,REPTFRMT
+          CALL      TPBE0000 IF EQUAL       * process for layout 5
+          COMPARE   SIX,REPTFRMT
+          CALL      TPBF0000 IF EQUAL       * process for layout 6
+          GOTO      EXTM2000
+.
+EXTM9999  RETURN
++
+.*********************************************************************
+.*                  REPT0000                    Called by : ML4000   *
+.*        Produce the report                                         *
+.*********************************************************************
+REPT0000  DISPLAY   *P1:24,"Generating the report now - ",*V2LON,*BLINKON:
+                    "Please wait",*EL;
+.
+          MOVE      "70",CLNO               * set line number
+          MOVE      ZERO,CPAGENO            * clear page counter
+          MOVE      ZERO,PRNTATTL           * ad. type total not printed
+          MOVE      ZERO,PRNTCLAM           * claim not printed
+          MOVE      ZERO,PRNTFUND           * fund not printed
+          MOVE      "***",CURRATYP          * current admission type
+.
+          MOVE      SP20,KEY15              * start of file
+          CALL      RDTEMPB1                * exact read
+          COMPARE   ZERO,OVRCD
+          GOTO      REPT1100 IF EQUAL       * valid item
+.
+. ------- loop over temp file -------
+.
+REPT1000  CALL      RKTEMPB1                * next read
+          BRANCH    OVRCD,REPT9000          * end of file
+.
+REPT1100  COMPARE   ONE,REPTFRMT
+          CALL      RPTA0000 IF EQUAL       * layout 1
+          COMPARE   TWO,REPTFRMT
+          CALL      RPTB0000 IF EQUAL       * layout 2
+          COMPARE   THREE,REPTFRMT
+          CALL      RPTC0000 IF EQUAL       * layout 3
+          COMPARE   FOUR,REPTFRMT
+          CALL      RPTD0000 IF EQUAL       * layout 4
+          COMPARE   FIVE,REPTFRMT
+          CALL      RPTE0000 IF EQUAL       * layout 5
+          COMPARE   SIX,REPTFRMT
+          CALL      RPTF0000 IF EQUAL       * layout 6
+          GOTO      REPT1000
+.
+REPT9000  PRINT     *N,"*** End of Report ***",*N
+.
+REPT9999  RETURN
++
+.*********************************************************************
+.*                  UPDB0000                    Called by : EXTB5000 *
+.*        Updates values on temp file B                              *
+.*        Para's  : KEY9          key of health fund and banding code*
+.*                  COUNT         which procudure number to update   *
+.*********************************************************************
+UPDB0000  MOVE      ZERO,XPROC1             * clear Number of 1st procedure
+          MOVE      ZERO,XPROC2             * clear Number of 2nd procedure
+          MOVE      ZERO,XPROC3             * clear Number of 3rd procedure
+          MOVE      ZERO,XPROC4             * clear Number of 4th procedure
+          MOVE      ZERO,XPROC5             * clear Number of 5th procedure
+.
+          CALL      RDTEMPB1                * read temp file
+.
+          BRANCH    COUNT,UPDB1100,UPDB1200,UPDB1300,UPDB1400,UPDB1500
+          GOTO      UPDB9999
+.
+UPDB1100  ADD       ONE,XPROC1              * update number
+          GOTO      UPDB2000
+.
+UPDB1200  ADD       ONE,XPROC2              * update number
+          GOTO      UPDB2000
+.
+UPDB1300  ADD       ONE,XPROC3              * update number
+          GOTO      UPDB2000
+.
+UPDB1400  ADD       ONE,XPROC4              * update number
+          GOTO      UPDB2000
+.
+UPDB1500  ADD       ONE,XPROC5              * update number
+.
+.         now update or write a new record
+.
+UPDB2000  BRANCH    OVRCD,UPDB2500          * write a record
+.
+.         update current values
+.
+          CALL      UPTEMPB1              
+          GOTO      UPDB9999
+.
+.         write a new record
+.
+UPDB2500  UNPACK    KEY15,XATYPE,XCLAIM,XHFUND,XBAND
+          CALL      WRTEMPB1                * write a record
+.
+UPDB9999  RETURN
++
+.*********************************************************************
+.*                  HEAD0000                    Called by : REPT0000 *
+.*        Print a new page heading for the report                    *
+.*********************************************************************
+HEAD0000  CALL      HEAD80                  * report page heading
+          PRINT     *20,"From ",DXFRDATE," to ",DXTODATE
+          PRINT     *20,OPT
+          ADD       TWO,CLNO
+          CALL      TBLE0000                * print table heading
+HEAD9999  RETURN
++
+.*********************************************************************
+.         print table heading
+.*********************************************************************
+TBLE0000  PRINT     *N,"*---------------------------------------":
+                       "---------------------------------------*":
+                    *N,"| ",HEAD1,*34,"| ------------ Procedure ----------- | ":
+                    *80,"|":
+                    *N,"| ",HEAD2,*34,"|",*41,"1":
+                    *48,"2",*55,"3",*62,"4",*69,"5 |  Total |":
+                    *N,"*---------------------------------------":
+                       "---------------------------------------*"
+          ADD       "4",CLNO               * set line number
+TBLE9999  RETURN
++
+.*********************************************************************
+.*                  DTPA0000                    Called by : EXTA0000 *
+.*        Delete temp file A                                         *
+.*********************************************************************
+DTPA0000  CLOSE     TEMPA
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISERASE,CFNAMEA
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+DTPA9999  RETURN
++
+.*********************************************************************
+.*                  CTPA0000                    Called by : EXTA0000 *
+.*        Create temp file A                                         *
+.*********************************************************************
+CTPA0000  CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,CFNAMEA
+.
+          CALL      DTPA0000                * delete it first
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,CFNAMEA,KEYA,SP30
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPA,CFNAMEA
+.
+CTPA9999  RETURN
++
+.*********************************************************************
+.*                  DTPB0000                    Called by : EXTB0000 *
+.*        Delete temp file B                                         *
+.*********************************************************************
+DTPB0000  CLOSE     TEMPB
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISERASE,CFNAMEB
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+DTPB9999  RETURN
++
+.*********************************************************************
+.*                  CTPB0000                    Called by : EXTB0000 *
+.*        Create temp file B                                         *
+.*********************************************************************
+CTPB0000  CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,CFNAMEB
+.
+          CALL      DTPB0000                * delete it first
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,CFNAMEB,KEYB,SP30
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPB,CFNAMEB
+.
+CTPB9999  RETURN
++
+.*********************************************************************
+.*        I/O routines for Temp file A                               *
+.*********************************************************************
+RATEMPA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      TEMPA,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMPA1  RESET     KEY8
+          READ      TEMPA,KEY8;;
+          RETURN
+.
+RDTEMPA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      TEMPA,KEY8;XADMISS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMPA1  MOVE      ZERO,OVRCD
+          READKS    TEMPA;XADMISS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMPA1  MOVE      ZERO,OVRCD
+          READKP    TEMPA;XADMISS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMPA1  RESET     KEY8
+          WRITE     TEMPA,KEY8;XADMISS
+          RETURN
+.
+UPTEMPA1  UPDATE    TEMPA;XADMISS
+          RETURN
++
+.*********************************************************************
+.*        I/O routines for Temp file B                               *
+.*********************************************************************
+RATEMPB1  MOVE      ZERO,OVRCD
+          RESET     KEY15
+          READ      TEMPB,KEY15;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMPB1  RESET     KEY15
+          READ      TEMPB,KEY15;;
+          RETURN
+.
+RDTEMPB1  MOVE      ZERO,OVRCD
+          RESET     KEY15
+          READ      TEMPB,KEY15;XATYPE,XCLAIM,XHFUND,XBAND:
+                                XPROC1,XPROC2,XPROC3,XPROC4,XPROC5
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMPB1  MOVE      ZERO,OVRCD
+          READKS    TEMPB;XATYPE,XCLAIM,XHFUND,XBAND:
+                          XPROC1,XPROC2,XPROC3,XPROC4,XPROC5
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMPB1  MOVE      ZERO,OVRCD
+          READKP    TEMPB;XATYPE,XCLAIM,XHFUND,XBAND:
+                          XPROC1,XPROC2,XPROC3,XPROC4,XPROC5
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMPB1  RESET     KEY15
+          WRITE     TEMPB,KEY15;XATYPE,XCLAIM,XHFUND,XBAND:
+                                XPROC1,XPROC2,XPROC3,XPROC4,XPROC5
+          RETURN
+.
+UPTEMPB1  UPDATE    TEMPB;XATYPE,XCLAIM,XHFUND,XBAND:
+                          XPROC1,XPROC2,XPROC3,XPROC4,XPROC5
+          RETURN
++
+.==============================================================================
+.
+          INC       STD001IO                * standard routines
+          INC       TFILENAM                     * Generate Temp File Name
+          INC       PATITMRD
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATDAYIO/INC            * Day file
+          INC       PATCODIO/INC            * Codes file
+          INC       PATDSCIO/INC            * Discharges file
+          INC       PATDTRIO/INC            * Patient Debtors Transactions file
+          INC       PATFN1IO/INC            * Health Funds file
+          INC       PATINVIO/INC            * Invoices file
+          INC       PATITMIO/INC            * MBS file
+          INC       PATMI1IO/INC            * Admissions file
+          INC       PMSVX1IO/INC            * Admissions file
+          INC       PMSMTIIO/INC            * Misc/Theatre charges
+          INC       WEBERRIO/INC                 * Web Server Error Logging
+..............................................................................
+.*********************************************************************
+.         detemine which option to ask
+.*********************************************************************
+OPTN0000  BRANCH    PTCNNTCM,OPTN1000
+.
+          CALL      OPNA0000
+          GOTO      OPTN9999
+.
+OPTN1000  CALL      OPNB0000
+.
+OPTN9999  RETURN
++
+.*********************************************************************
+.         enter Summary or Detailed
+.*********************************************************************
+SUDE0000  COMPARE   ONE,PTCNNTCM
+          GOTO      SUDE9999 IF NOT EQUAL   * option not available
+.
+          DISPLAY   *P1:15,*EL,"(",*V2LON,ANSS,*HOFF,")ummary or (":
+                    *V2LON,ANSD,*HOFF,")etailed report : "
+.
+SUDE1000  KEYIN     *P34:15,"_":
+                    *P34:15,*V2LON,ANS
+          REP       UPPLOW,ANS
+          MATCH     ANSD,ANS
+          GOTO      SUDE5000 IF EQUAL       * detailed
+          MATCH     ANSS,ANS
+          GOTO      SUDE6000 IF EQUAL       * summary
+          BEEP
+          GOTO      SUDE1000
+.
+SUDE5000  ADD       ONE,REPTFRMT
+          DISPLAY   *P34:15,*V2LON,"Detailed";
+          MOVE      "- Detailed",CPHDROPT
+          GOTO      SUDE9999
+.
+SUDE6000  DISPLAY   *P34:15,*V2LON,"Summary";
+          MOVE      "- Summary",CPHDROPT
+.
+SUDE9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 1
+.*********************************************************************
+TPBA0000  PACK      KEY15,Z3,Z3,AFUNDH,BANDCODE
+          CALL      UPDB0000                * normal line
+          PACK      KEY15,Z3,Z3,AFUNDH,Z3
+          CALL      UPDB0000                * total for health fund
+          PACK      KEY15,Z3,Z3,Z6,BANDCODE
+          CALL      UPDB0000                * total for band
+          PACK      KEY15,Z3,Z3,Z6,Z3
+          CALL      UPDB0000                * grand totals
+          MOVE      SP30,HEAD1
+          MOVE      "Health Fund/Theatre Banding   ",HEAD2
+TPBA9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 2
+.*********************************************************************
+TPBB0000  PACK      KEY15,ATYPE,Z3,AFUNDH,BANDCODE
+          CALL      UPDB0000                * normal line
+          PACK      KEY15,ATYPE,Z3,AFUNDH,Z3
+          CALL      UPDB0000                * total for health fund
+          PACK      KEY15,ATYPE,Z3,Z6,BANDCODE
+          CALL      UPDB0000                * total for type/band
+          PACK      KEY15,ATYPE,Z3,Z6,Z3
+          CALL      UPDB0000                * total for type
+          PACK      KEY15,Z3,Z3,Z6,BANDCODE
+          CALL      UPDB0000                * total for band
+          PACK      KEY15,Z3,Z3,Z6,Z3
+          CALL      UPDB0000                * grand total
+          MOVE      "Classification/               ",HEAD1
+          MOVE      "Health Fund/Theatre Banding   ",HEAD2
+TPBB9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 3
+.*********************************************************************
+TPBC0000  PACK      KEY15,Z3,ACLAIM,Z6,BANDCODE
+          CALL      UPDB0000                * normal line
+          PACK      KEY15,Z3,ACLAIM,Z6,Z3
+          CALL      UPDB0000                * total for health fund
+          PACK      KEY15,Z3,Z3,Z6,BANDCODE
+          CALL      UPDB0000                * total for band
+          PACK      KEY15,Z3,Z3,Z6,Z3
+          CALL      UPDB0000                * grand totals
+          MOVE      SP30,HEAD1
+          MOVE      "Claim Code/Theatre Banding    ",HEAD2
+TPBC9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 4
+.*********************************************************************
+TPBD0000  PACK      KEY15,ATYPE,ACLAIM,Z6,BANDCODE
+          CALL      UPDB0000                * normal line
+          PACK      KEY15,ATYPE,ACLAIM,Z6,Z3
+          CALL      UPDB0000                * type/claim total
+          PACK      KEY15,ATYPE,Z3,Z6,BANDCODE
+          CALL      UPDB0000                * type/band total
+          PACK      KEY15,ATYPE,Z3,Z6,Z3
+          CALL      UPDB0000                * type total
+          PACK      KEY15,Z3,Z3,Z6,BANDCODE
+          CALL      UPDB0000                * band total
+          PACK      KEY15,Z3,Z3,Z6,Z3
+          CALL      UPDB0000                * grand totals
+          MOVE      "Classification/               ",HEAD1
+          MOVE      "Claim Code/Theatre Banding    ",HEAD2
+TPBD9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 5
+.*********************************************************************
+TPBE0000  PACK      KEY15,Z3,ACLAIM,AFUNDH,BANDCODE
+          CALL      UPDB0000                * normal line
+          PACK      KEY15,Z3,ACLAIM,AFUNDH,Z3
+          CALL      UPDB0000                * total for claim/fund 
+          PACK      KEY15,Z3,ACLAIM,Z6,Z3
+          CALL      UPDB0000                * total for claim
+          PACK      KEY15,Z3,Z3,Z6,BANDCODE
+          CALL      UPDB0000                * total for band
+          PACK      KEY15,Z3,Z3,Z6,Z3
+          CALL      UPDB0000                * grand totals
+          MOVE      "Claim Code/                   ",HEAD1
+          MOVE      "Health Fund/Theatre Banding   ",HEAD2
+TPBE9999  RETURN
++
+.*********************************************************************
+.         maintain temp file B - report layout 6
+.*********************************************************************
+TPBF0000  PACK      KEY15,ATYPE,ACLAIM,AFUNDH,BANDCODE
+          CALL      UPDB0000                * normal line
+          PACK      KEY15,ATYPE,ACLAIM,AFUNDH,Z3
+          CALL      UPDB0000                * total for health fund
+          PACK      KEY15,ATYPE,ACLAIM,Z6,Z3
+          CALL      UPDB0000                * total for type/claim
+          PACK      KEY15,ATYPE,Z3,Z6,BANDCODE
+          CALL      UPDB0000                * total for type/band
+          PACK      KEY15,ATYPE,Z3,Z6,Z3
+          CALL      UPDB0000                * grand totals
+          PACK      KEY15,Z3,Z3,Z6,BANDCODE
+          CALL      UPDB0000                * total for band
+          PACK      KEY15,Z3,Z3,Z6,Z3
+          CALL      UPDB0000                * grand total
+.
+          MOVE      "Classification/Claim Code/    ",HEAD1
+          MOVE      "Health Fund/Theatre Banding   ",HEAD2
+.
+TPBF9999  RETURN
++
+.*********************************************************************
+.         print report - layout 1 
+.*********************************************************************
+RPTA0000  MATCH     Z6,XHFUND        
+          GOTO      RPTA9000 IF EQUAL       * have GT's
+.
+          MATCH     Z3,XBAND         
+          GOTO      RPTA8000 IF EQUAL       * print health fund totals
+.
+. ------- print for health fund and banding code -------
+.
+          BRANCH    PRNTFUND,RPTA2100       * fund has been printed
+          MOVE      "No Health Fund",HFNAME
+          MATCH     SP6,XHFUND
+          GOTO      RPTA2000 IF EQUAL
+.
+          PACK      HFNAME,INVCODE,XHFUND
+          PACK      KEY14,XHFUND,ZERO8      * health fund and "0000    "
+          CALL      RDFUND1
+.
+RPTA2000  COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS    * print page heading
+.
+          PACK      KEY30,HFNAME,SP30
+          PRINT     *1,"| ",KEY30,*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+.         print a line for the banding
+.
+RPTA2100  MOVE      "No Banding",TDESC 
+          MATCH     SP3,XBAND
+          GOTO      RPTA2300 IF EQUAL       * no banding set
+.
+          PACK      TDESC,INVCODE,XBAND
+          PACK      KEY5,CATTB,XBAND        * get band desc
+          CALL      RDCODE1
+.
+RPTA2300  PACK      KEY30,SP4,TDESC,SP30
+          CALL      PLIN0000
+          GOTO      RPTA9999
+.
+. ------- print the total for a health fund -------
+.
+RPTA8000  CALL      UND80
+          MOVE      "Total for Health Fund",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      ZERO,PRNTFUND           * signal fund not printed
+          GOTO      RPTA9999
+.
+. ------- print the grand totals for the bands -------
+.
+RPTA9000  BRANCH    PRNTFUND,RPTA9200       * heading been printed
+.
+          PRINT     *1,"| Grand Totals",*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+RPTA9200  MATCH     Z3,XBAND         
+          GOTO      RPTA2100 IF NOT EQUAL   * print band totals
+.
+          CALL      UND80
+          MOVE      "    Grand Totals",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          GOTO      RPTA9999
+.
+RPTA9999  RETURN
++
+.*********************************************************************
+.         print report - layout 2
+.*********************************************************************
+RPTB0000  MATCH     Z3,XATYPE
+          GOTO      RPTB9000 IF EQUAL       * grand totals
+.
+          MATCH     Z6,XHFUND
+          GOTO      RPTB8000 IF EQUAL       * classification total
+.
+          MATCH     Z3,XBAND
+          GOTO      RPTB7000 IF EQUAL       * health fund total
+.
+. ------- have a normal line -------
+.
+          MATCH     CURRATYP,XATYPE
+          GOTO      RPTB3000 IF EQUAL       * same type
+.
+          MOVE      XATYPE,CURRATYP         * set current type
+          MOVE      "No Classification",TDESC
+          MATCH     SP3,XATYPE
+          GOTO      RPTB2100 IF EQUAL       * no code
+.
+          PACK      TDESC,INVCODE,XATYPE
+          PACK      KEY5,CATA,XATYPE
+          CALL      RDCODE1
+.
+RPTB2100  MOVE      TDESC,HEAD1
+          COMPARE   "55",CLNO
+          GOTO      RPTB2200 IF LESS        * no new page needed
+.
+          CALL      HEAD0000
+          GOTO      RPTB3000
+.
+RPTB2200  CALL      TBLE0000                * print new table
+.
+. ------- print the health fund -------
+.
+RPTB3000  BRANCH    PRNTFUND,RPTB5000       * fund has been printed
+          MOVE      "No Health Fund",HFNAME
+          MATCH     SP6,XHFUND
+          GOTO      RPTB3100 IF EQUAL
+.
+          PACK      HFNAME,INVCODE,XHFUND
+          PACK      KEY14,XHFUND,ZERO8      * health fund and "0000    "
+          CALL      RDFUND1
+.
+RPTB3100  PACK      KEY30,HFNAME,SP30
+          PRINT     *1,"| ",KEY30,*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+.         print a line for the banding
+.
+RPTB5000  MOVE      "No Banding",TDESC 
+          MATCH     SP3,XBAND
+          GOTO      RPTB5100 IF EQUAL       * no banding set
+.
+          PACK      TDESC,INVCODE,XBAND
+          PACK      KEY5,CATTB,XBAND        * get band desc
+          CALL      RDCODE1
+.
+RPTB5100  PACK      KEY30,SP4,TDESC,SP30
+          CALL      PLIN0000
+          GOTO      RPTB9999
+.
+. ------- print the total for a health fund -------
+.
+RPTB7000  CALL      UND80
+          MOVE      "Total for Health Fund",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      ZERO,PRNTFUND           * signal fund not printed
+          GOTO      RPTA9999
+.
+. ------- print the classification totals -------
+.
+RPTB8000  BRANCH    PRNTFUND,RPTB8200       * heading been printed
+.
+          PRINT     *1,"| Total for Classification",*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+RPTB8200  MATCH     Z3,XBAND         
+          GOTO      RPTB5000 IF NOT EQUAL   * print band totals
+.
+          CALL      UND80
+          MOVE      "Classification Total",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      "***",CURRATYP
+          MOVE      ZERO,PRNTFUND           * signal fund not printed
+          GOTO      RPTB9999
+.
+. ------- print the grand totals for the bands -------
+.
+RPTB9000  BRANCH    PRNTFUND,RPTB9200       * heading been printed
+.
+          PRINT     *N;
+          CALL      UND80
+          PRINT     *1,"| Grand Totals",*34,"|",*71,"|",*80,"|"
+          ADD       TWO,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+RPTB9200  MATCH     Z3,XBAND         
+          GOTO      RPTB5000 IF NOT EQUAL   * print band totals
+.
+          CALL      UND80
+          MOVE      "    Grand Total",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+.
+RPTB9999  RETURN
++
+.*********************************************************************
+.         print report - layout 3
+.*********************************************************************
+RPTC0000  MATCH     Z3,XCLAIM
+          GOTO      RPTC9000 IF EQUAL       * have GT's
+.
+          MATCH     Z3,XBAND         
+          GOTO      RPTC8000 IF EQUAL       * print claim code totals
+.
+. ------- print for claim code and banding code -------
+.
+          BRANCH    PRNTCLAM,RPTC2100       * claim has been printed
+          MOVE      "No Claim Code",TDESC
+          MATCH     SP3,XCLAIM
+          GOTO      RPTC2000 IF EQUAL
+.
+          PACK      TDESC,INVCODE,XCLAIM
+          PACK      KEY5,CATCL,XCLAIM
+          CALL      RDCODE1
+.
+RPTC2000  COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS    * print new page
+.
+          PACK      KEY30,TDESC,SP30
+          PRINT     *1,"| ",KEY30,*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+.         print a line for the banding
+.
+RPTC2100  MOVE      "No Banding",TDESC 
+          MATCH     SP3,XBAND
+          GOTO      RPTC2300 IF EQUAL       * no banding set
+.
+          PACK      TDESC,INVCODE,XBAND
+          PACK      KEY5,CATTB,XBAND        * get band desc
+          CALL      RDCODE1
+.
+RPTC2300  PACK      KEY30,SP4,TDESC,SP30
+          CALL      PLIN0000
+          GOTO      RPTC9999
+.
+. ------- print the total for a claim code -------
+.
+RPTC8000  CALL      UND80
+          MOVE      "Total for Claim Code",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      ZERO,PRNTCLAM           * signal claim not printed
+          GOTO      RPTC9999
+.
+. ------- print the grand totals for the bands -------
+.
+RPTC9000  BRANCH    PRNTCLAM,RPTC9200       * heading been printed
+.
+          PRINT     *1,"| Grand Totals",*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+RPTC9200  MATCH     Z3,XBAND         
+          GOTO      RPTC2100 IF NOT EQUAL   * print band totals
+.
+          CALL      UND80
+          MOVE      "    Grand Totals",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+.
+RPTC9999  RETURN
++
+.*********************************************************************
+.         print report - layout 4
+.*********************************************************************
+RPTD0000  MATCH     Z3,XATYPE
+          GOTO      RPTD9000 IF EQUAL       * grand totals
+.
+          MATCH     Z3,XCLAIM
+          GOTO      RPTD8000 IF EQUAL       * classification total
+.
+          MATCH     Z3,XBAND
+          GOTO      RPTD7000 IF EQUAL       * claim code total
+.
+. ------- have a normal line -------
+.
+          MATCH     CURRATYP,XATYPE
+          GOTO      RPTD3000 IF EQUAL       * same type
+.
+          MOVE      XATYPE,CURRATYP         * set current type
+          MOVE      "No Classification",TDESC
+          MATCH     SP3,XATYPE
+          GOTO      RPTD2100 IF EQUAL       * no code
+.
+          PACK      TDESC,INVCODE,XATYPE
+          PACK      KEY5,CATA,XATYPE
+          CALL      RDCODE1
+.
+RPTD2100  MOVE      TDESC,HEAD1
+          COMPARE   "55",CLNO
+          GOTO      RPTD2200 IF LESS        * no new page needed
+.
+          CALL      HEAD0000
+          GOTO      RPTD3000
+.
+RPTD2200  CALL      TBLE0000                * print new table
+.
+. ------- print the health fund -------
+.
+RPTD3000  BRANCH    PRNTCLAM,RPTD5000       * fund has been printed
+          MOVE      "No Claim Code",TDESC
+          MATCH     SP3,XCLAIM
+          GOTO      RPTD3100 IF EQUAL
+.
+          PACK      TDESC,INVCODE,XCLAIM
+          PACK      KEY5,CATCL,XCLAIM
+          CALL      RDCODE1
+.
+RPTD3100  PACK      KEY30,TDESC,SP30
+          PRINT     *1,"| ",KEY30,*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+.         print a line for the banding
+.
+RPTD5000  MOVE      "No Banding",TDESC 
+          MATCH     SP3,XBAND
+          GOTO      RPTD5100 IF EQUAL       * no banding set
+.
+          PACK      TDESC,INVCODE,XBAND
+          PACK      KEY5,CATTB,XBAND        * get band desc
+          CALL      RDCODE1
+.
+RPTD5100  PACK      KEY30,SP4,TDESC,SP30
+          CALL      PLIN0000
+          GOTO      RPTD9999
+.
+. ------- print the total for a health fund -------
+.
+RPTD7000  CALL      UND80
+          MOVE      "Total for Claim Code",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      ZERO,PRNTCLAM           * signal fund not printed
+          GOTO      RPTA9999
+.
+. ------- print the classification totals -------
+.
+RPTD8000  BRANCH    PRNTCLAM,RPTD8200       * heading been printed
+.
+          PRINT     *1,"| Total for Classification",*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+RPTD8200  MATCH     Z3,XBAND         
+          GOTO      RPTD5000 IF NOT EQUAL   * print band totals
+.
+          CALL      UND80
+          MOVE      "Classification Total",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      "***",CURRATYP
+          MOVE      ZERO,PRNTCLAM           * signal fund not printed
+          GOTO      RPTD9999
+.
+. ------- print the grand totals for the bands -------
+.
+RPTD9000  BRANCH    PRNTCLAM,RPTD9200       * heading been printed
+.
+          PRINT     *N;
+          CALL      UND80
+          PRINT     *1,"| Grand Totals",*34,"|",*71,"|",*80,"|"
+          ADD       TWO,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+RPTD9200  MATCH     Z3,XBAND         
+          GOTO      RPTD5000 IF NOT EQUAL   * print band totals
+.
+          CALL      UND80
+          MOVE      "    Grand Total",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+.
+RPTD9999  RETURN
++
+.*********************************************************************
+.         print report - layout 5
+.*********************************************************************
+RPTE0000  MATCH     Z3,XCLAIM
+          GOTO      RPTE9000 IF EQUAL       * have GT's
+.
+          MATCH     Z6,XHFUND
+          GOTO      RPTE8000 IF EQUAL       * have claim code total
+.
+          MATCH     Z3,XBAND         
+          GOTO      RPTE7000 IF EQUAL       * have health fund total
+.
+. ------- print for claim code / health fund / banding code -------
+.
+RPTE1000  BRANCH    PRNTCLAM,RPTE2100       * claim has been printed
+          MOVE      "No Claim Code",TDESC
+          MATCH     SP3,XCLAIM
+          GOTO      RPTE2000 IF EQUAL
+.
+          PACK      TDESC,INVCODE,XCLAIM
+          PACK      KEY5,CATCL,XCLAIM
+          CALL      RDCODE1
+.
+RPTE2000  COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS    * print new page
+.
+          PACK      KEY30,TDESC,SP30
+          PRINT     *1,"| ",KEY30,*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+.         see if to print health fund name
+.
+RPTE2100  BRANCH    PRNTFUND,RPTE2300       * fund has been printed
+          MOVE      "No Health Fund",HFNAME
+          MATCH     SP6,XHFUND
+          GOTO      RPTE2200 IF EQUAL
+.
+          PACK      HFNAME,INVCODE,XHFUND
+          PACK      KEY14,XHFUND,ZERO8      * health fund and "0000    "
+          CALL      RDFUND1
+.
+RPTE2200  PACK      KEY30,SP2,HFNAME,SP30
+          PRINT     *1,"| ",KEY30,*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+.         print a line for the banding
+.
+RPTE2300  MOVE      "No Banding",TDESC 
+          MATCH     SP3,XBAND
+          GOTO      RPTE2400 IF EQUAL       * no banding set
+.
+          PACK      TDESC,INVCODE,XBAND
+          PACK      KEY5,CATTB,XBAND        * get band desc
+          CALL      RDCODE1
+.
+RPTE2400  PACK      KEY30,SP4,TDESC,SP30
+          CALL      PLIN0000
+          GOTO      RPTE9999
+.
+. ------- print the total health fund -------
+.
+RPTE7000  CALL      UND80
+          MOVE      "  Total for Health Fund",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      ZERO,PRNTFUND           * signal fund not printed
+          GOTO      RPTE9999
+.
+. ------- print the claim code total -------
+.
+RPTE8000  MOVE      "Total for Claim Code",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      ZERO,PRNTCLAM           * signal claim not printed
+          PRINT     *N;
+          ADD       ONE,CLNO
+          CALL      UND80
+          GOTO      RPTE9999
+.
+. ------- print the grand totals for the bands -------
+.
+RPTE9000  BRANCH    PRNTCLAM,RPTE9200       * heading been printed
+.
+          PRINT     *1,"| Grand Totals",*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+RPTE9200  MATCH     Z3,XBAND         
+          GOTO      RPTE2300 IF NOT EQUAL   * print band totals
+.
+          CALL      UND80
+          MOVE      "    Grand Totals",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+.
+RPTE9999  RETURN
++
+.*********************************************************************
+.         print report - layout 6
+.*********************************************************************
+RPTF0000  MATCH     Z3,XATYPE
+          GOTO      RPTF9000 IF EQUAL       * have GT's
+.
+          MATCH     Z3,XCLAIM
+          GOTO      RPTF8000 IF EQUAL       * have classification total
+.
+          MATCH     Z6,XHFUND
+          GOTO      RPTF7000 IF EQUAL       * have claim code total
+.
+          MATCH     Z3,XBAND         
+          GOTO      RPTF6000 IF EQUAL       * have health fund total
+.
+. ------- have a normal line -------
+.
+          MATCH     CURRATYP,XATYPE
+          GOTO      RPTF3000 IF EQUAL       * same type
+.
+          MOVE      XATYPE,CURRATYP         * set current type
+          MOVE      "No Classification",TDESC
+          MATCH     SP3,XATYPE
+          GOTO      RPTF2100 IF EQUAL       * no code
+.
+          PACK      TDESC,INVCODE,XATYPE
+          PACK      KEY5,CATA,XATYPE
+          CALL      RDCODE1
+.
+RPTF2100  PACK      HEAD1,SP20,SP20
+          MOVE      TDESC,HEAD1
+          ENDSET    HEAD1
+RPTF2150  CMATCH    SP1,HEAD1
+          GOTO      RPTF2160 IF NOT EQUAL
+          BUMP      HEAD1,-1
+          GOTO      RPTF2150 IF NOT EOS
+.
+RPTF2160  APPEND    "/Claim",HEAD1
+          RESET     HEAD1
+          SETLPTR   HEAD1
+.
+          COMPARE   "55",CLNO
+          GOTO      RPTF2200 IF LESS        * no new page needed
+.
+          CALL      HEAD0000
+          GOTO      RPTF3000
+.
+RPTF2200  CALL      TBLE0000                * print new table
+.
+. ------- print for claim code / health fund / banding code -------
+.
+RPTF3000  BRANCH    PRNTCLAM,RPTF4100       * claim has been printed
+          MOVE      "No Claim Code",TDESC
+          MATCH     SP3,XCLAIM
+          GOTO      RPTF4000 IF EQUAL
+.
+          PACK      TDESC,INVCODE,XCLAIM
+          PACK      KEY5,CATCL,XCLAIM
+          CALL      RDCODE1
+.
+RPTF4000  COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS    * print new page
+.
+          PACK      KEY30,TDESC,SP30
+          PRINT     *1,"| ",KEY30,*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+.         see if to print health fund name
+.
+RPTF4100  BRANCH    PRNTFUND,RPTF5000       * fund has been printed
+          MOVE      "No Health Fund",HFNAME
+          MATCH     SP6,XHFUND
+          GOTO      RPTF4200 IF EQUAL
+.
+          PACK      HFNAME,INVCODE,XHFUND
+          PACK      KEY14,XHFUND,ZERO8      * health fund and "0000    "
+          CALL      RDFUND1
+.
+RPTF4200  PACK      KEY30,SP2,HFNAME,SP30
+          PRINT     *1,"| ",KEY30,*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTFUND            * signal fund printed
+.
+.         print a line for the banding
+.
+RPTF5000  MOVE      "No Banding",TDESC 
+          MATCH     SP3,XBAND
+          GOTO      RPTF5200 IF EQUAL       * no banding set
+.
+          PACK      TDESC,INVCODE,XBAND
+          PACK      KEY5,CATTB,XBAND        * get band desc
+          CALL      RDCODE1
+.
+RPTF5200  PACK      KEY30,SP4,TDESC,SP30
+          CALL      PLIN0000
+          GOTO      RPTF9999
+.
+. ------- print the total health fund -------
+.
+RPTF6000  CALL      UND80
+          MOVE      "  Total for Health Fund",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      ZERO,PRNTFUND           * signal fund not printed
+          GOTO      RPTF9999
+.
+. ------- print the claim code total -------
+.
+RPTF7000  MOVE      "Total for Claim Code",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      ZERO,PRNTCLAM           * signal claim not printed
+          MOVE      ZERO,PRNTFUND           * signal fund not printed
+          GOTO      RPTF9999
+.
+. ------- print the total for the classification -------
+.
+RPTF8000  BRANCH    PRNTCLAM,RPTF8200       * heading been printed
+.
+          PRINT     *1,"| Total for Classification",*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+RPTF8200  MATCH     Z3,XBAND         
+          GOTO      RPTF5000 IF NOT EQUAL   * print band totals
+.
+          CALL      UND80
+          MOVE      "Classification Total",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+          MOVE      ZERO,PRNTCLAM           * set as claim not printed
+          MOVE      "***",CURRATYP          * clear current admiss. type
+          GOTO      RPTF9999
+.
+. ------- print the grand totals for the bands -------
+.
+RPTF9000  BRANCH    PRNTCLAM,RPTF9200       * heading been printed
+.
+          PRINT     *1,"| Grand Totals",*34,"|",*71,"|",*80,"|"
+          ADD       ONE,CLNO
+          MOVE      ONE,PRNTCLAM            * signal fund printed
+.
+RPTF9200  MATCH     Z3,XBAND         
+          GOTO      RPTF5000 IF NOT EQUAL   * print band totals
+.
+          CALL      UND80
+          MOVE      "    Grand Totals",KEY30
+          CALL      PLIN0000
+          CALL      UND80
+.
+RPTF9999  RETURN
++
+.*********************************************************************
+.         the common print routine for each layout
+.         Para's  : KEY30         the line header
+.*********************************************************************
+PLIN0000  COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS    * print new page
+.
+          MOVE      XPROC1,BANDTOTL
+          ADD       XPROC2,BANDTOTL
+          ADD       XPROC3,BANDTOTL
+          ADD       XPROC4,BANDTOTL
+          ADD       XPROC5,BANDTOTL         * the total
+          PRINT     *1,"| ",KEY30," | ",XPROC1,SP1,XPROC2,SP1,XPROC3,SP1:
+                    XPROC4,SP1,XPROC5," | ",BANDTOTL," |"
+          ADD       ONE,CLNO
+.
+PLIN9999  RETURN
++

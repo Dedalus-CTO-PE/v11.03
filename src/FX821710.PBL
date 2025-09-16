@@ -1,0 +1,996 @@
+.----------------------------------------------------------------------------
+. System    :   Patient Management System                                    
+. Program   :   FX821710                                                     
+. Desc      :   Inpatient/Outpatient Comments Conversion                     
+.----------------------------------------------------------------------------
+. Date      :   21/06/2017                                                   
+. Author    :   Thanh T.                                                     
+. Function  :   This program reads all the data in the patient comment file
+.               and converts the comment data into the visit comment data
+.               viscmdtaf/viscmtxaf files with the visit type of "013".
+.               If option 1 (Inpatient) is selected, for each visit number, 
+.               it reads the patient visit table for the visit type. If  
+.               the visit type is "3", the comments will be converted.      
+.               If option 2 (Outpatient) is selected, for each visit number, 
+.               it reads the patient visit table for the visit type. If  
+.               the visit type is "2", the comments will be converted.      
+.               Otherwise, it checks if the visit is from the booking tables,
+.               the comments will also be converted.  
+.----------------------------------------------------------------------------
+. V10.14.01 :   16/08/2019  Ebon Clements  TSK 0880067
+.               Added option 6 cancelled OP booking comments 
+.               Added cancelled OP booking comments to other outpatient options
+. V10.12.07 :   28/06/2018  Thanh T        TSK 0821710
+.               Changed to use the current date/time for creation date/time
+.               when the visit comment header vismdtaf record is created.
+. V10.12.06 :   22/06/2018  Thanh T        TSK 0858920
+.               Changed to ignore all the first blank comment data. when 
+.               the first non-blank comment is found, all subsequence data
+.               will be converted.  
+. V10.12.05 :   22/06/2018    Thanh T            TSK 0859209
+.               Added line to OPEN the CONTROLF
+. V10.12.04 :   08/06/2018  Jill Parkinson TSK 0858414       
+.               Corrected date for the booking option        
+. V10.12.03 :   07/06/2018  Jill Parkinson TSK 0858414       
+.               Added booking option                         
+. V10.12.02 :   01/06/2018  Jill Parkinson TSK 0858133       
+.               Added emergency and all options                          
+. V10.12.01 :   11/01/2018  Steve Armstrong      TSK 0821710
+.               Removed record display during processing to reduce time.
+.               Fixed invalid user id message.
+.----------------------------------------------------------------------------
+. V10.10.01 :   21/06/2017  Thanh T.             TSK 0821710                 
+.----------------------------------------------------------------------------
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       BOKRC1FD/INC
+          INC       VISMDTFD/INC
+          INC       VISMTXFD/INC
+          INC       PATVISFD/INC
+          INC       PATCMNFD/INC
+          INC       WEBSECFD/INC
+          INC       OUTCANFD/INC
+          INC       OUTPREFD/INC
+          INC       OUTSITFD/INC
+          INC       OUTBB1FD/INC
+          INC       OUTBOAFD/INC
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+CFILEPRE  DIM       3   * Current Open File Prefix for Outpatient Files
+FORM6     FORM      6
+NOTETYPE  INIT      "013"
+CUSERID   DIM       10
+SAVADMNO  DIM       8
+CMNTLINE  DIM       70
+NOTENUMB  FORM      6
+PUNIQ     FORM      3
+CRTDATE   DIM       8
+CRTTIME   DIM       8
+NOFPCMR   FORM      6
+NOFCMDT   FORM      6
+NOFCMTX   FORM      6
+NOFVIS3   FORM      6
+NOFVIS2   FORM      6
+NOFBOKR   FORM      6
+NOFBOKS   FORM      6
+NOFINPB   FORM      6
+.
+.---------------------------------------------------------------------
+PRGID     INIT      "FX821710"
+VERSION   INIT      "V11.03.00"
+PRGNAM    INIT      "Inpatient/Outpatient Comments Conversion"
+.---------------------------------------------------------------------
+. Controlling Logic (Mainline code)                 
+.---------------------------------------------------------------------
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with clean up
+.
+MAIN1000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  IF        COPTION = 1
+            CALL      INPA0000             * process inpatient
+          ENDIF
+          IF        COPTION = 2
+            CALL      OUPA0000             * process outpatient     
+          ENDIF       
+          IF        COPTION = 3
+            CALL      EMRA0000             * process emergency      
+          ENDIF       
+          IF        COPTION = 4
+            CALL      ALLC0000             * process all
+          ENDIF       
+          IF        COPTION = 5
+            CALL      BOOK0000             * process bookings       
+          ENDIF       
+          IF        COPTION = 6
+            CALL      OUPA0000             * cancelled OP bookings       
+          ENDIF       
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.------------------------------------------------------------------------
+.  The initialisation routine is used to display headings and open files. 
+.------------------------------------------------------------------------
+.
+INIT0000  CALL      DISPHEAD                * display heading
+.
+          OPEN      CONTROLF,"controlf"
+          OPEN      BOKRC1A1,"bokrc1af"
+          OPEN      VISMDTA1,"vismdtaf"
+          OPEN      VISMTXA1,"vismtxaf"
+          OPEN      PATCMNT1,"patcmntf"
+          OPEN      PATVISA1,"patvisaf"
+          OPEN      WEBSECA1,"websecaf"
+          OPEN      OUTSITA1,"outsitaf"
+          OPEN      OUTPREA1,"outpreaf"
+.
+          MOVE      "out",CFILEPRE       * Save Current File Prefix
+          CALL      OPNOUT00             * Open Outpatient Files
+.
+          CALL      IBACLOCK
+          PACK      KEY8,CCC,CYY,CMM,CDD
+          REP       " 0",KEY8
+          MOVE      KEY8,CRTDATE
+          MOVE      CTIMEIS,CRTTIME
+.
+          MOVE      ZERO,NOFPCMR
+          MOVE      ZERO,NOFCMDT
+          MOVE      ZERO,NOFCMTX
+          MOVE      ZERO,NOFVIS3
+          MOVE      ZERO,NOFVIS2
+          MOVE      ZERO,NOFBOKR
+          MOVE      ZERO,NOFINPB
+          MOVE      ZERO,NOFBOKS
+.
+INIT9999  RETURN
++
+.---------------------------------------------------------------------
+.                    Open Outpatient Files
+.---------------------------------------------------------------------
+OPNOUT00  PACK      CFNAME,CFILEPRE,FILBB1A1
+          CLOSE     OUTBB1A1
+          CALL      OPOTBB11               * Open the file
+.
+          PACK      CFNAME,CFILEPRE,FILCANA1
+          CLOSE     OUTCANA1
+          OPEN      OUTCANA1,CFNAME        * Open the file xxxcanaf
+.
+OPNOUT99  RETURN
++
+.---------------------------------------------------------------------
+. get user options or exit                        
+. Returns:  EXIT    = FALSE (0)  Run clean up                           
+.                     TRUE  (1)  Exit option selected                  
+.---------------------------------------------------------------------
+.
+OPTN0000  DISPLAY   *P1:3,*EF
+.
+OPTN0100  MOVE      SP70,CUSERID 
+          KEYIN     *P1:4,*EL,*V2LON,"User Id : ",*HOFF:
+                    *P11:4,CUSERID
+          DISPLAY   *P1:24,*EL
+.
+          SQUEEZE   CUSERID
+          GOTO      OPTN8000 IF EOS
+. 
+          PACK      KEY10,CUSERID,SP70
+          CALL      RDWBSE1
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*V2LON,"User Id not on file",*HOFF 
+            GOTO      OPTN0100
+          ENDIF
+. 
+OPTN0200  DISPLAY   *P1:6,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:7,*V2LON,ONE,*HOFF,". Inpatient Comments":
+                    *P1:8,*V2LON,TWO,*HOFF,". Outpatient Comments":
+                    *P1:9,*V2LON,THREE,*HOFF,". Emergency Comments":
+                    *P1:10,*V2LON,FOUR,*HOFF,". All Comments":
+                    *P1:11,*V2LON,FIVE,*HOFF,". Booking Comments":
+                    *P1:12,*V2LON,SIX,*HOFF,". Cancelled Outpaient ":
+                                            "Booking Comments"
+.
+OPTN0300  KEYIN     *P1:14,*EL,"Select Option : ":
+                    *P17:14,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION            * exit selected ?
+          GOTO      OPTN8000 IF EQUAL       * yes
+.
+          BRANCH    COPTION,OPTN1000,OPTN1000,OPTN1000,OPTN1000,OPTN1000:
+                            OPTN1000
+.
+          BEEP
+          GOTO      OPTN0300
+.
+OPTN1000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN8000  MOVE      ONE,EXIT
+          GOTO      OPTN9999
+.
+OPTN9999  RETURN
++
+.---------------------------------------------------------------------
+. Processs copying visit comments for Inpatient
+.---------------------------------------------------------------------
+INPA0000  CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:13,"Started : ",CDATE,SP1,CTIMEIS:
+                    *P1:14,"Processing in progress.  ":
+                    "Please wait until completed."
+.
+          MOVE      SP70,SAVADMNO 
+          MOVE      ZERO,PUNIQ
+.
+          PACK      KEY10,SP70
+          CALL      RDSCMNT1                 * start Reading patcmntf
+INPA1000  CALL      RDKCMNT1                 * Next patient Comments
+          BRANCH    OVRCD,INPA9200
+.
+          ADD       ONE,NOFPCMR
+          MATCH     SAVADMNO,DPCADMN
+          IF        @EQUAL
+            IF        PUNIQ = 0
+              GOTO      INPA1000             * previous rec with the same UR 
+                                             * is not patient visit so skip
+            ELSE
+              GOTO      INPA3000             * header & 1st line created
+            ENDIF
+          ELSE
+            MOVE      PCLINE,CMNTLINE 
+            STRIP     CMNTLINE
+            MATCH     SP70,CMNTLINE
+            GOTO      INPA1000 IF EOS        * skip all the first blank line 
+          ENDIF
+.
+          MOVE      DPCADMN,SAVADMNO
+          MOVE      ZERO,PUNIQ
+.
+. Check if the comments are for inpatient visit
+. 
+INPA1100  PACK      KEY8,DPCADMN,SP70
+          CALL      RDVISA1                 
+          BRANCH    OVRCD,INPA1000
+.
+          COMPARE   "3",PVITYPE             * Inpatient visit?
+          GOTO      INPA1000 IF NOT EQUAL   
+.
+          ADD       ONE,NOFVIS3 
+.
+. Create Visit Comment header
+.
+          MOVE      ONE,NOTENUMB
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70 
+          CALL      RDVSMDT1                * header record exists?
+INPA2000  IF        OVRCD = 0
+            CALL      MAXNOT00              * allocate the next note number
+          ENDIF
+
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70
+          CALL      RDVSMDT1                * header record exists?
+          COMPARE   ZERO,OVRCD
+          GOTO      INPA9000 IF EQUAL       * Note number shouldn't exist
+.
+          CALL      CLVSMD00
+.
+INPA2200  MOVE      DPCADMN,VSMDVISN
+          MOVE      NOTETYPE,VSMDTYPE
+          MOVE      NOTENUMB,VSMDNOTE
+          MOVE      CRTDATE,VSMDDATE
+          MOVE      CRTTIME,VSMDTIME
+          MOVE      CUSERID,VSMDUSER
+.
+          CALL      WRVSMDT1                 * create comment header
+          ADD       ONE,NOFCMDT              * Update record counter 
+.
+.         IF        (NOFCMDT % 1000) = 0
+.           DISPLAY   *P1:14,*EL,"Record No. :":
+.                     *P15:14,*V2LON,NOFCMDT
+.         ENDIF
+.
+. Create Visit Comments Text
+.
+INPA3000  MOVE      VSMDVISN,VSMTVISN 
+          MOVE      VSMDTYPE,VSMTTYPE
+          MOVE      VSMDNOTE,VSMTNOTE
+          ADD       ONE,PUNIQ
+          MOVE      PUNIQ,VSMTUNIQ
+
+          PACK      KEY20,VSMTVISN,VSMTTYPE,VSMTNOTE,VSMTUNIQ,SP70
+          CALL      RDVSMTX1
+          IF        OVRCD = 1
+            MOVE      PCLINE,VSMTCMNT
+            CALL      WRVSMTX1               * create comment text       
+            ADD       ONE,NOFCMTX
+          ENDIF
+.
+          GOTO      INPA1000
+.
+INPA9000  PRINT     *1,"Comments from patcmntf not written ":
+                    " for Visit: ",DPCADMN
+          GOTO      INPA1000
+.
+INPA9200  OPEN      CONTROLF,"controlf"
+          CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:16,*V2LON,"Number of patcmntf read    : ":
+                    NOFPCMR,*HOFF
+          DISPLAY   *P1:17,*V2LON,"Number of visit selected   : ":
+                    NOFVIS3,*HOFF
+          DISPLAY   *P1:18,*V2LON,"Number of vismdtaf created : ":
+                    NOFCMDT,*HOFF
+          DISPLAY   *P1:19,*V2LON,"Number of vismtxaf created : ":
+                    NOFCMTX,*HOFF
+          DISPLAY   *P1:21,"Ended  : ",CDATE,SP1,CTIMEIS:
+                    *P1:24,*EL;
+          CALL      HITENTER
+.
+INPA9999  RETURN
+.
+.---------------------------------------------------------------------
+. Processs copying visit comments for Emergency
+.---------------------------------------------------------------------
+EMRA0000  CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:13,"Started : ",CDATE,SP1,CTIMEIS:
+                    *P1:14,"Processing in progress.  ":
+                    "Please wait until completed."
+.
+          MOVE      SP70,SAVADMNO
+          MOVE      ZERO,PUNIQ
+.
+          PACK      KEY10,SP70
+          CALL      RDSCMNT1                 * start Reading patcmntf
+EMRA1000  CALL      RDKCMNT1                 * Next patient Comments
+          BRANCH    OVRCD,EMRA9200
+.
+          ADD       ONE,NOFPCMR
+          MATCH     SAVADMNO,DPCADMN
+          IF        @EQUAL
+            IF        PUNIQ = 0
+              GOTO      EMRA1000             * previous rec with the same visit
+                                             * is not emergency visit so skip
+            ELSE
+              GOTO      EMRA3000             * header & 1st line created
+            ENDIF
+          ELSE
+            MOVE      PCLINE,CMNTLINE 
+            STRIP     CMNTLINE
+            MATCH     SP70,CMNTLINE
+            GOTO      EMRA1000 IF EOS        * skip all the first blank line 
+          ENDIF
+.
+          MOVE      DPCADMN,SAVADMNO
+          MOVE      ZERO,PUNIQ
+.
+. Check if the comments are for emergency visit
+.
+EMRA1100  PACK      KEY8,DPCADMN,SP70
+          CALL      RDVISA1
+          BRANCH    OVRCD,EMRA1000
+.
+          COMPARE   "1",PVITYPE             * Emergency visit?
+          GOTO      EMRA1000 IF NOT EQUAL
+.
+          ADD       ONE,NOFVIS3
+.
+. Create Visit Comment header
+.
+          MOVE      ONE,NOTENUMB
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70
+          CALL      RDVSMDT1                * header record exists?
+EMRA2000  IF        OVRCD = 0
+            CALL      MAXNOT00              * allocate the next note number
+          ENDIF
+
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70
+          CALL      RDVSMDT1                * header record exists?
+          COMPARE   ZERO,OVRCD
+          GOTO      EMRA9000 IF EQUAL       * Note number shouldn't exist
+.
+          CALL      CLVSMD00
+.
+EMRA2200  MOVE      DPCADMN,VSMDVISN
+          MOVE      NOTETYPE,VSMDTYPE
+          MOVE      NOTENUMB,VSMDNOTE
+          MOVE      CRTDATE,VSMDDATE
+          MOVE      CRTTIME,VSMDTIME
+          MOVE      CUSERID,VSMDUSER
+.
+          CALL      WRVSMDT1                 * create comment header
+          ADD       ONE,NOFCMDT              * Update record counter
+.
+.         IF        (NOFCMDT % 1000) = 0
+.           DISPLAY   *P1:14,*EL,"Record No. :":
+.                     *P15:14,*V2LON,NOFCMDT
+.         ENDIF
+.
+. Create Visit Comments Text
+.
+EMRA3000  MOVE      VSMDVISN,VSMTVISN
+          MOVE      VSMDTYPE,VSMTTYPE
+          MOVE      VSMDNOTE,VSMTNOTE
+          ADD       ONE,PUNIQ
+          MOVE      PUNIQ,VSMTUNIQ
+
+          PACK      KEY20,VSMTVISN,VSMTTYPE,VSMTNOTE,VSMTUNIQ,SP70
+          CALL      RDVSMTX1
+          IF        OVRCD = 1
+            MOVE      PCLINE,VSMTCMNT
+            CALL      WRVSMTX1               * create comment text
+            ADD       ONE,NOFCMTX
+          ENDIF
+.
+          GOTO      EMRA1000
+.
+EMRA9000  PRINT     *1,"Comments from patcmntf not written ":
+                    " for Visit: ",DPCADMN
+          GOTO      EMRA1000
+.
+EMRA9200  OPEN      CONTROLF,"controlf"
+          CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:16,*V2LON,"Number of patcmntf read    : ":
+                    NOFPCMR,*HOFF
+          DISPLAY   *P1:17,*V2LON,"Number of visit selected   : ":
+                    NOFVIS3,*HOFF
+          DISPLAY   *P1:18,*V2LON,"Number of vismdtaf created : ":
+                    NOFCMDT,*HOFF
+          DISPLAY   *P1:19,*V2LON,"Number of vismtxaf created : ":
+                    NOFCMTX,*HOFF
+          DISPLAY   *P1:21,"Ended  : ",CDATE,SP1,CTIMEIS:
+                    *P1:24,*EL;
+          CALL      HITENTER
+.
+EMRA9999  RETURN
+.
+.---------------------------------------------------------------------
+. Processs copying visit comments for Medical Bookings
+.---------------------------------------------------------------------
+BOOK0000  CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:13,"Started : ",CDATE,SP1,CTIMEIS:
+                    *P1:14,"Processing in progress.  ":
+                    "Please wait until completed."
+.
+          MOVE      SP70,SAVADMNO
+          MOVE      ZERO,PUNIQ
+.
+          PACK      KEY10,SP70
+          CALL      RDSCMNT1                 * start Reading patcmntf
+BOOK1000  CALL      RDKCMNT1                 * Next patient Comments
+          BRANCH    OVRCD,BOOK9200
+.
+          ADD       ONE,NOFPCMR
+          MATCH     SAVADMNO,DPCADMN
+          IF        @EQUAL
+            IF        PUNIQ = 0
+              GOTO      BOOK1000             * previous rec with the same visit
+                                             * is not booking visit so skip
+            ELSE
+              GOTO      BOOK3000             * header & 1st line created
+            ENDIF
+          ELSE
+            MOVE      PCLINE,CMNTLINE 
+            STRIP     CMNTLINE
+            MATCH     SP70,CMNTLINE
+            GOTO      BOOK1000 IF EOS        * skip all the first blank line 
+          ENDIF
+.
+          MOVE      DPCADMN,SAVADMNO
+          MOVE      ZERO,PUNIQ
+.
+. Check if the comments are for a booking
+.
+BOOK1100  PACK      KEY8,DPCADMN,SP70
+          CALL      RDVISA1
+          IF        OVRCD<>1
+            GOTO      BOOK1000    * we don't want visits
+          ENDIF
+.
+          PACK      KEY8,DPCADMN,SP70
+          CALL      RDBKREC1
+          BRANCH    OVRCD,BOOK1000
+.
+          MOVE      BKREBKDT,PVIDATE
+          ADD       ONE,NOFINPB
+.
+. Create Visit Comment header
+.
+          MOVE      ONE,NOTENUMB
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70
+          CALL      RDVSMDT1                * header record exists?
+BOOK2000  IF        OVRCD = 0
+            CALL      MAXNOT00              * allocate the next note number
+          ENDIF
+
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70
+          CALL      RDVSMDT1                * header record exists?
+          COMPARE   ZERO,OVRCD
+          GOTO      BOOK9000 IF EQUAL       * Note number shouldn't exist
+.
+          CALL      CLVSMD00
+.
+BOOK2200  MOVE      DPCADMN,VSMDVISN
+          MOVE      NOTETYPE,VSMDTYPE
+          MOVE      NOTENUMB,VSMDNOTE
+          MOVE      CRTDATE,VSMDDATE
+          MOVE      CRTTIME,VSMDTIME
+          MOVE      CUSERID,VSMDUSER
+.
+          CALL      WRVSMDT1                 * create comment header
+          ADD       ONE,NOFCMDT              * Update record counter
+.
+.         IF        (NOFCMDT % 1000) = 0
+.           DISPLAY   *P1:14,*EL,"Record No. :":
+.                     *P15:14,*V2LON,NOFCMDT
+.         ENDIF
+.
+. Create Visit Comments Text
+.
+BOOK3000  MOVE      VSMDVISN,VSMTVISN
+          MOVE      VSMDTYPE,VSMTTYPE
+          MOVE      VSMDNOTE,VSMTNOTE
+          ADD       ONE,PUNIQ
+          MOVE      PUNIQ,VSMTUNIQ
+
+          PACK      KEY20,VSMTVISN,VSMTTYPE,VSMTNOTE,VSMTUNIQ,SP70
+          CALL      RDVSMTX1
+          IF        OVRCD = 1
+            MOVE      PCLINE,VSMTCMNT
+            CALL      WRVSMTX1               * create comment text
+            ADD       ONE,NOFCMTX
+          ENDIF
+.
+          GOTO      BOOK1000
+.
+BOOK9000  PRINT     *1,"Comments from patcmntf not written ":
+                    " for Visit: ",DPCADMN
+          GOTO      BOOK1000
+.
+BOOK9200  OPEN      CONTROLF,"controlf"
+          CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:16,*V2LON,"Number of patcmntf read    : ":
+                    NOFPCMR,*HOFF
+          DISPLAY   *P1:17,*V2LON,"Number of bookings selected: ":
+                    NOFINPB,*HOFF
+          DISPLAY   *P1:18,*V2LON,"Number of vismdtaf created : ":
+                    NOFCMDT,*HOFF
+          DISPLAY   *P1:19,*V2LON,"Number of vismtxaf created : ":
+                    NOFCMTX,*HOFF
+          DISPLAY   *P1:21,"Ended  : ",CDATE,SP1,CTIMEIS:
+                    *P1:24,*EL;
+          CALL      HITENTER
+.
+BOOK9999  RETURN
+.
+.---------------------------------------------------------------------
+. Clear the file variables - vismdtaf                                    
+.---------------------------------------------------------------------
+CLVSMD00  MOVE      SP70,VSMDVISN
+          MOVE      SP70,VSMDTYPE
+          MOVE      SP70,VSMDNOTE
+          MOVE      SP70,VSMDDATE
+          MOVE      SP70,VSMDTIME
+          MOVE      SP70,VSMDUSER
+          MOVE      SP70,VSMDOCCG
+          MOVE      ZERO,VSMDDELT
+          MOVE      SP70,VSMDDDAT
+          MOVE      SP70,VSMDDTIM
+          MOVE      SP70,VSMDDUSE
+          MOVE      SP70,VSMDDOCC
+          MOVE      SP70,VSMDSPAR
+.
+CLVSMD99  RETURN
++
+.---------------------------------------------------------------------
+. get the maximum note number for an admmision number and type.  
+. Add 1 to the maximum note number and return                     
+.---------------------------------------------------------------------
+MAXNOT00  PACK      KEY17,DPCADMN,NOTETYPE,Z70
+          CALL      RSVSMDT1                * header record exists?
+          CALL      RPVSMDT1
+          BRANCH    OVRCD,MAXNOT99
+.
+          MATCH     DPCADMN,VSMDVISN
+          GOTO      MAXNOT99 IF NOT EQUAL
+.
+          MATCH     NOTETYPE,VSMDTYPE
+          GOTO      MAXNOT99 IF NOT EQUAL
+.
+          MOVE      ZERO,FORM6
+          MOVE      VSMDNOTE,FORM6
+          ADD       ONE,FORM6
+          MOVE      FORM6,NOTENUMB
+.
+MAXNOT99  RETURN
+.
+.---------------------------------------------------------------------
+. Processs copying visit comments for Outpatient
+.---------------------------------------------------------------------
+OUPA0000  CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:13,"Started : ",CDATE,SP1,CTIMEIS:
+                    *P1:14,"Processing in progress.  ":
+                    "Please wait until completed."
+.
+          MOVE      SP70,SAVADMNO
+          MOVE      ZERO,PUNIQ
+.
+          PACK      KEY10,SP70
+          CALL      RDSCMNT1                * start Reading patcmntf
+OUPA1000  CALL      RDKCMNT1                * Next patient Comments
+          BRANCH    OVRCD,OUPA9200
+.
+          ADD       ONE,NOFPCMR
+          MATCH     SAVADMNO,DPCADMN
+          IF        @EQUAL
+            IF        PUNIQ = 0
+              GOTO      OUPA1000             * not patient visit
+            ELSE
+              GOTO      OUPA3000             * header & 1st line created
+            ENDIF
+          ELSE
+            MOVE      PCLINE,CMNTLINE 
+            STRIP     CMNTLINE
+            MATCH     SP70,CMNTLINE
+            GOTO      OUPA1000 IF EOS        * skip all the first blank line 
+          ENDIF
+.
+          MOVE      DPCADMN,SAVADMNO
+          MOVE      ZERO,PUNIQ
+.
+. Check if the comments are for Outpatient visit
+.
+OUPA1100  IF        COPTION = 6
+            GOTO      OUPA1300         * Cancelled OP booking comments only   
+          ENDIF
+.
+          PACK      KEY8,DPCADMN,SP70
+          CALL      RDVISA1
+          BRANCH    OVRCD,OUPA1200
+.
+          COMPARE   "2",PVITYPE             * Outpatient visit?
+          IF        @EQUAL
+            ADD       ONE,NOFVIS2
+            GOTO      OUPA1500
+          ELSE
+            GOTO      OUPA1000
+          ENDIF
+.
+. Check if it is in outpatient booking
+.
+OUPA1200  ADD       ONE,NOFBOKR
+          PACK      KEY8,DPCADMN,SP70
+          CALL      RDPREA1
+          BRANCH    OVRCD,OUPA1300
+.
+          PACK      KEY6,OPRSITE,SP70
+          CALL      RDSITA1       
+          BRANCH    OVRCD,OUPA1000
+.
+. Open outpatient files
+.
+          MATCH     OSTFILE,CFILEPRE         * check if same File Prefix
+          IF        !@EQUAL
+            MOVE      OSTFILE,CFILEPRE       * Save Current File Prefix
+            CALL      OPNOUT00               * Open Outpatient Files
+          ENDIF
+.
+          PACK      KEY8,DPCADMN,SP70 
+          CALL      RDBOKB1
+          BRANCH    OVRCD,OUPA9000
+.
+          MOVE      OBADATE,PVIDATE         * uses booking for comment date
+          ADD       ONE,NOFBOKS
+          GOTO      OUPA1500
+.
+. Check if it's a cancelled outpatient booking
+.
+OUPA1300  MOVE      SP70,KEY6
+          CALL      RDSSITA1                 * check all outpatient sites
+OUPA1350  CALL      RDKSITA1
+          BRANCH    OVRCD,OUPA1000
+.
+          MATCH     OSTFILE,CFILEPRE         * check if same File Prefix
+          IF        !@EQUAL
+            MOVE      OSTFILE,CFILEPRE       * Save Current File Prefix
+            CALL      OPNOUT00               * Open Outpatient Files
+          ENDIF
+.
+          PACK      KEY8,DPCADMN,SP70
+          CALL      RDOTCAN1                * Read cancelled OP booking
+          BRANCH    OVRCD,OUPA1350
+.
+          MOVE      OPCNDATE,PVIDATE        * Use original booking date
+          ADD       ONE,NOFBOKS
+.
+. Create Visit Comment header
+.
+OUPA1500  MOVE      ONE,NOTENUMB
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70
+          CALL      RDVSMDT1                * header record exists?
+OUPA2000  IF        OVRCD = 0
+            CALL      MAXNOT00              * allocate the next note number
+          ENDIF
+
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70
+          CALL      RDVSMDT1                * header record exists?
+          COMPARE   ZERO,OVRCD
+          GOTO      OUPA9000 IF EQUAL       * Note number shouldn't exist
+.
+          CALL      CLVSMD00
+.
+OUPA2200  MOVE      DPCADMN,VSMDVISN
+          MOVE      NOTETYPE,VSMDTYPE
+          MOVE      NOTENUMB,VSMDNOTE
+          MOVE      CRTDATE,VSMDDATE
+          MOVE      CRTTIME,VSMDTIME
+          MOVE      CUSERID,VSMDUSER
+.
+          CALL      WRVSMDT1                 * create comment header
+          ADD       ONE,NOFCMDT              * Update record counter
+.
+.         IF        (NOFCMDT % 1000) = 0
+.           DISPLAY   *P1:14,*EL,"Record No. :":
+.                     *P15:14,*V2LON,NOFCMDT
+.         ENDIF
+.
+. Create Visit Comments Text
+.
+OUPA3000  MOVE      VSMDVISN,VSMTVISN
+          MOVE      VSMDTYPE,VSMTTYPE
+          MOVE      VSMDNOTE,VSMTNOTE
+          ADD       ONE,PUNIQ
+          MOVE      PUNIQ,VSMTUNIQ
+
+          PACK      KEY20,VSMTVISN,VSMTTYPE,VSMTNOTE,VSMTUNIQ,SP70
+          CALL      RDVSMTX1
+          IF        OVRCD = 1
+            MOVE      PCLINE,VSMTCMNT
+            CALL      WRVSMTX1               * create comment text
+            ADD       ONE,NOFCMTX
+          ENDIF
+.
+          GOTO      OUPA1000
+.
+OUPA9000  PRINT     *1,"Comments from patcmntf not written ":
+                    " for Visit: ",DPCADMN
+          GOTO      OUPA1000
+.
+OUPA9200  OPEN      CONTROLF,"controlf"
+          CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:16,*V2LON,"Number of patcmntf read    : ":
+                    NOFPCMR,*HOFF
+          DISPLAY   *P1:17,*V2LON,"Number of visit selected   : ":
+                    NOFVIS2,*HOFF
+          DISPLAY   *P1:18,*V2LON,"Number of Booking selected : ":
+                    NOFBOKS,*HOFF
+          DISPLAY   *P1:19,*V2LON,"Number of vismdtaf created : ":
+                    NOFCMDT,*HOFF
+          DISPLAY   *P1:20,*V2LON,"Number of vismtxaf created : ":
+                    NOFCMTX,*HOFF
+          DISPLAY   *P1:22,"Ended  : ",CDATE,SP1,CTIMEIS:
+                    *P1:24,*EL;
+          CALL      HITENTER
+.
+OUPA9999  RETURN
++
+.---------------------------------------------------------------------
+. Processs copying visit comments for Inpatient,Outpatient and Emergency
+.---------------------------------------------------------------------
+ALLC0000  CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:13,"Started : ",CDATE,SP1,CTIMEIS:
+                    *P1:14,"Processing in progress.  ":
+                    "Please wait until completed."
+.
+          MOVE      SP70,SAVADMNO
+          MOVE      ZERO,PUNIQ
+.
+          PACK      KEY10,SP70
+          CALL      RDSCMNT1                * start Reading patcmntf
+ALLC1000  CALL      RDKCMNT1                * Next patient Comments
+          BRANCH    OVRCD,ALLC9200
+.
+          ADD       ONE,NOFPCMR
+          MATCH     SAVADMNO,DPCADMN
+          IF        @EQUAL
+            IF        PUNIQ = 0
+              GOTO      ALLC1000             * not patient visit
+            ELSE
+              GOTO      ALLC3000             * header & 1st line created
+            ENDIF
+          ELSE
+            MOVE      PCLINE,CMNTLINE 
+            STRIP     CMNTLINE
+            MATCH     SP70,CMNTLINE
+            GOTO      ALLC1000 IF EOS        * skip all the first blank line 
+          ENDIF
+.
+          MOVE      DPCADMN,SAVADMNO
+          MOVE      ZERO,PUNIQ
+.
+. Check if the comments are for Inp,Outpatient or emr visit
+.
+ALLC1100  PACK      KEY8,DPCADMN,SP70
+          CALL      RDVISA1
+          BRANCH    OVRCD,ALLC1200
+.
+          COMPARE   "1",PVITYPE             * Emergency  visit?
+          IF        @EQUAL
+            ADD       ONE,NOFVIS2
+            GOTO      ALLC1500
+          ENDIF
+.
+          COMPARE   "3",PVITYPE             * Inpatient  visit?
+          IF        @EQUAL
+            ADD       ONE,NOFVIS2
+            GOTO      ALLC1500
+          ENDIF
+.
+          COMPARE   "2",PVITYPE             * Outpatient visit?
+          IF        @EQUAL
+            ADD       ONE,NOFVIS2
+            GOTO      ALLC1500
+          ELSE
+            GOTO      ALLC1000
+          ENDIF
+.
+.
+. Check if it is inpatient booking
+.
+ALLC1200  PACK      KEY8,DPCADMN,SP70
+          CALL      RDBKREC1
+          BRANCH    OVRCD,ALLC1300
+          MOVE      BKREBKDT,PVIDATE         * uses booking for comment date
+          ADD       ONE,NOFINPB
+          GOTO      ALLC1500
+.
+. Check if it is in outpatient booking
+.
+ALLC1300  ADD       ONE,NOFBOKR
+          PACK      KEY8,DPCADMN,SP70
+          CALL      RDPREA1
+          BRANCH    OVRCD,ALLC1400
+.
+          PACK      KEY6,OPRSITE,SP70
+          CALL      RDSITA1
+          BRANCH    OVRCD,ALLC1000
+.
+. Open outpatient files
+.
+          MATCH     OSTFILE,CFILEPRE         * check if same File Prefix
+          IF        !@EQUAL
+            MOVE      OSTFILE,CFILEPRE       * Save Current File Prefix
+            CALL      OPNOUT00               * Open Outpatient Files
+          ENDIF
+.
+          PACK      KEY8,DPCADMN,SP70
+          CALL      RDBOKB1
+          BRANCH    OVRCD,ALLC9000
+.
+          MOVE      OBADATE,PVIDATE         * uses booking for comment date
+          ADD       ONE,NOFBOKS
+          GOTO      ALLC1500
+.
+. Check if it's a cancelled outpatient booking
+.
+ALLC1400  MOVE      SP70,KEY6
+          CALL      RDSSITA1                 * check all outpatient sites
+ALLC1450  CALL      RDKSITA1
+          BRANCH    OVRCD,ALLC1000
+.
+          MATCH     OSTFILE,CFILEPRE         * check if same File Prefix
+          IF        !@EQUAL
+            MOVE      OSTFILE,CFILEPRE       * Save Current File Prefix
+            CALL      OPNOUT00               * Open Outpatient Files
+          ENDIF
+.
+          PACK      KEY8,DPCADMN,SP70
+          CALL      RDOTCAN1                * Read cancelled OP booking
+          BRANCH    OVRCD,ALLC1450
+.
+          MOVE      OPCNDATE,PVIDATE        * Use original booking date
+          ADD       ONE,NOFBOKS
+.
+. Create Visit Comment header
+.
+ALLC1500  MOVE      ONE,NOTENUMB
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70
+          CALL      RDVSMDT1                * header record exists?
+ALLC2000  IF        OVRCD = 0
+            CALL      MAXNOT00              * allocate the next note number
+          ENDIF
+
+          PACK      KEY17,DPCADMN,NOTETYPE,NOTENUMB,SP70
+          CALL      RDVSMDT1                * header record exists?
+          COMPARE   ZERO,OVRCD
+          GOTO      ALLC9000 IF EQUAL       * Note number shouldn't exist
+.
+          CALL      CLVSMD00
+.
+ALLC2200  MOVE      DPCADMN,VSMDVISN
+          MOVE      NOTETYPE,VSMDTYPE
+          MOVE      NOTENUMB,VSMDNOTE
+          MOVE      CRTDATE,VSMDDATE
+          MOVE      CRTTIME,VSMDTIME
+          MOVE      CUSERID,VSMDUSER
+.
+          CALL      WRVSMDT1                 * create comment header
+          ADD       ONE,NOFCMDT              * Update record counter
+.
+.         IF        (NOFCMDT % 1000) = 0
+.           DISPLAY   *P1:14,*EL,"Record No. :":
+.                     *P15:14,*V2LON,NOFCMDT
+.         ENDIF
+.
+. Create Visit Comments Text
+.
+ALLC3000  MOVE      VSMDVISN,VSMTVISN
+          MOVE      VSMDTYPE,VSMTTYPE
+          MOVE      VSMDNOTE,VSMTNOTE
+          ADD       ONE,PUNIQ
+          MOVE      PUNIQ,VSMTUNIQ
+
+          PACK      KEY20,VSMTVISN,VSMTTYPE,VSMTNOTE,VSMTUNIQ,SP70
+          CALL      RDVSMTX1
+          IF        OVRCD = 1
+            MOVE      PCLINE,VSMTCMNT
+            CALL      WRVSMTX1               * create comment text
+            ADD       ONE,NOFCMTX
+          ENDIF
+.
+          GOTO      ALLC1000
+.
+ALLC9000  PRINT     *1,"Comments from patcmntf not written ":
+                    " for Visit: ",DPCADMN
+          GOTO      ALLC1000
+.
+ALLC9200  OPEN      CONTROLF,"controlf"
+          CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:16,*V2LON,"Number of patcmntf read    : ":
+                    NOFPCMR,*HOFF
+          DISPLAY   *P1:17,*V2LON,"Number of visit selected   : ":
+                    NOFVIS2,*HOFF
+          DISPLAY   *P1:18,*V2LON,"Number of Booking selected : ":
+                    NOFBOKS,*HOFF
+          DISPLAY   *P1:19,*V2LON,"Number of vismdtaf created : ":
+                    NOFCMDT,*HOFF
+          DISPLAY   *P1:20,*V2LON,"Number of vismtxaf created : ":
+                    NOFCMTX,*HOFF
+          DISPLAY   *P1:22,"Ended  : ",CDATE,SP1,CTIMEIS:
+                    *P1:24,*EL;
+          CALL      HITENTER
+.
+ALLC9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       BOKRC1IO/INC
+          INC       VISMDTIO/INC
+          INC       VISMTXIO/INC
+          INC       PATCMNIO/INC
+          INC       PATVISIO/INC
+          INC       WEBSECIO/INC
+          INC       OUTCANIO/INC
+          INC       OUTPREIO/INC
+          INC       OUTSITIO/INC
+          INC       OUTBB1IO/INC

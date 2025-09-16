@@ -1,0 +1,660 @@
+.
+.**********************************************************************
+.* System   : PATIENT BILLING                                         *
+.* Program  : IBAPMS30                                                *
+.* Desc     : Daily Patient Intake                                    *
+.**********************************************************************
+.* Date     :  16/01/90                                               *
+.* Author   :  K.Peak                                                 *
+.* Mods.    :                                                         *
+.*        V10.01.01 03/02/2011 Jill Parkinson CAR 233088                      *
+.*                  Added pmsvx1af                                            *
+.*        V9.02.02  12/10/2001  Dean Cramer                           *
+.*                  Include code for web access.                      *
+.*        V5.08.01  28/08/2000  Caleb Sharman                         *
+.*                  Changed Health Fund variables to be 8 chars       *
+.*             V5.07.B02 02/02/1999 Jim Stathopoulos                  *
+.*                       Real 507 Mods                                *
+.                   09/11/1998  Glenn Berry      5.07 changes         *
+.**********************************************************************
+.*             V5.01.02 15/11/90 DIG                                  *
+.*                      Fixed problem with daily update. i.e. it      *
+.*                      would not work for discharged patients who    *
+.*                      were in hospital for each day the update was  *
+.*                      run.                                          *
+.**********************************************************************
+.
+          INC       STD001FD
+          INC       PATCOMM/INC
+.
+          INC       PATCONFD/INC              * control file
+          INC       PATDAYFD/INC              * daily patient list file
+          INC       PATDRGFD/INC              * period date range file
+          INC       PATDSCFD/INC              * discharge file
+          INC       PATMI1FD/INC              * admission file
+          INC       PMSVX1FD/INC              * admission file
++
+.**********************************************************************
+.*                         VARIABLES                                  *
+.**********************************************************************
+.
+CMDLINE   DIM       50        
+CURDATE   DIM       8
+CURPER    DIM       6          * current period
+.
+DATFLG    FORM      1          * data generated flag
+DADATE    DIM       8          * yesterdays date 
+.
+FADMDTE   DIM       8          * fromdate
+FDAYMON   DIM       4          * mmdd 
+FYEAR     DIM       4          * ccyy 
+.
+HTMLFILE  FIFO      ASCII, FIXED=250
+.
+LASTDATE  DIM       8
+LDAYMON   DIM       4          * mmdd 
+LDATE     DIM       8          * ccyymmdd 
+LYEAR     DIM       4          * ccyy 
+.
+PCENT     DIM       2          * century from ptcnndat
+.
+STRTDATE  DIM       8
+.
+.
+WSTAT     FORM      1          * admission status
+.
+YDATE     DIM       8          * working date 
+YDAYMON   DIM       4          * mmdd
+YYEAR     DIM       4          * ccyy
+.
+PRGID     INIT      "IBAPMS30"
+PRGNAM    INIT      "Daily Inpatient Update"
+VERSION   INIT      "V11.03.00"
++
+.**********************************************************************
+.*                         MAINLINE                                   *
+.**********************************************************************
+.
+ML0000    CALL      INIT0000                  * initialisation
+          BRANCH    EXIT,ML9000
+.
+ML1000    CALL      SCR0000                   * select option
+          BRANCH    EXIT,ML9000
+.
+          MOVE      ZERO,DATFLG               * no data generated flag
+.
+.         Check if the date from the control file is blank or zero
+.
+          MATCH     "00000000",PTCNNDAT
+          GOTO      ML1500 IF EQUAL       
+.
+          MATCH     SP8,PTCNNDAT
+          GOTO      ML1500 IF EQUAL       
+.
+          GOTO      ML2000 
+.
+.         If the date is blank we can assume that the update has never been
+.         run before, so we need to generate the data for the first time
+.
+ML1500    MATCH     "IBARSH",PGM
+          GOTO      ML3000 IF EQUAL
+. 
+          CALL      GDAT0000                  * generate first time data
+          BRANCH    EXIT,ML1000,ML9000
+.
+ML2000    CALL      PROC0000                  * process existing data
+.
+ML3000    CALL      END0000                   * end of report
+          GOTO      ML1000
+.
+.----------------------------------------------------------------------
+.                          .. The End                                  
+.----------------------------------------------------------------------
+ML9000    CHAIN     PGM
++
+.**********************************************************************
+.*                         INIT0000                                   *
+.*                      Initialisation                                *
+.**********************************************************************
+.
+INIT0000  CALL      DISPHEAD
+.
+          DISPLAY   *P56:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"patdschf";
+          OPEN      PATDSCH1,"patdschf"
+          OPEN      PATDSCH2,"patdschf"
+.
+          DISPLAY   *P64:24,"patdrgaf";
+          OPEN      PATDRGA1,"patdrgaf"
+.
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PATMI1A2,"patmi1af"
+          OPEN      PATMI1A3,"patmi1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          READ      CONTROLF,FIFTY9;*174,PTCNNDAT
+.
+.         Find the period the current date fits in
+.
+          PACK      CPTDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CPTDATE
+          CALL      GPERD
+          BRANCH    EXIT,INIT1000           * current date not in a valid period
+.
+          PACK      CURPER,DRGYR,DRGNUM
+.
+          MOVE      FALSE,EXIT
+          GOTO      INIT9999
+.
+INIT1000  MATCH     "IBARSH",PGM
+          GOTO      INIT1500 IF EQUAL
+.
+          KEYIN     *P1:24,*EL,*B,*V2LON:
+                    "** Error: Current date not found in Period file. ":
+                    "Hit <ENTER> to exit ",*EOFF,ANS,*P1:24;
+INIT1500  MOVE      TRUE,EXIT
+.
+INIT9999  RETURN
++
+.**********************************************************************
+.*                         SCR0000                                    *
+.*                      Main Option Screen                            *
+.**********************************************************************
+.
+SCR0000   HLINE     *G37,2,51,80
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Daily Statistics Update"
+.
+SCR1000   KEYIN     *P1:7,"Option : ",*EF,*DV,UNDLN1:
+                    *P10:7,*V2LON,OPTION
+.
+          BRANCH    OPTION,SCR8000
+.
+          COMPARE   ZERO,OPTION
+          GOTO      SCR9000 IF EQUAL
+          BEEP
+          GOTO      SCR1000
+.
+SCR8000   MOVE      FALSE,EXIT
+          GOTO      SCR9999
+.
+SCR9000   MOVE      TRUE,EXIT
+SCR9999   RETURN
++
+.**********************************************************************
+.*                         PROC0000                                   *
+.*                       Process Data                                 *
+.**********************************************************************
+.
+PROC0000  DISPLAY   *P1:24,*EL:
+                    *P15:24,"Admission No : ",*P40:24,"Scanning : "
+.
+.         Need to calculate yesterdays date for the update, this is done by 
+.         converting the current date into julian form and then subtracting 
+.         one and converting the date back into a date format
+.
+          MOVE      CYY,YY                    * current date variables
+          MOVE      CMM,MM
+          MOVE      CDD,DD
+          MOVE      CCC,CC
+.
+          CALL      SUBD0000                  * subtract a day
+.
+          PACK      DADATE,CC,YY,MM,DD
+          REP       " 0",DADATE               * yesterdays date
+.
+. ------  Need to calculate the last date, it being the day before ptcnndat ---
+. ------  also the working date becomes PTCNNDAT ------
+.
+          UNPACK    PTCNNDAT,YDATE
+          MOVE      PTCNNDAT,LASTDATE
+          UNPACK    LASTDATE,CCENT,CYEAR,CMON,CDAY
+          MOVE      CCENT,CC
+          MOVE      CYEAR,YY
+          MOVE      CMON,MM
+          MOVE      CDAY,DD
+.
+          CALL      SUBD0000                  * subtract a day
+.
+          PACK      LASTDATE,CC,YY,MM,DD
+          REP       " 0",LASTDATE
+          MOVE      LASTDATE,PTCNNDAT
+.
+.         Process admission and discharge data
+.
+PROC2000  UNPACK    YDATE,XCENT,XYEAR,XMON,XDAY     * working date
+          PACK      YDAYMON,XMON,XDAY
+          PACK      YYEAR,XCENT,XYEAR
+.
+          UNPACK    PTCNNDAT,XCENT,XYEAR,XMON,XDAY   * last date
+          PACK      LDAYMON,XMON,XDAY
+          PACK      LYEAR,XCENT,XYEAR
+          PACK      LDATE,XCENT,XYEAR,XMON,XDAY
+.
+.         Check if the last date requires a new file, if it does create one
+.
+          CLOSE     PATDAYA1                  * close the old file
+          PACK      CFNAME,FILDAYA1,LYEAR
+.
+          TRAP      CREA0000 IF IO  
+          OPEN      PATDAYA1,CFNAME           * open the old file
+          TRAPCLR   IO
+.
+.         Check if the new date requires a new file, if it does create one
+.
+          CLOSE     PATDBYB1                  * close the new file
+          PACK      CFNAME,FILDAYA1,YYEAR
+.
+          TRAP      CREB0000 IF IO  
+          OPEN      PATDBYB1,CFNAME           * open the new file
+          TRAPCLR   IO
+.
+          UNPACK    YDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          DISPLAY   *P1:24,CPCDATE;
+.
+          CALL      PDIS0000             * loop through discharges for last date
+          CALL      PADM0000             * loop through admissions for new date
+.
+          PACK      PTCNNDAT,YDATE * move working date to ptcnndat
+.
+.         Check whether the working date is equal to yesterdays date, if 
+.         it isn't equal we need to keep updating the daily patient list file
+.
+          MATCH     DADATE,YDATE
+          GOTO      PROC3000 IF NOT LESS
+.
+.         Add one to the working date so the next day between ptcnndat 
+.         and dadate can be updated
+.
+          CALL      FDTE0000                  * add one to working date 
+          GOTO      PROC2000
+.
+.         Write todays date to the control file
+.
+PROC3000  PACK      PTCNNDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTCNNDAT
+          WRITAB    CONTROLF,FIFTY9;*174,PTCNNDAT
+.
+          RETURN
++
+.**********************************************************************
+.*                            SUBD0000                                *
+.*             Routine to subtract one from a given date              *
+.*   Requires : CC,YY,MM,DD                                           *
+.*   Returns  : CC,YY,MM,DD of date before given date                 *
+.**********************************************************************
+SUBD0000  CALL      DMYCON                    * convert to julian form
+.
+          SUB       ONE,JULDAY
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON                    * convert to date form
+.
+SUBD9999  RETURN
++
+.**********************************************************************
+.*                         PDIS0000                                   *
+.*             Loop through discharges for last date                  *
+.**********************************************************************
+.
+PDIS0000  DISPLAY   *P12:24,"D";
+          PACK      KEY12,LDAYMON,SP10    
+          CALL      RSPTDAY1                  * a is the old record
+PDIS1000  CALL      RKPTDAY1
+          BRANCH    OVRCD,PDIS9999
+.
+          MATCH     PTDYDATE,LDAYMON
+          GOTO      PDIS9999 IF NOT EQUAL
+.
+          DISPLAY   *P51:24,PTDYADMN
+.
+.         Read the discharge file
+.
+          PACK      KEY8,PTDYADMN
+          CALL      RDDSCH1
+          BRANCH    OVRCD,PDIS2000
+.
+          MATCH     DDATE,LDATE   
+          GOTO      PDIS1000 IF NOT LESS
+.
+.         If the record already exists then we dont't write the record away
+.
+PDIS2000  PACK      KEY12,YDAYMON,PTDYADMN    
+          CALL      RDPTDBY1                  * b is the new record
+          BRANCH    OVRCD,PDIS2500
+          GOTO      PDIS1000 
+.
+PDIS2500  MOVE      YDAYMON,PTDYDATE
+          CALL      WRPTDBY1                  * write record
+.
+          MOVE      ONE,DATFLG                * data generated flag
+          DISPLAY   *P30:24,*V2LON,PTDYADMN 
+.
+.         Do a read of old date/last admission number to repostion for readks
+.
+PDIS3000  PACK      KEY12,LDAYMON,PTDYADMN     
+          CALL      RSPTDAY1                   
+          GOTO      PDIS1000 
+.
+PDIS9999  RETURN
++
+.**********************************************************************
+.*                         PADM0000                                   *
+.*        Loop through the admission file for the new date            *     
+.**********************************************************************
+.
+PADM0000  DISPLAY   *P12:24,"A";
+          PACK      KEY16,YDATE,SP20          * new date
+          CALL      RDSMISS3
+PADM1000  CALL      RDKMISS3
+          BRANCH    OVRCD,PADM9999
+.
+.         If the admission date is not equal to the working date then we 
+.         have finished looping through the admission file 
+.
+          MATCH     ADATE,YDATE            
+          GOTO      PADM9999 IF NOT EQUAL
+.
+          DISPLAY   *P51:24,AADMNO
+.
+.         If the admission status is a 2, 3 or 4 then write the admission 
+.         number to the new date if it doesn't already exist
+.
+PADM2000  BRANCH    ASTAT,PADM1000,PADM2500,PADM2500,PADM2500,PADM1000
+          GOTO      PADM1000
+.
+.         If the record already exists then we dont't write the record away
+.
+PADM2500  PACK      KEY12,YDAYMON,AADMNO      
+          CALL      RDPTDBY1                  * b is the new file
+          BRANCH    OVRCD,PADM3000
+          GOTO      PADM1000
+.
+PADM3000  MOVE      YDAYMON,PTDYDATE
+          MOVE      AADMNO,PTDYADMN
+          CALL      WRPTDBY1                  * write record
+.
+          MOVE      ONE,DATFLG                * data generated flag
+          DISPLAY   *P30:24,*V2LON,AADMNO
+          GOTO      PADM1000
+.
+PADM9999  RETURN
++
+.**********************************************************************
+.*                         GDAT0000                                   *
+.*               Generate the data for the first time                 *
+.**********************************************************************
+
+GDAT0000  MATCH     "IBARSH",PGM
+          GOTO      GDAT9500 IF EQUAL
+.
+          DISPLAY   *P1:9,*EF,"Enter Starting Date : ";
+          PACK      CURDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURDATE
+          MOVE      SP2,CDAY
+          MOVE      SP2,CMON
+          MOVE      SP2,CYEAR
+          MOVE      CCC,CCENT
+          REP       " 0",CCENT
+          MOVE      TWENTY3,CCOL
+          MOVE      NINE,CVERT
+          MOVE      ZERO,CHIGHLT
+.
+          CALL      KEYDATE                 * keyin the starting date
+          BRANCH    CQUEST,GDAT0000
+          BRANCH    OVRCD,GDAT9000
+.
+          PACK      STRTDATE,CCENT,CYEAR,CMON,CDAY
+.
+          MATCH     CURDATE,STRTDATE
+          GOTO      GDAT1000 IF LESS
+.
+          DISPLAY   *P1:24,*EL,*B,"Date must be < the current date - Hit <":
+                           *V2LON,"ENTER",*HOFF,"> to continue";
+          KEYIN     ANS;
+          DISPLAY   *P1:24,*EL;
+          GOTO      GDAT0000
+.
+GDAT1000  PACK      FYEAR,CCENT,CYEAR         * ccyy
+          PACK      FDAYMON,CMON,CDAY         * mmdd
+          PACK      FADMDTE,CYEAR,CMON,CDAY   * fromdate
+.
+.         Check if the new date requires a new file
+.
+          CLOSE     PATDAYA1                  * close the old file
+          PACK      CFNAME,FILDAYA1,FYEAR
+.
+          TRAP      CREA0000 IF IO  
+          OPEN      PATDAYA1,CFNAME           * open the old file
+          TRAPCLR   IO
+.
+          CALL      CONT0000                  * see if O.K. to continue
+          BRANCH    EXIT,GDAT2000,GDAT0000,GDAT9000
+.
+GDAT2000  DISPLAY   *P1:24,*EL:
+                    *P15:24,"Admission No : ",*P40:24,"Scanning : "
+.
+.         Loop through the current admissions in the admission file
+.
+          MOVE      TWO,WSTAT                 * current admissions
+          CALL      ADMN0000                  * read admission file
+.
+.         Loop through the on leave admissions in the admission file
+.
+          MOVE      FOUR,WSTAT                * on leave admissions
+          CALL      ADMN0000                  * read admission file
+.
+.         Loop through the discharge file
+.
+          CALL      DISC0000                  * read discharge file
+.    
+.         Set ptcnndat to next day for proc0000
+.
+          MOVE      STRTDATE,PTCNNDAT
+          MOVE      FALSE,EXIT
+.
+          GOTO      GDAT9999
+.
+.------ no date entered ------
+.
+GDAT9000  MOVE      TRUE,EXIT
+          GOTO      GDAT9999
+.
+GDAT9500  MOVE      TWO,EXIT
+.
+GDAT9999  RETURN
++
+.**************************************************************************
+.*                              CONT0000                                  *
+.*                         check if OK to Continue                        *
+.*         1 = Yes                                                        *
+.*         2 = No                                                         *
+.*         3 = Cancel                                                     *
+.**************************************************************************
+CONT0000  MOVE      FALSE,EXIT
+.
+          CALL      CONTQST                    * see if O.K. to continue
+.
+          MOVE      ANS,EXIT
+.
+CONT9999  RETURN
++
+.**********************************************************************
+.*                         ADMN0000                                   *
+.*                 Loop through the admission file                    *
+.**********************************************************************
+.
+ADMN0000  PACK      KEY9,WSTAT,SP8
+          CALL      RDSMISS2
+ADMN1000  CALL      RDKMISS2
+          BRANCH    OVRCD,ADMN9999
+.
+          DISPLAY   *P51:24,AADMNO
+.
+          COMPARE   WSTAT,ASTAT               * same status ?
+          GOTO      ADMN9999 IF NOT EQUAL
+.
+.         Patient in hospital on date in question
+.
+          MATCH     ADATE,FADMDTE
+          GOTO      ADMN1000 IF LESS
+.
+.         Only need to write to the day file if the admission number 
+.         is not on the file already
+.
+          PACK      KEY12,FDAYMON,AADMNO      
+          CALL      RDPTDAY1                  * b is the new file
+          BRANCH    OVRCD,ADMN8000
+          GOTO      ADMN1000
+.
+ADMN8000  MOVE      FDAYMON,PTDYDATE
+          MOVE      AADMNO,PTDYADMN
+          CALL      WRPTDAY1                  * write record
+.
+          MOVE      ONE,DATFLG                * data generated flag
+          DISPLAY   *P30:24,*V2LON,AADMNO
+          GOTO      ADMN1000
+.
+ADMN9999  RETURN
++
+.**********************************************************************
+.*                         DISC0000                                   *
+.*                 Loop through the discharge file                    *
+.**********************************************************************
+.
+DISC0000  PACK      KEY16,FADMDTE,SP20
+          CALL      RDSDSCH2
+DISC1000  CALL      RDKDSCH2
+          BRANCH    OVRCD,DISC9999
+.
+          DISPLAY   *P51:24,DADMNO
+.
+.         Read the admission file 
+.
+          PACK      KEY8,DADMNO
+          CALL      RDMISS1
+          BRANCH    OVRCD,DISC1000
+.
+.         Patient in hospital on date in question
+.
+          MATCH     ADATE,FADMDTE
+          GOTO      DISC1000 IF LESS
+.
+.         Only need to write to the day file if the admission number 
+.         is not on the file already
+.
+          PACK      KEY12,FDAYMON,AADMNO      
+          CALL      RDPTDAY1                  * b is the new file
+          BRANCH    OVRCD,DISC8000
+          GOTO      DISC1000
+.
+DISC8000  MOVE      FDAYMON,PTDYDATE
+          MOVE      AADMNO,PTDYADMN
+          CALL      WRPTDAY1                  * write record 
+.
+          MOVE      ONE,DATFLG                * data generated flag
+          DISPLAY   *P30:24,*V2LON,DADMNO
+          GOTO      DISC1000
+.
+DISC9999  RETURN
++
+.**********************************************************************
+.*                         FDTE0000                                   *
+.*        Find the day after the ptcnndat date                        *
+.**********************************************************************
+.
+FDTE0000  UNPACK    YDATE,XCENT,XYEAR,XMON,XDAY
+          MOVE      XCENT,CC
+          MOVE      XYEAR,YY
+          MOVE      XMON,MM
+          MOVE      XDAY,DD
+          CALL      DMYCON
+.
+          ADD       ONE,JULDAY
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON
+          PACK      YDATE,CC,YY,MM,DD
+          REP       " 0",YDATE
+.
+          RETURN
++
+.**********************************************************************
+.*                         CREA0000                                   *
+.*        Create the file that is needed to write to                  *
+.**********************************************************************
+.
+CREA0000  
+.         Create the old file as it doesn't exist as yet
+.
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    CFNAME,CMDLINE
+          APPEND    " 13 U1-4,5-12 ",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      PATDAYA1,CFNAME           * a is the old file
+          RETURN
++
+.**********************************************************************
+.*                         CREB0000                                   *
+.*        Create the file that is needed to write to                  *
+.**********************************************************************
+.
+CREB0000  
+.         Create the new file as it doesn't exist as yet
+.
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    CFNAME,CMDLINE
+          APPEND    " 13 U1-4,5-12 ",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      PATDBYB1,CFNAME           * b is the new file
+          RETURN
++
+.**********************************************************************
+.*                         END0000                                    *
+.*                      End of Report                                 *
+.**********************************************************************
+.
+END0000   BRANCH    DATFLG,END1000            * any data generated ?
+.
+.         No data generated by program
+.
+          DISPLAY   *P1:23,*EF,*P20:24,*V2LON:
+                    "** No Data Generated ** ";
+          CALL      HITENTER
+          DISPLAY   *P1:14,*EF
+          GOTO      END9999
+.
+.         Data was generated by program
+.
+END1000   DISPLAY   *P1:23,*EF,*P20:24,*V2LON:
+                    "** Generation Completed ** ";
+          CALL      HITENTER
+          DISPLAY   *P1:14,*EF
+.
+END9999   RETURN
++
+.**********************************************************************
+.*              I/O INCLUDES FOR FILES AND GENERAL ROUTINES           *
+.**********************************************************************
+.
+          INCLUDE   PATCOMN3
+.
+          INCLUDE   PATDAYIO/INC              * daily patient list file
+          INCLUDE   PATDRGIO/INC              * period date range file
+          INC       PATDSCIO/INC              * patient discharge file
+          INC       PATMI1IO/INC              * patients admissions file
+          INC       PMSVX1IO/INC              * patients admissions file
+.
+          INCLUDE   STD001IO
+.

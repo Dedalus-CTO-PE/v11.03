@@ -1,0 +1,171 @@
+.        INCLUDE NAME : IBAIMNIO.INC
+.
+.        FILE I/O REQUESTS FOR INVALID MENU SELECTION FILE
+.
+.OVRCD   FORM     1        0 = NOT OVER
+.                          1 = OVER
+.KEY22   DIM     22        KEY FOR IBAIMEN1
+.KEY18   DIM     18        KEY FOR IBAIMEN2 AND IBAIMEN3
+.
+RAIBIMN1
+         MOVE     ZERO,OVRCD
+         RESET    KEY22
+         READ     IBAIMEN1,KEY22;ANS
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RSIBIMN1 
+         RESET    KEY22
+         READ     IBAIMEN1,KEY22;;
+         RETURN
+.
+RKIBIMN1
+         MOVE     ZERO,OVRCD
+         READKS   IBAIMEN1;IBIMUSER,IBIMDATE,IBIMTIME,IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+.
+         RETURN
+.
+RPIBIMN1
+         MOVE     ZERO,OVRCD
+         READKP   IBAIMEN1;IBIMUSER,IBIMDATE,IBIMTIME:
+                           IBIMPORT,IBIMPROG,IBIMSPAR
+.
+         GOTO     OVERCOND IF OVER
+.
+         RETURN
+.
+RDIBIMN1
+         MOVE     ZERO,OVRCD
+         RESET    KEY22
+         READ     IBAIMEN1,KEY22;IBIMUSER,IBIMDATE,IBIMTIME:
+                                 IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+.
+         RETURN
+.
+UPIBIMN1   
+         UPDATE   IBAIMEN1;IBIMUSER,IBIMDATE,IBIMTIME:
+                           IBIMPORT,IBIMPROG,IBIMSPAR
+.
+         RETURN
+.
+DEIBIMN1  
+         RESET    KEY22
+         DELETE   IBAIMEN1,KEY22
+         RETURN
+.
+WRIBIMN1  
+         MOVE     ZERO,OVRCD
+         RESET    KEY22
+         WRITE    IBAIMEN1,KEY22;KEY22,IBIMPROG,IBIMSPAR
+.
+         RETURN
+.
+RAIBIMN2 
+         MOVE     ZERO,OVRCD
+         RESET    KEY18
+         READ     IBAIMEN2,KEY18;ANS
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RSIBIMN2  
+         MOVE     ZERO,OVRCD
+         RESET    KEY18
+         READ     IBAIMEN2,KEY18;;
+         RETURN
+.
+RKIBIMN2
+         MOVE     ZERO,OVRCD
+         READKS   IBAIMEN2;IBIMUSER,IBIMDATE,IBIMTIME:
+                           IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RPIBIMN2
+         MOVE     ZERO,OVRCD
+         READKP   IBAIMEN2;IBIMUSER,IBIMDATE,IBIMTIME:
+                           IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RDIBIMN2
+         MOVE     ZERO,OVRCD
+         RESET    KEY18
+         READ     IBAIMEN2,KEY18;IBIMUSER,IBIMDATE,IBIMTIME:
+                                 IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RAIBIMN3 
+         MOVE     ZERO,OVRCD
+         RESET    KEY18
+         READ     IBAIMEN3,KEY18;ANS
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RSIBIMN3  
+         MOVE     ZERO,OVRCD
+         RESET    KEY18
+         READ     IBAIMEN3,KEY18;;
+         RETURN
+.
+RKIBIMN3
+         MOVE     ZERO,OVRCD
+         READKS   IBAIMEN3;IBIMUSER,IBIMDATE,IBIMTIME:
+                           IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RPIBIMN3
+         MOVE     ZERO,OVRCD
+         READKP   IBAIMEN3;IBIMUSER,IBIMDATE,IBIMTIME:
+                           IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RDIBIMN3
+         MOVE     ZERO,OVRCD
+         RESET    KEY18
+         READ     IBAIMEN3,KEY18;IBIMUSER,IBIMDATE,IBIMTIME:
+                                 IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+.
+RAIBIMN4
+         MOVE     ZERO,OVRCD
+         RESET    KEY26
+         READ     IBAIMEN4,KEY26;ANS
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RSIBIMN4
+         MOVE     ZERO,OVRCD
+         RESET    KEY26
+         READ     IBAIMEN4,KEY26;;
+         RETURN
+.
+RKIBIMN4
+         MOVE     ZERO,OVRCD
+         READKS   IBAIMEN4;IBIMUSER,IBIMDATE,IBIMTIME:
+                           IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RPIBIMN4
+         MOVE     ZERO,OVRCD
+         READKP   IBAIMEN4;IBIMUSER,IBIMDATE,IBIMTIME:
+                           IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RDIBIMN4
+         MOVE     ZERO,OVRCD
+         RESET    KEY26
+         READ     IBAIMEN4,KEY26;IBIMUSER,IBIMDATE,IBIMTIME:
+                                 IBIMPORT,IBIMPROG,IBIMSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+.

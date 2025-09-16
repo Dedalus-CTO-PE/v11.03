@@ -1,0 +1,58 @@
+create table pmsresaf
+(
+  pmrsurno    char(8) default ' ' not null,
+  pmrscont    char(3) default ' ' not null,
+  pmrstexp    char(8) default ' ' not null,
+  pmrsgrdt    char(8) default ' ' not null,
+  pmrscomm    char(127) default ' ' not null,
+  pmrsvisn    char(10) default ' ' not null,
+  pmrsvexp    char(8) default ' ' not null,
+  pmrsvtyp    char(3) default ' ' not null,
+  pmrspnum    char(20) default ' ' not null,
+  pmrspexp    char(8) default ' ' not null,
+  pmrspcou    char(3) default ' ' not null,
+  pmrsincd    char(6) default ' ' not null,
+  pmrsinfm    char(20) default ' ' not null,
+  pmrsinex    char(8) default ' ' not null,
+  pmrsstdn    char(20) default ' ' not null,
+  pmrsschl    char(6) default ' ' not null,
+  pmrsecon    char(50) default ' ' not null,
+  pmrscad1    char(35) default ' ' not null,
+  pmrscad2    char(35) default ' ' not null,
+  pmrscad3    char(35) default ' ' not null,
+  pmrscad4    char(35) default ' ' not null,
+  pmrscpcd    char(8) default ' ' not null,
+  pmrssbil    char(1) default ' ' not null,
+  pmrstins    char(1) default ' ' not null,
+  pmrsipol    char(20) default ' ' not null,
+  pmrsiexd    char(8) default ' ' not null,
+  pmrsucm1    char(50) default ' ' not null,
+  pmrsucm2    char(50) default ' ' not null,
+  pmrsucm3    char(50) default ' ' not null,
+  pmrsucm4    char(50) default ' ' not null,
+  pmrsucm5    char(50) default ' ' not null,
+  pmrsccnt    char(50) default ' ' not null,
+  pmrscphn    char(20) default ' ' not null,
+  pmrsfsch    char(30) default ' ' not null,
+  pmrssad1    char(35) default ' ' not null,
+  pmrssad2    char(35) default ' ' not null,
+  pmrssad3    char(35) default ' ' not null,
+  pmrssad4    char(35) default ' ' not null,
+  pmrsspcd    char(8) default ' ' not null,
+  pmrsscnt    char(50) default ' ' not null,
+  pmrssphn    char(20) default ' ' not null,
+  pmrscuid    char(10) default ' ' not null,
+  pmrscdat    char(8) default ' ' not null,
+  pmrsctim    char(8) default ' ' not null,
+  pmrsuuid    char(10) default ' ' not null,
+  pmrsudat    char(8) default ' ' not null,
+  pmrsutim    char(8) default ' ' not null,
+  pmrsspar    char(60) default ' ' not null,
+  lf          char(1)
+);
+create unique index pmsresa1 on pmsresaf
+(
+pmrsurno
+);
+revoke all on pmsresaf from public ; 
+grant select on pmsresaf to public ; 

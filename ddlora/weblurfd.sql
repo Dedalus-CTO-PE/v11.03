@@ -1,0 +1,52 @@
+create table webluraf
+(
+wblruid     varchar2(10),
+wblrur01    varchar2(8),
+wblrvs01    varchar2(8),
+wblrur02    varchar2(8),
+wblrvs02    varchar2(8),
+wblrur03    varchar2(8),
+wblrvs03    varchar2(8),
+wblrur04    varchar2(8),
+wblrvs04    varchar2(8),
+wblrur05    varchar2(8),
+wblrvs05    varchar2(8),
+wblrur06    varchar2(8),
+wblrvs06    varchar2(8),
+wblrur07    varchar2(8),
+wblrvs07    varchar2(8),
+wblrur08    varchar2(8),
+wblrvs08    varchar2(8),
+wblrur09    varchar2(8),
+wblrvs09    varchar2(8),
+wblrur10    varchar2(8),
+wblrvs10    varchar2(8),
+wblrur11    varchar2(8),
+wblrvs11    varchar2(8),
+wblrur12    varchar2(8),
+wblrvs12    varchar2(8),
+wblrur13    varchar2(8),
+wblrvs13    varchar2(8),
+wblrur14    varchar2(8),
+wblrvs14    varchar2(8),
+wblrur15    varchar2(8),
+wblrvs15    varchar2(8),
+wblrur16    varchar2(8),
+wblrvs16    varchar2(8),
+wblrur17    varchar2(8),
+wblrvs17    varchar2(8),
+wblrur18    varchar2(8),
+wblrvs18    varchar2(8),
+wblrur19    varchar2(8),
+wblrvs19    varchar2(8),
+wblrur20    varchar2(8),
+wblrvs20    varchar2(8),
+wblrspar    varchar2(50),
+lf          varchar2(1),
+constraint weblura1 primary key( 
+wblruid)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 
+create public synonym webluraf for webluraf;

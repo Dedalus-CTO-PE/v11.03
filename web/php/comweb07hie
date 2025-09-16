@@ -1,0 +1,197 @@
+#!/usr/bin/php
+<?php
+
+  $approot = getenv('approot');
+  if (!file_exists($approot)) 
+  {
+    echo "Error: Environment variable approot not set";
+    exit -1;
+  } 
+
+  //echo "test some expected env vars (approot) = $approot\n";
+
+  include_once("$approot/etc/class.ihireq.php");
+
+  $ini = parse_ini_file("$approot/etc/hie.ini",true);
+
+  if ($argc < 2)
+  {
+    echo "Error: No  input file specified\n";
+    exit -1;
+  }
+  $filename = $argv[1];
+
+  //echo "argc is $argc\n";
+
+  if (!file_exists($filename))
+  {
+    echo "Error: file $filename does not exist\n";
+    exit -1;
+  }
+
+  if (!is_writable($filename))
+  {
+    echo "Error: file $filename does not have write privileges\n";
+    exit -1;
+  }
+
+  if (false === ($in = @file($filename)))
+  {
+    echo "Error: Cannot open file $filename\n";
+    exit -1;
+  }
+
+  // set up empty array  for relevant input data 
+  $indata = array();
+
+  // load the request data 
+  foreach ($in as $ln => $line) {
+    //echo "$line";
+    if ('Request' == substr($line,0,7)) {
+      $endtag = strpos($line,":"); 
+      $tag = trim(substr($line,7,$endtag -7));
+      $data = substr($line,$endtag+1);
+      $indata["$tag"] = rtrim($data);
+      //echo "$tag=$data\n";
+    }
+  }
+
+
+  switch ($indata['Type'])
+  {
+    case 1:  $type = "patient";
+             $xtype = 0;
+    case 2:
+             $type = "individual";
+             $xtype = 1;
+             break;
+    case 3:
+    case 4:
+    case 5:
+             $type = "organisation";
+             $xtype = 2;
+             break;
+
+    default: $type = "patient";
+             $xtype = 0;
+  }
+
+  $xml = new ihi_req($xtype,$ini['RequestingSystem']['Organisation']);
+  $xml->UserEmail("Jamison.kuck@csc.com");
+  $xml->UserName("Dr","Kuck","Jamieson");
+  $xml->UserIdenfifier("8003614900000215","","AUSHIC","NPI");
+
+
+  if (isset($indata['IHI']))
+    $xml->TargetIdentifier($indata['IHI'],"","AUSHIC","IHI");
+  if (isset($indata['MedicareNumber']))
+    $xml->TargetIdentifier($indata['MedicareNumber'],$indata['MedicareReference'],"AUSHIC","MC");
+  if (isset($indata['DVA']))
+    $xml->TargetIdentifier($indata['DVA'],"","AUSDVA","DVA");
+
+  $xml->TargetName("",$indata['Surname'],$indata['Given1'],$indata['Given2']);
+
+  $xml->TargetSex($indata['Gender']);
+  $xml->TargetDOB($indata['DOB']);
+  if (isset($indata['Address1']))
+    $xml->TargetAddress($indata['Address1'],$indata['Address2'],$indata['Address3'],$indata['Address4'],$indata['PostCode']);
+  $xml->save("/tmp/comweb07.xml");
+  //$xml->render();
+
+
+  //echo "\nbuild SOAP client\n";
+
+  $outxml = callSHINE($xml);
+
+  //$outxml= $response->IdentityRequestResult;
+
+
+  $r = new DOMDocument('1.0','utf-8');
+  $r->loadXML($outxml);
+  $r->preserveWhiteSpace = true;
+  $r->formatOutput = true;
+  file_put_contents("/tmp/comweb07hie_out.xml", $r->saveXML());
+
+  $sx = new simpleXMLElement($outxml);
+
+
+  $IDV = "http://isofthealth.com/IdentifierValidation";
+  $SYS = "http://isofthealth.com/IdentifierValidation/ClinicalSystem";
+
+  $responseHeader = $sx->children($IDV)->Response->ResponseHeader;
+
+  $rc     = (string) $responseHeader->ResponseStatus->ResponseStatusCode;
+  $rcdesc = (string) $responseHeader->ResponseStatus->ResponseStatusDesc;
+
+  if (($fh = fopen($filename,"a")) == false) exit;
+  reply($fh,"Type",$indata["Type"]);
+  reply($fh,"ID",$indata["ID"]);
+
+
+  reply($fh,"StatusCode",$rc);
+  reply($fh,"StatusDesc",$rcdesc);
+  reply($fh,"SystemVersion",(string) $responseHeader->ResponseSystem->SystemVersion);
+  reply($fh,"SystemName",(string) $responseHeader->ResponseSystem->SystemName);
+  reply($fh,"SystemVendor",(string) $responseHeader->ResponseSystem->SystemVendor);
+  reply($fh,"SystemOrg",(string) $responseHeader->ResponseSystem->SystemOrganisation);
+  reply($fh,"UID",(string) $responseHeader->ResponseIdentification->ResponseUID);
+
+
+
+  if (isset($sx->children($IDV)->Response->ResponsePayload) &&
+      isset($sx->children($IDV)->Response->ResponsePayload->children($SYS)->ClinicalSystemResponsePayload))
+  {
+    $Payload = $sx->children($IDV)->Response->ResponsePayload->children($SYS)->ClinicalSystemResponsePayload;
+
+    if (isset($Payload))
+    {
+      $ihi = $Payload->Identifier;
+      reply($fh,"IHI",( string) $ihi->ID);
+      reply($fh,"IHIStatus", (string) $ihi->IdentifierStatus);
+      reply($fh,"IHIRecStatus", (string) $ihi->RecordStatus);
+    }
+  }
+
+  fclose($fh);
+
+function callSHINE($xml)
+{
+
+  $wsdl = "http://vmapsh-test09:3280/SHINE/API/iPM/?wsdl";
+  $options = array('trace' => true
+                   ,'exceptions' => true
+                   ,'soap_version' => SOAP_1_1);
+
+  // if the soap call fails set up an error response
+  $e1  = "<IdentifierValidation:Response><IdentifierValidation:ResponseHeader>";
+  $e1 .= "<IdentifierValidation:ResponseStatus><IdentifierValidation:ResponseStatusCode>-666</IdentifierValidation:ResponseStatusCode>";
+  $e1 .= "<IdentifierValidation:ResponseStatusDesc>";
+  $e9  = "</IdentifierValidation:ResponseStatusDesc><IdentifierValidation:ResponseStatus></IdentifierValidation:ResponseHeader></IdentifierValidation:Response>";
+
+  try {
+      $client = new SoapClient($wsdl,$options);
+  }
+  catch (SoapFault $e) {
+    return $e1.libxml_get_last_error().$e9;
+  }
+
+  //echo "Send SOAP req\n";
+  $xmlreq = new stdClass;
+  $xmlreq->RequestXML = $inxml = $xml->fetch();
+  try {
+    $xmlresp =  $client->IdentityRequest($xmlreq);
+  }
+  catch (SoapFault $e) {
+    return $e1.libxml_get_last_error().$e9;
+  }
+
+  return $xmlresp->IdentityRequestResult;
+}
+
+function reply($fh,$label,$text)
+{
+  $line = sprintf("Response% -17.17s:%s\n",$label,rtrim($text));
+  //echo $line;
+  fwrite($fh,$line);
+}
+?>

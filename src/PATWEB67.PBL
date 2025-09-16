@@ -1,0 +1,324 @@
+.----------------------------------------------------------------------
+. Program       : PATWEB67
+.
+. Function      : Overdue leave SMS Polling Server - Trigger SMS
+.
+. Modifications :
+.----------------------------------------------------------------------
+. V10.01.01  07/07/2021  Ebon Clements   TSK 0900650
+.            Skip inactive leave register records and added multi hospital
+.            test
+. V10.01.00  21/05/2021  Ebon Clements   TSK 0900650
+.            Created program
+.----------------------------------------------------------------------
+.
+          INC       IBAWEBDF
+          INC       WEBDATDF
+          INC       RSHWEBDF
+.
+          INC       MLTOLNFD/INC
+          INC       PATCONFD/INC
+          INC       PATMI1FD/INC
+          INC       PMSLRDFD/INC
+          INC       PMSVX1FD/INC
+.
+CURRDATE  DIM       8              * Current Date
+CURRTIME  DIM       8              * Current Time
+CURRDTIM  DIM       16             * Current Date Time
+HOSPITAL  DIM       3              * Hospital of visit
+HOUR      DIM       2              * Hour
+MIN       DIM       2              * Minute
+MINUTES4  DIM       4              * Minutes DIM 4
+RETNDTIM  DIM       16             * Return Date Time
+SAVKEY13  DIM       13             * Save leave rule key
+SAVKEY27  DIM       27             * Save leave register key
+OVERDMIN  FORM      6              * Overdue from leave minutes
+POLLTIME  FORM      16             * Polling sleep time
+.
+.----------------------------------------------------------------------
+PRGID     INIT      "PATWEB67"
+VERSION   INIT      "V11.03.00"
+PRGNAM    INIT      "Overdue leave SMS Polling Server"
+.----------------------------------------------------------------------
+.
+          CALL      WEBINT00       * Initialise Fifo Etc.
+.
+          CALL      INIT0000       * Open Files
+.
+MAIN0000  COMMIT                   * Match BEGIN in WEBINT00 for Transactions
+.
+          BEGIN
+.
+          DISPLAY   *WPOLLTIME
+.
+          CALL      LEAV0000       * Check overdue patients and trigger an SMS
+.
+          GOTO      MAIN0000
+.
+.------------------------------------------------------------
+. Open Files and Initialize Variables
+.------------------------------------------------------------
+INIT0000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,HUND24;*105,PTCNSMSP,*241,PTCNOLPM
+.
+          MOVE      ZERO,POLLTIME
+          SQUEEZE   PTCNOLPM
+          MOVE      PTCNOLPM,POLLTIME          * Polling time sleep minutes
+          ASSIGN    (POLLTIME * 60),POLLTIME   * Convert to seconds
+.
+          IF        POLLTIME=0
+            STOP                               * Don't run program
+          ENDIF
+.
+          OPEN      MLTOLNA1,"mltolnaf"
+          OPEN      PATMI1A2,"patmi1af"
+          OPEN      PMSLRDA1,"pmslrdaf"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+INIT9999  RETURN
+.
+.------------------------------------------------------------
+. Check overdue leave patients and trigger an SMS reminder
+.------------------------------------------------------------
+LEAV0000  IF        POLLTIME=9999
+            GOTO      LEAV9999              * Not using SMS remonders
+          ENDIF
+.
+          PACK      KEY9,FOUR,SP70          * On Leave
+          CALL      RDSMISS2
+LEAV1000  CALL      RDKMISS2
+          BRANCH    OVRCD,LEAV9999  
+.
+          COMPARE   FOUR,ASTAT              * On Leave
+          GOTO      LEAV9999 IF NOT EQUAL
+.
+          IF        IBCNMHOS=1
+            MOVE      PMVXMHOS,HOSPITAL     * Hospital id of visit
+           ELSE
+            MOVE      SP70,HOSPITAL
+          ENDIF
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE           * Current Date
+          MOVE      CTIMEIS,CURRTIME        * Current Time
+          MOVE      AADMNO,ADMISSNO         * Admission Number 
+.
+          PACK      KEY27,ADMISSNO,Z70
+          CALL      RSPMLRD1                * Get the last valid
+LEAV2000  CALL      RPPMLRD1                * patient leave register record
+          BRANCH    OVRCD,LEAV1000
+.
+          MATCH     ADMISSNO,PMLRVISN       * Same admission
+          GOTO      LEAV1000 IF NOT EQUAL
+.
+          MATCH     "1",PMLRACTV            * Skip inactive records
+          GOTO      LEAV2000 IF EQUAL
+.
+          MATCH     "D",PMLRRECS            * Skip Delete records
+          GOTO      LEAV2000 IF EQUAL
+.
+          MATCH     "L",PMLRRECS            * Skip patient if record is
+          GOTO      LEAV1000 IF NOT EQUAL   * not a leave record
+.
+LEAV5000  MATCH     SP70,PMLRWARD           * Skip patient blank ward
+          GOTO      LEAV1000 IF EQUAL
+.          
+          MATCH     SP70,PMLREXRD           * Skip patient expected return date
+          GOTO      LEAV1000 IF EQUAL       * blank
+.
+          MATCH     SP70,PMLREXRT           * Skip patent expected return time
+          GOTO      LEAV1000 IF EQUAL       * blank
+.
+          PACK      CURRDTIM,CURRDATE,CURRTIME,SP70    * Current Date Time
+          REP       ":0",CURRDTIM
+          PACK      RETNDTIM,PMLREXRD,PMLREXRT,SP70    * Return Date Time
+          REP       ":0",RETNDTIM
+.
+          MATCH     RETNDTIM,CURRDTIM       * Skip extected return date/time
+          GOTO      LEAV1000 IF LESS        * is in the future
+.
+          MOVE      PMLREXRD,FIRSTDAT       * Expected return date
+          UNPACK    PMLREXRT,HOUR,D1,MIN
+          PACK      FIRSTIME,HOUR,MIN       * Expected return time
+          REP       " 0",FIRSTDAT
+          REP       " 0",FIRSTIME
+.
+          MOVE      CURRDATE,LASTDATE       * Current Date
+          UNPACK    CURRTIME,HOUR,D1,MIN
+          PACK      LASTTIME,HOUR,MIN       * Current Time
+          REP       " 0",LASTTIME
+          CALL      TIMEDIFF
+          MOVE      CALCTIME,OVERDMIN       * Overdue from leave return minutes
+.
+          CALL      GETR0000                * Get leave rule
+          BRANCH    EXIT,LEAV1000
+.
+          MOVE      MLOLREMN,PMLRREMN       * Set reminder number sent
+.
+          CALL      UPPMLRD1                * Update leave register
+.
+          CALL      SEND0000                * Send SMS
+.
+          GOTO      LEAV1000
+.
+LEAV9999  RETURN
+.
+.------------------------------------------------------------
+. Get the SMS overdue leave reminder rule
+.------------------------------------------------------------
+GETR0000  IF        OVERDMIN > 9999
+            MOVE     9999,OVERDMIN
+          ENDIF
+.
+          MOVE     OVERDMIN,D6
+          SQUEEZE  D6
+          MOVE     ZERO,F4
+          MOVE     D6,F4
+          MOVE     F4,MINUTES4
+.
+.---------------------------------------------------------------------
+.         Exact match, Hospital, Ward, Leave Type and Minutes
+.---------------------------------------------------------------------
+.
+          PACK     KEY13,HOSPITAL,PMLRWARD,PMLRTLEV,MINUTES4,SP70
+          CALL     RDMLOLN1
+          COMPARE  ONE,OVRCD
+          IF       !@EQUAL
+            MATCH    "1",MLOLIACT           * Not inactive           
+            GOTO     GETR7000 IF NOT EQUAL
+          ENDIF
+.
+.------------------------------------------------------------------i-------
+.         Prior Minutes Match, Hospital, Ward, Leave Type and Minutes
+.--------------------------------------------------------------------------
+.
+          PACK     KEY13,HOSPITAL,PMLRWARD,PMLRTLEV,MINUTES4,Z70
+          CALL     RSMLOLN1
+GETR1000  CALL     RPMLOLN1
+          BRANCH   OVRCD,GETR4000
+.
+          MATCH    MLOLHOSP,HOSPITAL        * Hospital Id (pathspaf)
+          GOTO     GETR4000 IF NOT EQUAL
+.
+          MATCH    MLOLWARD,PMLRWARD        * Ward (patwr1af)
+          GOTO     GETR4000 IF NOT EQUAL
+.
+          MATCH    MLOLLTYP,PMLRTLEV        * Type of Leave (Cat TL)
+          GOTO     GETR4000 IF NOT EQUAL
+.
+          MATCH    "1",MLOLIACT             * Skip rule if inactive           
+          GOTO     GETR1000 IF EQUAL
+.
+          GOTO     GETR7000
+.
+.---------------------------------------------------------------------
+.         Exact match, Hospital, Blank Ward, Leave Type and Minutes
+.---------------------------------------------------------------------
+.
+GETR4000  PACK     KEY13,HOSPITAL,SP3,PMLRTLEV,MINUTES4,SP70
+          CALL     RDMLOLN1
+          COMPARE  ONE,OVRCD
+          IF       !@EQUAL
+            MATCH    "1",MLOLIACT           * Not inactive
+            GOTO     GETR7000 IF NOT EQUAL
+          ENDIF
+.
+.------------------------------------------------------------------i-------
+.         Prior Minutes Match, Hospital, Blank Ward, Leave Type and Minutes
+.--------------------------------------------------------------------------
+.
+          PACK     KEY13,HOSPITAL,SP3,PMLRTLEV,MINUTES4,Z70
+          CALL     RSMLOLN1
+GETR5000  CALL     RPMLOLN1
+          BRANCH   OVRCD,GETR9000
+.
+          MATCH    MLOLHOSP,HOSPITAL        * Hospital Id (pathspaf)
+          GOTO     GETR9000 IF NOT EQUAL
+.
+          MATCH    MLOLWARD,SP3              *Blank Ward (patwr1af)
+          GOTO     GETR9000 IF NOT EQUAL
+.
+          MATCH    MLOLLTYP,PMLRTLEV        * Type of Leave (Cat TL)
+          GOTO     GETR9000 IF NOT EQUAL
+.
+          MATCH    "1",MLOLIACT             * Skip rule if inactive
+          GOTO     GETR5000 IF EQUAL
+.
+.---------------------------------------------------------------------
+.
+GETR7000  MATCH     MLOLREMN,PMLRREMN       * Reminder number already sent
+          GOTO      GETR9000 IF EQUAL       * Skip visit
+.
+GETR8000  MOVE      ZERO,EXIT               * Valid overdue leave rule found
+          GOTO      GETR9999
+.
+GETR9000  MOVE      ONE,EXIT                * No valid overdue leave rule found
+          GOTO      GETR9999
+.
+GETR9999  RETURN
+.
+.------------------------------------------------------------
+. Schedule a reminder SMS via the report scheduler - IBAPMS89
+.------------------------------------------------------------
+SEND0000  MOVE      "IBAPMS89",SCHDPGID
+          MOVE      "Overdue Leave SMS Reminder",SCHDDESC
+          CALL      IBACLOCK
+          PACK      SCHDDATE,CCC,CYY,CMM,CDD
+          REP       " 0",SCHDDATE
+          CLOCK     TIME,SCHDTIME
+          MOVE      ONE,SCHDCOPY
+          MOVE      PTCNSMSP,SCHDPRNT        * SMS printer
+.
+.         Write Keyin parameters
+.
+          MOVE      PMLRWEBC,USERID          * User id who created leave record
+          MOVE      SIX,KEYSTARR[1]          * Send SMS
+          MOVE      ADMISSNO,KEYSTARR[2]     * Adission number
+          MOVE      MLOLSMSM,KEYSTARR[3]     * SMS to send
+.
+          PACK      KEY8,CDD,CMM,CCC,CYY     
+          REP       " 0",KEY8
+          MOVE      KEY8,KEYSTARR[4]         * Letter date
+.
+          PACK      SAVKEY13,MLOLHOSP,MLOLWARD,MLOLLTYP:
+                             MLOLOMIN,MLOLGOVM,SP70
+.
+          MOVE      SAVKEY13,KEYSTARR[5]     * Leave Rule Record Key
+.
+          PACK      SAVKEY27,PMLRVISN,PMLRDATE,PMLRTIME:
+                             PMLRCOUN,SP70
+.
+          MOVE      SAVKEY27,KEYSTARR[6]     * Leave Register Record Key
+          MOVE      SP1,KEYSTARR[7]          * Enter
+          MOVE      SEVEN,KEYSTCNT             * Number of Keyins
+.
+          CALL      SCHPRO00                 * Schedule Extract
+.
+SEND9999  RETURN
+.
+.------------------------------------------------------------
+. Clear Parameters
+.------------------------------------------------------------
+CLRPAR00  RETURN
+.
+.------------------------------------------------------------
+. Set Parameters
+.------------------------------------------------------------
+SETPAR00  RETURN
+.
+.------------------------------------------------------------
+. Process Fields
+.------------------------------------------------------------
+PROFLD00  RETURN
+.
+.----------------------------------------------------------------------
+.
+          INC       IBAWEBCD
+          INC       RSHWEBCD
+.
+          INC       MLTOLNIO/INC
+          INC       PATMI1IO/INC
+          INC       PMSLRDIO/INC
+          INC       PMSVX1IO/INC

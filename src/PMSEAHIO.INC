@@ -1,0 +1,104 @@
+RSPMEAH1  RESET     KEY38
+          READ      PMSEAHA1,KEY38;;
+          RETURN
+.
+RAPMEAH1  RESET     KEY38
+          MOVE      ZERO,OVRCD
+          READ      PMSEAHA1,KEY38;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPMEAH1  RESET     KEY38
+          MOVE      ZERO,OVRCD
+          READ      PMSEAHA1,KEY38;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPMEAH1  MOVE      ZERO,OVRCD
+          READKS    PMSEAHA1;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPMEAH1  MOVE      ZERO,OVRCD
+          READKP    PMSEAHA1;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPMEAH1  UPDATE    PMSEAHA1;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          RETURN
+.
+WRPMEAH1  RESET     KEY38
+          WRITE     PMSEAHA1,KEY38;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          RETURN
+.
+DEPMEAH1  RESET     KEY38
+          DELETE    PMSEAHA1,KEY38
+          RETURN
+.
+RSPMEAH2  RESET     KEY62
+          READ      PMSEAHA2,KEY62;;
+          RETURN
+.
+RAPMEAH2  RESET     KEY62
+          MOVE      ZERO,OVRCD
+          READ      PMSEAHA2,KEY62;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPMEAH2  RESET     KEY62
+          MOVE      ZERO,OVRCD
+          READ      PMSEAHA2,KEY62;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPMEAH2  MOVE      ZERO,OVRCD
+          READKS    PMSEAHA2;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPMEAH2  MOVE      ZERO,OVRCD
+          READKP    PMSEAHA2;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPMEAH2  UPDATE    PMSEAHA2;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          RETURN
+.
+WRPMEAH2  RESET     KEY62
+          WRITE     PMSEAHA2,KEY62;PMAHFBID,PMAHARID,PMAHFRID,PMAHRPTC,PMAHFSCD:
+                                  PMAHFCID,PMAHCFAC,PMAHTCAM,PMAHTBAM,PMAHEXAM:
+                                  PMAHCPAM,PMAHFTID,PMAHUDTE,PMAHUTIM:
+                                  PMAHSPAR
+          RETURN
+.
+DEPMEAH2  RESET     KEY62
+          DELETE    PMSEAHA2,KEY62
+          RETURN
+.

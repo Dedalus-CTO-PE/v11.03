@@ -1,0 +1,860 @@
+.******************************************************************************
+.* System        :  Waiting Lists                                             *
+.* Program       :  IBAWAT42.PBL                                              *
+.* Description   :  Same Day Summary                                          *
+.******************************************************************************
+.* Date          :  25/07/1990                                                *
+.* Author        :  Justin Coates                                             *
+.* Function      :  Print all patients currently on the waiting list,         *
+.*                  been on for 6-12 months, greater than 12 months           *
+.* Modifications :                                                            *
+.                                                                             *
+.******************************************************************************
+.* V11.02.01 10/02/2022  Thanh T          TSK 0889899                         *
+.*           Recompiled as WATTR1FD changes                                   *
+.******************************************************************************
+.        V10.05.01  01/08/2015  Ania P                      CAR 261630        *
+.                   Removed use of PORT for temp file naming                  *
+.         V5.01.01  17/09/1990 Bill Dew                                       *
+.                   Fix minor report layouts and fix calculation of totals    *
+.                   and percentages.                                          *
+.******************************************************************************
+.
+.         IBAWAT42.PBL        Same Day Summary
+.         ============        ================
+.         
+.         KDAT0000 - Enter the as at date
+.         REPT0000 - Produce the report
+.                    Loop through the 2nd index of the treatment file obtaining
+.                    all patients of status 1,2 or 3. Write to temp file
+.                    Loop through the temp. file and do the following:
+.                    The amount of time they have been on the waiting list is
+.                    calculated and the appropriate column is updated
+.                    It also checks if they are a 'Same Day' patient and updates
+.                    the appropriate value
+.
+.
+          INC       STD001FD                * common variables
+          INC       PATCODFD/INC            * codes file
+          INC       PATDO1FD/INC            * doctors file
+          INC       WATCONFD/INC            * WL control file
+          INC       WATTR1FD/INC            * WL treatment file
+          INC       IBASEQFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+. ------ program variables ------
+.
+AGCC      FORM      2
+AGYR      FORM      2                       * year of 12 months ago
+AGDAYS    FORM      3                       * days of 12 months ago
+AGLEAP    FORM      1                       * holds leap year extra day
+.
+CLTOT     FORM      8                       * total for each clinic
+CLTOTS    FORM      6                       * total same day for each clinic
+CLTOT6    FORM      8                       * total for each clinic 6-12
+CLTOTS6   FORM      6                       * total same day for each clin 6-12
+CLTOT12   FORM      8                       * total for each clinic >12
+CLTOTS12  FORM      6                       * total same day for each clinic >12
+.
+CMDLINE   DIM       42                      * line for 'execute' command
+CURRDATE  DIM       8                       * current date ccyymmdd
+DATETO    DIM       8                       * to date for report ccyymmdd
+DATE6AGO  DIM       8                       * date 6 months before 'dateto'
+DATE2AGO  DIM       8                       * date 12 months before 'dateto'
+.
+DIM14     DIM       14                      * dummy variable
+DIM26     DIM       26                      * holds unit : code - description
+DIM31     DIM       31                      * holds doct : code - description
+.
+ENTCC     FORM      2
+ENTYR     FORM      2                       * year of entered date
+ENTDAYS   FORM      3                       * days of entered date 
+ENTLEAP   FORM      1                       * holds leap year extra day
+.
+.
+PCSD      FORM      3.1                     * <06 month same day percentage
+PCSD6     FORM      3.1                     * 6-12 month same day percentage
+PCSD12    FORM      3.1                     * >12 month same day percentage
+PCTEMP    FORM      6.3                     * temp %-age calcultion var
+PREVUNIT  DIM       3                       * previous unit
+PREVPROC  DIM       9                       * previous procedure code
+PREVDESC  DIM       33                      * previous procedure description
+PRUNIT1   DIM       45                      * holds clinic code - description
+PRUNIT2   DIM       18                      * holds clinic code - description
+PRTO      DIM       23                      * holds as at date for print out
+.
+PRTOT     FORM      4                       * total for each procedure
+PRTOTS    FORM      4                       * total same day for each procedure
+PRTOT6    FORM      4                       * total for each procedure 6-12
+PRTOTS6   FORM      4                       * total same day for each proc 6-12
+PRTOT12   FORM      4                       * total for each procedure >12
+PRTOTS12  FORM      4                       * total same day for each proced >12
+.
+.
+. ------ variables needed for the temporary index file ------
+.
+TEMPFILE  IFILE     SQL, FIXED=84, KEY="D1-3,4-12"
+.
+.Name     Type      Length  Phys. Sta-Fin
+.----     ----      ------  ----- -------
+XWMUNIT   DIM       3        3      1-3     * unit/clinic code
+XWMCODE   DIM       9        9      4-12    * procedure code
+XWMDESC   DIM       33      33     13-45    * procedure description
+XTOTLST   FORM      8        5     46-50    * total procedures on list
+XTOTLSTS  FORM      6        4     51-54    * total same day procedures on list
+XTOT6     FORM      8        5     54-59    * total procedures on list 6-12 mths
+XTOTS6    FORM      6        4     60-63    * tot same day proc on list 6-12 mth
+XTOT12    FORM      8        5     64-68    * total procedures on list > 12 mths
+XTOTS12   FORM      6        4     69-72    * tot same day proc on list > 12 mth
+XWMUDEF1  DIM       3        3     73-75    * user defined field 1
+XWMDATE1  DIM       8        8     76-83    * date of waiting list record
+.
+. End of Record                    84-84    * end of record
+.
+. ------ program constants ------
+.
+CATWU     INIT      "WU"                    * U/C category
+CATW1     INIT      "W1"                    * UD field 1 category
+DASH      INIT      "-"                     * a dash
+FILPREC   INIT      "wat42c"                * prefix for temp file clinic
+NEEDNP    FORM      "48"                    * limit when new tble headg printed
+PREFUNCL  INIT      "Unit/Clinic Code : "   * Unit/Clinic prefix for report
+PREFTO    INIT      "As at Date : "         * To date prefix for report
+PRINTLIM  FORM      "55"                    * no. lines to print per page
+.
+PRGNAM    INIT      "Same Day Summary"
+PRGID     INIT      "IBAWAT42"
+VERSION   INIT      "V11.03.00"
+.
+.*********************************************************************
+.*                  ML0000                                           *
+.*        Mainline Code / Controlling Logic                          *
+.*********************************************************************
+ML0000    CALL      INIT0000                * initialization and open files
+.
+ML0500    CALL      KDAT0000                * enter the report type
+          BRANCH    EXIT,ML9999             * exit chosen
+.
+. ------ produce the report  ------
+.
+ML1000    CALL      REPT0000                * produce report
+.
+ML9999
+          CALL      DETP0000                * delete the temp file
+          CHAIN     PGM
++
+.*********************************************************************
+.*                  INIT0000                    Called by : ML0000   *
+.*        Initialization and open files                              *
+.*********************************************************************
+INIT0000  DISPLAY   *P1:1,*EF               * clear screen
+          CALL      DISPHEAD                * display program heading
+          CALL      IBACLOCK                * get current date/time
+          CALL      TFILENAM
+.
+          OPEN      CONTROLF,"controlf"     * WL control file
+          OPEN      PATCODE1,"patcodes"     * open codes file
+          OPEN      PATDO1A1,"patdo1af"     * open doctors file
+          OPEN      PATDO1A2,"patdo1af"     * open doctors file
+.         OPEN      PATMX1A1,"patmx1af"     * open master extension file
+          OPEN      WATTR1A2,"wattr1af"     * WL treatment file
+.
+          READ      CONTROLF,THIRTY7;*122,WTCNTPUC,*185,WTCNTPDS
+.
+          MOVE      ONE,CNEWDS              * new ? option
+.
+          MOVE      ZERO,PRTOT              * initialize procedure counters
+          MOVE      ZERO,PRTOTS
+          MOVE      ZERO,PRTOT6
+          MOVE      ZERO,PRTOTS6
+          MOVE      ZERO,PRTOT12 
+          MOVE      ZERO,PRTOTS12
+.
+          MOVE      ZERO,CLTOT              * initialize clinic counters
+          MOVE      ZERO,CLTOTS
+          MOVE      ZERO,CLTOT6
+          MOVE      ZERO,CLTOTS6
+          MOVE      ZERO,CLTOT12
+          MOVE      ZERO,CLTOTS12
+.
+          MOVE      ZERO,XTOTLST            * initialize total counters
+          MOVE      ZERO,XTOTLSTS
+          MOVE      ZERO,XTOT6
+          MOVE      ZERO,XTOTS6
+          MOVE      ZERO,XTOT12
+          MOVE      ZERO,XTOTS12
+
+INIT9999  RETURN
++
+.*********************************************************************
+.*                  KDAT0000                    Called by : ML0000   *
+.*        Enter the as at date for the report                        *
+.*        Returns   DATETO        the as at date                     *
+.*                  EXIT = 1      nothing entered for 'dateto'       *
+.*********************************************************************
+KDAT0000  DISPLAY   *P1:5,*EF:
+                    *P1:5,"Enter As At Date  : "
+.
+KDAT0100  CALL      IBACLOCK                * get current date and time
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE           * zero fill
+.
+. ------ set up the common parameters for keydate ------
+.
+          MOVE      ONE,CCANLDTE            * can cancel default
+          MOVE      ONE,CDEFDTE             * hit enter once to accept default
+          MOVE      ZERO,CHIGHLT            * use highlighting
+          MOVE      CCC,CCENT               * default to current century
+.
+. ------ enter the as at date ------
+.
+KDAT2000  UNPACK    SP6,CYEAR,CMON,CDAY     * no default date
+          MOVE      FIVE,CVERT              * row for input
+          MOVE      "22",CCOL               * column for input
+          CALL      KEYDATE                 * enter the date
+.
+          MATCH     SP2,CYEAR               * was a date entered ?
+          GOTO      KDAT9000 IF EQUAL       * no, exit
+.
+          PACK      DATETO,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",DATETO             * zero fill
+          CALL      PACDATE                 * get date in correct format
+          RESET     DATETO   
+.
+. ------ check that TO date isnt into the future ------
+.
+          MATCH     DATETO,CURRDATE         * is current date < entered ??
+          GOTO      KDAT5100 IF LESS        * yes, invalid answer
+.
+. ------ ask them if they want to continue ------
+.
+KDAT2100  CALL      CONTQST                 * continue
+          BRANCH    CEXIT,KDAT8000:         * Yes entered
+                          KDAT0000:         * No entered
+                          KDAT9000          * Cancel entered
+.
+. ------ date entered and accepted ------
+.
+KDAT8000  MOVE      FALSE,EXIT              * set exit status
+          PACK      PRTO,PREFTO,CPCDATE     * set up print date line
+          RESET     PRTO
+.
+. ------ determine date 12 months ago from entered date ------
+.
+          MOVE      CYEAR,FORM2             * set up as a form
+          SUB       ONE,FORM2               * take one off the year
+          MOVE      FORM2,CYEAR             * set cyear up again
+.
+. ------ change in century occurs when year goes from '00' to '-1' ------
+.
+          MATCH     "-1",CYEAR              * has there been a change in cent ?
+          GOTO      KDAT8100 IF NOT EQUAL   * no, leave century alone
+.
+. ------ have gone b
+.
+          MOVE      CCENT,FORM2             * get cent as a form
+          SUB       ONE,FORM2               * take a century off
+          MOVE      FORM2,CCENT             * set up dim value
+          MOVE      "99",CYEAR              * get year back
+.
+. ------ pack up the date of 12 months ago ------
+.
+KDAT8100  PACK      DATE2AGO,CCENT,CYEAR,CMON,CDAY * date 12 months ago
+          REP       " 0",DATE2AGO           * zero fill
+          CALL      ODSA0000                * get date 6 months ago
+          GOTO      KDAT9999
+.
+. ------ ERROR: TO date is into the future ------
+.
+KDAT5100  DISPLAY   *P1:24,*B,"The TO date musn't be into the future.  ",*EL;
+          CALL      HITENTER
+          GOTO      KDAT2000
+.
+. ------ no to date entered ------
+.
+KDAT9000  MOVE      ONE,EXIT                * no date entered
+          UNPACK    SP8,DATETO              * clear to date
+.
+KDAT9999  RETURN
++
+.*********************************************************************
+.*                  REPT0000                    Called by : UNCL0000 *
+.*        Generates the report                                       *
+.*********************************************************************
+REPT0000  CALL      CRTC0000                * create temp file
+          DISPLAY   *P1:24,"Obtaining the valid entries.",*EL
+.
+. ------ start looping through 2nd index of treatment file ------
+.
+REPT1000  PACK      KEY20,ONE,SP8,SP9,SP2   * start at beginning
+          CALL      RDSTREA2                * positional read
+.
+. -----------------------------------------
+. ------ next read on treatment file ------
+. -----------------------------------------
+.
+REPT2000  CALL      RDKTREA2                * next read
+          BRANCH    OVRCD,REPT5000          * finished report
+.
+          DISPLAY   *P70:24,WMURNO          * display UR to show working
+.
+. ------ check for bad data ------
+.
+          MATCH     ZEROUR,WMURNO           * is it a zero UR number
+          GOTO      REPT2000 IF EQUAL       * yes so ignore
+.
+          MATCH     SP3,WMUNIT              * is it a blank unit ??
+          GOTO      REPT2000 IF EQUAL       * yes, so ignore
+.
+          MATCH     SP9,WMCODE              * is it a blank proc. code ??
+          GOTO      REPT2000 IF EQUAL       * yes, so ignore
+.
+. ------ check that still in the date range ------
+.
+          MATCH     WMDATE1,DATETO          * is dateto < file date ??
+          GOTO      REPT2000 IF LESS   * 17/09/90 BD
+.
+. ------ check that have the correct status of 1 or 2 or 3 ------
+.
+          BRANCH    WMSTAT,REPT3000,REPT3000,REPT3000
+.                          unsched   sched   pre-adm
+.
+          GOTO      REPT5000           * 17/09/90 BD
+.
+. ------ have a correct record so write a temp file record ------
+.
+REPT3000  PACK      KEY12,WMUNIT,WMCODE
+          MOVE      WMDESC,XWMDESC          * shorten the description
+          WRITE     TEMPFILE,KEY12;WMUNIT,WMCODE,XWMDESC,SP20,SP7:
+                                   WMUDEF1,WMDATE1
+.
+          DISPLAY   *P70:24,*V2LON,WMURNO   * highlight UR to show it is valid
+.
+          GOTO      REPT2000                * read next record
+.
+. -----------------------------------------------------------
+. ------ have finished looping through treatment file, ------
+. ------ start doing the report                        ------
+. -----------------------------------------------------------
+.
+REPT5000  PACK      KEY12,SP10,SP2          * key to position at start
+          READ      TEMPFILE,KEY12;;        * positional read
+          CALL      IBACLOCK                * get current date and time
+          MOVE      ZERO,CPAGENO            * initialize page number
+          DISPLAY   *P1:24,"Producing the report now.",*EL
+.
+. ------ have to do a read here to get the name of the first unit ------
+.
+          READKS    TEMPFILE;XWMUNIT,XWMCODE,XWMDESC,SP20,SP7,XWMUDEF1,XWMDATE1
+          GOTO      REPT7000 IF OVER        * nothing on file
+.
+. ------ stores the first unit's name ------
+.
+          PACK      KEY5,CATWU,XWMUNIT      * unit as the key
+          CALL      RDCODE1                 * read codes file
+          BRANCH    OVRCD,REPT5200          * read next record if bad clinic
+          PACK      PRUNIT1,PREFUNCL,XWMUNIT,SP1,DASH,SP1,TDESC
+          RESET     PRUNIT1
+          MOVE      XWMUNIT,PREVUNIT        * set up previous unit
+          MOVE      XWMCODE,PREVPROC        * set up previous procedure
+          MOVE      XWMDESC,PREVDESC        * save the previous description
+.
+          CALL      NEWP0000                * print new page and table heading
+.
+. ---------------------------------------------------------
+. ------ update the stats of the record just read in ------
+. ---------------------------------------------------------
+.
+REPT5100  CALL      UPST0000                * update the stats
+.
+REPT5200  READKS    TEMPFILE;XWMUNIT,XWMCODE,XWMDESC,SP20,SP7,XWMUDEF1,XWMDATE1
+          GOTO      REPT9000 IF OVER
+.
+          MATCH     XWMCODE,PREVPROC        * is it same procedure ??
+          GOTO      REPT5100 IF EQUAL       * yes, update the stats
+.
+REPT5300  CALL      PLIN0000                * print the line
+.
+          MATCH     PREVUNIT,XWMUNIT        * is previous same as current ??
+          GOTO      REPT5100 IF EQUAL       * yes, update new procedure stats
+.
+. ---------------------------------------------------------------
+. ------ have a new clinic type                            ------
+. ------ do underlines for last clinic, give patient count ------
+. ------ set up new clinic name, do new table heading      ------
+. ------ update the previous clinic with the new one       ------
+. ---------------------------------------------------------------
+.
+          CALL      PNCL0000                * prints change of clinic details
+          BRANCH    EXIT,REPT5200           * invalid clinic; read next record
+          GOTO      REPT5100                * update the stats
+.
+. ------ there are no entries ------
+.
+REPT7000  CALL      NEWP0000                * print heading
+          PRINT     *1,"*-----------------------------------------------":
+                       "------------------------------------------------":
+                       "-----------------------------------*":
+                    *N,*N,"There is no data for this report."
+.
+          GOTO      REPT9050
+.
+. ------ report is finished ------
+.
+REPT9000
+          CALL      PLIN0000           * Bill Dew : Print Last line in buffer
+          CALL      REFI0000                * report finished
+.
+REPT9050  PRINT     *N,*N,"***  END OF REPORT ****"
+REPT9999  RETURN
+.********************************************************************
+.*                  ODSA0000                   Called by : INTA0000 *
+.*        Obtain  date 6 months ago                                 *
+.*        Paras   : DATETO        entered date                      *
+.*                  DATE2AGO      date 12 months before entered     *
+.*        Returns   ENTDAYS       current julian day                *
+.*                  ENTYR         current julian year               *
+.*                  ENTLEAP       if curr. is a leap year = 1       *
+.*                  AGDAYS        WL julian day                     *
+.*                  AGYR          WL julian year                    *
+.*                  AGLEAP        WL leap year                      *
+.*                  DATE6AGO      date 6 months ago                 *
+.********************************************************************
+ODSA0000  
+.
+. ------ turn the entered date into julian date ------
+.
+          UNPACK    DATETO,CCENT,CYEAR,CMON,CDAY
+          MOVE      CDAY,DD                 * set up current day
+          MOVE      CMON,MM                 *                month
+          MOVE      CYEAR,YY                *                year
+          MOVE      CCENT,CC
+.
+          CALL      DMYCON                  * get julian day
+          MOVE      JULDAY,ENTDAYS          * get current julian day
+          MOVE      JULYR,ENTYR             * get current julian year
+          MOVE      JULCC,ENTCC
+          MOVE      LEAPYR,ENTLEAP          * get leap year flag
+.
+. ------ turn date a year ago into julian days ------
+. ------ mainly to see if it is a leap year    ------
+.
+          UNPACK    DATE2AGO,XCENT,XYEAR,XMON,XDAY  * date a year ago
+          MOVE      XCENT,CC
+          MOVE      XYEAR,YY                * set up year
+          MOVE      XMON,MM                 * set up month
+          MOVE      XDAY,DD                 * set up day
+.
+          CALL      DMYCON
+          MOVE      JULDAY,AGDAYS           * WL julian day
+          MOVE      JULYR,AGYR              * WL julian year
+          MOVE      JULCC,AGCC
+          MOVE      LEAPYR,AGLEAP           * WL leap year
+.
+. ------ make the entered day as a day of previous year           ------
+. ------ eg: if it is the 10th of Jan, it is either the (plus 365)------
+. ------ 375 or 376 th day of last year (depending on leap years) ------
+. ------ so subtract 180 days (approx. 6 months) from 375/376     ------
+. ------ to get the day number then convert this back to DD MM YY ------
+.
+          ADD       AGLEAP,ENTDAYS          * add leap year
+          ADD       "365",ENTDAYS           * ent. date is a day of year before
+          SUB       "180",ENTDAYS           * take 6 months off
+.
+. ------ turn the date six months ago  back into correct format ------
+.
+          MOVE      AGYR,JWKYER            * use year from date2ago.
+          MOVE      ENTDAYS,JWKDAY         * new days of that year
+          CALL      JULCON                 * convert back to DD MM YY
+          MOVE      DD,XDAY                * day of 6 months ago
+          MOVE      MM,XMON                * month of 6 months ago
+          MOVE      YY,XYEAR               * year of 6 months ago
+          MOVE      CC,XCENT
+.
+. ------ if the entered and six-ago years are the same, dont worry about ------
+. ------ allowing for six-ago date being in the previous century/year    ------
+.
+          MATCH     XYEAR,CYEAR             * check for the same year
+          GOTO      ODSA8000 IF EQUAL       * same year
+.
+. ------ we have changed years so check on century change also ------
+. ------ a diff. cent means new date's year is 99              ------
+.
+          MATCH     "99",XYEAR              * is 6-ago year 99 ??
+          GOTO      ODSA8000 IF NOT EQUAL   * no, so in same century
+.
+. ------ have a change in century eg 10/1/2000 -> 14/07/1999 ------
+.
+          MOVE      CCENT,FORM2             * set up as a form
+          SUB       ONE,FORM2               * take off a century
+          MOVE      FORM2,XCENT             * set up century value
+.
+ODSA8000  PACK      DATE6AGO,XCENT,XYEAR,XMON,XDAY * set up date 6 months ago
+          REP       " 0",DATE6AGO           * zero fill
+.
+ODSA9999  RETURN
++
+.*********************************************************************
+.*                  UPST0000                    Called by : REPT0000 *
+.*        Updates the stats for a procedure                          *
+.*********************************************************************
+UPST0000  ADD       ONE,PRTOT               * add one to number of this proced.
+.
+. ------ read codes file so can determine if a day stay ------
+.
+          MOVE      SP1,TCINDC1             * clear indicator if read fails
+          PACK      KEY5,CATW1,XWMUDEF1     * ud field 1 as key
+          CALL      RDCODE1                 * read codes file for 'tcindc1'
+.
+. ------ determine what range the patient is in ------
+.
+         MATCH      DATE2AGO,XWMDATE1       * is date < 12 ago ??
+         GOTO       UPST3000 IF LESS        * yes, in > 12 range
+.
+         MATCH      DATE6AGO,XWMDATE1       * is date < 6 ago ??
+         GOTO       UPST2000 IF LESS        * yes, in 6-12 range
+.
+. ------ in 0-6 range, determine if a day stay patient ------
+.
+          MATCH     ANSD,TCINDC1            * is it a day stay
+          GOTO      UPST9999 IF NOT EQUAL   * no
+.
+          ADD       ONE,PRTOTS              * add one to total day stays
+          GOTO      UPST9999
+.
+. ------ in the range 6 - 12 months ------
+.
+UPST2000  ADD       ONE,PRTOT6              * add one to the 6-12 total
+.
+          MATCH     ANSD,TCINDC1            * is it a day stay
+          GOTO      UPST9999 IF NOT EQUAL   * no
+.
+          ADD       ONE,PRTOTS6             * add one to total day stays 6-12
+          ADD       ONE,PRTOTS              * add one to total day stays
+          GOTO      UPST9999
+.
+. ------ in the range > 12 months ------
+.
+UPST3000  ADD       ONE,PRTOT12             * add one to the > 12 total
+.
+          MATCH     ANSD,TCINDC1            * is it a day stay
+          GOTO      UPST9999 IF NOT EQUAL   * no
+.
+          ADD       ONE,PRTOTS12            * add one to total day stays > 12 
+          ADD       ONE,PRTOTS              * add one to total day stays
+          GOTO      UPST9999
+.
+UPST9999  RETURN
++
+.*********************************************************************
+.*                  NEWP0000                    Called by : REPT0000 *
+.*        Prints the new page heading for a report          DORP0000 *
+.*        Para's  : CPHRDOPT      sub heading                        *
+.*********************************************************************
+NEWP0000  MOVE      ONE,CNOUNDLN            * no underlines at end of page
+.
+NEWP0500  CALL      HEAD132                 * do the new heading
+.
+NEWP1500  PRINT     *50,PRTO                * as at date
+.
+. ------ print the table heading ------
+.
+          MOVE      FIVE,CVERT              * set line counter
+          CALL      PTBH0000                * print a table heading
+.
+NEWP9999  RETURN
++
+.*********************************************************************
+.*                  PLIN0000                    Called by : REPT0000 *
+.*        Prints data about a single procedure                       *
+.*        Adds the procedure count to the total clinic counts        *
+.*        and clears the procedure counts                            *
+.*        Updates : CVERT         current row number                 *
+.*********************************************************************
+PLIN0000
+          COMPARE   CVERT,PRINTLIM     * is new page needed ??
+          CALL      NEWP0000 IF LESS   * print new page heading
+.
+          ADD       PRTOT,CLTOT        * update clinic total
+          ADD       PRTOTS,CLTOTS      * update standby clin total
+          ADD       PRTOT6,CLTOT6      * update clinic total 6-12
+          ADD       PRTOTS6,CLTOTS6    * update standby clin total 6-12
+          ADD       PRTOT12,CLTOT12    * update clinic total > 12
+          ADD       PRTOTS12,CLTOTS12  * update standby clin total > 12
+.
+          PRINT     *1,"|",*3,PREVDESC,*36,"|",*42,PRTOT,*52,"|",*55,PRTOTS:
+                    *68,"|",*76,PRTOT6,*85,"|",*88,PRTOTS6,*101,"|":
+                    *109,PRTOT12,*117,"|",*120,PRTOTS12,*132,"|"
+.
+          MOVE      ZERO,PRTOT              * clear procdure total
+          MOVE      ZERO,PRTOTS             * clear standby proc total
+          MOVE      ZERO,PRTOT6             * clear procdure total 6-12
+          MOVE      ZERO,PRTOTS6            * clear standby proc total 6-12
+          MOVE      ZERO,PRTOT12            * clear procdure total > 12
+          MOVE      ZERO,PRTOTS12           * clear standby proc total > 12
+.
+          ADD       ONE,CVERT               * add to line counter
+          DISPLAY   *P60:24,PREVUNIT,*P70:24,PREVPROC  * display which proc used
+          MOVE      XWMCODE,PREVPROC        * update the previous procedure
+          MOVE      XWMDESC,PREVDESC        * update the description
+.
+PLIN9999  RETURN
++
+.*********************************************************************
+.*                  PTBH0000                    Called by : NEWP0000 *
+.*        Prints a new table heading                        REPT0000 *
+.*        Needed at a new page or for a new unit/clinic              *
+.*        Updates : CVERT         current row number                 *
+.*********************************************************************
+PTBH0000  PRINT     *N,PRUNIT1:
+                    *N,"*-----------------------------------------------":
+                       "------------------------------------------------":
+                       "-----------------------------------*":
+                    *N,*1,"|",*36,"|",*41,"Total",*52,"|",*55,"Same Day":
+                    *68,"|",*70,"Total on List",*85,"|",*88,"Same Day":
+                    *101,"|",*103,"Total on List",*117,"|",*121,"Same Day":
+                    *132,"|":
+                    *N,*1,"|",*2,WTCNTPDS," Description",*36,"|",*40,"On list":
+                    *52,"|",*55,"On List":
+                    *68,"|",*70,"6 - 12 Months",*85,"|",*87,"6 - 12 Months":
+                    *101,"|",*104,"> 12 Months",*117,"|",*120,"> 12 Months":
+                    *132,"|":
+                    *N,"*-----------------------------------------------":
+                       "------------------------------------------------":
+                       "-----------------------------------*"
+.
+          ADD       SIX,CVERT               * add to line count
+.
+PTBH9999  RETURN
++
+.*********************************************************************
+.*                  PNCL0000                    Called by : RETP0000 *
+.*        Prints the details at the change of clinics                *
+.*        Resets clinic counters and gets new clinic description     *
+.*        and prints new clinic table heading                        *
+.*        Returns : EXIT = 1      invalid new unit/clinic            *
+.*********************************************************************
+PNCL0000  UNPACK    PRUNIT1,DIM19,DIM26     * get the two parts
+          MOVE      DIM26,PRUNIT2           * unit to print in column
+.
+          ADD       CLTOT,XTOTLST           * update total
+          ADD       CLTOTS,XTOTLSTS         * update standby total
+          ADD       CLTOT6,XTOT6            * update total 6-12
+          ADD       CLTOTS6,XTOTS6          * update standby total 6-12
+          ADD       CLTOT12,XTOT12          * update total > 12
+          ADD       CLTOTS12,XTOTS12        * update standby total > 12
+.
+. ------ get the clinic percentages ------
+.
+          MOVE      ZERO,PCSD               * make percentage zero
+          COMPARE   ZERO,CLTOTS             * are there any same day pats. ?
+          GOTO      PNCL0500 IF EQUAL       * no
+.
+          MOVE      CLTOTS,PCTEMP           * start % calc.
+          DIV       CLTOT,PCTEMP            * same day / total
+          MULT      "100",PCTEMP            * as a % age
+          MOVE      PCTEMP,PCSD             * set up variable
+.
+PNCL0500  MOVE      ZERO,PCSD6              * make percentage zero
+          COMPARE   ZERO,CLTOTS6            * are there any same day pats. ?
+          GOTO      PNCL1000 IF EQUAL       * no
+.
+          MOVE      CLTOTS6,PCTEMP          * start % calc.
+          DIV       CLTOT6,PCTEMP           * same day / total
+          MULT      "100",PCTEMP            * as a % age
+          MOVE      PCTEMP,PCSD6            * set up variable
+.
+PNCL1000  MOVE      ZERO,PCSD12             * make percentage zero
+          COMPARE   ZERO,CLTOTS12           * are there any same day pats. ?
+          GOTO      PNCL1500 IF EQUAL       * no
+.
+          MOVE      CLTOTS12,PCTEMP         * start % calc.
+          DIV       CLTOT12,PCTEMP          * same day / total
+          MULT      "100",PCTEMP            * as a % age
+          MOVE      PCTEMP,PCSD12           * set up variable
+.
+PNCL1500  PRINT     *1,"*-----------------------------------------------":
+                       "------------------------------------------------":
+                       "-----------------------------------*":
+                    *N,"| Total Patients ",PRUNIT2,*36,"|":
+                    *38,CLTOT,*52,"|",*53,CLTOTS,*60,"(",PCSD,"%)|":
+                    *72,CLTOT6,*85,"|",*86,CLTOTS6,*93,"(",PCSD6,"%)|":
+                    *105,CLTOT12,*117,"|",*118,CLTOTS12,*124,"(",PCSD12,"%)|":
+                    *N,"*-----------------------------------------------":
+                       "------------------------------------------------":
+                       "-----------------------------------*"
+.
+          ADD       THREE,CVERT             * increment line counter
+.
+. ------ clear each unit total ------
+.
+          MOVE      ZERO,CLTOT              * total - on list
+          MOVE      ZERO,CLTOTS             * total - same day on list
+          MOVE      ZERO,CLTOT6             * total - on list 6-12 months
+          MOVE      ZERO,CLTOTS6            * total - same day on list 6-12 mth
+          MOVE      ZERO,CLTOT12            * total - on list > 12 months
+          MOVE      ZERO,CLTOTS12           * total - same day on list > 12 mth
+.
+. ------ obtain the new units description ------
+.
+          PACK      KEY5,CATWU,XWMUNIT      * unit as the key
+          CALL      RDCODE1                 * read codes file
+          BRANCH    OVRCD,PNCL9000          * invalid unit/clinic
+          PACK      PRUNIT1,PREFUNCL,XWMUNIT,SP1,DASH,SP1,TDESC
+          RESET     PRUNIT1
+          MOVE      XWMUNIT,PREVUNIT        * update previous unit
+.
+. ------ see if there is enough room on the page for new table heading ------
+.
+          COMPARE   CVERT,NEEDNP            * will table fit on page ??
+          GOTO      PNCL8000 IF LESS        * no, print new page heading
+.
+          CALL      PTBH0000                * print new table
+          GOTO      PNCL8010
+.
+PNCL8000  CALL      NEWP0000                * need a new page
+.
+PNCL8010  MOVE      FALSE,EXIT              * valid answer
+          GOTO      PNCL9999
+.
+PNCL9000  MOVE      TRUE,EXIT               * invalid clinic type
+.
+PNCL9999  RETURN
++
+.*********************************************************************
+.*                  REFI0000                    Called by : REPT9000 *
+.*        Displays the end of report details                         *
+.*********************************************************************
+REFI0000  UNPACK    PRUNIT1,DIM19,DIM26     * get the two parts
+          MOVE      DIM26,PRUNIT2           * print variable
+.
+.    17/09/90 BD add final subtotals to grand totals.
+          ADD       CLTOT,XTOTLST           * update total
+          ADD       CLTOTS,XTOTLSTS         * update standby total
+          ADD       CLTOT6,XTOT6            * update total 6-12
+          ADD       CLTOTS6,XTOTS6          * update standby total 6-12
+          ADD       CLTOT12,XTOT12          * update total > 12
+          ADD       CLTOTS12,XTOTS12        * update standby total > 12
+.
+. ------ get the clinic percentages ------
+.
+          MOVE      ZERO,PCSD               * make percentage zero
+          COMPARE   ZERO,CLTOTS             * are there any same day pats. ?
+          GOTO      REFI0500 IF EQUAL       * no
+.
+          MOVE      CLTOTS,PCTEMP           * start % calc.
+          DIV       CLTOT,PCTEMP            * same day / total
+          MULT      "100",PCTEMP            * as a % age
+          MOVE      PCTEMP,PCSD             * set up variable
+.
+REFI0500  MOVE      ZERO,PCSD6              * make percentage zero
+          COMPARE   ZERO,CLTOTS6            * are there any same day pats. ?
+          GOTO      REFI1000 IF EQUAL       * no
+.
+          MOVE      CLTOTS6,PCTEMP          * start % calc.
+          DIV       CLTOT6,PCTEMP           * same day / total
+          MULT      "100",PCTEMP            * as a % age
+          MOVE      PCTEMP,PCSD6            * set up variable
+.
+REFI1000  MOVE      ZERO,PCSD12             * make percentage zero
+          COMPARE   ZERO,CLTOTS12           * are there any same day pats. ?
+          GOTO      REFI1500 IF EQUAL       * no
+.
+          MOVE      CLTOTS12,PCTEMP         * start % calc.
+          DIV       CLTOT12,PCTEMP          * same day / total
+          MULT      "100",PCTEMP            * as a % age
+          MOVE      PCTEMP,PCSD12           * set up variable
+.
+REFI1500  PRINT     *1,"*-----------------------------------------------":
+                       "------------------------------------------------":
+                       "-----------------------------------*":
+                    *N,"| Total Patients ",PRUNIT2,*36,"|":
+                    *38,CLTOT,*52,"|",*53,CLTOTS,*60,"(",PCSD,"%)|":
+                    *72,CLTOT6,*85,"|",*86,CLTOTS6,*93,"(",PCSD6,"%)|":
+                    *105,CLTOT12,*117,"|",*118,CLTOTS12,*124,"(",PCSD12,"%)|":
+                    *N,"*-----------------------------------------------":
+                       "------------------------------------------------":
+                       "-----------------------------------*"
+.
+. ------ get the total percentages ------
+.
+          MOVE      ZERO,PCSD               * make percentage zero
+          COMPARE   ZERO,XTOTLST            * are there any same day pats. ?
+          GOTO      REFI2500 IF EQUAL       * no
+.
+          MOVE      XTOTLSTS,PCTEMP         * start % calc.
+          DIV       XTOTLST,PCTEMP          * same day / total
+          MULT      "100",PCTEMP            * as a % age
+          MOVE      PCTEMP,PCSD             * set up variable
+.
+REFI2500  MOVE      ZERO,PCSD6              * make percentage zero
+          COMPARE   ZERO,XTOTS6             * are there any same day pats. ?
+          GOTO      REFI3000 IF EQUAL       * no
+.
+          MOVE      XTOTS6,PCTEMP           * start % calc.
+          DIV       XTOT6,PCTEMP            * same day / total
+          MULT      "100",PCTEMP            * as a % age
+          MOVE      PCTEMP,PCSD6            * set up variable
+.
+REFI3000  MOVE      ZERO,PCSD12             * make percentage zero
+          COMPARE   ZERO,XTOTS12            * are there any same day pats. ?
+          GOTO      REFI3500 IF EQUAL       * no
+.
+          MOVE      XTOTS12,PCTEMP          * start % calc.
+          DIV       XTOT12,PCTEMP           * same day / total
+          MULT      "100",PCTEMP            * as a % age
+          MOVE      PCTEMP,PCSD12           * set up variable
+.
+REFI3500  PRINT     *1,"| Grand Total of Patients ",*36,"|":
+                    *38,XTOTLST,*52,"|",*53,XTOTLSTS,*60,"(",PCSD,"%)|":
+                    *72,XTOT6,*85,"|",*86,XTOTS6,*93,"(",PCSD6,"%)|":
+                    *105,XTOT12,*117,"|",*118,XTOTS12,*124,"(",PCSD12,"%)|":
+                    *N,"*-----------------------------------------------":
+                       "------------------------------------------------":
+                       "-----------------------------------*"
+REFI9999  RETURN
++
+.*********************************************************************
+.*                  CRTC0000                    Called by : REPT0000 *
+.*        Create temporary file for Unit/Clinic sequence             *
+.*********************************************************************
+CRTC0000  CALL      DETP0000                * delete the temp file
+          DISPLAY   *V2LON,*BLINKON,*P1:24,"Please wait.",*EL
+          CLEAR     CMDLINE                 
+          APPEND    "isbuild ",CMDLINE      
+          APPEND    TFILNAME,CMDLINE        
+          APPEND    " 84 D1-3,4-12",CMDLINE 
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID          
+.
+          OPEN      TEMPFILE,TFILNAME       
+          DISPLAY   *P1:24,"Producing the report now.....",*EL
+.
+CRTC9999  RETURN
++
+.*********************************************************************
+.*                  DETP0000                    Called by : REPT0000 *
+.*        Delete temporary file                                      *
+.*********************************************************************
+DETP0000  CLEAR     CMDLINE                   * clear the command line
+          APPEND    "iserase ",CMDLINE        * create command
+          APPEND    TFILNAME,CMDLINE          * add file name
+          RESET     CMDLINE
+          CLOSE     TEMPFILE                  * close temp files so iserase
+          EXECUTE   CMDLINE,TASKID            * execute the delete command
+.
+DETP9999  RETURN
++
+.*********************************************************************
+.
+. ------ I/O routines needed ------
+.
+          INC       STD001IO                * standard IO routines
+          INC       PATCODIO/INC            * codes file
+          INC       PATDO1IO/INC            * doctors file
+          INC       WATTR1IO/INC            * WL treatment file
+          INC       TFILENAM
+          INC       IBASEQIO/INC
+          INC       WEBERRIO/INC
+

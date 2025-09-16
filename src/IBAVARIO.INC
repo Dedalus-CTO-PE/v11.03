@@ -1,0 +1,117 @@
+.
+. IBAVARIO.INC
+. ------------
+. Filename     : ibavaraf
+. Description  : IBA Variable Definition File for User Defined Stationary
+.                I/O Subroutines
+. Variables    : OVRCD    FORM    1
+.                KEY8     DIM     8
+.                KEY33    DIM     33
+. Modifications:
+.     V9.05.01 21/03/2006 Peter Vela  CAR 61299
+.              Made DIBVRFNM DIM5 , IBVRFNUM FORM5. Increased index 2.
+.     V9.04.01 17/03/2005 Lina Vo     CAR 56405 
+.              Added Write, Update and Delete for index 2.
+.
+RAIBVAR1  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      IBAVARD1,KEY33;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSIBVAR1  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      IBAVARD1,KEY33;;
+          RETURN
+.
+RDIBVAR1  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      IBAVARD1,KEY33;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DIBVRTYP,IBVRSTYP
+          MOVE      DIBVRFNM,IBVRFNUM
+          RETURN
+.
+RKIBVAR1  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READKS    IBAVARD1;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DIBVRTYP,IBVRSTYP
+          MOVE      DIBVRFNM,IBVRFNUM
+          RETURN
+.
+RPIBVAR1  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READKP    IBAVARD1;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DIBVRTYP,IBVRSTYP
+          MOVE      DIBVRFNM,IBVRFNUM
+          RETURN
+.
+WRIBVAR1  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          MOVE      IBVRFNUM,DIBVRFNM
+          MOVE      IBVRSTYP,DIBVRTYP
+          WRITE     IBAVARD1,KEY33;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          RETURN
+.
+UPIBVAR1  MOVE      IBVRFNUM,DIBVRFNM
+          MOVE      IBVRSTYP,DIBVRTYP
+          UPDATE    IBAVARD1;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          RETURN
+.
+DEIBVAR1  RESET     KEY33
+          DELETE    IBAVARD1,KEY33
+          RETURN
+.
+RAIBVAR2  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      IBAVARD2,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSIBVAR2  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      IBAVARD2,KEY8;;
+          RETURN
+.
+RDIBVAR2  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      IBAVARD2,KEY8;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DIBVRTYP,IBVRSTYP
+          MOVE      DIBVRFNM,IBVRFNUM
+          RETURN
+.
+RKIBVAR2  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READKS    IBAVARD2;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DIBVRTYP,IBVRSTYP
+          MOVE      DIBVRFNM,IBVRFNUM
+          RETURN
+.
+RPIBVAR2  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READKP    IBAVARD2;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DIBVRTYP,IBVRSTYP
+          MOVE      DIBVRFNM,IBVRFNUM
+          RETURN
+.
+WRIBVAR2  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          MOVE      IBVRFNUM,DIBVRFNM
+          MOVE      IBVRSTYP,DIBVRTYP
+          WRITE     IBAVARD2,KEY8;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          RETURN
+.
+UPIBVAR2  MOVE      IBVRFNUM,DIBVRFNM
+          MOVE      IBVRSTYP,DIBVRTYP
+          UPDATE    IBAVARD2;DIBVRTYP,IBVRDESC,DIBVRFNM,IBVRFLEN,IBVRSPAR
+          RETURN
+.
+DEIBVAR2  RESET     KEY8
+          DELETE    IBAVARD2,KEY8
+          RETURN
+.

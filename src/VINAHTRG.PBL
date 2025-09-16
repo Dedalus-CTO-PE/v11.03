@@ -1,0 +1,1773 @@
+.*****************************************************************************
+.* System    :   Allied Health                                               *
+.* Program   :   VINAHTRG                                                    *
+.* Desc      :   Fixit to re-trigger previously rejected batches where one   *
+.*               or more of the records had E412 or E206 errors.             *
+.*****************************************************************************
+.* Date      :   18/05/2016                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will process and re-trigger referrals from an  *
+.*               upload file where the data has been sourced from rejected   *
+.*               batches in a DHS XML response file.                         *
+.*               defined period of time.                                     *
+.* Mods      :                                                               *
+.*                                                                           *
+.*>>>>>   Note:  All scenarios I've looked at so far only have one Episode   *
+.*>>>>>          per Referral-In, so the client will need to check for       *
+.*>>>>>          scenarios where there are multiple Episodes per Referral-In *
+.*>>>>>          in a single batch and manually determine what to do with    *
+.*>>>>>          each case before retriggering.                              *
+.*                                                                           *
+.*        V10.14.01 17/04/2019  Steve Armstrong  TSK 0868837                 *
+.*                  Recompiled for changes to ALLHDTFD.                      *
+.*****************************************************************************
+.*        V10.08.00 17/06/2016  Steve Armstrong  TSK 0818948                 *
+.*                  Program created.                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       ALLCONFD/INC
+          INC       ALLENCFD/INC
+          INC       ALLHDTFD/INC
+          INC       ALLREFFD/INC
+          INC       ALLRLNFD/INC
+          INC       IBASEQFD/INC
+          INC       PATMA1FD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+.
+.         Temporary File Definitions
+.         --------------------------
+.
+.         Batch file
+.
+VINTEMP1  IFILE SQL, FIXED=65, KEY="U1-20,21-28,29-36,37-44,45-51,52-55"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+TEMPBTCH   DIM      20          20          1       Batch Number
+TEMPREFL   DIM      8           8          21       Referral In Visit Number
+TEMPEPIS   DIM      8           8          29       Episode Visit Number
+TEMPCONT   DIM      8           8          37       Contact Number
+TEMPMTYP   DIM      7           7          45       Message Type (eg RRI_I13)
+TEMPEROR   DIM      4           4          52       Error Code (Eg E412/E206)
+TEMPURNO   DIM      8           8          56       U/R Number
+TEMPSTAT   DIM      1           1          64       Current Status
+.
+.End of Record                             65
+.
+. Redfine FORM fields from key
+. ----------------------------
+BATCOUNT  FORM      3
+.
+.        
+.         Batch error file
+.
+VINTEMP2  IFILE SQL, FIXED=21, KEY="U1-20"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+BATCHNUM   DIM      20          20          1       Batch Number
+.
+.End of Record                             21
+.
+.
+.
+.         VINAH Retrigger Upload file layout - VINAHTRG.txt
+.
+VINAHUPL  FILE      HL7, FIXED=61
+.
+. Field   Type    Length  Start     Description
+.------   ----    ------  -----     -----------------------------------
+VINABTCH  DIM       20      1       Batch Number (right justified)
+.PIPE     DIM       1      21       Field separator
+VINAREFL  DIM       17     22       Referral/Contact Number
+.PIPE     DIM       1      39       Field separator
+VINAMTYP  DIM       7      40       Message Type (eg RRI_I13)
+.PIPE     DIM       1      47       Field separator
+VINAURNO  DIM       8      48       U/R Number
+.PIPE     DIM       1      56       Field separator
+VINAEROR  DIM       4      57       Error Code (Eg E412/E206)
+.
+. End of Record            61
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+AUDITDTE  DIM       8             * user defined audit date (ccyymmdd)
+.
+BATCHCNT  FORM      2             * batch count
+.
+CMDLINE   DIM       80
+CONTNUMB  DIM       8             * contact number for Episode
+CURRDATE  DIM       8             * current date (ccyymmdd)
+.
+DIM3      DIM       3
+DIM3A     DIM       3
+DIM3B     DIM       3
+.
+E206FLAG  FORM      1             * E206 error flag
+.                                    0 = no E206 found
+.                                    1 = E206 found
+E412FLAG  FORM      1             * E412 error flag
+.                                    0 = no E412 found
+.                                    1 = E412 found
+ERRORCNT  FORM      10            * error count
+.
+GRANDTOT  FORM      10            * totral records read
+.
+I12MFLAG  FORM      1             * I12 message flag
+.                                   0 = no I12 message found
+.                                   1 = I12 message found
+IGNORCNT  FORM      10            * ignored record count
+.
+MINVALUE  FORM      2             * minute value
+.
+PCBMFLAG  FORM      1             * PCB message flag
+.                                   0 = no PCB message found
+.                                   1 = PCB message found
+PPPMFLAG  FORM      1             * PPP message flag
+.                                   0 = no PPP message found
+.                                   1 = PPP message found
+PRINTDSC  DIM       54
+PRINTFLG  FORM      1             * print flag
+.                                     0 = valid record
+.                                     1 = error record
+.                                     2 = ignore record
+.
+RECCOUNT  FORM      10            * processed record count
+REPORTFL  FORM      1             * report flag
+.                                    1 = validation section
+.                                    2 = processing section
+RRIMFLAG  FORM      1             * RRI message flag
+.                                   0 = no RRI message found
+.                                   1 = RRI message found
+.
+SAVBATCH  DIM       20            * saved batch number
+SAVEREFL  DIM       8             * Referral-In visit number
+SAVESTAT  FORM      1             * saved Episode status
+SAVEEPIS  DIM       8             * Episode visit number
+SAVEURNO  DIM       8             * saved U/R number
+SAVEMTYP  DIM       7             * save message type
+SAVRSTAT  FORM      1             * saved Referral-In status
+SAVKEY55  DIM       55            * saved key for temp table
+SECVALUE  FORM      2             * minute value
+.
+TEMPFILA  DIM       8
+TEMPFILB  DIM       8
+TIMVALUE  DIM       8             * time value (hh:mm:ss)
+.
+VISITNUM  DIM       8             * visit number for Referral-In or Episode
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+ERASE     INIT      "iserase "
+ISBUILD   INIT      "isbuild "
+PIPE      INIT      "|"
+REPDESC1  INIT      " - Validation Report"
+REPDESC2  INIT      " - Processing Report"
+REPDESC3  INIT      " - Fixit            "
+TILDA50   INIT      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+UKEYA     INIT      " 65 U1-20,21-28,29-36,37-44,45-51,52-55"
+UKEYB     INIT      " 21 U1-20"
+.
+.
+PRGID     INIT      "VINAHTRG"
+PRGNAM    INIT      "Re-Trigger Referrals/Contacts"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+          CALL      CREA0000               * create temp file
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9000          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000:      * run validation report only
+                            MAIN1000:      * run processing report only
+                            MAIN1000       * run fixit
+.
+MAIN1000  CALL      OPEN0000               * open upload file
+          BRANCH    EXIT,MAIN0100          * file not found
+.
+          CALL      ADAT0000               * get audit date
+          BRANCH    EXIT,MAIN0100          * nothing entered
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN5000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN5000  CALL      CLER0000               * clear temp file records
+          CALL      LOAD0000               * load valid records into temp file
+          BRANCH    COPTION,MAIN0100       * validation report only option
+.
+          CALL      REMV0000               * remove all batches with errors
+.
+          CALL      PROC0000               * process temp file records
+          GOTO      MAIN0100
+.
+MAIN9000  CALL      KILA0000               * remove temp file A
+          CALL      KILB0000               * remove temp file B
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"allrefaf";
+          OPEN      ALLREFA1,"allrefaf"
+          OPEN      ALLREFA6,"allrefaf"
+.
+          DISPLAY   *P64:24,"allauden";
+          OPEN      ALLAUDEN,"allauden"
+.
+          DISPLAY   *P64:24,"allaudre";
+          OPEN      ALLAUDRE,"allaudre"
+.
+          DISPLAY   *P64:24,"allencaf";
+          OPEN      ALLENCA1,"allencaf"
+.
+          DISPLAY   *P64:24,"allhdtaf";
+          OPEN      ALLHDTA6,"allhdtaf"
+.
+          DISPLAY   *P64:24,"allrlnaf";
+          OPEN      ALLRLNA1,"allrlnaf"
+          OPEN      ALLRLNA2,"allrlnaf"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                              CREA0000               Called by: MAIN0000   *
+.*             Create a new temporary file                                   *
+.*****************************************************************************
+.
+.         Create tempfile A
+.
+CREA0000  CALL      TFILENAM                     * get new tempfile name
+          MOVE      TFILNAME,TEMPFILA
+.
+          CALL      KILA0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILA,UKEYA
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      VINTEMP1,TEMPFILA            * open temp index file
+.
+.         Create tempfile B
+.
+          CALL      TFILENAM                     * get new tempfile name
+          MOVE      TFILNAME,TEMPFILB
+.
+          CALL      KILB0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILB,UKEYB
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      VINTEMP2,TEMPFILB            * open temp index file
+.
+CREA9999  RETURN
++
+.****************************************************************************
+.*                              KILA0000               Called by: MAIN0000  *
+.*               Close and erase the temporary file A                       *
+.****************************************************************************
+.
+KILA0000  CLOSE     VINTEMP1                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILA       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILA9999  RETURN
++
+.****************************************************************************
+.*                              KILB0000               Called by: MAIN0000  *
+.*               Close and erase the temporary file B                       *
+.****************************************************************************
+.
+KILB0000  CLOSE     VINTEMP2                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILB       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILB9999 RETURN
++
+.****************************************************************************
+.*                              CLER0000               Called by: MAIN0000  *
+.*               Clear all records from the temporary table                 *
+.****************************************************************************
+.
+.         Clear tempfile A
+.
+CLER0000  MOVE      SP70,KEY55
+          CALL      RSTEMP1                      * position at start of file
+          CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,CLER5000               * eof - clear next file
+.
+          PACK      KEY55,TEMPBTCH,TEMPREFL,TEMPEPIS,TEMPCONT,TEMPMTYP,TEMPEROR
+          CALL      DETEMP1                      * delete current record
+          GOTO      CLER0000                     * get next record
+.
+.         Clear tempfile B
+.
+CLER5000  MOVE      SP20,KEY20
+          CALL      RSTEMP2                      * position at start of file
+          CALL      RKTEMP2                      * read next record
+          BRANCH    OVRCD,CLER9999               * eof - finished
+.
+          MOVE      BATCHNUM,KEY20
+          CALL      DETEMP2                      * delete current record
+          GOTO      CLER5000                     * get next record
+.
+CLER9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        Get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run fixit                               *
+.*                        TRUE  (1)  Exit option selected                    *
+.*              COPTION  1 = Run Validation Report Only                      *
+.*                       2 = Run Processing Report Only                      *
+.*                       3 = Run Fixit                                       *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Validation Report Only":
+                    *P1:6,*V2LON,TWO,*HOFF,". Run Processing Report Only":
+                    *P1:7,*V2LON,THREE,*HOFF,". Run Fixit"
+.
+OPTN0500  KEYIN     *P1:9,*EL,"Select Option : ":
+                    *P17:9,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000:            * run validation report only
+                            OPTN9000:            * run processing report only
+                            OPTN9000             * run fixit
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  LOAD      CPHDROPT,COPTION,REPDESC1:   * run validation report only
+                                     REPDESC2:   * run processing report only
+                                     REPDESC3    * run fixit
+          MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000              Called by: MAIN0000   *
+.*                  Open upload file (vinahtrg.txt)                          *
+.* Returns:  EXIT  0 = ok to continue                                        *
+.*                 1 = error occurred                                        *
+.*****************************************************************************
+.
+OPEN0000  MOVE      ZERO,OVRCD
+.
+          TRAP      OVERCOND IF IO
+          OPEN      VINAHUPL,"vinahtrg"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,*B,"Upload file - vinahtrg.txt - not found.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.*****************************************************************************
+.*                             ADAT0000            Called by: MAIN0000       *
+.*              Get the user to input the audit date to be used              *
+.* Returns: AUDITDTE - Audit date (ccyymmdd)                                 *
+.*          EXIT  0 = Valid date entered                                     *
+.*                1 = nothing entered                                        *
+.*****************************************************************************
+.
+ADAT0000  BRANCH    COPTION,ADAT9000:            * Validation Report only
+                            ADAT9000             * Processing Report only
+                            
+          DISPLAY   *P1:11,*EF,"Audit Date :"
+          MOVE      ONE,CCANLDTE
+          MOVE      ONE,CCENTRY
+          MOVE      TEN1,CVERT
+          MOVE      TEN4,CCOL
+.
+          CALL      IBACLOCK                     * default to current date
+.
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          UNPACK    CURRDATE,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,ADAT9100
+          PACK      AUDITDTE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",AUDITDTE
+.
+          MATCH     CURRDATE,AUDITDTE            * date in past ?
+          GOTO      ADAT1000 IF LESS             * yes
+          GOTO      ADAT9000                     * no
+.
+ADAT1000  DISPLAY   *P1:24,*EL,*B,"Warning: Audit date is in the past.  ";
+          CALL      HITENTER
+.
+ADAT9000  MOVE      ZERO,EXIT
+          GOTO      ADAT9999
+.
+ADAT9100  MOVE      ONE,EXIT
+.
+ADAT9999  RETURN
++
+.*****************************************************************************
+.*                               LOAD0000              Called by: MAIN0000   *
+.*        Process each line record in the text file and determine            *
+.*        whether to re-trigger an audit record or not.                      *
+.*****************************************************************************
+.
+LOAD0000  MOVE      ZERO,CPAGENO                 * set report variables
+          MOVE      ONE,CNOUNDLN
+          CALL      IBACLOCK
+.
+          MOVE      ONE,REPORTFL                 * set report flag for validate
+          CALL      HEAD0000                     * print report header
+.
+          MOVE      ZERO,IGNORCNT                * init. ignored record count
+          MOVE      ZERO,RECCOUNT                * init. re-triggered rec. count
+          MOVE      ZERO,ERRORCNT                * init. error record count
+.
+          DISPLAY   *P1:24,*EL,"Loading:";
+.
+.         Loop through each record in the text file
+.
+LOAD0500  READ      VINAHUPL,SEQ;VINABTCH,VINAREFL,VINAMTYP,VINAURNO,VINAEROR
+          GOTO      LOAD9000 IF OVER
+.
+          DISPLAY   *P10:24,*EL,*V2LON,VINABTCH,VINAREFL,VINAMTYP,VINAURNO:
+                                       VINAEROR;
+.
+          CALL      VMES0000                     * validate message
+          BRANCH    EXIT,LOAD0500                * error/ignore record
+.
+.         Read the referral record from allrefaf
+.
+          MOVE      VISITNUM,KEY8
+          CALL      RDALREF1                     * referral record on file ?
+          IF        OVRCD = 1
+            MOVE      ONE,PRINTFLG               * no - error
+            MOVE      "Referral allrefaf record not found",PRINTDSC
+            CALL      PRNT0000
+            GOTO      LOAD0500
+          ENDIF
+.
+.         Check that the current record status is valid
+.
+          MOVE      ZERO,FORM1
+          MOVE      ALRESTAT,FORM1
+          BRANCH    FORM1,LOAD1000:              * Active
+                          LOAD1000:              * Closed
+                          LOAD0800:              * Inactive
+                          LOAD1000:              * Cancelled
+                          LOAD1000               * Rejected
+.
+LOAD0800  MOVE      ONE,PRINTFLG                 * error
+          MOVE      "Current status not valid",PRINTDSC
+          CALL      PRNT0000
+          GOTO      LOAD0500                     * get next record
+.
+.         Check if this is a Referral-In record or an Episode
+.
+LOAD1000  MATCH     "1",ALREUYN4                 * Referral-In ?
+          IF        @EQUAL
+            MOVE      SP8,SAVEEPIS               * clear episode number
+            MOVE      VISITNUM,SAVEREFL          * load referral-in number
+            GOTO      LOAD3000
+          ENDIF
+.
+          PACK      KEY16,VISITNUM,SP20
+          CALL      RSALRLN2                     * position before episode 
+          CALL      RKALRLN2                     * read next record
+          BRANCH    OVRCD,LOAD2000               * eof - error
+.
+          MATCH     VISITNUM,ALRLLNKV            * same episode still ?
+          GOTO      LOAD2000 IF NOT EQUAL        * no - error
+.
+          MOVE      VISITNUM,SAVEEPIS            * load episode number
+          MOVE      ALRLVISN,SAVEREFL            * load referral-in number
+.
+          GOTO      LOAD3000
+.
+LOAD2000  MOVE      ONE,PRINTFLG                 * error
+          MOVE      "Episode not linked",PRINTDSC
+          CALL      PRNT0000
+          GOTO      LOAD0500
+.
+.         Check if the U/R has been merged
+.
+LOAD3000  MATCH     VINAURNO,ALREURNO            * same U/R still ?
+          IF        !@EQUAL
+            MOVE      ONE,PRINTFLG               * no - error
+            MOVE      "U/R has since been merged - process manually",PRINTDSC
+            CALL      PRNT0000
+            GOTO      LOAD0500
+          ENDIF
+.
+.         Read the patient PMI record from patma1af/patmx1af
+.
+          MOVE      VINAURNO,KEY8
+          CALL      RDMAST1                      * PMI record on file ?
+          IF        OVRCD = 1
+            MOVE      ONE,PRINTFLG               * no - error
+            MOVE      "PMI Master record not found",PRINTDSC
+            CALL      PRNT0000
+            GOTO      LOAD0500
+          ENDIF
+.
+          MATCH     SP8,CONTNUMB                 * contact ?
+          GOTO      LOAD8000 IF EQUAL            * no
+.
+.         Read the encounter record from allencaf
+.
+          PACK      KEY16,SAVEEPIS,CONTNUMB
+          CALL      RDALENC1
+          IF        OVRCD =1
+            MOVE      ONE,PRINTFLG               * error
+            MOVE      "Contact allencaf record not found",PRINTDSC
+            CALL      PRNT0000
+            GOTO      LOAD0500
+          ENDIF
+.
+.         The record is valid, so load it into the temp file if it doesn't
+.         already exist.  If the record we are processing has an error number,
+.         then it can replace an existing temp file record which has a blank
+.         error number.
+.
+LOAD8000  PACK      KEY55,VINABTCH,SAVEREFL,SAVEEPIS,CONTNUMB,VINAMTYP,VINAEROR
+          CALL      RDTEMP1                      * record on file already ?
+          BRANCH    OVRCD,LOAD8500               * no - write record
+.
+          MOVE      TWO,PRINTFLG                 * ignore
+          MOVE      "Record already loaded",PRINTDSC
+          CALL      PRNT0000
+          GOTO      LOAD0500
+.
+LOAD8500  MOVE      VINABTCH,TEMPBTCH
+          MOVE      SAVEREFL,TEMPREFL
+          MOVE      SAVEEPIS,TEMPEPIS
+          MOVE      CONTNUMB,TEMPCONT
+          MOVE      VINAMTYP,TEMPMTYP
+          MOVE      VINAEROR,TEMPEROR
+          MOVE      VINAURNO,TEMPURNO
+          MOVE      ALRESTAT,TEMPSTAT
+          CALL      WRTEMP1                      * write temp file record
+.
+          MOVE      ZERO,PRINTFLG                * valid
+          MOVE      SP70,PRINTDSC
+          CALL      PRNT0000                     * print record
+          GOTO      LOAD0500                     * get next record
+.
+LOAD9000  IF        COPTION = 1
+            DISPLAY   *P1:24,*EF,"Processing completed.  ";
+            CALL      HITENTER
+          ENDIF
+.
+          CALL      LINE0000
+          ASSIGN    (IGNORCNT+ERRORCNT+RECCOUNT),GRANDTOT
+          PRINT     *N,*1,"Records Ignored      : ",IGNORCNT:
+                    *N,*1,"Records with Errors  : ",ERRORCNT:
+                    *N,*1,"Valid Records        : ",RECCOUNT:
+                    *N,*1,"Grand Total          : ",GRANDTOT
+.
+          IF        COPTION = 1
+            PRINT     *N,*1,"*** End of Report ***"
+          ENDIF
+.
+LOAD9999  RETURN
++
+.*****************************************************************************
+.*                               WERR0000          Called by: PRNT0000       *
+.*         Write the batch number to the batch error file                    *
+.* Requires: VINABTCH - batch number from upload record                      *
+.*****************************************************************************
+.
+WERR0000  MOVE     VINABTCH,KEY20
+          CALL     RATEMP2                       * batch on file ?
+          BRANCH   OVRCD,WERR5000                * no - write record
+          GOTO     WERR9999                      * yes - finished
+.
+WERR5000  MOVE     VINABTCH,BATCHNUM
+          CALL     WRTEMP2                       * write record
+.
+WERR9999  RETURN
++
+.*****************************************************************************
+.*                             PROC0000            Called by: MAIN0000       *
+.*              Process the temp file records to trigger audit records       *
+.*****************************************************************************
+.
+PROC0000  DISPLAY   *P1:24,*EL,"Processing:";
+.
+.         Initialise processing variables
+.
+          MOVE      TWO,REPORTFL                 * set report flag for validate
+          MOVE      ZERO,RECCOUNT                * initialise record count
+          MOVE      SP20,SAVBATCH                * initialise saved batch no.
+          CALL      CLVR0000                     * clear variables
+.
+          CALL      HEAD0000                     * print header
+.
+          BRANCH    COPTION,PROC9000             * validation report only
+.
+          MOVE      SP70,KEY55
+          CALL      RSTEMP1                      * position at start of file
+PROC0500  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,PROC8000               * eof - finished
+.
+          DISPLAY   *P13:24,*EL,*V2LON,TEMPBTCH,TEMPREFL,TEMPEPIS,TEMPCONT:
+                                       TEMPMTYP,TEMPEROR,TEMPURNO,TEMPSTAT
+.
+          MATCH     TEMPBTCH,SAVBATCH            * same batch number still ?
+          GOTO      PROC1000 IF EQUAL            * yes
+.
+          MATCH     SP20,SAVBATCH                * first batch ?
+          GOTO      PROC0700 IF EQUAL            * yes
+.
+.         We have a new batch, so determine what retriggering needs to occur
+.         for the previous batch and write the relevant audit records
+.
+          CALL      TRIG0000                     * trigger audit records
+.
+.         Load all the save variables ready for the next batch
+.
+PROC0700  MOVE      TEMPBTCH,SAVBATCH            * save batch number
+          MOVE      TEMPREFL,SAVEREFL            * saved referral-in number
+          MOVE      TEMPEPIS,SAVEEPIS            * saved episode number
+          MOVE      TEMPURNO,SAVEURNO            * saved U/R number
+          GOTO      PROC1100
+.
+.         We have a new record for the same batch
+.
+PROC1000  MATCH     SAVEREFL,TEMPREFL            * same Referral-In visit no ?
+          GOTO      PROC1100 IF EQUAL            * yes
+.
+          CALL      TRIG0000                     * no - trigger audit records
+.
+          CALL      CLVR0000                     * clear variables
+          MOVE      TEMPREFL,SAVEREFL            * initialise saved ref. no.
+          MOVE      TEMPEPIS,SAVEEPIS            * initialise saved epis. no.
+          GOTO      PROC1100
+.
+.         Check if this is a Referral-In or Episode message and
+.         if so, whether it is an "add" message.
+.         If we know there was an "add" message in the original batch
+.         rejected by DHS, then we need to retrigger another "add", otherwise,
+.         we only need to retrigger an update.
+.         This applies to both RRI and PPP messages.
+.
+PROC1100  MATCH     "RRI",TEMPMTYP               * Referral-In message ?
+          GOTO      PROC2000 IF NOT EQUAL        * no
+.
+          MOVE      ONE,RRIMFLAG                 * yes - set flag for RRI
+          MOVE      TEMPSTAT,SAVRSTAT            * save current referral status
+.
+          MATCH     "RRI_I12",TEMPMTYP           * RRI_I12 add message ?
+          IF        @EQUAL
+            MOVE      ONE,I12MFLAG               * yes - set I12 found flag
+          ENDIF
+.
+.         Check if there was an error for the Referral-In and if so,
+.         set the error flag accordingly.
+.         NB. the error must by default be an E412, so we shouldn't need
+.             to check this as it was checked in validation during LOAD0000.
+.
+          MATCH     SP4,TEMPEROR                 * error present for message ?
+          IF        !@EQUAL
+            MOVE      ONE,E412FLAG               * yes - set flag for E412 found
+          ENDIF
+.
+          GOTO      PROC0500                     * get next record
+.
+PROC2000  MATCH     "PPP",TEMPMTYP               * Episode message ?
+          GOTO      PROC0500 IF NOT EQUAL        * no
+.
+          MOVE      ONE,PPPMFLAG                 * yes - set flag for PPP
+          MOVE      TEMPSTAT,SAVESTAT            * save current episode status
+.
+          MATCH     SP8,SAVEEPIS                 * first episode for Ref.-In ?
+          IF        @EQUAL
+            MOVE      TEMPEPIS,SAVEEPIS          * yes
+          ENDIF
+.
+          MATCH     "PPP_PCB",TEMPMTYP           * PPP_PCB add message ?
+          IF        @EQUAL
+            MOVE      ONE,PCBMFLAG               * yes - set PCB found flag
+          ENDIF
+.
+.         Check if there was an error for the Episode and if so,
+.         set the error flag accordingly.
+.         NB. the error must by default be an E206, so we shouldn't need
+.             to check this as it was checked in validation during LOAD0000.
+.
+          MATCH     SP4,TEMPEROR                 * error present for message ?
+          IF        !@EQUAL
+            MOVE      ONE,E206FLAG               * yes - set flag for E206 found
+          ENDIF
+.
+          GOTO      PROC0500                     * get next record
+.
+PROC8000  CALL      TRIG0000                    * trigger audit records
+.
+.
+PROC9000  DISPLAY   *P1:22,*EF,"Processing completed.":
+                    *P1:23,"Records triggered  :",*V2LON,RECCOUNT,*HOFF:
+                    *P1:24;
+          CALL      HITENTER
+.
+          CALL      LINE0000
+          PRINT     *N,*1,"Records Processed  : ",RECCOUNT,*N,*N:
+                    *1,"*** End of Report ***"
+          GOTO      PROC9999
+.
+PROC9999  RETURN
++
+.****************************************************************************
+.*                         CLVR0000                Called by: PROC0000      *
+.*             Clear the processing variables                               *
+.****************************************************************************
+.
+CLVR0000  MOVE      ZERO,RRIMFLAG                * initialise RRI found flag
+          MOVE      ZERO,PPPMFLAG                * initialise PPP found flag
+          MOVE      ZERO,SAVESTAT             * init. saved episode status flag
+          MOVE      ZERO,SAVRSTAT             * init. saved referral status flag
+          MOVE      ZERO,E206FLAG                * initialise E206 error flag
+          MOVE      ZERO,E412FLAG                * initialise E412 error flag
+          MOVE      ZERO,I12MFLAG                * initialise I12 found flag
+          MOVE      ZERO,PCBMFLAG                * initialise PCB found flag
+          MOVE      ZERO,BATCHCNT                * initialise batch counter
+.
+CLVR9999  RETURN
++
+.****************************************************************************
+.*                            TRIG0000             Called by: PROC0000      *
+.*                                                                          *
+.* Requires: RRIMFLAG - RRI messages found flag                             *
+.*           PPPMFLAG - PPP messages found flag                             *
+.*           SAVESTAT - Saved current Episode status                        *
+.*           SAVRSTAT - Saved current Referral-In status                    *
+.*           E206FLAG - E206 error found flag                               *
+.*           E412FLAG - E412 error found flag                               *
+.*           I12MFLAG - RRI-I12 message found flag                          *
+.*           PCBMFLAG - PPP-PCB message found flag                          *
+.*           SAVEREFL - Saved Referral-In visit number                      *
+.*           SAVEEPIS - Saved Episode visit number                          *
+.****************************************************************************
+.
+TRIG0000  BRANCH    RRIMFLAG,TRIG5000            * RRI messages found
+.
+.         There are no RRI messages in the batch for this Referral-In/Episode
+.         combination, so check if there are any PPP messages
+.
+          BRANCH    PPPMFLAG,TRIG1000            * PPP messages found
+.
+.         No RRI messages and no PPP messages found, so just ignore this
+.         scenario which should never occur.
+.
+          GOTO      TRIG9999
+.
+.         There are no RRI messages in the batch for this Referral-In/Episode
+.         combination, but there are PPP messages, so check if there was
+.         an E206 error.
+.
+TRIG1000  BRANCH    E206FLAG,TRIG1200            * E206 found
+.
+.         There are no RRI messages in the batch for this Referral-In/Episode
+.         combination, but there are PPP messages with no errors, so
+.         check the current status of the Episode
+.
+          BRANCH    SAVESTAT,TRIG1100:           * active
+                             TRIG1100:           * closed
+                             TRIG9999:           * shouldn't get here
+                             TRIG9999:           * cancelled - shouldn't occur
+                             TRIG9999            * rejected - shouldn't occur
+          GOTO      TRIG9999                     * waiting
+.
+.         There are no RRI messages in the batch for this Referral-In/Episode
+.         combination, but there are PPP messages with no errors and a
+.         current status which is either active or closed, so trigger the
+.         relevant messages
+.
+TRIG1100  IF        PCBMFLAG = 1
+            CALL      AEPS0000                   * Trigger PPP_PCB
+          ELSE
+            CALL      UEPS0000                   * Trigger PPP_PCC
+          ENDIF
+          CALL      ACNT0000                     * Trigger ADT_A03's for episode
+.
+          GOTO      TRIG9999
+.-------------------------------------------------------------------------------
+.
+.         There are no RRI messages in the batch for this Referral-In/Episode
+.         combination, but there are PPP messages with an E206 error, so
+.         check the current status of the Episode.
+.
+TRIG1200  BRANCH    SAVESTAT,TRIG1300:           * active
+                             TRIG1300:           * closed
+                             TRIG9999:           * shouldn't get here
+                             TRIG9999:           * cancelled - shouldn't occur
+                             TRIG9999            * rejected - shouldn't occur
+          GOTO      TRIG9999                     * waiting
+.
+.         There are no RRI messages in the batch for this Referral-In/Episode
+.         combination, but there are PPP messages with an E206 error and a
+.         current status which is either active or closed, so trigger the
+.         relevant messages
+.
+TRIG1300  CALL      UREF0000                     * Trigger RRI_I13
+          IF        PCBMFLAG = 1
+            CALL      AEPS0000                   * Trigger PPP_PCB
+          ELSE
+            CALL      UEPS0000                   * Trigger PPP_PCC
+          ENDIF
+          CALL      ACNT0000                     * Trigger ADT_A03's for episode
+.
+          GOTO      TRIG9999
+.-------------------------------------------------------------------------------
+.
+.         There are RRI messages in the batch for this Referral-In/Episode
+.         combination, so check if there are any PPP messages
+.
+TRIG5000  BRANCH    PPPMFLAG,TRIG7000            * PPP messages found
+.
+.         There are RRI messages in the batch for this Referral-In/Episode
+.         combination, but there are no PPP messages, so check if there was
+.         an E412 error.
+.
+          BRANCH    E412FLAG,TRIG6000            * E412 found
+.
+.         There are RRI messages in the batch for this Referral-In/Episode
+.         combination, with no errors and no PPP messages, so
+.         check the current status of the Referral-In
+.
+          BRANCH    SAVRSTAT,TRIG5100:           * active
+                             TRIG5100:           * closed
+                             TRIG9999:           * shouldn't get here
+                             TRIG5200:           * cancelled
+                             TRIG5200            * rejected
+          GOTO      TRIG9999                     * waiting
+.
+TRIG5100  IF        I12MFLAG = 1
+            CALL      AREF0000                   * Trigger RRI_I12
+          ELSE
+            CALL      UREF0000                   * Trigger RRI_I13
+          ENDIF
+.
+.         Get all the linked Episodes for the Referral-In and
+.         Trigger a PPP_PCB for each one, along with an ADT_A03
+.         for each associated active contact
+.
+          CALL      GEPS0000
+.
+          GOTO      TRIG9999
+.-------------------------------------------------------------------------------
+.
+TRIG5200  IF        I12MFLAG = 1
+            CALL      AREF0000                   * Trigger RRI_I12
+          ELSE
+            CALL      UREF0000                   * Trigger RRI_I13
+          ENDIF
+.
+.         Get all the linked Episodes for the Referral-In and
+.         Trigger a PPP_PCB for each one, along with an ADT_A03
+.         for each associated active contact
+.
+          CALL      GEPS0000
+.
+          GOTO      TRIG9999
+.-------------------------------------------------------------------------------
+.
+.         There are RRI messages in the batch for this Referral-In/Episode
+.         combination with an E412 error, but there are no PPP messages, so
+.         check the current status of the Referral-In.
+.
+TRIG6000  BRANCH    SAVRSTAT,TRIG9999:           * active - shouldn't occur
+                             TRIG9999:           * closed - shouldn't occur
+                             TRIG9999:           * shouldn't get here
+                             TRIG6100:           * cancelled
+                             TRIG6100            * rejected
+          GOTO      TRIG9999                     * waiting
+.
+TRIG6100  IF        I12MFLAG = 1
+            CALL      AREF0000                   * Trigger RRI_I12
+          ELSE
+.
+.           Get all the linked Episodes for the Referral-In and
+.           trigger a PPP_PCD for each one
+.
+            CALL      GEPS0000
+            CALL      UREF0000                   * Trigger RRI_I13
+          ENDIF
+.
+          GOTO      TRIG9999
+.-------------------------------------------------------------------------------
+.
+.         There are RRI and PPP messages in the batch for this
+.         Referral-In/Episode combination, so check if there was an E412 
+.         or E206 error.
+.
+TRIG7000  IF        E412FLAG = 1 | E206FLAG = 1
+            GOTO      TRIG8000
+          ENDIF
+.
+.         There are RRI and PPP messages in the batch for this
+.         Referral-In/Episode combination with no errors, so
+.         check the current status of the Referral-In.
+.
+          BRANCH    SAVRSTAT,TRIG7100:           * active
+                             TRIG7100:           * closed
+                             TRIG9999:           * shouldn't get here
+                             TRIG7200:           * cancelled
+                             TRIG7200            * rejected
+          GOTO      TRIG9999                     * waiting
+.
+TRIG7100  IF        I12MFLAG = 1
+            CALL      AREF0000                   * Trigger RRI_I12
+          ELSE
+            CALL      UREF0000                   * Trigger RRI_I13
+          ENDIF
+.
+.         Get all the linked Episodes for the Referral-In and
+.         Trigger a PPP_PCB for each one, along with an ADT_A03
+.         for each associated active contact
+.
+          CALL      GEPS0000
+.
+          GOTO      TRIG9999
+.-------------------------------------------------------------------------------
+.
+TRIG7200  IF        I12MFLAG = 1
+            CALL      AREF0000                   * Trigger RRI_I12
+          ELSE
+.
+.           Get all the linked Episodes for the Referral-In and
+.           trigger a PPP_PCD for each one
+.
+            CALL      GEPS0000
+            CALL      UREF0000                   * Trigger RRI_I13
+          ENDIF
+.
+          GOTO      TRIG9999
+.-------------------------------------------------------------------------------
+.
+.         There are RRI and PPP messages in the batch for this
+.         Referral-In/Episode combination with an E412 and/or E206 error,
+.         so check the current status of the Referral-In.
+.
+TRIG8000  BRANCH    SAVRSTAT,TRIG8100:           * active
+                             TRIG8100:           * closed
+                             TRIG9999:           * shouldn't get here
+                             TRIG8200:           * cancelled
+                             TRIG8200            * rejected
+          GOTO      TRIG9999                     * waiting
+.
+TRIG8100  IF        I12MFLAG = 1
+            CALL      AREF0000                   * Trigger RRI_I12
+          ELSE
+            CALL      UREF0000                   * Trigger RRI_I13
+          ENDIF
+.
+.         Get all the linked Episodes for the Referral-In and
+.         Trigger a PPP_PCB for each one, along with an ADT_A03
+.         for each associated active contact
+.
+          CALL      GEPS0000
+.
+          GOTO      TRIG9999
+.-------------------------------------------------------------------------------
+.
+TRIG8200  IF        I12MFLAG = 1
+            CALL      AREF0000                   * Trigger RRI_I12
+          ELSE
+.
+.           Get all the linked Episodes for the Referral-In and
+.           trigger a PPP_PCD for each one
+.
+            CALL      GEPS0000
+            CALL      UREF0000                   * Trigger RRI_I13
+          ENDIF
+.
+TRIG9999  RETURN
++
+.****************************************************************************
+.*                               GEPS0000          Called by: TRIG0000      *
+.*        Get all the linked episodes and trigger a PPP_PCD for each        *
+.****************************************************************************
+.
+GEPS0000  PACK      KEY16,SAVEREFL,SP20
+          CALL      RSALRLN1                     * position before referral-in
+GEPS0500  CALL      RKALRLN1                     * read next record
+          BRANCH    OVRCD,GEPS9999               * eof - finished
+.
+          MATCH     SAVEREFL,ALRLVISN            * same referral-in still ?
+          GOTO      GEPS9999 IF NOT EQUAL        * no - finished
+.
+          MOVE      ALRLLNKV,SAVEEPIS            * save the episode number
+.
+.         If this is a cancelled or rejected referral-In, then we
+.         need to send a PPP_PCD message
+.                                                  for printing (PLIN0000)
+          IF        SAVRSTAT > 3
+            CALL      DEPS0000                   * Trigger PPP_PCD
+            GOTO      GEPS0500
+          ENDIF
+.
+.         This is an active referral, so we need to send a PPP_PCB, 
+.         followed by an ADT_A03 for each associated active contact
+.
+          CALL      AEPS0000                     * Trigger PPP_PCB
+          CALL      ACNT0000                     * Trigger ADT_A03(s)
+.
+          GOTO      GEPS0500                     * get next record
+.
+GEPS9999  RETURN
++
+.****************************************************************************
+.*                               AREF0000          Called by: TRIG0000      *
+.* Requires: SAVEREFL - Referral-In number                                  *
+.*           BATCHCNT - Batch sequence number                               *
+.* Returns:  BATCHCNT - Update batch sequence number                        *
+.****************************************************************************
+.
+.         Adding a Referral-In
+.
+AREF0000  MOVE      SAVEREFL,KEY8
+          CALL      RDALREF1                     * Referral-In record found ?
+          BRANCH    OVRCD,AREF9999               * no - ignore record
+.
+          ADD       ONE,BATCHCNT                 * increment batch count
+.
+          CALL      CTIM0000                     * convert count to time
+.
+.         Load audit file variables
+.
+          MOVE      AUDITDTE,ALREAUDD
+          MOVE      TIMVALUE,ALREAUDT
+          REP       " 0",ALREAUDD
+          MOVE      PORT,ALREAUDP
+          MOVE      ANSA,ALREAUDR
+          MOVE      ONE,ALREAUDS
+          MOVE      "VTRG",ALREAUDO
+.
+          IF        COPTION = 3
+            CALL      AWALREF                    * write audit file record
+          ENDIF
+.
+          MOVE      "RRI_I12",SAVEMTYP
+          CALL      PLIN0000                     * print line
+.
+AREF9999  RETURN
++
+.****************************************************************************
+.*                               UREF0000          Called by: TRIG0000      *
+.* Requires: SAVEREFL - Referral-In number                                  *
+.*           BATCHCNT - Batch sequence number                               *
+.* Returns:  BATCHCNT - Update batch sequence number                        *
+.****************************************************************************
+.
+.         Updating a Referral-In
+.
+UREF0000  MOVE      SAVEREFL,KEY8
+          CALL      RDALREF1                     * Referral-In record found ?
+          BRANCH    OVRCD,UREF9999               * no - ignore record
+.
+          ADD       ONE,BATCHCNT                 * increment batch count
+.
+          CALL      CTIM0000                     * convert count to time
+.
+.         Load before audit file variables
+.
+          MOVE      AUDITDTE,ALREAUDD
+          MOVE      TIMVALUE,ALREAUDT
+          REP       " 0",ALREAUDD
+          MOVE      PORT,ALREAUDP
+          MOVE      ANSB,ALREAUDR
+          MOVE      ONE,ALREAUDS
+          MOVE      "VTRG",ALREAUDO
+.
+          IF        COPTION = 3
+            CALL      AWALREF                    * write before audit record
+          ENDIF
+.
+.         Load after audit file variables
+.
+          MOVE      ANSC,ALREAUDR
+.
+          IF        COPTION = 3
+            CALL      AWALREF                    * write after audit record
+          ENDIF
+.
+          MOVE      "RRI_I13",SAVEMTYP
+          CALL      PLIN0000                     * print line
+.
+UREF9999  RETURN
++
+.****************************************************************************
+.*                               AEPS0000          Called by: TRIG0000      *
+.* Requires: SAVEEPIS - Episode number                                      *
+.*           BATCHCNT - Batch sequence number                               *
+.* Returns:  BATCHCNT - Update batch sequence number                        *
+.****************************************************************************
+.
+.         Adding an Episode
+.
+AEPS0000  MOVE      SAVEEPIS,KEY8
+          CALL      RDALREF1                     * Episode record found ?
+          BRANCH    OVRCD,AEPS9999               * no - ignore record
+.
+          ADD       ONE,BATCHCNT                 * increment batch count
+.
+          CALL      CTIM0000                     * convert count to time
+.
+.         Load audit file variables
+.
+          MOVE      AUDITDTE,ALREAUDD
+          MOVE      TIMVALUE,ALREAUDT
+          REP       " 0",ALREAUDD
+          MOVE      PORT,ALREAUDP
+          MOVE      ANSA,ALREAUDR
+          MOVE      ONE,ALREAUDS
+          MOVE      "VTRG",ALREAUDO
+.
+          IF        COPTION = 3
+            CALL      AWALREF                    * write audit file record
+          ENDIF
+.
+          MOVE      "PPP_PCB",SAVEMTYP
+          CALL      PLIN0000                     * print line
+.
+AEPS9999  RETURN
++
+.****************************************************************************
+.*                               UEPS0000          Called by: TRIG0000      *
+.* Requires: SAVEEPIS - Episode number                                      *
+.*           BATCHCNT - Batch sequence number                               *
+.* Returns:  BATCHCNT - Update batch sequence number                        *
+.****************************************************************************
+.
+.         Updating an Episode
+.
+UEPS0000  MOVE      SAVEEPIS,KEY8
+          CALL      RDALREF1                     * Episode record found ?
+          BRANCH    OVRCD,UEPS9999               * no - ignore record
+.
+          ADD       ONE,BATCHCNT                 * increment batch count
+.
+          CALL      CTIM0000                     * convert count to time
+.
+.         Load before audit file variables
+.
+          MOVE      AUDITDTE,ALREAUDD
+          MOVE      TIMVALUE,ALREAUDT
+          REP       " 0",ALREAUDD
+          MOVE      PORT,ALREAUDP
+          MOVE      ANSB,ALREAUDR
+          MOVE      ONE,ALREAUDS
+          MOVE      "VTRG",ALREAUDO
+.
+          IF        COPTION = 3
+            CALL      AWALREF                    * write before audit record
+          ENDIF
+.
+.         Load after audit file variables
+.
+          MOVE      ANSC,ALREAUDR
+.
+          IF        COPTION = 3
+            CALL      AWALREF                    * write after audit record
+          ENDIF
+.
+          MOVE      "PPP_PCB",SAVEMTYP
+          CALL      PLIN0000                     * print line
+.
+UEPS9999  RETURN
++
+.****************************************************************************
+.*                               ACNT0000          Called by: TRIG0000      *
+.*                    Add contact records for an episode                    *
+.* Requires: SAVEEPIS - Episode number                                      *
+.*           BATCHCNT - Batch sequence number                               *
+.* Returns:  BATCHCNT - Update batch sequence number                        *
+.****************************************************************************
+.
+ACNT0000  PACK      KEY16,SAVEEPIS,SP20
+          CALL      RSALENC1                     * position before episode
+ACNT0500  CALL      RKALENC1                     * read next record
+          BRANCH    OVRCD,ACNT9999               * no - finished
+.
+          MATCH     SAVEEPIS,ALENVISN            * same episode visit still ?
+          GOTO      ACNT9999 IF NOT EQUAL        * no - finished
+.
+          MATCH     "0",ALENRSTA                 * active contact ?
+          GOTO      ACNT0500 IF NOT EQUAL        * no - ignore
+.
+          ADD       ONE,BATCHCNT                 * increment batch count
+.
+          CALL      CTIM0000                     * convert count to time
+.
+.         Load audit file variables
+.
+          MOVE      AUDITDTE,ALENAUDD
+          MOVE      TIMVALUE,ALENAUDT
+          MOVE      PORT,ALENAUDP
+          MOVE      ANSA,ALENAUDR
+          MOVE      ONE,ALENAUDS
+          MOVE      "VTRG",ALENAUDO
+.
+          IF        COPTION = 3
+            CALL      AWALENC                    * write audit file record
+          ENDIF
+.
+          MOVE      "ADT_A03",SAVEMTYP
+          CALL      PLIN0000                     * print line
+.
+          CALL      ACNT0500                     * get next contact
+.
+ACNT9999  RETURN
++
+.****************************************************************************
+.*                               DEPS0000          Called by: TRIG0000      *
+.*                         Delete an Episode                                *
+.* Requires: ALRLLNKV - Episode number                                      *
+.*           BATCHCNT - Batch sequence number                               *
+.* Returns:  BATCHCNT - Update batch sequence number                        *
+.****************************************************************************
+.
+.         Deleting an Episode
+.
+DEPS0000  MOVE      ALRLLNKV,KEY8
+          CALL      RDALREF1                     * Episode record found ?
+          BRANCH    OVRCD,DEPS9999               * no - ignore record
+.
+          ADD       ONE,BATCHCNT                 * increment batch count
+.
+          CALL      CTIM0000                     * convert count to time
+.
+.         Load audit file variables
+.
+          MOVE      AUDITDTE,ALREAUDD
+          MOVE      TIMVALUE,ALREAUDT
+          REP       " 0",ALREAUDD
+          MOVE      PORT,ALREAUDP
+          MOVE      ANSD,ALREAUDR
+          MOVE      ONE,ALREAUDS
+          MOVE      "VTRG",ALREAUDO
+.
+          IF        COPTION = 3
+            CALL      AWALREF                    * write audit file record
+          ENDIF
+.
+          MOVE      "PPP_PCD",SAVEMTYP
+          CALL      PLIN0000                     * print line
+.
+DEPS9999  RETURN
++
+.*****************************************************************************
+.*                              PLIN0000           Called by: AREF0000       *
+.*         Print a report line for the message triggered      UREF0000       *
+.* Requires: SAVBATCH - saved batch number                    AEPS0000       *
+.*           SAVEURNO - saved U/R number                      UEPS0000       *
+.*           SAVEREFL - saved referral-in visit number        ACNT0000       *
+.*           SAVEEPIS - saved episode visit number            DEPS0000       *
+.*           SAVEMTYP - saved message type                                   *
+.*           CLNO - line count for page                                      *
+.*           RECCOUNT - record trigger count                                 *
+.* Returns:  CLNO - updated line count for page                              *
+.*           RECCOUNT - updated record trigger count                         *
+.*****************************************************************************
+.
+PLIN0000  COMPARE   CLNO,FIFTY5                  * page full ?
+          CALL      HEAD0000 IF LESS             * yes
+.
+          PRINT     *1,PIPE,*3,SAVBATCH,*24,PIPE,*26,SAVEURNO,*35,PIPE:
+                    *37,SAVEREFL,*46,PIPE;
+.
+          MATCH     "PPP",SAVEMTYP
+          IF        @EQUAL
+            PRINT     *48,SAVEEPIS;
+          ENDIF
+.
+          MATCH     "ADT",SAVEMTYP
+          IF        @EQUAL
+            PRINT     *48,SAVEEPIS,*57,PIPE,*59,ALENENCT;
+          ELSE
+            PRINT     *57,PIPE;
+          ENDIF
+.
+          PRINT     *68,PIPE,*70,SAVEMTYP,*132,PIPE
+.
+          ADD       ONE,CLNO                     * increment line count
+.
+          IF        COPTION = 3
+            ADD       ONE,RECCOUNT               * increment record count
+          ENDIF
+.
+PLIN9999  RETURN
++
+.*****************************************************************************
+.*                              CTIM0000           Called by: AREF0000       *
+.*                    Convert count to time (hh:mm:ss)                       *
+.*           The first record triggered for a batch will have time 00:00:01  *
+.*           then every record after that will have the time incremented     *
+.*           by 1 second.                                                    *
+.* Requires: BATCHCNT - Current batch count                                  *
+.* Returns:  TIMVALUE - Audit record time (hh:mm:ss)                         *
+.*****************************************************************************
+.
+CTIM0000  IF        BATCHCNT < 60
+            PACK      TIMVALUE,ZERO,ZERO,COLON,ZERO,ZERO,COLON,BATCHCNT
+            REP       " 0",TIMVALUE
+            GOTO      CTIM9999
+          ENDIF
+.
+.         Batch count is greater than 60, so calculate how many minutes
+.         and seconds
+.
+          ASSIGN    (BATCHCNT/SIXTY),MINVALUE
+          ASSIGN    (BATCHCNT%SIXTY),SECVALUE
+.
+          PACK      TIMVALUE,ZERO,ZERO,COLON,MINVALUE,COLON,SECVALUE
+          REP       " 0",TIMVALUE
+.
+CTIM9999  RETURN
++
+.****************************************************************************
+.*                            VMES0000                 Called by: LOAD0000  *
+.*      Validate the message type and load the visit/contact numbers        *
+.* Requires: Upload record data                                             *
+.* Returns:  VISITNUM - referral visit number right justified               *
+.*           CONTNUMB - contact number right justified (ADT_A03 & ADT_A13)  *
+.****************************************************************************
+.
+.         First, pad out the data fields and right justify where
+.         necessary
+.
+VMES0000  PACK      VINAMTYP,VINAMTYP,SP70
+          PACK      VINABTCH,VINABTCH,SP70
+          RJUSTIFY  VINABTCH
+          PACK      VINAURNO,VINAURNO,SP70
+          RJUSTIFY  VINAURNO
+          PACK      VINAEROR,VINAEROR,SP70
+.
+.         Make sure that the message type is 7 characters in length
+.
+          MOVE      ZERO,FORM1
+          MOVELPTR  VINAMTYP,FORM1               * message type 7 chars ?
+          IF        FORM1 <> 7
+            MOVE      ONE,PRINTFLG               * no - error
+            MOVE      "Message type has too many characters",PRINTDSC
+            CALL      PRNT0000
+            GOTO      VMES9100
+          ENDIF
+.
+          UNPACK    VINAMTYP,DIM3A,ANS,DIM3B
+.
+.         Make sure the first 3 characters of the message are valid.
+.         We can ignore all REF messages as they will be re-created at
+.         extract
+.
+          MATCH     "REF",DIM3A                  * Referral Out message ?
+          GOTO      VMES1800 IF EQUAL            * yes - ignore
+.
+          MATCH     "RRI",DIM3A                  * Referral In message ?
+          GOTO      VMES0100 IF NOT EQUAL        * no
+.
+          MATCH     SP4,VINAEROR                 * yes - blank error code ?
+          GOTO      VMES1000 IF EQUAL            * yes
+.
+          MATCH     "E412",VINAEROR              * E412 error ?
+          IF        !@EQUAL
+            MOVE      ONE,PRINTFLG               * invalid error # - error
+            MOVE      "Invalid error for referral",PRINTDSC
+            CALL      PRNT0000
+            GOTO      VMES9100
+          ENDIF
+.
+          GOTO      VMES1000                     * yes - valid
+.
+VMES0100  MATCH     "PPP",DIM3A                  * Episode message ?
+          GOTO      VMES0200 IF NOT EQUAL        * no
+.
+          MATCH     SP4,VINAEROR                 * yes - blank error code ?
+          GOTO      VMES1100 IF EQUAL            * yes
+.
+          MATCH     "E206",VINAEROR              * E206 error ?
+          IF        !@EQUAL
+            MOVE      ONE,PRINTFLG               * invalid error # - error
+            MOVE      "Invalid error for episode",PRINTDSC
+            CALL      PRNT0000
+            GOTO      VMES9100
+          ENDIF
+.
+          GOTO      VMES1100                     * yes - valid
+.
+VMES0200  MATCH     "ADT",DIM3A                  * PMI or Contact message ?
+          GOTO      VMES1200 IF EQUAL            * yes - valid
+.
+          GOTO      VMES1700                     * no - error
+.
+.         We can ignore ADT_A08, ADT_A04 and all REF messages as they
+.         will automatically be generated by the VINAH extract program
+.         at the time of extraction
+.
+VMES1000  MATCH     "I12",DIM3B                  * add referral in message ?
+          GOTO      VMES2000 IF EQUAL            * yes - valid
+.
+          MATCH     "I13",DIM3B                  * update referral in message ?
+          GOTO      VMES2000 IF EQUAL            * yes - valid
+.
+          MATCH     "I14",DIM3B                  * delete referral in message ?
+          GOTO      VMES1900 IF EQUAL            * no - ignore
+.
+          GOTO      VMES1700
+.
+VMES1100  MATCH     "PCB",DIM3B                  * add episode message ?
+          GOTO      VMES2000 IF EQUAL            * yes - valid
+.
+          MATCH     "PCC",DIM3B                  * update episode message ?
+          GOTO      VMES2000 IF EQUAL            * yes - valid
+.
+.         We'll ignore PCD messages as it is unlikely these will
+.         be present and even if they are, the issue here is missing
+.         referrals/episodes/contacts
+.
+          MATCH     "PCD",DIM3B                  * delete episode message ?
+          GOTO      VMES1900 IF EQUAL            * no - ignore
+.
+          GOTO      VMES1700
+.
+.         We'll ignore A03 messages as we have no idea what's been sent
+.         previously, if anything, and if so, if all contacts have been sent
+.         or only some.  As such, we'll send out all associated contacts
+.         where it's appropriate when retriggering.
+.
+VMES1200  MATCH     "A03",DIM3B                  * add contact message ?
+          GOTO      VMES1800 IF EQUAL            * yes - ignore
+.
+          MATCH     "A04",DIM3B                  * PMI add message ?
+          GOTO      VMES1800 IF EQUAL            * yes - ignore
+.
+          MATCH     "A08",DIM3B                  * PMI update message ?
+          GOTO      VMES1800 IF EQUAL            * yes - ignore
+.
+          MATCH     "A40",DIM3B                  * PMI merge message ?
+          GOTO      VMES1800 IF EQUAL            * yes - ignore
+.
+VMES1700  MOVE      ONE,PRINTFLG                 * error
+          MOVE      "Message Type not valid",PRINTDSC
+          CALL      PRNT0000
+          GOTO      VMES9100
+.
+VMES1800  MOVE      TWO,PRINTFLG                 * ignore
+          MOVE      "Record will be regenerated at extraction",PRINTDSC
+          CALL      PRNT0000
+          GOTO      VMES9100
+.
+VMES1900  MOVE      TWO,PRINTFLG                 * ignore
+          MOVE      "Message Type ignored",PRINTDSC
+          CALL      PRNT0000
+          GOTO      VMES9100
+.
+.         We have a referral message, so load the referral visit number
+.
+VMES2000  MOVE      SP8,CONTNUMB                 * initialise contact number
+          PACK      VISITNUM,VINAREFL,SP8
+          RJUSTIFY  VISITNUM
+          GOTO      VMES8000
+.
+.         We have a contact message, so separate out the visit
+.         and contact numbers which are in the same field, but separated
+.         by a hyphen
+.
+VMES3000  SCAN      "-",VINAREFL                 * hypen found ?
+          IF        !@EQUAL
+            MOVE      ONE,PRINTFLG               * no - error
+            MOVE      "No contact number found",PRINTDSC
+            CALL      PRNT0000
+            GOTO      VMES9100
+          ENDIF
+.
+          MOVEFPTR  VINAREFL,FORM2               * save hyphen position
+          SUB       ONE,FORM2                    * save end position of visit #
+          BUMP      VINAREFL                     * move FP to start of contact #
+          MOVE      VINAREFL,CONTNUMB            * load contact number
+          RJUSTIFY  CONTNUMB
+.
+          RESET     VINAREFL                     * set FP back to zero
+          SETLPTR   VINAREFL,FORM2               * set LL at end of visit #
+          MOVE      VINAREFL,VISITNUM            * load visit number
+          RJUSTIFY  VISITNUM
+.
+          MATCH     SP8,CONTNUMB
+          IF        @EQUAL
+            MOVE      ONE,PRINTFLG               * error
+            MOVE      "Blank contact number",PRINTDSC
+            CALL      PRNT0000
+            GOTO      VMES9100
+          ENDIF
+.
+VMES8000  MATCH     SP8,VISITNUM
+          IF        @EQUAL
+            MOVE      ONE,PRINTFLG               * error
+            MOVE      "Blank referral visit number",PRINTDSC
+            CALL      PRNT0000
+            GOTO      VMES9100
+          ENDIF
+.
+VMES9000  MOVE      ZERO,EXIT
+          GOTO      VMES9999
+.
+VMES9100  MOVE      ONE,EXIT
+.
+VMES9999  RETURN
++
+.****************************************************************************
+.*                            PRNT0000                 Called by: LOAD0000  *
+.*                  Valid record found so print it                          *
+.* Requires: Upload record data                                             *
+.*           ERORFLAG - error flag                                          *
+.*               0 = ignore only                                            *
+.*               1 = error                                                  *
+.*           PRINTDSC - error description                                   *
+.*           ERRORCNT - Error record count                                  *
+.*           IGNORCNT - Ignored record count                                *
+.* Returns:  CLNO - line count for current page                             *
+.*           ERRORCNT - Error record count                                  *
+.*           IGNORCNT - Ignored record count                                *
+.****************************************************************************
+.
+PRNT0000  COMPARE   CLNO,FIFTY5                  * page full ?
+          CALL      HEAD0000 IF LESS             * yes
+.
+          PRINT     *1,PIPE,*3,VINABTCH,*24,PIPE,*26,VINAURNO,*35,PIPE:
+                    *37,VINAREFL,*56,PIPE,*58,VINAMTYP,*66,PIPE,*68,VINAEROR:
+                    *74,PIPE,*76,PRINTDSC,*132,PIPE
+.
+          BRANCH    PRINTFLG,PRNT1000:           * error
+                             PRNT2000            * ignore
+.
+          ADD       ONE,RECCOUNT                 * increment valid rec. count
+          GOTO      PRNT9000
+.
+PRNT1000  CALL      WERR0000                     * write a batch error record
+          ADD       ONE,ERRORCNT                 * increment error rec. count
+          GOTO      PRNT9000
+.
+PRNT2000  ADD       ONE,IGNORCNT                 * increment ignored rec. count
+.
+PRNT9000  ADD       ONE,CLNO                     * increment line count
+.
+PRNT9999  RETURN
++
+.****************************************************************************
+.*                            REMV0000             Called by: MAIN0000      *
+.*             Remove all batch related records where one or more           *
+.*             records in the batch failed validation                       *
+.****************************************************************************
+.
+REMV0000  MOVE      SP20,KEY20
+REMV0100  CALL      RSTEMP2                      * position at start of file
+REMV0500  CALL      RKTEMP2                      * read next record
+          BRANCH    OVRCD,REMV9999               * eof - finished
+.
+          PACK      KEY55,BATCHNUM,SP70
+          CALL      RSTEMP1                      * position before batch
+REMV1000  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,REMV0500               * eof - finished batch
+.
+          MATCH     TEMPBTCH,BATCHNUM            * same batch still ?
+          GOTO      REMV0500 IF NOT EQUAL        * no - finished batch
+.
+          PACK      KEY55,TEMPBTCH,TEMPREFL,TEMPEPIS,TEMPCONT,TEMPMTYP,TEMPEROR
+          MOVE      KEY55,SAVKEY55
+          CALL      DETEMP1                      * delete record
+.
+          MOVE      SAVKEY55,KEY55
+          GOTO      REMV0100                     * re-position for next batch
+.
+REMV9999  RETURN
++
+.****************************************************************************
+.*                            HEAD0000                 Called by: LOAD0000  *
+.*                       Print page heading                                 *
+.* Returns:  CLNO - initialised line count for new page                     *
+.****************************************************************************
+.
+HEAD0000  CALL      HEAD132                      * display page header
+.
+          IF        REPORTFL = 1
+            PRINT     *40,"Validation Phase",*N
+          ELSE
+            PRINT     *40,"Processing Phase",*N
+          ENDIF
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"Batch",*24,PIPE,*26,"U/R",*35,PIPE:
+                    *37,"Visit",*56,PIPE,*58,"Message Type";
+          IF        REPORTFL = 1
+            PRINT     *66,PIPE,*68,"Error",*74,PIPE,*76,"Description";
+          ELSE
+            PRINT     *1,PIPE,*3,"Batch",*24,PIPE,*26,"U/R",*35,PIPE:
+                      *37,"Referral",*46,PIPE,*48,"Episode",*57,PIPE:
+                      *59,"Contact",*68,PIPE,*70,"Message Type";
+          ENDIF
+          PRINT       *132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      TEN1,CLNO                    * initialise line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: LOAD0000  *
+.*                      Draw line across page                     HEAD0000  *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.****************************************************************************
+.*        IO ROUTINES FOR TEMPORARY FILE                                    *
+.****************************************************************************
+.
+.         Index 1
+.
+RATEMP1   MOVE      ZERO,OVRCD
+          READ      VINTEMP1,KEY55;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP1   READ      VINTEMP1,KEY55;;
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          READ      VINTEMP1,KEY55;TEMPBTCH,TEMPREFL,TEMPEPIS,TEMPCONT,TEMPMTYP:
+                                   TEMPEROR,TEMPURNO,TEMPSTAT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    VINTEMP1;TEMPBTCH,TEMPREFL,TEMPEPIS,TEMPCONT,TEMPMTYP:
+                             TEMPEROR,TEMPURNO,TEMPSTAT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMP1   MOVE      ZERO,OVRCD
+          READKP    VINTEMP1;TEMPBTCH,TEMPREFL,TEMPEPIS,TEMPCONT,TEMPMTYP:
+                             TEMPEROR,TEMPURNO,TEMPSTAT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     VINTEMP1,KEY55;TEMPBTCH,TEMPREFL,TEMPEPIS,TEMPCONT,TEMPMTYP:
+                                   TEMPEROR,TEMPURNO,TEMPSTAT
+          RETURN
+.
+UPTEMP1   UPDATE    VINTEMP1;TEMPBTCH,TEMPREFL,TEMPEPIS,TEMPCONT,TEMPMTYP:
+                             TEMPEROR,TEMPURNO,TEMPSTAT
+          RETURN
+.
+DETEMP1   DELETE    VINTEMP1,KEY55
+          RETURN
+.
+.         Index 2
+.
+RATEMP2   MOVE      ZERO,OVRCD
+          READ      VINTEMP2,KEY20;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP2   READ      VINTEMP2,KEY20;;
+          RETURN
+.
+RDTEMP2   MOVE      ZERO,OVRCD
+          READ      VINTEMP2,KEY20;BATCHNUM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          READKS    VINTEMP2;BATCHNUM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMP2   MOVE      ZERO,OVRCD
+          READKP    VINTEMP2;BATCHNUM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP2   WRITE     VINTEMP2,KEY20;BATCHNUM
+          RETURN
+.
+UPTEMP2   UPDATE    VINTEMP2;BATCHNUM
+          RETURN
+.
+DETEMP2   DELETE    VINTEMP2,KEY20
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       TFILENAM
+.
+.         INC       ALLAUDIO/INC
+          INC       ALLENCIO/INC
+          INC       ALLHDTIO/INC
+.         INC       ALLLNKIO/INC
+.         INC       ALLQUEIO/INC
+          INC       ALLREFIO/INC
+          INC       ALLRLNIO/INC
+.         INC       ALLSTSIO/INC
+.         INC       HL7CISIO/INC
+.         INC       HL7INBIO/INC
+          INC       IBASEQIO/INC
+.         INC       NHIMASIO/INC
+.         INC       PATCODIO/INC
+          INC       PATMA1IO/INC
+.         INC       PATNIDIO/INC
+.         INC       PMSPX2IO/INC
+.         INC       PMSQPTIO/INC
+          INC       WEBERRIO/INC
+.         INC       WEBSECIO/INC
++

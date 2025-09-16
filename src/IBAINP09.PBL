@@ -1,0 +1,647 @@
+.*******************************************************************************
+.* System   : Patient Management                                               *
+.* Program  : IBAINP09                                                         *
+.* Desc.    : Pension Report                                                   *
+.*******************************************************************************
+.* Date     : 27/08/1993                                                       *
+.* Author   : Gabrielle Cameron                                                *
+.* Function : This program provides a printed report of admission numbers      *
+.*            within a specified admission date range, that have pension       *
+.*            numbers.                                                         *
+.* Report layout :                                                             *
+.-------------------------------------------------------------------------------
+.|UR No. |Admin.Date | Surname | Ward/Bed | Sex|Age| HFund | Pens. No.|Repat.No|
+.|Adm No.|           |Givn Name|          |    |   | Table |Pens. Type|        |
+.-------------------------------------------------------------------------------
+.*                                                                             *
+.* Mods                                                                        *
+.* V10.10.01  16/03/2017   Richa Phogat                 CAR 832066             *
+.*                         Changed DVA Card Number to be collected from        *
+.*                         PMCDCNUM.PMSCCDFD instead of PREPAT.PMIMA1FD        *
+.* V10.03.01  27/12/2012   Patrick Adair                CAR 261630             *
+.*                         Removed port number from temp file name             *
+.*          :  V10.00.01   07/10/2010  Ebon Clements    CAR 225206             *
+.*                         Get repatriation number from DVA concession card    *
+.*             V9.12.00    28/01/2010  Davin            CAR 212889             *
+.*                         Ported from 6.17. Get pension card details from     *
+.*                         pmsccdaf (conc0000).                                *
+.*******************************************************************************
+.*             V6.05.01    08/12/1998  Nicole Harrington                       *
+.*                         Removed CCENTRY                                     *
+.*             V6.00.02    01/09/93  Gabrielle                                 *
+.*                         Change to print only current inpatients for a       *
+.*                         particular date, and print if the patient has       *
+.*                         either a penision number or repat. number           *
+.*             V6.00.03    02/09/93  Gabrielle                                 *
+.*                         Change to default to current date                   *
+.*                         Changed the prompt description                      *
+.*             V6.00.04    03/09/93  Gabrielle                                 *
+.*                         Change to print all current inpatients, not just    *
+.*                         patients with pension or repatriation numbers       *
+.*             V6.00.05    06/09/93  Gabrielle                                 *
+.*                         Fixed printing of pension type                      *
+.*             V6.00.06    27/10/93  DIG                    SRF : 126108       *
+.*                         Fixed so that the current Ward/Bed is printed.      *
+.*******************************************************************************
+.
+.         FILE DESCRIPTION INCLUDES
+.
+          INC       STDGENDF
+          INC       IBACONFD/INC
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       PATCODFD/INC            * Patient Codes File
+          INC       PATCONFD/INC
+          INC       PATHSPFD/INC            * hospital file
+          INC       PATMA1FD/INC            * Patient Master File
+          INC       PATMI1FD/INC            * Patient Admission File
+          INC       PATWR1FD/INC            * Patient Ward/Bed File
+          INC       PMSCCDFD/INC            * Concession Card Details File
+          INC       PMSVX1FD/INC            * Visit Extension file
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+.         LOCAL VARIABLE DEFINITION
+.
+
+PRGID     INIT      "IBAINP09"
+PRGNAM    INIT      "Pension Report"
+VERSION   INIT      "V11.03.00"
+.
+CURRDATE  DIM      8                         * Current Date
+CMDLINE   DIM      60                        * Command Line
+.
+FORM8     FORM     8                         *
+ASATDATC  DIM      8                         * Admission Date with Century
+.
+FILNAME1  DIM      8                         * Temporary file name
+TOTADMN   FORM     3                         * Total number of Admissions
+.
+CATct     INIT      "ct"
+SP11      INIT     "           "
+.
+.         TEMPORARY FILE DEFINITION
+.
+TEMPFIL1  IFILE SQL, FIXED=155, KEY="U69-71,72-74,9-16" 
+.
+. NAME    TYPE  LENGTH  PHYSICAL START LOC.  DESCRIPTION
+. ----    ----  ------  -------- ----------  -----------
+TEMPURNO  DIM      8        8        1       * UR Number
+TEMPADMN  DIM      8        8        9       * Admission Number
+TEMPADAT  DIM      12       12      17       * Admission Date
+TEMPSNAM  DIM      20       20      29       * Surname
+TEMPGNAM  DIM      20       20      49       * Given Names
+TEMPWARD  DIM      3        3       69       * Ward/Bed
+TEMPBEDD  DIM      3        3       72       * Ward/Bed
+TEMPSEXX  DIM      1        1       75       * Sex
+TEMPAGEE  DIM      3        3       76       * Age
+TEMPHFND  DIM      6        6       79       * Health Fund 
+TEMPTBLE  DIM      8        8       85       * Table
+TEMPPNNO  DIM      20       20      93       * Pension Number (Cat ct/indc1=4)
+TEMPPNTY  DIM      20       20     113       * Pension Type (Cat ct/indc1=4)
+TEMPRPNO  DIM      20       20     133       * Repatraition Number
+TEMPSTBY  FORM     1        2      153       * Patient Standby Flag
+.                                  ----
+.End of Record                     155 
++
+.*******************************************************************************
+.*                              ML0000                    CALLED BY :     0000 *
+.*                   Controlling Logic (Mainline Code)                         *
+.*******************************************************************************
+ML0000    CALL      INIT0000                 * Initialization and open files
+.
+ML0100    CALL      OPTN0000                 * Select options
+          BRANCH    EXIT,ML9999              * Exit = 1 if 0 chosen in menu
+          BRANCH    OPTION,ML1000            
+.
+ML1000    CALL      DATE0000                 * Obtain Date Range
+          BRANCH    EXIT,ML0100              * Exit = 1; Error : Invalid Date
+.
+          CALL      KHOS0000                 * Keyin hospital id
+.
+          CALL      CONTQST                  * Ok to Continue ?
+          BRANCH    CEXIT,ML1100,ML1000,ML0100  *Yes, No, Cancel
+ML1100    CALL      PROC0000                 * Yes. Process each record
+          CALL      PRNT0000                 * Print each record
+          GOTO      ML0100                   * Return for next option
+.
+ML9999    CALL      TCLS0000                 * Close Temporary file. 
+          CHAIN     PGM
++
+.*******************************************************************************
+.*                             INIT0000                   CALLED BY :   ML0000 *
+.*            Initialize variables, display heading, and open files            *
+.*******************************************************************************
+INIT0000  CALL      DISPHEAD                 * Display Heading
+.
+          DISPLAY   *P56:24,"Opening ";
+.
+          DISPLAY   *P64:24,"controlf"       * Open CONTROLF
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          DISPLAY   *P64:24,"patcodes"       * Open PATCODE1
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patmi1af"       * Open PATMI1A2
+          OPEN      PATMI1A2,"patmi1af"
+.
+          DISPLAY   *P64:24,"patma1af"       * Open PATMA1A1
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"patwr1af"       * Open PATWR1A4
+          OPEN      PATWR1A4,"patwr1af"
+.
+          DISPLAY   *P64:24,"pmsccdaf"       * Open PMSCCDA1
+          OPEN      PMSCCDA1,"pmsccdaf"
+.
+          DISPLAY   *P64:24,"pmsvx1af";
+          OPEN      PMSVX1A1,"pmsvx1af"
+.         
+          MOVE      ZERO,TOTADMN
+.
+INIT9999  RETURN
++
+.*******************************************************************************
+.*                             OPTN0000                   CALLED BY :   ML0100 *
+.*                         Obtain the options                                  *
+.*******************************************************************************
+OPTN0000  DISPLAY   *P1:4,*EF,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Produce Report" 
+          KEYIN     *P1:7,"Please Select : ",*V2LON,OPTION
+.
+          COMPARE   ZERO,OPTION
+          GOTO      OPTN9000 IF EQUAL        * Exit
+.
+          BRANCH    OPTION,OPTN8000
+.
+          BEEP                               * Error : Invalid Option
+          GOTO      OPTN0000
+.
+OPTN8000  CALL      TOPN0000                 * Open Temporary file 
+          MOVE      FALSE,EXIT               * Set Exit = 0
+          GOTO      OPTN9999
+.
+OPTN9000  MOVE      TRUE,EXIT                * Set Exit = 1
+.
+OPTN9999  RETURN
++
+.*******************************************************************************
+.*                             DATE0000                   CALLED BY :   ML1000 *
+.*                       Specifiy the date range                               *
+.*******************************************************************************
+DATE0000  MOVE      FALSE,EXIT 
+          CALL      IBACLOCK 
+          PACK      CURRDATE,CCC,CYY,CMM,CDD * Current Date
+          REP       " 0",CURRDATE            * Replace spaces with zeros
+.
+DATE1000  CALL      IDAT0000                 * Initialize Date Variables
+          DISPLAY   *P1:10,*EF,"As at Date : " 
+          MOVE      TEN4,CCOL
+          MOVE      TEN,CVERT
+          CALL      KEYDATE
+          BRANCH    OVRCD,DATE9900           * No Input: Return to prev field
+.
+          PACK      ASATDATC,CCENT,CYEAR,CMON,CDAY * Save As at date with cent.
+.
+          MATCH     ASATDATC,CURRDATE        * As at date > Currdate
+          GOTO      DATE9999 IF NOT LESS     * Yes. Exit Routine
+.   
+DATE9000  DISPLAY   *P1:24,*B,"Date must not be in the future. ";
+          CALL      HITENTER 
+          GOTO      DATE0000                 * Input another date
+.
+DATE9900  MOVE      TRUE,EXIT
+.
+DATE9999  RETURN
++
+.*******************************************************************************
+.*                             IDAT0000                   CALLED BY : DATE0000 *
+.*                       Initialize Date Variables                             *
+.*******************************************************************************
+IDAT0000  MOVE      ONE,CCANLDTE
+          MOVE      CCC,CCENT                * Initialize Century
+          REP       " 0",CCENT
+          MOVE      CYY,CYEAR                * Initialize Year
+          REP       " 0",CYEAR
+          MOVE      CMM,CMON                 * Initialize Month
+          REP       " 0",CMON
+          MOVE      CDD,CDAY                 * Initialize Day
+          REP       " 0",CDAY
+.
+IDAT9999  RETURN
++
+.*******************************************************************************
+.*                             PROC0000                   CALLED BY :   ML1000 *
+.*        Process the admissions within the date range specified               *
+.*******************************************************************************
+PROC0000  DISPLAY   *P1:24,"Processing Admission No. : ";
+          PACK      KEY9,TWO,SP10
+          CALL      RDSMISS2                 * Positional Read
+PROC1000  CALL      RDKMISS2                 * Read Next PATMIS record
+          BRANCH    OVRCD,PROC9999           * End of file
+.
+          COMPARE   TWO,ASTAT                * Current Admission     
+          GOTO      PROC9999 IF NOT EQUAL    * No.
+.
+          MATCH     ADATE,ASATDATC           * Yes. Adm. Dat < As At Date
+          GOTO      PROC1000 IF LESS         * No.
+.
+          DISPLAY   *P29:24,*EL,AADMNO
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDPMVX11                * read pmsvx1 before hospital check
+          IF        OVRCD=1
+            MOVE      SP70,PMVXMHOS
+          ENDIF
+          CALL      CHOS0000                 * check hospital
+          BRANCH    EXIT,PROC1000
+.
+          PACK      KEY8,AURNO               * No.
+          CALL      RDMAST1                  * Read Next PATMIS record
+          BRANCH    OVRCD,PROC1000           * URNO not on Master File
+.
+PROC2000  CALL      WRTE0000                 * Yes. Write to Temporary File 
+          GOTO      PROC1000                 * Get Next Admission Number
+.
+PROC9999  RETURN
++
+.*******************************************************************************
+.*                             WRTE0000                   CALLED BY : PROC0000 *
+.*                        Write to the temporary file                          *
+.*******************************************************************************
+WRTE0000  MOVE      AURNO,TEMPURNO           * UR Number
+.
+          MOVE      AADMNO,TEMPADMN          * Admission Number
+.
+          UNPACK    ADATE,CCENT,CYEAR,CMON,CDAY    * Admission Date
+          PACK      TEMPADAT,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR
+.
+          MOVE      PSNAME,TEMPSNAM          * Surname
+          PACK      TEMPGNAM,PGNAME          * Given Names
+.
+          MOVE      AWARD,TEMPWARD           * Ward
+.
+          MOVE      ABED,TEMPBEDD            * Bed
+.
+          MOVE      PSEX,TEMPSEXX            * Sex
+.
+          MOVE      PSAGE,TEMPAGEE           * Age
+.
+          MOVE      AFUNDH,TEMPHFND          * Health Fund
+.
+          MOVE      AFNDTB,TEMPTBLE          * Table
+.
+          CALL      CONC0000                 * get pension conc card details
+.
+          CALL      DVAC0000                 * get DVA card details
+.
+.         Check if standby patient
+.
+          MOVE      FALSE,TEMPSTBY           * Initialize Standby to false 
+          PACK      DIM8,TEMPADMN            * Move TEMPADMN to DIM8 
+          PACK      KEY14,DIM8,SP10
+          CALL      RDSWARD4                 * Read Ward File
+          CALL      RDKWARD4
+          BRANCH    OVRCD,WRTE3000
+.
+          MOVE      DIM8,FORM8               * Move DIM8 to FORM8
+          COMPARE   FORM8,WSTBY              * Admission No. on Standby ?
+          GOTO      WRTE3000 IF NOT EQUAL    * No.
+          MOVE      TRUE,TEMPSTBY            * Yes. Move True to Standby flag 
+.
+WRTE3000  PACK      KEY14,TEMPWARD,TEMPBEDD,TEMPADMN
+          CALL      WRTMPA1                  * Write to tempfile
+.
+WRTE9999  RETURN
++
+.*******************************************************************************
+.*                             PRNT0000                   CALLED BY :   ML1000 *
+.*        Print the admissions located on the temporary file                   *
+.*******************************************************************************
+PRNT0000  DISPLAY   *P1:24,"Printing Admission No. : ";
+          CALL      IBACLOCK 
+          PACK      KEY14,SP10,SP10
+          CALL      RSTMPA1                  * Positional read
+PRNT1000  CALL      PHED0000                 * Print heading
+          REPEAT 
+            CALL      RKTMPA1                * Read next record
+            BRANCH    OVRCD,PRNT9000         * End of file
+.
+            DISPLAY   *P26:24,*EL,TEMPADMN
+.
+            CALL      PREC0000               * Print Record
+            ADD       ONE,TOTADMN            * Add 1 to total number of adm.
+          UNTIL     CLNO >= 55
+          GOTO      PRNT1000                 * Goto print Heading
+.
+PRNT9000  CALL      PEND0000                 * Print End of report
+.
+PRNT9999  RETURN
++
+.*******************************************************************************
+.*                             PHED0000                   CALLED BY : PRNT0000 *
+.*                 Print the head of the report                                *
+.*******************************************************************************
+PHED0000  CALL      HEAD132
+          UNPACK    ASATDATC,CCENT,CYEAR,CMON,CDAY
+          PRINT     *40,"As at : ":          * Print Date
+                    *48,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR,*N
+.
+          ADD       ONE,CLNO
+          IF        IBCNMHOS=1
+            PRINT     *40,"Hospital : ",PTHSNAME
+            ADD       ONE,CLNO
+          ENDIF
+.                                                        * Line 1  
+          CALL      UND132
+          PRINT     *1,"|",*3,"UR No.":                  * Column 1
+                    *11,"|",*13,"Admin Date":            *        2
+                    *25,"|",*27,"Surname":               *        3
+                    *48,"|",*50,"Ward/Bed":              *        4
+                    *59,"|",*60,"Sex":                   *        5
+                    *64,"|",*66,"Age":                   *        6
+                    *71,"|",*74,"H. Fund":               *        7
+                    *83,"|",*85,"Pension No.":           *        8
+                    *107,"|",*110,"Repatriation No.":    *        9
+                    *132,"|" 
+.                                                        * Line 2
+          PRINT     *1,"|",*3,"Admn No":                 * Column 1
+                    *11,"|",*13:                         *        2
+                    *25,"|",*27,"Given Name":            *        3
+                    *48,"|",*50:                         *        4
+                    *59,"|",*60:                         *        5
+                    *64,"|",*66:                         *        6
+                    *71,"|",*74,"Table":                 *        7
+                    *83,"|",*85,"Pension Type":          *        8
+                    *107,"|",*110:                       *        9
+                    *132,"|"
+          ADD       TWO,CLNO
+          CALL      UND132
+PHED9999  RETURN
++
+.*******************************************************************************
+.*                             PREC0000                   CALLED BY : PRNT0000 *
+.*                 Print record from the temporary file                        *
+.*******************************************************************************
+PREC0000  PRINT     *1,"|",*3,TEMPURNO:                  * Column 1
+                    *11,"|",*13,TEMPADAT:                *        2
+                    *25,"|",*27,TEMPSNAM:                *        3
+                    *48,"|",*50,TEMPWARD,SLASH,TEMPBEDD; *        4
+.
+          COMPARE   FALSE,TEMPSTBY                       * Stand By Patient ?
+          GOTO      PREC1000 IF EQUAL                    * No.
+          PRINT     *48,"|",*50,TEMPWARD,SLASH,TEMPBEDD; * Yes. Hlight Ward/Bed
+.
+PREC1000  PRINT     *59,"|",*61,TEMPSEXX:                *        5
+                    *64,"|",*66,TEMPAGEE:                *        6
+                    *71,"|",*74,TEMPHFND:                *        7
+                    *83,"|",*85,TEMPPNNO:                *        8
+                    *107,"|",*110,TEMPRPNO:              *        9
+                    *132,"|" 
+.                                                        * Line 2
+          PRINT     *1,"|",*3,TEMPADMN:                  * Column 1
+                    *11,"|",*13:                         *        2
+                    *25,"|",*27,TEMPGNAM:                *        3
+                    *48,"|",*50:                         *        4
+                    *59,"|",*60:                         *        5
+                    *64,"|",*66:                         *        6
+                    *71,"|",*74,TEMPTBLE:                *        7
+                    *83,"|",*85,TEMPPNTY:                *        8
+                    *107,"|",*110:                       *        9
+                    *132,"|" 
+          ADD       TWO,CLNO
+          CALL      UND132
+PREC9999  RETURN
++
+.*******************************************************************************
+.*                             PEND0000                   CALLED BY : PRNT0000 *
+.*                 Print the end of the report                                 *
+.*******************************************************************************
+PEND0000  PRINT     *N,"Number of Admissions : ",TOTADMN:
+                    *N,"**** End of Report ****" 
+.
+PEND9999  RETURN
++
+.*******************************************************************************
+.*                             TOPN0000                   CALLED BY : OPTN0000 *
+.*             Open and create the temporary file                              *
+.*******************************************************************************
+TOPN0000  CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,FILNAME1
+.
+          CALL      TCLS0000                 * Ensure Old Temp file is removed
+.
+          CLEAR     CMDLINE                  * Build Command Line
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FILNAME1,CMDLINE
+                      
+          APPEND    " 155 U69-71,72-74,9-16",CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPFIL1,FILNAME1        * Open Temporary File
+.
+TOPN9999  RETURN
++
+.*******************************************************************************
+.*                                TCLS0000                 CALLED BY: TOPN0000 *
+.*                                                                      ML9999 *
+.*             Close and erase the temporary file                              *
+.*******************************************************************************
+TCLS0000  CLOSE     TEMPFIL1
+          CLEAR     CMDLINE                  * Build Command Line
+          APPEND    "iserase ",CMDLINE
+          APPEND    FILNAME1,CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID           * Remove Temporary file
+.
+TCLS9999  RETURN
++
+.*****************************************************************************
+.*                              CONC0000                                     *
+.*     See if the patient has concession card of Pension type on file        *
+.* Requires: PURNO - U/R number                                              *
+.* Returns:  TEMPPNNO - pension card number                                  *
+.*           TEMPPNTY - pension type desc                                    *
+.*****************************************************************************
+CONC0000  MOVE      SP20,TEMPPNNO            * Initailize Pension Card Number
+          MOVE      SP20,TEMPPNTY            * Initailize pension type.
+          PACK      KEY19,PURNO,Z70
+          CALL      RSPMCCD1                     * position on U/R
+CONC0500  CALL      RPPMCCD1                     * read previous record
+          BRANCH    OVRCD,CONC9999               * eof - nothing found
+.
+          MATCH     PURNO,PMCDURNO               * same U/R still ?
+          GOTO      CONC9999 IF NOT EQUAL        * no - nothing found
+.
+.         Check if the card type is Pension (Cat ct, Indicator 1 = 4)
+.
+CONC1000  PACK      KEY5,CATct,PMCDCTYP
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,CONC0500               * no - ignore record
+.
+          MATCH     "4",TCINDC1                  * pension card type ?
+          GOTO      CONC0500 IF NOT EQUAL        * no - ignore record
+.
+.         A pension concession card has been found, so check
+.         if there is an expiry date
+.
+          MATCH     SP8,PMCDEXDT                 * expiry date blank ?
+          GOTO      CONC5000 IF EQUAL            * yes - assume valid
+.
+.         There is an expiry date for the card, so check that the
+.         card is current
+.
+          CALL      IBACLOCK
+          PACK      DIM8,CCC,CYY,CMM,CDD
+          REP       " 0",DIM8
+.
+          MATCH     DIM8,PMCDEXDT                * card valid for date ?
+          GOTO      CONC9999 IF LESS             * no - nothing found
+.
+.         Concession card is current
+.
+CONC5000  MATCH     SP20,PMCDCNUM                * card number blank ?
+          GOTO      CONC9999 IF EQUAL            * yes - nothing found
+.
+          MOVE      PMCDCNUM,TEMPPNNO            * pension card number
+          MOVE      TDESC,TEMPPNTY               * pension type desc
+.
+CONC9999  RETURN
+.
+.*****************************************************************************
+.*                              DVAC0000                                     *
+.*     See if the patient has a concession card of type DVA on file          *
+.* Requires: PURNO - U/R number                                              *
+.* Returns:  TEMPRPNO - Repatraition Number                                  *
+.*****************************************************************************
+DVAC0000  MOVE      SP20,TEMPRPNO               * Initailize Repatraition Number
+.
+          PACK      KEY19,PURNO,Z70
+          CALL      RSPMCCD1                     * position on U/R
+DVAC0500  CALL      RPPMCCD1                     * read previous record
+          BRANCH    OVRCD,DVAC9999               * eof - nothing found
+.
+          MATCH     PURNO,PMCDURNO               * same U/R still ?
+          GOTO      DVAC9999 IF NOT EQUAL        * no - nothing found
+.
+.         Check if the card type is DVA (Cat ct, Indicator 1 = 3)
+.
+DVAC1000  PACK      KEY5,CATct,PMCDCTYP
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,DVAC0500               * no - ignore record
+.
+          MATCH     "3",TCINDC1                  * DVA card type ?
+          GOTO      DVAC0500 IF NOT EQUAL        * no - ignore record
+.
+.         A DVA concession card has been found, so check
+.         if there is an expiry date
+.
+          MATCH     SP8,PMCDEXDT                 * expiry date blank ?
+          GOTO      DVAC5000 IF EQUAL            * yes - assume valid
+.
+.         There is an expiry date for the card, so check that the
+.         card is current
+.
+          CALL      IBACLOCK
+          PACK      DIM8,CCC,CYY,CMM,CDD
+          REP       " 0",DIM8
+.
+          MATCH     DIM8,PMCDEXDT                * card valid for date ?
+          GOTO      DVAC9999 IF LESS             * no - nothing found
+.
+.         DVA card is current
+.
+DVAC5000  MATCH     SP20,PMCDCNUM                * card number blank ?
+          GOTO      DVAC9999 IF EQUAL            * yes - nothing found
+.
+          MOVE      PMCDCNUM,TEMPRPNO            * Repatraition Number
+.
+DVAC9999  RETURN
++
+.*******************************************************************************
+.*                                TPIO0000                                     *
+.*                IO procedures for the temporary file                         *
+.*******************************************************************************
+RSTMPA1   RESET     KEY14
+          READ      TEMPFIL1,KEY14;;
+          RETURN
+.
+RKTMPA1   MOVE      ZERO,OVRCD
+          READKS    TEMPFIL1;TEMPURNO,TEMPADMN,TEMPADAT,TEMPSNAM:
+                             TEMPGNAM,TEMPWARD,TEMPBEDD,TEMPSEXX:
+                             TEMPAGEE,TEMPHFND,TEMPTBLE,TEMPPNNO:
+                             TEMPPNTY,TEMPRPNO,TEMPSTBY
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTMPA1   WRITE     TEMPFIL1,KEY14;TEMPURNO,TEMPADMN,TEMPADAT,TEMPSNAM:
+                                   TEMPGNAM,TEMPWARD,TEMPBEDD,TEMPSEXX:
+                                   TEMPAGEE,TEMPHFND,TEMPTBLE,TEMPPNNO:
+                                   TEMPPNTY,TEMPRPNO,TEMPSTBY
+          RETURN
++
+.********************************************************************
+.         Enter selected Hospital code
+.********************************************************************
+KHOS0000  COMPARE   ONE,IBCNMHOS
+          GOTO      KHOS9000 IF NOT EQUAL
+.
+          DISPLAY   *P1:18,*EL,"Hospital: ";
+.
+          MOVE      "18",EVERT
+          MOVE      "11",ECOL
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND           * Not Mandatory
+          OPEN      PATHSPA1,"pathspaf"
+.
+          CALL      PATHSPKY
+          BRANCH    EXIT,KHOS3000,KHOS3000
+.
+KHOS2000  DISPLAY   *P20:18,*V2LON,PTHSNAME;
+          GOTO      KHOS9999
+.
+KHOS3000  MOVE      "All Hospitals",PTHSNAME
+          DISPLAY   *P20:18,*V2LON,PTHSNAME;
+.
+KHOS9000  MOVE      SP10,PTHSHOSP
+.
+KHOS9999  RETURN
++
+.********************************************************************
+.         Check selected Hospital code (if multi hospital)
+.********************************************************************
+CHOS0000  COMPARE   ONE,IBCNMHOS
+          GOTO      CHOS9000 IF NOT EQUAL
+.
+          PACK      PTHSHOSP,PTHSHOSP,SP70
+          MATCH     SP10,PTHSHOSP           * All Hospitals
+          GOTO      CHOS9000 IF EQUAL
+.
+          MATCH     PTHSHOSP,PMVXMHOS       * check hospital
+          GOTO      CHOS9500 IF NOT EQUAL
+.
+CHOS9000  MOVE      ZERO,EXIT
+          GOTO      CHOS9999
+.
+CHOS9500  MOVE      ONE,EXIT
+CHOS9999  RETURN
++
+.
+.         I/O INCLUDES
+.
+          INC       STDGENCD
+          INC       PATHSPKY
+          INC       TFILENAM                     * Generate Temp File Name
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATCODIO/INC            * Patient Codes File
+          INC       PATHSPIO/INC            * hospital file
+          INC       PATMA1IO/INC            * Patient Master File
+          INC       PATMI1IO/INC            * Patient Admission File
+          INC       PATWR1IO/INC            * Patient Ward/Bed File
+          INC       PMSCCDIO/INC            * Concession Card Details File
+          INC       PMSVX1IO/INC            * Visit Extension file
+          INC       WEBERRIO/INC                 * Web Server Error Logging
++

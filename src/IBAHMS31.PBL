@@ -1,0 +1,565 @@
+.***************************************************************************
+.* System    :   HCPMAINT                                                  *
+.* Program   :   IBAHMS31                                                  *
+.* Desc      :   Schedule program to deactivate HCPs                       *
+.***************************************************************************
+.* Date      :   05/07/2023                                                *
+.* Author    :   PJ Le Febour                                              *
+.* Function  :   This program will automatically deactivate HCP codes      *
+.*           :   based on WWCC Expiry Date or Registered To Date being     *
+.*           :   in the past AND WWCC Status or Registration Status code   *
+.*           :   recorded being deemed to be Completed/Final               *
+.*           :   (i.e. Cat HW Indicator 2 = "F" HR Indicator 2 = "F")      *
+.*           :                                                             *
+.* Mods      :                                                             *
+.*           :   V11.03.17 12/12/2023 PJ Le Febour     TSK 0916825r        *
+.*           :             cater for instance where patdo1af dcode BLANK   *
+.*           :             rename PROC WWCC0000 REGX0000 COMB0000          *
+.*           :             report HCP details (pmshcpaf) instead (patdo1af)*
+.*           :   V11.03.16 29/11/2023 PJ Le Febour     TSK 0916825q        *
+.*           :             remove duplicated instance sub-heading          *
+.*           :   V11.03.15 29/11/2023 PJ Le Febour     TSK 0916825p        *
+.*           :             fix WWCC Exp date equal Current Date skip       *
+.*           :             fix REG  Exp date equal Current Date skip       *
+.*           :   V11.03.14 29/11/2023 PJ Le Febour     TSK 0916825o        *
+.*           :             fix option 3 no WWCC Exp or WWCC staus          *
+.*           :                         but REG To and REG Status           *
+.*           :   V11.03.13 24/11/2023 PJ Le Febour     TSK 0916825n        *
+.*           :             fix where reg-date in past status complete      *
+.*           :                       wwcc exp date & wwcc status blank     *
+.*           :                 where reg-date blank & status complete      *
+.*           :                       wwcc exp date blank & wwcc status Comp*
+.*           :             exclude where reg-date but HR Ind 2 != F        *
+.*           :   V11.03.12 22/11/2023 PJ Le Febour     TSK 0916825m        *
+.*           :             updated test of WWCC date with CURRDATE         *
+.*           :             exclude where reg-date in past but status blank *
+.*           :             exclude where reg-date but HR Ind 2 != F        *
+.*           :             exclude where reg-date in the future            *
+.*           :   V11.03.11 14/11/2023 PJ Le Febour     TSK 0916825l        *
+.*           :             in PEXP0000 corrected GOTO PEXP1100             *
+.*           :                                to GOTO PEXP9999             *
+.*           :             WWCC Expiry Date and Registered To Date
+.*           :   V11.03.10 10/11/2023 PJ Le Febour     TSK 0916825k        *
+.*           :             update Print Report to include                  *
+.*           :             WWCC Expiry Date and Registered To Date
+.*           :   V11.03.09 24/10/2023 PJ Le Febour     TSK 0916825j        *
+.*           :             amendment to cater for a PRINT ONLY option      *
+.*           :             print report of pmshcpaf and patdolaf updates   *
+.*           :   V11.03.08 09/08/2023 PJ Le Febour     TSK 0916825i        *
+.*           :             amend for scenario when expdate in the future   *
+.*           :                                but  regdate in the past     *
+.*           :   V11.03.07 08/08/2023 PJ Le Febour     TSK 0916825h        *
+.*           :             include read patdo1af before update             *
+.*           :             to prevent the I * P error                      *
+.*           :   V11.03.06 04/08/2023 PJ Le Febour     TSK 0916825e        *
+.*           :             pmshcpaf.pmhcrgdt instead of pmshcpaf.pmhcdeac  *
+.*           :   V11.03.05 02/08/2023 PJ Le Febour     TSK 0916825d        *
+.*           :             correct name of report in Heading               *
+.*           :   V11.03.04 28/07/2023 PJ Le Febour     TSK 0916825c        *
+.*           :             correct name of report in Heading               *
+.*           :   V11.03.03 25/07/2023 PJ Le Febour     TSK 0916825b        *
+.*           :             Amendments related to rebounds from testing     *
+.*           :   V11.03.02 05/07/2023 PJ Le Febour     TSK 0916825         *
+.*           :             Created program                                 *
+.***************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+. 
+          INC       PATDO1FD/INC
+          INC       PMSHCPFD/INC
+          INC       PATCODFD/INC
+.
+. LOCAL VARIABLE DEFINITION
+. ----
+CURRDATE  DIM       8
+CURRTIME  DIM       8
+DRAW      INIT      "*-------------------------------------------------------":
+                    "---------------------------*"
+DISPDAT1  DIM       11
+DISPDAT2  DIM       11
+DIM40     DIM       40
+UPDATFLG  FORM      1            * Update record or just print report
+CODE      DIM       3 
+CATEGORY  DIM       2
+
+FIELDNAM  DIM       8
+FIELDTXT  DIM       13                 * database field name text
+FLLENGTH  FORM      2                  * database field name length
+CAPTTEXT  DIM       34           * caption text
+DIM50     DIM       50
+.
+PRGID     INIT      "IBAHMS31"
+PRGNAM    INIT      "Deactivate HCP Codes"
+VERSION   INIT      "V11.03.17"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+ML0000    CALL      INIT0000                * initialisation and open files
+.
+ML0100    CALL      OPTN0000                * select options
+          BRANCH    EXIT,ML9999             * EXIT = 1 if 0 chosen in menu
+.
+          BRANCH    OPTION,ML1100,ML1100,ML1100
+.
+          GOTO      ML0100
+.
+ML1100    CALL      EXPR0000                * HCP requires WWCC
+          BRANCH    EXIT,ML0100
+          GOTO      ML9999
+.
+ML9999    CHAIN     PGM                     * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          OPEN      PATDO1A1,"patdo1af"
+          OPEN      PMSHCPA1,"pmshcpaf"
+          OPEN      PATCODE1,"patcodes"
+.
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run clean up                           *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+OPTN0000  HLINE     *G37,2,50,80
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," Use WWCC Status/WWCC Expiry Date":
+                                           " only":  
+                    *P1:6,*V2LON,TWO,*HOFF," Use Registration Status/":
+                                           " Registration To Date only ": 
+                    *P1:7,*V2LON,THREE,*HOFF," Use WWCC Status/WWCC Expiry Date":
+                                           " or Registration Status/":
+                                           " Registration To Date"  
+.
+OPTN0500  KEYIN     *P1:22,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:22,*V2LON,OPTION
+.
+          COMPARE   ZERO,OPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    OPTION,OPTN9000,OPTN9000,OPTN9000
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
+.**************************************************************************
+.*                               EXPR0000              Called by: ML4000  *
+.*                                                                        *
+.**************************************************************************
+EXPR0000  CALL      UPDT0000                    * Print report only
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          CLOCK     TIME,CURRTIME
+.
+          CALL      CONTQST                     * ok to continue
+          BRANCH    CEXIT,EXPR5000,EXPR9000,EXPR9000    * 1=Yes, 2=No, 3=Cancel
+.
+EXPR5000  BRANCH    OPTION,EXPR5100,EXPR5200,EXPR5300  
+          GOTO      EXPR9000
+.
+EXPR5100  CALL      WWCC0000                    * WWCC Status & WWCC Exp Date
+          GOTO      EXPR9000
+.
+EXPR5200  CALL      REGX0000                    * Reg Status & Reg To Date  
+          GOTO      EXPR9000
+.
+EXPR5300  CALL      COMB0000                    * WWCC Status & WWCC Exp Date or
+                                                * Reg Status & Reg To Date   
+          GOTO      EXPR9000
+.
+EXPR9000  PRINT     *13,DRAW,*N,*N,*13,"***  End of Report  ***"
+EXPR9999  RETURN
+.------------------------------------------------------------
+. Update records or print report only
+.------------------------------------------------------------
+UPDT0000  DISPLAY   *P1:14,*EF
+          KEYIN     *P1:14,*EL,"Print Report Only":
+                    " (",*V2LON,"Y",*HOFF,"/":
+                    *V2LON,"N",*HOFF,") ? ",*V2LON,ANS;
+.
+          REP       UPPLOW,ANS
+          MATCH     ANSY,ANS
+          IF          @EQUAL
+            MOVE       ZERO,UPDATFLG
+            GOTO       UPDT9999
+          ENDIF
+.
+          MATCH     ANSN,ANS
+          IF          @EQUAL
+            MOVE       ONE,UPDATFLG
+            GOTO       UPDT9999
+          ENDIF
+.
+          BEEP
+.
+UPDT9999  RETURN
+.
+.*******************************************************************************
+.*                                  PEXP1000                                   *
+.*         - Option 1 - Use WWCC Status(Active) & WWCC Exp Date(< currentdate) *
+.*******************************************************************************
+WWCC0000  DISPLAY   *P1:24,*EL,*V2LON,*BLINKON:
+                    "1 - Looping all HCP records. table(pmshcpaf) ";
+.
+          CALL      HEAD0000                     * print headings
+.
+          PACK      KEY10,SP70
+          CALL      RSPMHCP1                     * position read
+WWCC1100  CALL      RKPMHCP1
+          BRANCH    OVRCD,WWCC9999               * end-of-file
+.     
+          MATCH     "1",PMHCSTTS                 * 
+          IF        @EQUAL
+            GOTO      WWCC1100
+          ENDIF
+.
+          MATCH     "0",PMHCSTTS                 * Skip if not active
+          IF        !@EQUAL
+            GOTO      WWCC1100 
+          ENDIF
+.     
+          MATCH     PMHCWWCE,SP70                * Skip if blank
+          IF        @EQUAL
+            GOTO      WWCC1100 
+          ENDIF
+.     
+          MATCH     PMHCWWCE,CURRDATE          * Check if record has expired
+          GOTO      WWCC1100 IF EQUAL          
+          GOTO      WWCC1100 IF LESS           
+.
+          MATCH     PMHCWWCS,SP70                * Check Status code  
+          IF        @EQUAL
+            GOTO      WWCC1100 
+          ENDIF
+.
+          PACK      KEY5,ANSH,ANSW,PMHCWWCS,SP70 * Check Category HW
+          CALL      RDCODE1
+          BRANCH    OVRCD,WWCC1100
+.
+          MATCH     ANSF,TCINDC2                 * ind2 = F 
+          IF        !@EQUAL
+            GOTO      WWCC1100 
+          ENDIF
+. 
+WWCC1200  MOVE      ONE,PMHCSTTS
+          MOVE      CURRDATE,PMHCLUPD
+          MOVE      CURRTIME,PMHCLUPT
+          MOVE      "IBAHMS31",PMHCWEBU
+.
+          IF        UPDATFLG=1
+            CALL      UPPMHCP1                 * Update HCP Table       
+          ENDIF
+.
+          CALL      PEXP0000
+.
+          PACK      KEY6,PMHCLDOC,SP70         
+          CALL      RDDOCT1                    * read Doctor table
+          BRANCH    OVRCD,WWCC1100             * no doctor read next hcp
+.
+          MOVE      ONE,DRSTAT  
+          MOVE      CURRDATE,DLUPDDTE
+          MOVE      CURRTIME,DLUPDTME
+.
+          IF        UPDATFLG=1
+            CALL      UPDOCT1                  * Update Doctor Linked Table
+          ENDIF
+.
+          GOTO      WWCC1100                   * read next record 
+WWCC9999  RETURN
+.*******************************************************************************
+.*                                  REGX0000                                   *
+.*                                                                             *
+.*        - Option 2 - Reg Status(Completed/Final) & Reg To Date(< currentdate)*
+.*                                                                             *
+.*******************************************************************************
+REGX0000  DISPLAY   *P1:24,*EL,*V2LON,*BLINKON:
+                    "2 - Looping all HCP records. table(pmshcpaf) ";
+.
+          CALL      HEAD0000                     * print headings
+.
+          PACK      KEY10,SP70
+          CALL      RSPMHCP1                     * position read
+REGX2100  CALL      RKPMHCP1
+          BRANCH    OVRCD,REGX9999               * end-of-file
+.
+          MATCH     "1",PMHCSTTS                * Skip if blank     
+          IF        @EQUAL
+            GOTO      REGX2100 
+          ENDIF
+.
+          MATCH     "0",PMHCSTTS                 * Skip if not active
+          IF        !@EQUAL
+            GOTO      REGX2100 
+          ENDIF
+.     
+REGX2200  MATCH     PMHCRGDT,SP70                * Skip if no reg to date
+          IF        @EQUAL
+            GOTO      REGX2100 
+          ENDIF
+.          
+          MATCH    PMHCRGDT,CURRDATE             * reg dte prior curr dte
+          GOTO     REGX2100 IF EQUAL 
+          GOTO     REGX2100 IF LESS
+.
+          PACK      KEY5,ANSH,ANSR,PMHCREGT,SP70 * Check Category HR        
+          CALL      RDCODE1
+          BRANCH    OVRCD,REGX2100
+. 
+          MATCH     ANSF,TCINDC2                 * ind2 = F
+          IF        !@EQUAL
+            GOTO      REGX2100
+          ENDIF 
+.
+REGX2300  MOVE      ONE,PMHCSTTS
+          MOVE      CURRDATE,PMHCLUPD
+          MOVE      CURRTIME,PMHCLUPT
+          MOVE      "IBAHMS31",PMHCWEBU
+.
+          IF        UPDATFLG=1
+            CALL      UPPMHCP1                   * Update HCP Table       
+          ENDIF
+.
+          CALL      PEXP0000
+.
+          PACK      KEY6,PMHCLDOC,SP70         
+          CALL      RDDOCT1                    * read Doctor table
+          BRANCH    OVRCD,REGX2100             * no doctor get next hcp
+.
+          MOVE      ONE,DRSTAT  
+          MOVE      CURRDATE,DLUPDDTE
+          MOVE      CURRTIME,DLUPDTME
+.
+          IF        UPDATFLG=1
+            CALL      UPDOCT1                  * Update Doctor Linked Table
+          ENDIF
+.
+          GOTO      REGX2100                   * read next record
+.
+REGX9999  RETURN
+.*******************************************************************************
+.*                                  COMB0000                                   *
+.*        - Option 3 - WWCC Status(Active) &                                   *
+.*                  -  WWCC Exp Date (< currentdate)                           *
+.*                  or                                                         *
+.*                  -  WWCC Status(Active) &                                   *
+.*                  -  Reg Status(Completed/Final) & Reg To Date(< currentdate)*
+.*******************************************************************************
+COMB0000  DISPLAY   *P1:24,*EL,*V2LON,*BLINKON:
+                    "3 - Looping all HCP records. table(pmshcpaf) ";
+.
+          CALL      HEAD0000                     * print headings
+.
+          PACK      KEY10,SP70
+          CALL      RSPMHCP1                     * position read
+COMB3100  CALL      RKPMHCP1
+          BRANCH    OVRCD,COMB9999               * end-of-file
+.
+          MATCH     "1",PMHCSTTS                * Skip if not active
+          IF        @EQUAL
+            GOTO      COMB3100
+          ENDIF
+.
+          MATCH     "0",PMHCSTTS                 * Skip if not active
+          IF        !@EQUAL
+            GOTO      COMB3100
+          ENDIF
+.
+          MATCH     PMHCWWCE,SP70                * if no exp date
+          IF        @EQUAL
+            GOTO      COMB3120
+          ENDIF
+.     
+          MATCH     PMHCWWCE,CURRDATE             * Check if record has expired
+          GOTO      COMB3120 IF EQUAL            
+          GOTO      COMB3120 IF LESS             
+.     
+COMB3110  MATCH     PMHCWWCS,SP70                * Check Status code  
+          IF        @EQUAL
+            GOTO      COMB3120
+          ENDIF                                  * Skip if blank
+.
+          PACK      KEY5,ANSH,ANSW,PMHCWWCS,SP70 * Check Category HW
+          CALL      RDCODE1
+          BRANCH    OVRCD,COMB3100
+.
+          MATCH     ANSF,TCINDC2                 * ind2 = F 
+          IF        @EQUAL
+            GOTO      COMB3200
+          ELSE
+            GOTO      COMB3120
+          ENDIF 
+.
+COMB3120  MATCH     PMHCRGDT,SP70                * if no reg-to date
+          IF        @EQUAL
+            GOTO      COMB3100 
+          ENDIF                                  * Skip if blank
+.
+          MATCH     PMHCRGDT,CURRDATE            * reg date prior curr dte
+          GOTO      COMB3100 IF EQUAL            
+          GOTO      COMB3100 IF LESS    
+.
+          MATCH     SP70,PMHCREGT                * Check Reg Status code
+          IF        @EQUAL
+            GOTO      COMB3100
+          ENDIF                                  * Skip if blank
+.
+          PACK      KEY5,ANSH,ANSR,PMHCREGT,SP70 * Check Category HR
+          CALL      RDCODE1
+          BRANCH    OVRCD,COMB3100
+.
+          MATCH     ANSF,TCINDC2                 * ind2 = F 
+          IF        @EQUAL
+            GOTO      COMB3200 
+          ELSE
+            GOTO      COMB3100 
+          ENDIF 
+.
+COMB3200  MOVE      ONE,PMHCSTTS
+          MOVE      CURRDATE,PMHCLUPD
+          MOVE      CURRTIME,PMHCLUPT
+          MOVE      "IBAHMS31",PMHCWEBU
+.
+          IF        UPDATFLG=1
+            CALL      UPPMHCP1                 * Update HCP Table       
+          ENDIF
+.
+          CALL      PEXP0000
+.
+          PACK      KEY6,PMHCLDOC,SP70         
+          CALL      RDDOCT1                    * read Doctor table
+          BRANCH    OVRCD,COMB3100             * no doctor next hcp         
+.      
+          MOVE      ONE,DRSTAT  
+          MOVE      CURRDATE,DLUPDDTE
+          MOVE      CURRTIME,DLUPDTME
+.
+          IF        UPDATFLG=1
+            CALL      UPDOCT1                  * Update Doctor Linked Table
+          ENDIF
+.
+          GOTO      COMB3100                   * read next record 
+.
+COMB9999  RETURN
+.------------------------------------------------------------
+. Get Code Description
+.------------------------------------------------------------
+GETCOD00  MOVE      SP70,TDESC
+          MATCH     SP70,CODE
+          GOTO      GETCOD99 IF EQUAL
+          PACK      KEY5,CATEGORY,CODE
+          CALL      RDCODE1
+          IF        OVRCD=1
+            MOVE      SP70,ACODE
+            MOVE      SP70,TDESC
+            UNPACK    SP70,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5:
+                           TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10
+          ENDIF
+.
+GETCOD99  RETURN
+.*******************************************************************************
+.*                                  HEAD0000                                   *
+.*        routine headings                               called by : PRNT0000  *
+.*******************************************************************************
+HEAD0000  COMPARE   ZERO,CPAGENO
+          GOTO      HEAD1000 IF EQUAL
+          PRINT     *13,DRAW
+.
+HEAD1000  CLOCK     TIME,CTIMEIS
+          CALL      HEAD132
+.
+          IF        UPDATFLG=0
+            PRINT     *20,"Print Report Only : Yes"
+          ELSE
+            PRINT     *20,"Print Report Only : No "
+          ENDIF
+.
+          PRINT     *N,*13,DRAW:
+                    *N,*13,"| HCP   ",*26,"|  HCP Name ":
+                       *67,"| WWCC Expiry",*81,"| Registered To",*96,"|":
+                    *N,*13,DRAW
+.
+          ADD       FOUR,CLNO                    * increase current line no by 4
+.
+HEAD9999  RETURN
+.
+          INC       STD001IO
+.
+          INC       PATDO1IO/INC
+          INC       PMSHCPIO/INC
+          INC       PATCODIO/INC
+.*******************************************************************************
+.*                                  PEXP0000                                   *
+.* Print/Expired WWCC                                                          *
+.*******************************************************************************
+PEXP0000  DISPLAY   *P1:24,*EL,*V2LON,*BLINKON:
+               "Printing Deactivate HCP Code Doctor Codes.  Please wait ... ";
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          COMPARE   "55",CLNO                    * page overflow ?
+          CALL      HEAD0000 IF NOT LESS
+.
+.
+.         print detail line
+.
+.         MOVE      DTITL,PACTITLE
+.         MOVE      DSNAME,PACSNAME
+.         MOVE      DGNAME,PACGNAME
+          MOVE      PMHCTITL,PACTITLE
+          MOVE      PMHCSNAM,PACSNAME
+          MOVE      PMHCGNAM,PACGNAME
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,DIM40
+.
+          MOVE      SP70,DISPDAT1
+          MATCH     PMHCWWCE,SP70
+          IF        !@EQUAL
+            UNPACK    PMHCWWCE,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE
+            MOVE      CPCDATE,DISPDAT1
+          ENDIF
+.
+          MOVE      SP70,DISPDAT2
+          MATCH     PMHCRGDT,SP70
+          IF        !@EQUAL
+            UNPACK    PMHCRGDT,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE
+            MOVE      CPCDATE,DISPDAT2
+          ENDIF
+.
+          PRINT     *13,"| ",PMHCHCPC,*26,"|",DIM40,*67,"| ":
+                             DISPDAT1,*81,"| ",DISPDAT2,*96,"|"
+.
+          ADD       ONE,CLNO                     * increase current line no by 1
+          GOTO      PEXP9999
+.
+.         End of Range/End of File
+.
+PEXP9000  PRINT     *13,DRAW,*N,*N,*13,"***  End of Report  ***"
+.
+PEXP9999  RETURN

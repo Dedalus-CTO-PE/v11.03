@@ -1,0 +1,1373 @@
+.******************************************************************************
+.* System        :   Patient Management System                                *
+.* Program       :   IBAPMS95                                                 *
+.* Desc          :   Healthscope Queensland Monthly Activity Report           *
+.******************************************************************************
+.* Date          :   11/05/2012                                               *
+.* Author        :   Don Nguyen                                               *
+.* Function      :   Healthscope have a requirement to submit a monthly       *
+.*                   report to the Queensland government.                     *
+.*                   This program builds out the report based on data         *
+.*                   collected by claim type and resident status.             *
+.*                   It accepts an inputed period (Month/Year) for which the  *
+.*                   report is run against.                                   *
+.*                                                                            *
+.******************************************************************************
+.* Modifications :                                                            *
+.*        V10.12.01  19/07/2018  Ania P             TSK 0261630               *
+.*                   Removed use of PORT                                      *
+.*        V10.11.01  08/09/2017  Ebon Clements      TSK 0818097               *
+.*                   Added excluded newborn functionality -  EXNB0000         *
+.*        V10.05.01  14/10/2014  Don Nguyen         CAR 268863                *
+.*                   Modified PRAD2000 loop of discharges; GOTO PRAD2100      *
+.*                   instead of PRAD1000 for pre-admission or cancelled.      *
+.*        V10.03.02  20/08/2012  Don Nguyen         CAR 268863                *
+.*                   Changed the way Claim Type is determined and also how    *
+.*                   some totals are calculated.                              *
+.*        V10.03.01  06/06/2012  Don Nguyen         CAR 258734                *
+.*                   Removed code to read Hospital Details file to get the    *
+.*                   hosital name since Healthscope is single hospital. We    *
+.*                   now just use CNAME for printing the hospital name.       *
+.*        V10.03.00  11/05/2012  Don Nguyen         CAR 258734                *
+.*                   Created new.                                             *
+.******************************************************************************
+.
+          INC       STD001FD
+.
+          INC       IBACONFD/INC
+          INC       PATCODFD/INC
+          INC       PATVISFD/INC
+          INC       PATHSPFD/INC        * Hospital Name
+          INC       PATMI1FD/INC        * Admissions
+          INC       PMSVX1FD/INC        * Visit extensions
+          INC       PATDSCFD/INC        * Discharge details
+          INC       PATCONFD/INC        * Facility ID; Sector 13-213
+          INC       PATCOMM/INC         * for KEYPER
+          INC       PATDRGFD/INC        * for KEYPER
+          INC       PATTRNFD/INC        * for NHOSPDAY
+          INC       WEBDINVS/INC        * for NHOSPDAY
+          INC       IBASEQFD/INC 
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+.
+.------------------------------------------------------------------------------
+.         Temporary index file 1   - Patient admissions we're interested in
+.
+TMPFL1K1  IFILE     SQL, FIXED=9, KEY="U1-8"
+.
+.Name     Type      Length  Physical  Start  Description
+.-------  ----      ------  --------  -----  ----------------------------------
+XADMN     DIM       8       8         1      Admission Number
+.
+.End of Record                        9
+.
+.------------------------------------------------------------------------------
+.         Temporary index file 2   - Totals for report (keyed by claim type
+.                                    and admission type) 
+.
+TMPFL2K1  IFILE     SQL, FIXED=55, KEY="U1-3,4-6"
+.
+.Name     Type      Length  Physical  Start  Description
+.-------  ----      ------  --------  -----  ----------------------------------
+XCLMTYPE  DIM       3       3         1      Claim Type
+XADMTYPE  DIM       3       3         4      Admission Type
+XREMAINS  FORM      5       4         7      Remaining in start
+XFORMADM  FORM      5       4         11     Formal admissions
+XSTATADM  FORM      5       4         15     Statistical admissions
+XSTATDIS  FORM      5       4         19     Statistical discharges
+XFORMDIS  FORM      5       4         23     Formal discharges
+XREMAINE  FORM      5       4         27     Remaining in end
+XACRDAYS  FORM      6       4         31     Accrued days
+XSAMEDAY  FORM      5       4         35     Same day
+XSDFMADM  FORM      5       4         39     Same day formal admissions
+XSDSTADM  FORM      5       4         43     Same day statistical admissions
+XSDSTDIS  FORM      5       4         47     Same day statistical discharges
+XSDFMDIS  FORM      5       4         51     Same day formal discharges
+.
+.End of Record                        55
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+.
+PRGID     INIT      "IBAPMS95"
+PRGNAM    INIT      "QLD Monthly Activity Report"
+VERSION   INIT      "V11.03.00"
+.
+FORMTYPE  INIT      "MTHACPR1"
+FORMVERN  INIT      "V1"
+.
+JAN       INIT      "January"
+FEB       INIT      "February"
+MAR       INIT      "March"
+APR       INIT      "April"
+MAY       INIT      "May"
+JUN       INIT      "June"
+JUL       INIT      "July"
+AUG       INIT      "August"
+SEP       INIT      "September"
+OCT       INIT      "October"
+NOV       INIT      "November"
+DEC       INIT      "December"
+.
+ADTPDES1  INIT      "Acute"
+ADTPDES2  INIT      "Rehabilitation"
+ADTPDES3  INIT      "Palliative"
+ADTPDES4  INIT      "Ger Eval and Manage"
+ADTPDES5  INIT      "Psychogeriatric"
+ADTPDES6  INIT      "Newborn"
+ADTPDES7  INIT      "Other Care"
+ADTPDES8  INIT      "Maintenance"
+ADTPVAL1  INIT      "ACU"
+ADTPVAL2  INIT      "REH"
+ADTPVAL3  INIT      "PAL"
+ADTPVAL4  INIT      "GER"
+ADTPVAL5  INIT      "PSY"
+ADTPVAL6  INIT      "NEW"
+ADTPVAL7  INIT      "OTH"
+ADTPVAL8  INIT      "MAN"
+ADTPVAL9  INIT      "   "
+CATA      INIT      "A "
+CATCL     INIT      "CL"
+CATDD     INIT      "DD"
+CATS      INIT      "S "
+CATT      INIT      "T "
+CCLTYPAL  INIT      "ALL"
+CCLTYPEP  INIT      "EP "
+CCLTYPEC  INIT      "EC "
+CCLTYPIN  INIT      "IN "
+CCLTYPCO  INIT      "CON"
+CGRPDES1  INIT      "ELIGIBLE PRIVATE"
+CGRPDES2  INIT      "ELIGIBLE COMPENSABLE"
+CGRPDES3  INIT      "INELIGIBLE"
+INDCVALA  INIT      "A"
+INDCVALN  INIT      "N"
+INDCVALU  INIT      "U"
+PIPE      INIT      "|"
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+CALDAYS   FORM      4
+.
+CADMDESC  DIM       20
+CADMITYP  DIM       3
+CCLAITYP  DIM       3
+CGRPDESC  DIM       20
+CMDLINE   DIM       50
+CMNTHPRT  DIM       10                  * Print variable for month
+CPERIODF  DIM       8                   * Period start date (yyyymmdd)
+CPERIODT  DIM       8                   * Period end date (yyyymmdd)
+CYEARMON  DIM       6                   * Year month string (yyyymm)
+CYEARPRT  DIM       4                   * Print variable for year
+FADMTYPE  FORM      2                   * Admission Type value
+FNWBDAYS  FORM      6                   * Accrued Newborn days ('Unqualified')
+FNURDAYS  FORM      6                   * Accrued Nursing Home Type patient days
+FTOTADFM  FORM      6                   * Formal Admission total
+FTOTADST  FORM      6                   * Statistical Admission total
+FTOTARRY  FORM      6[8][11]            * 2-dimensional totals array 
+FTOTDAYS  FORM      6                   * Accrued Patient Days total
+FTOTDIFM  FORM      6                   * Formal Discharge total
+FTOTDIST  FORM      6                   * Statistical Discharge total
+FTOTREME  FORM      6                   * Remaining at end total
+FTOTREMS  FORM      6                   * Remaining at start total
+FTOTSDFA  FORM      6                   * Same day Formal Admission total
+FTOTSDSA  FORM      6                   * Same day Statistical Admission total
+FTOTSDFD  FORM      6                   * Same day Formal Discharge total
+FTOTSDSD  FORM      6                   * Same day Statistical Discharge total
+FVALARRY  FORM      6[11]               * Array of total values
+LOOPCTR1  FORM      2                   * Loop index
+LOOPCTR2  FORM      2
+TMPFNME1  DIM       8                   * Temp filename 1
+TMPFNME2  DIM       8                   * Temp filename 2
++
+.******************************************************************************
+.*                              MAIN0000                                      *
+.*                  Controlling Logic (Mainline code)                         *
+.******************************************************************************
+.
+MAIN0000  CALL      INIT0000            * Initialisation and open files
+.
+MAIN1000  CALL      OPTN0000            * Select options
+          BRANCH    EXIT,MAIN9999       * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN2000    * Proceed to process
+.
+          GOTO      MAIN1000            * invalid selection; get again
+.
+MAIN2000  CALL      GETP0000            * Get month & year period
+          BRANCH    EXIT,MAIN1000       * invalid period entered
+.
+          CALL      CONTQST             * Ok to continue ?
+          BRANCH    CEXIT,MAIN5000:     * Yes
+                          MAIN2000:     * No; prompt options again
+                          MAIN1000      * Cancel
+.
+MAIN5000  CALL      CRET0000            * Create temporary files
+          CALL      PROC0000            * Process patient admission records 
+          CALL      DISP0000            * Print report
+          CALL      KILL0000            * Delete temporary files
+          GOTO      MAIN1000
+.
+MAIN9999  CHAIN     PGM                 * Chain back to program
++
+.******************************************************************************
+.*                                INIT0000             Called by: MAIN0000    *
+.*                  Display headings and open files                           *
+.******************************************************************************
+.
+INIT0000  CALL      DISPHEAD                      * display heading
+.
+          DISPLAY   *P56:24,"Opening patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"pathspaf";           * hospital details
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P64:24,"patmi1af";           * patient admissions
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PATMI1A2,"patmi1af"
+          OPEN      PATMI1A3,"patmi1af"
+.
+          DISPLAY   *P64:24,"patvisaf";           * patient visits
+          OPEN      PATVISA2,"patvisaf"
+.
+          DISPLAY   *P64:24,"pmsvx1af";           * visit extensions
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"patdschf";           * discharge details
+          OPEN      PATDSCH1,"patdschf"
+          OPEN      PATDSCH2,"patdschf"
+.
+          DISPLAY   *P64:24,"pattranf";           * transfer details
+          OPEN      PATTRAN2,"pattranf"
+.
+          DISPLAY   *P64:24,"controlf";           * control file
+          OPEN      CONTROLF,"controlf"
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS    * get multi hospital flag
+          READ      CONTROLF,TEN3;*213,CHCSCOD    * get Facility ID
+.
+.         Set up the temporary index file names
+.
+          CALL      TFILENAM
+          PACK      TMPFNME1,TFILNAME,SP70
+          CALL      TFILENAM
+          PACK      TMPFNME2,TFILNAME,SP70
+.
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                KILL0000             Called by: MAIN0000    *
+.*                  Deletes all temporary files                               *
+.*                                                                            *
+.*        Parameters: TMPFNME1  filename of index file 1                      *
+.*        Parameters: TMPFNME2  filename of index file 2                      *
+.******************************************************************************
+.
+KILL0000  CLOSE     TMPFL1K1
+.
+          CLEAR     CMDLINE                       * Clear the command line
+          APPEND    "iserase ",CMDLINE            * Set up the command to
+          APPEND    TMPFNME1,CMDLINE              * 1st temporary file
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID                * Delete the 1st file
+.
+          CLEAR     CMDLINE                       * Clear the command line
+          APPEND    "iserase ",CMDLINE            * Set up the command to
+          APPEND    TMPFNME2,CMDLINE              * 2nd temporary file
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID                * Delete the 2nd file
+.
+KILL9999  RETURN
++
+.******************************************************************************
+.*                                CRET0000             Called by: MAIN0000    *
+.*                  Create our temporary files                                *
+.*                                                                            *
+.*        Parameters: TMPFNME1  filename of index file 1                      *
+.*                    TMPFNME2  filename of index file 2                      *
+.*                                                                            *
+.*           Returns: TMPFL1K1  open 1st index file                           *
+.*                    TMPFL2K1  open 2nd index file                           *
+.******************************************************************************
+.
+CRET0000  CALL      KILL0000                 * Make sure the files are gone
+.
+          CLEAR     CMDLINE                  * Clear the command line
+          APPEND    "isbuild ",CMDLINE       * Set up the command to
+          APPEND    TMPFNME1,CMDLINE         * create the 1st temporary
+          APPEND    " 9 U1-8",CMDLINE        * index file.
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID           * Create the 1st file
+.
+.
+          CLEAR     CMDLINE                  * Clear the command line
+          APPEND    "isbuild ",CMDLINE       * Set up the command to
+          APPEND    TMPFNME2,CMDLINE         * create the 1st temporary
+          APPEND    " 55 U1-3,4-6",CMDLINE   * index file.
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID           * Create the 2nd file
+.
+          OPEN      TMPFL1K1,TMPFNME1        * Open the 1st file
+          OPEN      TMPFL2K1,TMPFNME2        * Open the 2nd file
+.
+CRET9999  RETURN
++
+.******************************************************************************
+.*                                OPTN0000             Called by: MAIN0000    *
+.*                  Get user options or exit                                  *
+.*                                                                            *
+.*    Returns:  EXIT    = FALSE (0)  Valid option selected                    *
+.*                        TRUE  (1)  Exit option selected                     *
+.*              COPTION = 0 Exit                                              *
+.*                        1 Run Report                                        *
+.******************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Run Report"
+.
+OPTN1000  KEYIN     *P1:8,*EL,"Select option : ",*DV,UNDLN1:
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION
+          GOTO      OPTN9500 IF EQUAL             * exit
+.
+          BRANCH    COPTION,OPTN9000
+.
+.         BEEP
+.         GOTO      OPTN1000
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.******************************************************************************
+.*                                GETP0000             Called by: MAIN0000    *
+.*                  Get the period (month/year)                               *
+.*                                                                            *
+.*    Returns:  EXIT     = FALSE (0)  Valid period values                     *
+.*                         TRUE  (1)  Invalid input                           *
+.*              CMON     = Month value                                        *
+.*              CYEAR    = Year value                                         *
+.******************************************************************************
+.
+GETP0000  DISPLAY   *P1:4,*EF,"Period (MM/YYYY) : ";
+.
+          MOVE      TWENTY,CCOL
+          MOVE      FOUR,CVERT
+          MOVE      ZERO,CHIGHLT
+          UNPACK    SP4,CYEAR,CMON
+          MOVE      CCC,CCENT
+.
+          CALL      KEYPER
+          BRANCH    OVRCD,GETP0000
+.
+          MATCH     "13",CMON           * KEYPER allows 13 for some reason??
+          GOTO      GETP0000 IF EQUAL
+.
+          MATCH     "  ",CMON 
+          GOTO      GETP0000 IF EQUAL
+.
+          MATCH     "  ",CYEAR
+          GOTO      GETP0000 IF EQUAL
+.
+          MOVE      CMON,F2
+          LOAD      CMNTHPRT,F2,JAN,FEB,MAR,APR,MAY,JUN,JUL,AUG,SEP,OCT,NOV,DEC
+.
+          PACK      CYEARPRT,CCENT,CYEAR,SP70
+          PACK      CYEARMON,CYEARPRT,CMON,SP70
+.
+          MOVE      ZERO,EXIT
+          GOTO      GETP9999
+.
+GETP9100  MOVE      ONE,EXIT
+.
+GETP9999  RETURN
++
+.******************************************************************************
+.*                               PROC0000              Called by: MAIN0000    *
+.*                  Process the report                                        *
+.******************************************************************************
+.
+PROC0000  CALL      PRAD0000            * add admissions to temp file 1
+          CALL      PRRE0000            * update the total counts (temp file 2)
+PROC9999  RETURN
++
+.******************************************************************************
+.*                               PRAD0000              Called by: PROC0000    *
+.*                  Process admissions; add relevant AADMNO to temp file 1    *
+.******************************************************************************
+.
+PRAD0000  PACK      CPTDATE,CYEARMON,ZERO,ONE,SP70
+          CALL      GPERD
+          BRANCH    EXIT,PRAD9999
+.
+          MOVE      DRGFDTE,CPERIODF
+          MOVE      DRGTDTE,CPERIODT
+.
+          PACK      KEY16,CCENT,CYEAR,CMON,SP70   * Get admissions for period
+          CALL      RDSMISS3
+PRAD1000  CALL      RDKMISS3
+          BRANCH    OVRCD,PRAD2000      * finished processing period
+.
+          IF        ASTAT=1 | ASTAT=5
+            GOTO      PRAD1000          * pre-admission or cancelled
+          ENDIF
+.
+          CALL      EXNB0000            * Excluded newborn
+          BRANCH    EXIT,PRAD1000
+.
+          UNPACK    ADATE,D6
+          MATCH     D6,CYEARMON         * same month??
+          GOTO      PRAD2000 IF LESS    * no; bail
+.
+          PACK      KEY8,AADMNO,SP70
+          CALL      RDTEMP1             * already exists in temp file?
+          IF        OVRCD=0
+             GOTO       PRAD1000        * yes; process next record
+          ENDIF
+.
+          CALL      WRTEMP1             * add to our temp file 1
+          GOTO      PRAD1000
+.
+.         Get all discharges during or after period start (month/year)
+.
+PRAD2000  PACK      KEY16,CCENT,CYEAR,CMON,SP70
+          CALL      RDSDSCH2
+PRAD2100  CALL      RDKDSCH2
+          BRANCH    OVRCD,PRAD3000
+.
+.         Admitted before the period start??
+.
+          PACK      KEY8,DADMNO,SP70
+          CALL      RDMISS1
+          BRANCH    OVRCD,PRAD2100
+.
+          IF        ASTAT=1 | ASTAT=5
+            GOTO      PRAD2100             * pre-admission or cancelled
+          ENDIF
+.
+          MATCH     CPERIODF,ADATE         * admitted before period start?
+          GOTO      PRAD2100 IF NOT LESS   * no; get next discharge record
+.
+          PACK      KEY8,DADMNO,SP70
+          CALL      RDTEMP1                * already exists in temp file 1?
+          IF        OVRCD=0
+             GOTO       PRAD2100           * yes; process next record
+          ENDIF
+.
+          CALL      WRTEMP1                * add to our temp file 1
+          GOTO      PRAD2100
+.
+.         Get currently admitted...
+.
+PRAD3000  PACK      KEY9,TWO,SP70          * Admission Status = 2 (Current)
+          CALL      RDSMISS2
+PRAD3100  CALL      RDKMISS2
+          BRANCH    OVRCD,PRAD4000
+.
+          PACK      KEY8,AADMNO,SP70                   
+          CALL      RDTEMP1                * already exists in temp file 1?
+          IF        OVRCD=0
+             GOTO       PRAD3100           * yes; process next record
+          ENDIF
+.
+          CALL      WRTEMP1                * add to our temp file 1
+          GOTO      PRAD3100
+.         
+PRAD4000  PACK      KEY9,FOUR,SP70          * Admission Status = 4 (On Leave)
+          CALL      RDSMISS2
+PRAD4100  CALL      RDKMISS2
+          BRANCH    OVRCD,PRAD9999
+.
+          PACK      KEY8,AADMNO,SP70                   
+          CALL      RDTEMP1                * already exists in temp file 1?
+          IF        OVRCD=0
+             GOTO       PRAD4100           * yes; process next record
+          ENDIF
+.
+          CALL      WRTEMP1                * add to our temp file 1
+          GOTO      PRAD4100
+.
+PRAD9999  RETURN
++
+.******************************************************************************
+.*                               PRRE0000              Called by: PROC0000    *
+.*                  Process result (totals)...                                *
+.*                  Populate/update our temp file 2 (with totals)             *
+.******************************************************************************
+.
+PRRE0000  MOVE      ZERO,FNWBDAYS
+          MOVE      ZERO,FNURDAYS
+.
+.         Get period end date...
+.
+          PACK      CPTDATE,CYEARMON,ZERO,ONE,SP70
+          CALL      GPERD
+          BRANCH    EXIT,PRRE9999
+.
+          MOVE      DRGFDTE,CPERIODF
+          MOVE      DRGTDTE,CPERIODT
+.
+          PACK      KEY8,SP70
+          CALL      RDSTEMP1
+PRRE1000  CALL      RDKTEMP1
+          BRANCH    OVRCD,PRRE9999
+.
+          PACK      KEY8,XADMN,SP70
+          CALL      RDMISS1
+          BRANCH    OVRCD,PRRE1000
+.
+          MATCH     CPERIODT,ADATE         * admitted before or on period end?
+          IF        !@LESS & !@EQUAL
+            GOTO      PRRE1000             * no; get next admission
+          ENDIF
+.
+.         Process Claim Type...
+.
+          PACK      KEY5,CATCL,ACLAIM,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRRE1000         * No valid Claim category
+.
+          BUMP      THCSCOD,1
+          PACK      D2,THCSCOD,SP10        * get pos 2-3
+          RESET     THCSCOD
+.
+.         Claim Type...
+.       
+          MOVE      CCLTYPAL,CCLAITYP      * default to "ALL" admitted patients
+.
+          MATCH     "01",D2
+          IF        @EQUAL
+            MOVE      CCLTYPCO,CCLAITYP    * Contracted
+            GOTO      PRRE2000
+          ENDIF
+.
+          MATCH     "02",D2
+          IF        @EQUAL
+            MOVE      CCLTYPEP,CCLAITYP    * Eligible Private
+            GOTO      PRRE2000
+          ENDIF
+.
+          MATCH     "04",D2
+          GOTO      PRRE1100 IF EQUAL
+.
+          MATCH     "05",D2
+          GOTO      PRRE1100 IF EQUAL
+.
+          MATCH     "07",D2
+          GOTO      PRRE1100 IF EQUAL
+.
+          MATCH     "08",D2
+          GOTO      PRRE1100 IF EQUAL
+.
+.         Is it of claim type 'Ineligible' ?...
+.
+          PACK      KEY24,AURNO,SP70
+          CALL      RDSVISA2
+          CALL      RDKVISA2
+          BRANCH    OVRCD,PRRE2000
+.
+          MATCH     PVIURNO,AURNO          * same patient?
+          GOTO      PRRE2000 IF NOT EQUAL  * no; proceed
+.
+          PACK      KEY5,CATT,PVIRESI,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRRE2000
+.
+          MOVE      TCINDC1,F1
+          IF        F1=2
+            MOVE      "IN ",CCLAITYP       * Ineligible (overseas/embassy staff)
+          ENDIF
+          GOTO      PRRE2000
+.
+PRRE1100  MOVE      CCLTYPEC,CCLAITYP      * Eligible Compensable
+          GOTO      PRRE2000
+.
+.         Process Admission Type...
+.       
+PRRE2000  PACK      KEY5,CATA,ATYPE,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRRE1000         * Invalid category A; get next admis
+.
+          PACK      D2,THCSCOD,SP10
+          STRIP     D2
+          MOVE      ZERO,FADMTYPE
+          MOVE      D2,FADMTYPE
+.
+          MOVE      "   ",CADMITYP
+.
+          IF        FADMTYPE=1
+            MOVE      "ACU",CADMITYP       * Acute
+            GOTO      PRRE3000
+          ENDIF     
+          IF        FADMTYPE=21|FADMTYPE=22|FADMTYPE=23
+            MOVE      "REH",CADMITYP       * Rehabilitation
+            GOTO      PRRE3000
+          ENDIF     
+          IF        FADMTYPE=31|FADMTYPE=32|FADMTYPE=33
+            MOVE      "PAL",CADMITYP       * Palliative
+            GOTO      PRRE3000
+          ENDIF     
+          IF        FADMTYPE=9
+            MOVE      "GER",CADMITYP       * Geriatric Eval & Management
+            GOTO      PRRE3000
+          ENDIF     
+          IF        FADMTYPE=10
+            MOVE      "PSY",CADMITYP       * Psycho Geriatric
+            GOTO      PRRE3000
+          ENDIF     
+          IF        FADMTYPE=5
+            MOVE      "NEW",CADMITYP       * Newborn
+            GOTO      PRRE3000
+          ENDIF     
+          IF        FADMTYPE=6|FADMTYPE=7|FADMTYPE=8
+            MOVE      "OTH",CADMITYP       * Other Care
+            GOTO      PRRE3000
+          ENDIF     
+          IF        FADMTYPE=11
+            MOVE      "MAN",CADMITYP       * Maintenance
+            GOTO      PRRE3000
+          ENDIF     
+.
+.         We have a valid Claim Type & Admission Type...
+.
+PRRE3000  PACK      KEY6,CCLAITYP,CADMITYP,SP70
+          CALL      RDTEMP2             * temp file 2 record exists?
+.
+.         Init fields if record doesn't exist
+.
+          IF        OVRCD=1
+              MOVE      ZERO,XREMAINS
+              MOVE      ZERO,XFORMADM
+              MOVE      ZERO,XSTATADM
+              MOVE      ZERO,XSTATDIS
+              MOVE      ZERO,XFORMDIS
+              MOVE      ZERO,XREMAINE
+              MOVE      ZERO,XACRDAYS
+              MOVE      ZERO,XSAMEDAY
+              MOVE      ZERO,XSDFMADM
+              MOVE      ZERO,XSDSTADM
+              MOVE      ZERO,XSDSTDIS
+              MOVE      ZERO,XSDFMDIS
+          ENDIF
+.
+.         Update the totals...
+.
+.         Is there a discharge record for this admission?
+PRRE4000  PACK      KEY8,XADMN,SP70
+          CALL      RDDSCH1
+          BRANCH    OVRCD,PRRE7000      * no discharge record
+.
+.         -----------------------------
+.         Accrued patient days
+.         -----------------------------
+          MOVE      DASTAT,F1
+          IF        F1=4  
+            GOTO      PRRE5000          * on leave so we're not interested!
+          ENDIF
+.
+          MATCH     CPERIODF,DDATE      * discharged before period start date?
+          IF        @LESS
+            GOTO      PRRE5000          * yes; don't calc bed days
+          ELSE
+            MOVE      ADATE,FROMDATE    * no; start calc from admitted date
+          ENDIF
+.
+          MATCH     CPERIODT,DDATE
+          IF        !@LESS & !@EQUAL
+            MOVE      CPERIODT,TODATE   * discharged after period end date
+          ELSE
+            MOVE      DDATE,TODATE      * discharged before period end date
+          ENDIF
+.         
+PRRE4050  MOVE      ZERO,NBRDAYS
+          CALL      NHOSPDAY
+.
+          MATCH     CPERIODT,DDATE
+          IF        !@LESS & !@EQUAL
+.            ADD       ONE,NBRDAYS       * since discharged after period end
+          ENDIF
+.
+          ADD       NBRDAYS,XACRDAYS
+.
+.         ---------------------------------
+.         Newborns and Nursing Home Type...
+.         ---------------------------------
+          PACK      KEY5,CATA,ATYPE,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRRE5000      * invalid category!
+.
+          MATCH     TCINDC2,INDCVALU    * Unqualified Newborn?
+          GOTO      PRRE4100 IF EQUAL   * yes
+.
+          MATCH     TCINDC2,INDCVALA    * Acute Newborn?
+          GOTO      PRRE4100 IF EQUAL   * yes
+.
+          GOTO      PRRE4200
+.
+PRRE4100  MATCH     ADATE,DDATE         * same day visit?
+          IF        !@EQUAL
+            ADD       NBRDAYS,FNWBDAYS  * no
+          ENDIF
+.
+PRRE4200  MATCH     TCINDC2,INDCVALN    * Nursing Home Type?
+          IF        @EQUAL
+            MATCH     ADATE,DDATE       * same day visit?
+            IF        !@EQUAL
+              ADD       NBRDAYS,FNURDAYS
+            ENDIF
+          ENDIF
+.
+.         -----------------------------
+.         Remaining in at start/end?
+.         -----------------------------
+PRRE5000  MATCH     CPERIODF,ADATE      * admitted before period start date?
+          IF        @LESS
+            MATCH     CPERIODF,DDATE
+            IF        !@LESS & !@EQUAL
+.
+.             Discharged after period start date
+.
+              ADD       ONE,XREMAINS    * remain in at start
+            ENDIF
+          ENDIF
+.
+          MATCH     CPERIODT,DDATE
+          IF        !@LESS & !@EQUAL
+            ADD       ONE,XREMAINE      * discharged after period end date
+          ENDIF
+.
+.         -----------------------------------------------
+.         Formal/Statistical admission during this period
+.         -----------------------------------------------
+PRRE5100  MATCH     CPERIODF,ADATE
+          GOTO      PRRE6000 IF LESS    * admitted before period start date
+.
+          MATCH     CPERIODT,ADATE
+          IF        !@LESS & !@EQUAL
+            GOTO      PRRE6000          * admitted after period end date
+          ENDIF
+.
+          PACK      KEY5,CATS,ASRCE,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRRE6000
+.
+          PACK      D2,THCSCOD,SP10
+          MATCH     "06",D2
+          IF        @EQUAL
+            MATCH     ADATE,DDATE
+            IF        @EQUAL
+              ADD       ONE,XSDSTADM    * same day stat admission
+            ELSE
+              ADD       ONE,XSTATADM    * overnight stat admission
+            ENDIF
+          ELSE
+            MATCH     ADATE,DDATE
+            IF        @EQUAL
+              ADD       ONE,XSDFMADM    * same day formal admission
+            ELSE
+              ADD       ONE,XFORMADM    * overnight formal admission
+            ENDIF
+          ENDIF
+.
+.         -----------------------------------------------
+.         Formal/Statistical discharge during this period
+.         -----------------------------------------------
+PRRE6000  MATCH     CPERIODF,DDATE
+          GOTO      PRRE8000 IF LESS    * discharged before period start date
+.
+          MATCH     CPERIODT,DDATE
+          IF        !@LESS & !@EQUAL
+            GOTO      PRRE8000 IF LESS  * discharged after period end date
+          ENDIF
+.
+          PACK      KEY5,CATDD,DDEST,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRRE8000      * invalid cat; update temp file 2
+.
+          PACK      D2,THCSCOD,SP10
+          MATCH     "06",D2
+          IF        @EQUAL
+            MATCH     ADATE,DDATE
+            IF        @EQUAL
+              ADD       ONE,XSDSTDIS    * same day stat discharge
+            ELSE
+              ADD       ONE,XSTATDIS    * overnight stat discharge
+            ENDIF
+          ELSE
+            MATCH     ADATE,DDATE
+            IF        @EQUAL
+              ADD       ONE,XSDFMDIS    * same day formal discharge
+            ELSE
+              ADD       ONE,XFORMDIS    * overnight formal discharge
+            ENDIF
+          ENDIF
+.
+          GOTO      PRRE8000            * update record
+.
+.         ============================
+.         No discharge record...
+.         ============================
+.
+.         -----------------------------
+.         Remaining in at start/end?
+.         -----------------------------
+PRRE7000  MATCH     CPERIODF,ADATE      * admitted before period start date?
+          IF        @LESS
+            ADD       ONE,XREMAINS      * no discharge; remain in at start
+          ENDIF
+.
+          ADD       ONE,XREMAINE        * no discharge; remain in at end
+.
+.         -----------------------------------------------
+.         Formal/Statistical admission during this period
+.         -----------------------------------------------
+          MATCH     CPERIODF,ADATE
+          GOTO      PRRE7050 IF LESS    * admitted before period start date
+.
+          MATCH     CPERIODT,ADATE
+          IF        !@LESS & !@EQUAL
+            GOTO      PRRE7050 IF LESS  * admitted after period end date
+          ENDIF
+.
+          PACK      KEY5,CATS,ASRCE,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRRE7050
+.
+          PACK      D2,THCSCOD,SP10
+          MATCH     "06",D2
+          IF        @EQUAL
+            ADD       ONE,XSTATADM         * overnight stat admission
+          ELSE
+            ADD       ONE,XFORMADM         * overnight formal admission
+          ENDIF
+.
+.         ---------------------------
+.         Accrued patient days...
+.         ---------------------------
+PRRE7050  MOVE      DASTAT,F1
+          IF        F1=4  
+            GOTO      PRRE8000          * on leave; so we're not interested!
+          ENDIF
+.
+          MOVE      ADATE,FROMDATE      * start from admitted date
+          MOVE      CPERIODT,TODATE     * end calc on period end date
+.
+          MOVE      ZERO,NBRDAYS
+          CALL      NHOSPDAY
+.
+.          ADD       ONE,NBRDAYS         * to get total number of days in month
+          ADD       NBRDAYS,XACRDAYS         
+.
+.         ---------------------------------
+.         Newborns and Nursing Home Type...
+.         ---------------------------------
+          PACK      KEY5,CATA,ATYPE,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRRE8000      * invalid category!
+.
+          MATCH     TCINDC2,INDCVALU    * Unqualified Newborn?
+          GOTO      PRRE7100 IF EQUAL
+.
+          MATCH     TCINDC2,INDCVALA    * Acute Newborn?
+          GOTO      PRRE7100 IF EQUAL
+.
+          GOTO      PRRE7200
+.
+PRRE7100  ADD       NBRDAYS,FNWBDAYS
+.
+PRRE7200  MATCH     TCINDC2,INDCVALN    * Nursing Home Type?
+          IF        @EQUAL
+            ADD       NBRDAYS,FNURDAYS
+          ENDIF
+.
+.         ===========================
+.         Write/update the record
+.         ===========================
+PRRE8000  PACK      KEY6,CCLAITYP,CADMITYP,SP70
+          CALL      RDATEMP2
+          BRANCH    OVRCD,PRRE8100
+.
+          CALL      UPTEMP2
+          GOTO      PRRE1000            * process next admission
+.
+PRRE8100  CALL      WRTEMP2
+          GOTO      PRRE1000            * process next admission
+.
+PRRE9999  RETURN
++
+.******************************************************************************
+.*                            HEAD0000                 Called by: DISP0000    *
+.*                  Print report headings                                     *
+.******************************************************************************
+.
+HEAD0000  CALL      HEAD132                      * display page header
+.
+.         PRINT     *40,"FROM ",FSDATE,*58,"TO ",FEDATE,*N,*N:
+.                   *40,"FOR JOURNAL TYPE ",JCODE," - ",JDESC,*N
+          PRINT     *40,"FORM TYPE : ",FORMTYPE,*70,"FORM VERSION : ",FORMVERN
+          PRINT     *40,"MONTH : ",CMNTHPRT,*70,"YEAR : ",CYEARPRT
+.
+          IF        IBCNMHOS = 1
+            PRINT     *40,"HOSPITAL : ",PTHSNAME
+          ELSE
+            PRINT     *40,"HOSPITAL : ",CNAME
+          ENDIF
+.
+          PRINT     *70,"FACILITY ID : ",CHCSCOD
+          PRINT     *1,""
+          PRINT     *1,"ADMITTED PATIENTS NOT TREATED AND PAID FOR UNDER ":
+                    "CONTRACT TO THE QLD PUBLIC HEALTH SECTOR"
+          PRINT     *1,""
+.
+          PRINT     *42,"OVERNIGHT OR LONGER",*110,"SAME DAY"
+.
+.         Print column group headings...
+.
+          CALL      HDLN0000
+          PRINT     *31,PIPE,*34,"Admissions",*46,"Class Changes":
+                    *60,"Separations",*71,PIPE:
+                    *94,PIPE,*99,"Admissions",*118,"Separations",*132,PIPE
+          CALL      LINE0000                     * draw line across page
+.
+.         Column headers...
+.
+          PRINT     *21,PIPE,"Remaining",*31,PIPE,*39,PIPE,"Statis",*46,PIPE:
+                    *52,PIPE,*57,PIPE,"Statis",*64,PIPE,*71,PIPE:
+                    "Remaining",*81,PIPE,"Accrued",*94,PIPE,*101,PIPE:
+                    *113,PIPE,*125,PIPE,*132,PIPE
+.
+          PRINT     *21,PIPE,"in start",*31,PIPE,"Formal",*39,PIPE,"tical":
+                    *46,PIPE,"From",*52,PIPE,"To",*57,PIPE,"tical",*64,PIPE:
+                    "Formal",*71,PIPE,"in at end",*81,PIPE,"Patient Days":
+                    *94,PIPE,"Formal",*101,PIPE,"Statistical",*113,PIPE:
+                    "Statistical",*125,PIPE,"Formal",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      TEN7,CLNO                    * increment line count
+.
+HEAD9999  RETURN
++
+.******************************************************************************
+.*                            LINE0000                 Called by: HEAD0000    *
+.*                  Draw line across page                                     *
+.******************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.******************************************************************************
+.*                            HEADLN00                 Called by: HEAD0000    *
+.*                  Draw the section header lines                             *
+.******************************************************************************
+.
+HDLN0000  PRINT     *31,"-----------------------------------------":
+                    *94,"---------------------------------------"
+HDLN9999  RETURN
++
+.******************************************************************************
+.*                            REST0000                 Called by: DISP0000    *
+.*                  Resets the total counts for each column                   *
+.******************************************************************************
+.
+REST0000  MOVE      ZERO,FTOTREMS
+          MOVE      ZERO,FTOTADFM
+          MOVE      ZERO,FTOTADST
+          MOVE      ZERO,FTOTDIST
+          MOVE      ZERO,FTOTDIFM
+          MOVE      ZERO,FTOTREME
+          MOVE      ZERO,FTOTSDFA
+          MOVE      ZERO,FTOTSDSA
+          MOVE      ZERO,FTOTSDSD
+          MOVE      ZERO,FTOTSDFD
+          MOVE      ZERO,FTOTDAYS
+.
+REST9999  RETURN
++
+.******************************************************************************
+.*                            RSTA0000                 Called by: DISP0000    *
+.*                  Reset the totals (2-dimensional) array                    *
+.******************************************************************************
+.
+RSTA0000  MOVE      ONE,LOOPCTR1
+          REPEAT    
+            MOVE      ONE,LOOPCTR2
+            REPEAT      
+              MOVE      ZERO,FTOTARRY[LOOPCTR1][LOOPCTR2]   
+              ADD       ONE,LOOPCTR2
+            UNTIL     LOOPCTR2 = 12
+            ADD       ONE,LOOPCTR1
+          UNTIL     LOOPCTR1 = 9
+.
+RSTA9999  RETURN
++
+.******************************************************************************
+.*                            RSVA0000                 Called by: DISP0000    *
+.*                  Reset the values array                                    *
+.******************************************************************************
+.
+RSVA0000  MOVE      ONE,LOOPCTR1
+          REPEAT
+            MOVE      ZERO,FVALARRY[LOOPCTR1]
+            ADD       ONE,LOOPCTR1
+          UNTIL     LOOPCTR1 = 12
+.
+RSVA9999  RETURN
++
+.******************************************************************************
+.*                            DISP0000                 Called by: MAIN0000    *
+.*                  Print the report                                          *
+.******************************************************************************
+.
+DISP0000  MOVE      ZERO,CPAGENO
+          MOVE      ZERO,CNOUNDLN
+          CALL      IBACLOCK
+.
+          COMPARE   ONE,IBCNMHOS                     * using multi hosptial ?
+          GOTO      DISP0070 IF NOT EQUAL            * no
+.
+          PACK      KEY3,SP70                        * yes
+          CALL      RSPTHSP1
+DISP0050  CALL      RKPTHSP1
+          BRANCH    OVRCD,DISP9999
+.
+          MATCH     PTHSHDPC,CHCSCOD
+          GOTO      DISP0050 IF NOT EQUAL
+.
+DISP0070  CALL      HEAD0000            * print report headings
+          CALL      RSTA0000            * reset the ALL totals array
+.
+.         Loop through each claim type (Eligible Private, Compensable, etc)
+.
+DISP1000  MOVE      ONE,LOOPCTR1
+          REPEAT    
+            CALL      REST0000          * reset totals for this claim type
+.
+            LOAD      CGRPDESC,LOOPCTR1,CGRPDES1:
+                                        CGRPDES2:
+                                        CGRPDES3
+.
+            LOAD      CCLAITYP,LOOPCTR1,CCLTYPEP:
+                                        CCLTYPEC:
+                                        CCLTYPIN
+.
+            PRINT     *1,CGRPDESC
+            PRINT     *1,""
+            ADD       TWO,CLNO
+.
+.           Loop through each admission type (Acute, Rehabilitation, etc)
+.
+            MOVE      ONE,LOOPCTR2
+            REPEAT   
+              LOAD      CADMDESC,LOOPCTR2,ADTPDES1:
+                                          ADTPDES2:
+                                          ADTPDES3:
+                                          ADTPDES4:
+                                          ADTPDES5:
+                                          ADTPDES6:
+                                          ADTPDES7:
+                                          ADTPDES8
+.
+              LOAD      CADMITYP,LOOPCTR2,ADTPVAL1:
+                                          ADTPVAL2:
+                                          ADTPVAL3:
+                                          ADTPVAL4:
+                                          ADTPVAL5:
+                                          ADTPVAL6:
+                                          ADTPVAL7:
+                                          ADTPVAL8
+.
+              PACK      KEY6,CCLAITYP,CADMITYP,SP70
+              CALL      RDTEMP2
+              BRANCH    OVRCD,DISP1100
+.
+              PRINT     *1,CADMDESC,*21,PIPE,*26,XREMAINS,PIPE,*34,XFORMADM:
+                        PIPE,*41,XSTATADM,PIPE,*52,PIPE,*57,PIPE,*59,XSTATDIS:
+                        PIPE,*66,XFORMDIS,PIPE,*76,XREMAINE,PIPE,*88,XACRDAYS:
+                        PIPE,*96,XSDFMADM,PIPE,*108,XSDSTADM,PIPE,*120,XSDSTDIS:
+                        PIPE,*127,XSDFMDIS,PIPE
+              ADD       ONE,CLNO
+.
+.             Update the total value for THIS claim type...
+.
+              ADD       XREMAINS,FTOTREMS
+              ADD       XFORMADM,FTOTADFM
+              ADD       XSTATADM,FTOTADST
+              ADD       XSTATDIS,FTOTDIST
+              ADD       XFORMDIS,FTOTDIFM
+              ADD       XREMAINE,FTOTREME
+              ADD       XACRDAYS,FTOTDAYS
+              ADD       XSDFMADM,FTOTSDFA
+              ADD       XSDSTADM,FTOTSDSA
+              ADD       XSDSTDIS,FTOTSDSD
+              ADD       XSDFMDIS,FTOTSDFD
+.
+.             Update the total value for each admission type...
+.
+              ADD       XREMAINS,FTOTARRY[LOOPCTR2][1]
+              ADD       XFORMADM,FTOTARRY[LOOPCTR2][2]
+              ADD       XSTATADM,FTOTARRY[LOOPCTR2][3]
+              ADD       XSTATDIS,FTOTARRY[LOOPCTR2][4]
+              ADD       XFORMDIS,FTOTARRY[LOOPCTR2][5]
+              ADD       XREMAINE,FTOTARRY[LOOPCTR2][6]
+              ADD       XACRDAYS,FTOTARRY[LOOPCTR2][7]
+              ADD       XSDFMADM,FTOTARRY[LOOPCTR2][8]
+              ADD       XSDSTADM,FTOTARRY[LOOPCTR2][9]
+              ADD       XSDSTDIS,FTOTARRY[LOOPCTR2][10]
+              ADD       XSDFMDIS,FTOTARRY[LOOPCTR2][11]
+.
+              GOTO      DISP1200
+.
+DISP1100      PRINT     *1,CADMDESC,*21,PIPE,*31,PIPE,*39,PIPE,*46,PIPE,*52:
+                        PIPE,*57,PIPE,*64,PIPE,*71,PIPE,*81,PIPE,*94,PIPE,*101:
+                        PIPE,*113,PIPE,*125,PIPE,*132,PIPE
+.
+DISP1200      ADD       ONE,CLNO                     * increment line count
+              ADD       ONE,LOOPCTR2
+            UNTIL     LOOPCTR2 = 9
+.
+            CALL      LINE0000
+            PRINT     *1,"TOTAL",*21,PIPE,*25,FTOTREMS,PIPE,*33,FTOTADFM:
+                      PIPE,*40,FTOTADST,PIPE,*52,PIPE,*57,PIPE,*58,FTOTDIST:
+                      PIPE,*65,FTOTDIFM,PIPE,*75,FTOTREME,PIPE,*88,FTOTDAYS:
+                      PIPE,*95,FTOTSDFA,PIPE,*107,FTOTSDSA,PIPE,*119,FTOTSDSD:
+                      PIPE,*126,FTOTSDFD,PIPE
+.
+            CALL      LINE0000
+            ADD       THREE,CLNO                     * increment line count
+.
+            ADD       ONE,LOOPCTR1
+          UNTIL     LOOPCTR1=4
+.
+.         Print ALL totals (Eligible Private/Compensable, Ineligible)
+.
+DISP2000  PRINT     *1,""
+          PRINT     *1,"ALL ADMITTED PATIENTS NOT TREATED AND PAID FOR UNDER ":
+                    "CONTRACT TO THE QLD PUBLIC HEALTH SECTOR"
+          PRINT     *1,""
+          ADD       THREE,CLNO                     * increment line count
+.
+          CALL      RSVA0000            * reset values array
+          MOVE      ONE,LOOPCTR1
+          REPEAT    
+            LOAD      CADMDESC,LOOPCTR1,ADTPDES1:
+                                        ADTPDES2:
+                                        ADTPDES3:
+                                        ADTPDES4:
+                                        ADTPDES5:
+                                        ADTPDES6:
+                                        ADTPDES7:
+                                        ADTPDES8
+.
+            PRINT     *1,CADMDESC,*21,PIPE,*25,FTOTARRY[LOOPCTR1][1],PIPE:
+                      *33,FTOTARRY[LOOPCTR1][2],PIPE:
+                      *40,FTOTARRY[LOOPCTR1][3],PIPE:
+                      *52,PIPE,*57,PIPE,*58,FTOTARRY[LOOPCTR1][4],PIPE:
+                      *65,FTOTARRY[LOOPCTR1][5],PIPE:
+                      *75,FTOTARRY[LOOPCTR1][6],PIPE:
+                      *88,FTOTARRY[LOOPCTR1][7],PIPE:
+                      *95,FTOTARRY[LOOPCTR1][8],PIPE:
+                      *107,FTOTARRY[LOOPCTR1][9],PIPE:
+                      *119,FTOTARRY[LOOPCTR1][10],PIPE:
+                      *126,FTOTARRY[LOOPCTR1][11],PIPE
+.
+            ADD       ONE,CLNO                     * increment line count
+.
+            ADD       FTOTARRY[LOOPCTR1][1],FVALARRY[1]
+            ADD       FTOTARRY[LOOPCTR1][2],FVALARRY[2]
+            ADD       FTOTARRY[LOOPCTR1][3],FVALARRY[3]
+            ADD       FTOTARRY[LOOPCTR1][4],FVALARRY[4]
+            ADD       FTOTARRY[LOOPCTR1][5],FVALARRY[5]
+            ADD       FTOTARRY[LOOPCTR1][6],FVALARRY[6]
+            ADD       FTOTARRY[LOOPCTR1][7],FVALARRY[7]
+            ADD       FTOTARRY[LOOPCTR1][8],FVALARRY[8]
+            ADD       FTOTARRY[LOOPCTR1][9],FVALARRY[9]
+            ADD       FTOTARRY[LOOPCTR1][10],FVALARRY[10]
+            ADD       FTOTARRY[LOOPCTR1][11],FVALARRY[11]
+.
+            ADD       ONE,LOOPCTR1
+          UNTIL     LOOPCTR1 = 9
+.
+          CALL      LINE0000
+          PRINT     *1,"TOTAL",*21,PIPE,*25,FVALARRY[1],PIPE:
+                    *33,FVALARRY[2],PIPE,*40,FVALARRY[3],PIPE,*52,PIPE,*57,PIPE:
+                    *58,FVALARRY[4],PIPE,*65,FVALARRY[5],PIPE:
+                    *75,FVALARRY[6],PIPE,*88,FVALARRY[7],PIPE:
+                    *95,FVALARRY[8],PIPE,*107,FVALARRY[9],PIPE:
+                    *119,FVALARRY[10],PIPE,*126,FVALARRY[11],PIPE
+          CALL      LINE0000
+          ADD       THREE,CLNO                     * increment line count
+.
+.         Print Contracted Patient totals...
+.
+DISP3000  PRINT     *1,""
+          PRINT     *1,"ADMITTED PATIENTS TREATED AND PAID FOR UNDER ":
+                    "CONTRACT TO THE QLD PUBLIC HEALTH SECTOR"
+.
+          CALL      LINE0000
+.
+          PRINT     *21,PIPE,"Remaining",*31,PIPE,*39,PIPE,"Statis",*46,PIPE:
+                    *52,PIPE,*57,PIPE,"Statis",*64,PIPE,*71,PIPE:
+                    "Remaining",*81,PIPE,"Accrued",*94,PIPE,*101,PIPE:
+                    *113,PIPE,*125,PIPE,*132,PIPE
+.
+          PRINT     *21,PIPE,"in start",*31,PIPE,"Formal",*39,PIPE,"tical":
+                    *46,PIPE,"From",*52,PIPE,"To",*57,PIPE,"tical",*64,PIPE:
+                    "Formal",*71,PIPE,"in at end",*81,PIPE,"Patient Days":
+                    *94,PIPE,"Formal",*101,PIPE,"Statistical",*113,PIPE:
+                    "Statistical",*125,PIPE,"Formal",*132,PIPE
+.
+          CALL      LINE0000                      * draw line across page
+          ADD       SIX,CLNO                      * increment line count 
+.
+          CALL      RSVA0000                      * reset values array
+          MOVE      ONE,LOOPCTR1
+          REPEAT
+            LOAD      CADMITYP,LOOPCTR1,ADTPVAL1:
+                                        ADTPVAL2:
+                                        ADTPVAL3:
+                                        ADTPVAL4:
+                                        ADTPVAL5:
+                                        ADTPVAL6:
+                                        ADTPVAL7:
+                                        ADTPVAL8:
+                                        ADTPVAL9
+.
+            PACK      KEY6,CCLTYPCO,CADMITYP,SP70
+            CALL      RDTEMP2
+            BRANCH    OVRCD,DISP3100
+.
+            ADD       XREMAINS,FVALARRY[1]
+            ADD       XFORMADM,FVALARRY[2]
+            ADD       XSTATADM,FVALARRY[3]
+            ADD       XSTATDIS,FVALARRY[4]
+            ADD       XFORMDIS,FVALARRY[5]
+            ADD       XREMAINE,FVALARRY[6]
+            ADD       XACRDAYS,FVALARRY[7]
+            ADD       XSDFMADM,FVALARRY[8]
+            ADD       XSDSTADM,FVALARRY[9]
+            ADD       XSDSTDIS,FVALARRY[10]
+            ADD       XSDFMDIS,FVALARRY[11]
+.
+DISP3100    ADD       ONE,LOOPCTR1
+          UNTIL     LOOPCTR1 = 10
+.
+          PRINT     *1,"TOTAL (PUBLIC)",*21,PIPE,*25,FVALARRY[1],PIPE:
+                    *33,FVALARRY[2],PIPE,*40,FVALARRY[3],PIPE,*52,PIPE:
+                    *57,PIPE,*58,FVALARRY[4],PIPE,*65,FVALARRY[5],PIPE:
+                    *75,FVALARRY[6],PIPE,*88,FVALARRY[7],PIPE:
+                    *95,FVALARRY[8],PIPE,*107,FVALARRY[9],PIPE:
+                    *119,FVALARRY[10],PIPE,*126,FVALARRY[11],PIPE
+          CALL      LINE0000                      * draw line across page
+          ADD       TWO,CLNO                      * increment line count 
+.
+DISP4000  PRINT     *1,""
+          PRINT     *1,"ALL PATIENTS"
+          PRINT     *21,"Patient days accrued by Newborns with status ":
+                    "of Unqualified:",*88,FNWBDAYS,PIPE
+.
+          PRINT     *21,"Patient days accrued by Nursing Home Type Patients:":
+                    *88,FNURDAYS,PIPE
+          ADD       FOUR,CLNO                      * increment line count 
+.
+DISP9000  PRINT     *N,*1,"*** End of Report ***"
+          ADD       ONE,CLNO                      * increment line count 
+          DISPLAY   *P1:24,*EL,*V2LON,*BLINKON,"Report Completed!",*P30:24;
+.          CALL      HITENTER
+.
+DISP9999  RETURN
++
+. =============================================================================
+.  I/O Routines for the 2 index files
+. =============================================================================
+.
+. Temp file 1
+.
+RDSTEMP1  READ      TMPFL1K1,KEY8;;
+          RETURN
+.
+RDKTEMP1  MOVE      ZERO,OVRCD
+          READKS    TMPFL1K1;XADMN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          READ      TMPFL1K1,KEY8;XADMN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     TMPFL1K1,KEY8;KEY8
+          RETURN
+.
+.
+. Temp file 2
+.
+RDSTEMP2  READ      TMPFL2K1,KEY6;;
+          RETURN
+.
+RDATEMP2  MOVE      ZERO,OVRCD
+          RESET     KEY6
+          READ      TMPFL2K1,KEY6;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+
+RDKTEMP2  MOVE      ZERO,OVRCD
+          READKS    TMPFL2K1;XADMN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP2   MOVE      ZERO,OVRCD
+          READ      TMPFL2K1,KEY6;XCLMTYPE,XADMTYPE,XREMAINS,XFORMADM,XSTATADM:
+                                  XSTATDIS,XFORMDIS,XREMAINE,XACRDAYS,XSAMEDAY:
+                                  XSDFMADM,XSDSTADM,XSDSTDIS,XSDFMDIS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP2   WRITE     TMPFL2K1,KEY6;KEY6,XREMAINS,XFORMADM,XSTATADM:
+                                  XSTATDIS,XFORMDIS,XREMAINE,XACRDAYS,XSAMEDAY:
+                                  XSDFMADM,XSDSTADM,XSDSTDIS,XSDFMDIS
+          RETURN
+.
+UPTEMP2   UPDATE    TMPFL2K1;XCLMTYPE,XADMTYPE,XREMAINS,XFORMADM,XSTATADM:
+                             XSTATDIS,XFORMDIS,XREMAINE,XACRDAYS,XSAMEDAY:
+                             XSDFMADM,XSDSTADM,XSDSTDIS,XSDFMDIS
+          RETURN
+.
+.
+. =========================================================================
+.  I/O Includes
+. =========================================================================
+.
+          INC       PATCODIO/INC
+          INC       PATVISIO/INC
+          INC       PATHSPIO/INC
+          INC       PATMI1IO/INC
+          INC       PMSVX1IO/INC
+          INC       PATDSCIO/INC
+          INC       PATTRNIO/INC        * for NHOSPDAY
+          INC       PATDRGIO/INC        * for GPERD
+          INC       STD001IO
+          INC       EXCLNEWB
+          INC       NHOSPDAY            * Accrued bed days
+          INC       PATCOMN3            * KEYPER; Key in a period (MM/CCYY)
+          INC       TFILENAM 
+          INC       IBASEQIO/INC 
+          INC       WEBERRIO/INC
+

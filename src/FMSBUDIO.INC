@@ -1,0 +1,328 @@
+. 20/04/94  RKS  Added IO for the new audit file 'fmsaudbu'
+. ----------------------------------------------------------------------
+.
+. FMSBUDIO    
+. --------
+. Filename     : fmsbudaf.dat
+. Auditname    : fmsaudbu.dat
+.
+RSFMBU1   RESET     KEY14
+          READ      FMSBUDA1,KEY14;;
+          RETURN
+.
+RAFMBU1   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      FMSBUDA1,KEY14;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMBU1   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      FMSBUDA1,KEY14;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMBU1   MOVE      ZERO,OVRCD
+          READKS    FMSBUDA1;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMBU1   MOVE      ZERO,OVRCD
+          READKP    FMSBUDA1;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMBU1   UPDATE    FMSBUDA1;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          RETURN
+.
+WRFMBU1   RESET     KEY14
+          WRITE     FMSBUDA1,KEY14;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          RETURN
+.
+DEFMBU1   RESET     KEY14
+          DELETE    FMSBUDA1,KEY14
+          RETURN
+.
+RSFMBU2   RESET     KEY17
+          READ      FMSBUDA2,KEY17;;
+          RETURN
+.
+RAFMBU2   RESET     KEY17
+          MOVE      ZERO,OVRCD
+          READ      FMSBUDA2,KEY17;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMBU2   RESET     KEY17
+          MOVE      ZERO,OVRCD
+          READ      FMSBUDA2,KEY17;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMBU2   MOVE      ZERO,OVRCD
+          READKS    FMSBUDA2;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMBU2   MOVE      ZERO,OVRCD
+          READKP    FMSBUDA2;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMBU2   UPDATE    FMSBUDA2;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          RETURN
+.
+WRFMBU2   RESET     KEY17
+          WRITE     FMSBUDA2,KEY17;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          RETURN
+.
+DEFMBU2   RESET     KEY17
+          DELETE    FMSBUDA2,KEY17
+          RETURN
+.
+RSFMBU3   RESET     KEY14
+          READ      FMSBUDA3,KEY14;;
+          RETURN
+.
+RAFMBU3   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      FMSBUDA3,KEY14;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMBU3   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      FMSBUDA3,KEY14;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMBU3   MOVE      ZERO,OVRCD
+          READKS    FMSBUDA3;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMBU3   MOVE      ZERO,OVRCD
+          READKP    FMSBUDA3;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMBU3   UPDATE    FMSBUDA3;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          RETURN
+.
+WRFMBU3   RESET     KEY14
+          WRITE     FMSBUDA3,KEY14;FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                                  FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                                  FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                                  FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                                  FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                                  FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                                  FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                                  FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                                  FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+          RETURN
+.
+DEFMBU3   RESET     KEY14
+          DELETE    FMSBUDA3,KEY14
+          RETURN
+.
+.
+.**************************************
+. WAssff - Write Audit Record           
+. Requires - AUDTTYPE 1=write 
+.                     2=before change
+.                     3=after change
+.                     4=delete
+.**************************************
+WAFMBU00  OPEN      CONTROLF,"controlf"
+          MOVE      "   51",AUDTSECT
+          MOVE      "49",AUDTPOST
+          READ      CONTROLF,AUDTSECT;*AUDTPOST,AUDTFLAG
+          COMPARE   ONE,AUDTFLAG
+          GOTO      WAFMBU99 IF NOT EQUAL
+.
+          PACK     FMBUAUDD,CCC,CYY,CMM,CDD
+          REP       " 0",FMBUAUDD
+          CLOCK     TIME,FMBUAUDT
+          MOVE      PORT,FMBUAUDP
+          LOAD      FMBUAUDR,AUDTTYPE,ANSA,ANSB,ANSC,ANSD
+          MOVE      ONE,FMBUAUDS
+          MOVE      PASSCODE,FMBUAUDO
+          PACK      KEY19,FMBUAUDD,FMBUAUDT,FMBUAUDP,FMBUAUDR
+          MOVE      KEY19,AUDTSKEY
+          CALL      AWFMBU
+WAFMBU99  RETURN
+.**************************************
+. DAssff - Delete Before Change Audit 
+.**************************************
+DAFMBU00
+          MOVE      "   51",AUDTSECT
+          MOVE      "49",AUDTPOST
+          READ      CONTROLF,AUDTSECT;*AUDTPOST,AUDTFLAG
+          COMPARE   ONE,AUDTFLAG
+          GOTO      DAFMBU99 IF NOT EQUAL
+.
+          MOVE      AUDTSKEY,KEY19
+          CALL      ADFMBU
+DAFMBU99  RETURN
+.
+ASFMBU     RESET  KEY19
+           READ   FMSAUDBU,KEY19;;
+           RETURN
+.
+AUFMBU     UPDATE FMSAUDBU;FMBUAUDD,FMBUAUDT,FMBUAUDP:
+                           FMBUAUDR,FMBUAUDS,FMBUAUDO:
+                           FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                           FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                           FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                           FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                           FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                           FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                           FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                           FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                           FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+           RETURN
+.
+AKFMBU     MOVE   ZERO,OVRCD
+           READKS FMSAUDBU;FMBUAUDD,FMBUAUDT,FMBUAUDP:
+                           FMBUAUDR,FMBUAUDS,FMBUAUDO:
+                           FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                           FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                           FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                           FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                           FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                           FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                           FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                           FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                           FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+           GOTO   OVERCOND IF OVER
+           RETURN
+.
+AWFMBU     RESET  KEY19
+           WRITE  FMSAUDBU,KEY19;FMBUAUDD,FMBUAUDT,FMBUAUDP:
+                           FMBUAUDR,FMBUAUDS,FMBUAUDO:
+                           FMBUCULD,FMBUCUAC,FMBUCUPR,FMBUCA01:
+                           FMBUCA02,FMBUCA03,FMBUCA04,FMBUCA05,FMBUCA06:
+                           FMBUCA07,FMBUCA08,FMBUCA09,FMBUCA10,FMBUCA11:
+                           FMBUCA12,FMBUCA13,FMBUCB01,FMBUCB02,FMBUCB03:
+                           FMBUCB04,FMBUCB05,FMBUCB06,FMBUCB07,FMBUCB08:
+                           FMBUCB09,FMBUCB10,FMBUCB11,FMBUCB12,FMBUCB13:
+                           FMBUCC01,FMBUCC02,FMBUCC03,FMBUCC04,FMBUCC05:
+                           FMBUCC06,FMBUCC07,FMBUCC08,FMBUCC09,FMBUCC10:
+                           FMBUCC11,FMBUCC12,FMBUCC13,FMBUCUSP
+           RETURN
+.
+ADFMBU     RESET  KEY19
+           DELETE FMSAUDBU,KEY19
+           RETURN

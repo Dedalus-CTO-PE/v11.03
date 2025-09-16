@@ -1,0 +1,503 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   FX825792                                                    *
+.* Desc      :   Migrate Nurse codes from oprnuraf to pmshcpaf               *
+.*****************************************************************************
+.* Date      :   04/01/2018                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through the oprnuraf file and        *
+.*               create an equivalent pmshcpaf record for each valid nurse   *
+.*               record, provided the nurse code doesn't already exist on    *
+.*               pmshcpaf.  A report is produced for each record to indicate *
+.*               if the migration of that record was successful or not.      *
+.*                                                                           *
+.* Mods      :                                                               *
+.*        V10.12.02 23/02/2018  Steve Armstrong  Task: 0825792               *
+.*                  Fixed updating of keyword search file (pmshkiaf)         *
+.*        V10.12.01 23/02/2018  Steve Armstrong  Task: 0825792               *
+.*                  Fixed display of colon for Default Primary Specialty     *
+.*                  Code input field 5.                                      *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       OPRNURFD/INC
+          INC       PATCODFD/INC
+          INC       PMSHCPFD/INC
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CODE      DIM       2             * category variable for PATCODKY
+CODEDESC  DIM       20
+CURRDATE  DIM       8             * current date (ccyymmdd)
+DEFLTCOD  DIM       3             * default specialty code (Cat DT)
+DEFLTTYP  FORM      1             * default HCP type
+.                                    1 = "14 - Nurse"
+.                                    2 = "15 - Nurse and Other"
+DEFTITLE  DIM       10            * default nurse title
+INACTIVE  DIM       1             * migrating inactive nurse flag (y/n)
+OPTNDESC  DIM       18            * option description for header
+STRTDATE  DIM       8             * default start date (ccyymmdd)
+SUCCFLAG  FORM      1             * success flag
+.                                    0 = successful (hcp record written)
+.                                    1 = unsuccessful (hcp record not written)
+.
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+OPTDESC1  INIT      "- Migration "
+OPTDESC2  INIT      "- Validation Only "
+PIPE      INIT      "|"
+.
+.
+.
+PRGID     INIT      "FX825792"
+PRGNAM    INIT      "Migrate Nurse Codes"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000:      * proceed with validation
+                            MAIN1000       * proceed with migration
+.
+MAIN1000  CALL      TITL0000               * get default title
+.
+          CALL      GTYP0000               * get default HCP type
+.
+          CALL      GDAT0000               * get default start date
+.
+          CALL      INAC0000               * check if migrating inactive nurses
+.
+          CALL      GSPC0000               * get default HCP specialty code
+          BRANCH    EXIT,MAIN0100          * exitchar input
+.
+          CALL      SEL0000                * entry input
+          BRANCH    EXIT,MAIN0100          * cancel selected
+.
+MAIN5000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      PROC0000               * process
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"oprnuraf";
+          OPEN      OPRNURA1,"oprnuraf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"pmshcpaf";
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          MOVE      ONE,CNEWDS
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run migration or validation             *
+.*                        TRUE  (1)  Exit option selected                    *
+.*****************************************************************************
+.
+OPTN0000  HLINE     *G37,2,50,80
+          DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Nurse Code Validation":
+                    *P1:6,*V2LON,TWO,*HOFF,". Run Nurse Code Migration"
+.
+OPTN0500  KEYIN     *P1:8,*EL,"Select Option : ":
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000:            * run validation
+                            OPTN9000             * run migration
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  LOAD      OPTNDESC,COPTION,OPTDESC2,OPTDESC1
+          DISPLAY   *P50:2,*V2LON,OPTNDESC:
+                    *P1:3,*EF
+          PACK      CPHDROPT,OPTNDESC,SP20
+          MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               TITL0000              Called by: MAIN0000   *
+.*                        Get the default title                              *
+.* Returns: DEFTITLE - default title                                         *
+.*****************************************************************************
+.
+TITL0000  KEYIN     *P2:4,*EL,*V2LON,*DV,ONE,*HOFF:
+                    ". Default Title",*P39:4,":":
+                    *P41:4,*V2LON,DEFTITLE
+.
+          PACK      DEFTITLE,DEFTITLE,SP10
+.
+TITL9999  RETURN
++
+.*****************************************************************************
+.*                               GTYP0000              Called by: MAIN0000   *
+.*                        Get the default HCP Type                           *
+.* Returns: DEFLTTYP - default HCP type                                      *
+.*****************************************************************************
+.
+GTYP0000  KEYIN     *P1:24,*EL,*V2LON,*DV,ONE,*HOFF," = Nurse, ":
+                    *V2LON,*DV,TWO,*HOFF," = Nurse and Other":
+                    *P2:5,*EL,*V2LON,*DV,TWO,*HOFF:
+                    ". Default HCP Type",*P39:5,":":
+                    *P41:5,*V2LON,DEFLTTYP:
+                    *P1:24,*EL
+.
+          IF        DEFLTTYP <> 1 & DEFLTTYP <> 2
+            DISPLAY   *P1:24,*B,"Value can only be 1 or 2.  ";
+            CALL      HITENTER
+            GOTO      GTYP0000
+          ENDIF
+.
+          IF        DEFLTTYP = 1
+            DISPLAY   *P41:5,*EL,*V2LON,"Nurse"
+          ELSE
+            DISPLAY   *P41:5,*EL,*V2LON,"Nurse and Other"
+          ENDIF
+.
+GTYP9999  RETURN
++
+.****************************************************************************
+.*                             GDAT0000                Called by: MAIN0000  *
+.*                       Get default start date                             *
+.* Returns: STRTDATE - default starting date (ccyymmdd)                     *
+.****************************************************************************
+.
+GDAT0000  DISPLAY   *P2:6,*EL,*V2LON,THREE,*HOFF:
+                    ". Default Start Date",*P39:6,":"
+          MOVE      ONE,CCENTRY
+          MOVE      ZERO,CCANLDTE
+          MOVE      SIX,CVERT
+          MOVE      FORTY1,CCOL
+.
+          CALL      IBACLOCK                     * get current date
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          UNPACK    CURRDATE,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,GDAT9100
+.
+          PACK      STRTDATE,CCENT,CYEAR,CMON,CDAY
+          GOTO      GDAT9999
+.
+GDAT9100  MOVE      CURRDATE,STRTDATE
+.
+GDAT9999  RETURN
++
+.*****************************************************************************
+.*                               INAC0000              Called by: MAIN0000   *
+.*                      Check if we are migrating inactive nurses            *
+.* Returns: INACTIVE - Y/N field for migrating inactive nurses               *
+.*****************************************************************************
+.
+INAC0000  KEYIN     *P2:7,*EL,*V2LON,*DV,FOUR,*HOFF:
+                    ". Migrating Inactive Nurses (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,")",*P39:7,":":
+                    *P41:7,*V2LON,INACTIVE
+.
+          PACK      INACTIVE,INACTIVE,SP1
+          REP       UPPLOW,INACTIVE
+.
+          MATCH     ANSY,INACTIVE
+          IF        @EQUAL
+            DISPLAY   *P41:7,*EL,*V2LON,DYES
+            GOTO      INAC9999
+          ENDIF
+.
+          MATCH     ANSN,INACTIVE
+          IF        @EQUAL
+            DISPLAY   *P41:7,*EL,*V2LON,DNO
+            GOTO      INAC9999
+          ENDIF
+.
+          BEEP
+          GOTO      INAC0000
+.
+INAC9999  RETURN
++
+.*****************************************************************************
+.*                               GSPC0000              Called by: MAIN0000   *
+.*             Get Default HCP Specialty Code                                *
+.* Returns: DEFLTCOD - Default specialty code (Cat DT)                       *
+.*          EXIT  0 = Ok to continue                                         *
+.*                1 = exitchar input - return to program menu                *
+.*****************************************************************************
+.
+GSPC0000  DISPLAY   *P2:8,*EL,*V2LON,FIVE,*HOFF:
+                    ". Default Primary Specialty Code",*P39:8,":"
+.
+          MOVE      FORTY1,ECOL                  * set keyin column
+          MOVE      EIGHT,EVERT                  * set keyin row
+          PACK      CODE,ANSD,ANST               * set category "DT"
+          MOVE      SP3,CKYIDEF3                 * set blank default
+          MOVE      ONE,CKYIMAND                 * set mandatory
+.
+          CALL      PATCODKY                     * get specialty code
+          BRANCH    EXIT,GSPC0000:               * nothing entered - not poss.
+                         GSPC9100                * exitchar input
+.
+          DISPLAY   *P50:8,TDESC
+.
+GSPC9000  MOVE      ACODE,DEFLTCOD               * save default specialty code
+          MOVE      TDESC,CODEDESC
+          MOVE      ZERO,EXIT
+          GOTO      GSPC9999
+.
+GSPC9100  MOVE      ONE,EXIT
+.
+GSPC9999  RETURN
++
+.****************************************************************************
+.*                                   SEL0000           Called by: ML0000    *
+.*                         Select field to modify or post                   *
+.*    Returns:  EXIT    =       (0)  Post was selected.                     *
+.*                              (1)  Cancel was selected.                   *
+.****************************************************************************
+.
+SEL0000   CALL      MAINQST                  * Ask for an item, post or cancel
+.
+          COMPARE   ZERO,CCITEM              * What was entered ?
+          GOTO      SEL9000 IF EQUAL         * Post was selected
+          GOTO      SEL9100 IF LESS          * Cancel was selected
+.
+          BRANCH    CCITEM,SEL1000:          * default nurse title
+                           SEL2000:          * default hcp type
+                           SEL3000:          * start date
+                           SEL4000:          * migrating inactive nurses
+                           SEL5000           * copying qualification codes
+.
+          BEEP
+          GOTO      SEL0000                  * invalid
+.
+SEL1000   CALL      TITL0000                 * default nurse title
+          GOTO      SEL0000
+.
+SEL2000   CALL      GTYP0000                 * default hcp type
+          GOTO      SEL0000
+.
+SEL3000   CALL      GDAT0000                 * start date
+          GOTO      SEL0000
+.
+SEL4000   CALL      INAC0000                 * migrating inactive nurses
+          GOTO      SEL0000
+.
+SEL5000   CALL      GSPC0000                 * get default HCP specialty code
+          BRANCH    EXIT,SEL9100
+          GOTO      SEL0000
+.
+.         Post was selected. Set the exit flag to tell the calling routine.
+.
+SEL9000   MOVE      ZERO,EXIT                * Post was selected
+          GOTO      SEL9999
+.
+.         Cancel was selected. Set the exit flag to tell the calling routine.
+.
+SEL9100   MOVE      ONE,EXIT                 * Cancel was selected
+.
+SEL9999   RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*                                                                           *
+.*****************************************************************************
+.
+PROC0000  DISPLAY   *P1:24,*EL,"Processing:";
+.
+          MOVE      ZERO,CPAGENO                 * initialise print variables
+          MOVE      ZERO,CNOUNDLN
+          CALL      IBACLOCK
+.
+          CALL      HEAD0000
+.
+          MOVE      SP6,KEY6
+          CALL      RSOPNUR1                     * position at start of file
+PROC0500  CALL      RKOPNUR1                     * read next record
+          BRANCH    OVRCD,PROC9500               * eof - finished
+.
+          DISPLAY   *P13:24,*EL,*V2LON,OPNRCODE;
+.
+.         If we are only sending active nurse records, then check
+.         if the current record is active
+.
+          MATCH     ANSN,INACTIVE                * sending inactive records ?
+          IF        @EQUAL
+            COMPARE   ONE,OPNRSTAT               * no - inactive record ?
+            GOTO      PROC0500 IF EQUAL          * yes - ignore
+          ENDIF
+.
+.         Check if the nurse code already exists as a HCP code
+.
+          PACK      KEY10,OPNRCODE,SP10
+          CALL      RDPMHCP1                     * record on file ?
+          IF        OVRCD = 0
+            MOVE      ONE,SUCCFLAG               * yes - set success flag
+            CALL      DISP0000                   * print report record
+            GOTO      PROC0500                   * get next record
+          ENDIF
+.
+.         Check which mode we are running in
+.
+          BRANCH    COPTION,PROC0500             * val. only - get next record
+.
+.         The current nurse is valid for migration, so create a new HCP record
+.
+          CALL      CLPMSHCP                     * clear pmshcpaf variables
+.
+          PACK      PMHCHCPC,OPNRCODE,SP10       * load pmshcpaf variables
+          MOVE      DEFTITLE,PMHCTITL
+          PACK      PMHCGNAM,OPNRGNAM,SP70
+          PACK      PMHCSNAM,OPNRSNAM,SP70
+          MOVE      DEFLTCOD,PMHCSPC1
+          IF        DEFLTTYP = 1
+            MOVE      TEN4,PMHCHCST
+          ELSE
+            MOVE      TEN5,PMHCHCST
+          ENDIF
+          MOVE      STRTDATE,PMHCSDAT
+          MOVE      OPNRSTAT,PMHCSTTS
+.
+          CALL      WRPMHCP1                     * write pmshcpaf record
+          MOVE      ZERO,SUCCFLAG                * set success flag
+          CALL      DISP0000                     * print report record
+.
+          IF        COPTION = 2
+            PROC      PMSHKIUP                   * update doctor keyword index
+          ENDIF
+.
+          GOTO      PROC0500                     * get next record
+.
+PROC9500  CALL      LINE0000
+          IF        COPTION = 1
+            PRINT     *N,*1,"Validation Complete"
+          ELSE
+            PRINT     *N,*1,"Migration Complete"
+          ENDIF
+          PRINT     *N,*1,"*** End of Report ***"
+.
+          DISPLAY   *P1:24,*EF,"Fixit completed.  ";
+          CALL      HITENTER
+.
+PROC9999  RETURN
++
+.****************************************************************************
+.*                            DISP0000                 Called by: PROC0000  *
+.*                  Valid record so print it                                *
+.* Requires: SUCCFLAG - success flag                                        *
+.*                0 = successfully created hcp record                       *
+.*                1 = unsuccessfully created hcp record                     *
+.****************************************************************************
+.
+DISP0000  COMPARE   FIFTY2,CLNO                  * page full ?
+          CALL      HEAD0000 IF NOT LESS         * yes
+.
+          PRINT     *1,PIPE,*3,OPNRCODE,*14,PIPE,*16;
+          IF        SUCCFLAG = 0
+            PRINT     "Nurse Migrated Successfully";
+          ELSE
+            PRINT     "Nurse Code already exists on pmshcpaf - Not Migrated";
+          ENDIF
+          PRINT     *80,PIPE
+.
+          ADD       ONE,CLNO                     * increment line count
+.
+DISP9999  RETURN
++
+.****************************************************************************
+.*                            HEAD0000                 Called by: PROC0000  *
+.*                       Print page heading                       DISP0000  *
+.****************************************************************************
+.
+HEAD0000  CALL      HEAD80                       * display page header
+.
+          PRINT     *N,*20,"Default Title                 : ",DEFTITLE,*N:
+                    *20,"Default HCP Type              : ";
+          IF        DEFLTTYP = 1
+            PRINT     "Nurse"
+          ELSE
+            PRINT     "Nurse and Other"
+          ENDIF
+.
+          UNPACK    STRTDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *20,"Default Start Date            : ",CPCDATE,*N:
+                    *20,"Migrating Inactive Nurses     : ";
+          MATCH     ANSY,INACTIVE
+          IF        @EQUAL
+            PRINT     "Yes"
+          ELSE
+            PRINT     "No"
+          ENDIF
+.
+          PRINT     *20,"Default Primary Specialty Code: ",DEFLTCOD,SP5:
+                    CODEDESC,*N;
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"Nurse Code",*14,PIPE,*16,"Migration Status":
+                    *80,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      TEN2,CLNO                    * increment line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: PROC0000  *
+.*                      Draw line across page                     HEAD0000  *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       CLPMSHCP
+          INC       PATCODKY
+          INC       PMSHKIPR
+.
+          INC       OPRNURIO/INC
+          INC       PATCODIO/INC
+          INC       PMSHCPIO/INC

@@ -1,0 +1,610 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   EXTRACTN                                                    *
+.* Desc      :   Outpatient Action List Data Extraction Program              *
+.*****************************************************************************
+.* Date      :   12/12/2014                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will extract the outpatient action lists into  *
+.*               a pipe delimited file in a format that will feed into       *
+.*               CONVACTN.                                                   *
+.* Mods:                                                                     *
+.*        V10.12.01 16/01/2018  Steve Armstrong  TSK 0829351                 *
+.*                  Mods to load action related comments from outrcmaf.      *
+.*****************************************************************************
+.*        V10.06.01 02/09/2015  Steve Armstrong  CAR 318304                  *
+.*                  Mods to allow a range of Clinic Type codes to be         *
+.*                  extracted for a specific site.                           *
+.*****************************************************************************
+.*        V10.05.00 12/12/2014  Steve Armstrong  CAR 305263                  *
+.*                  Created program.                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       IBACONFD/INC
+          INC       OUTCONFD/INC
+          INC       OUTARTFD/INC
+          INC       OUTCTYFD/INC
+          INC       OUTRCMFD/INC
+          INC       OUTSITFD/INC
+          INC       PATCODFD/INC
+          INC       PATHSPFD/INC
+.
+.
+.         O/P Action List upload file layout - convactn.txt
+.         (as per CONVACTN)
+.
+ACTNTEXT  FILE      HL7, FIXED=4000
+.
+ACTNURNO  DIM       8       UR Number                         (otarurno)
+ACTNAVIS  DIM       20      Alternate Referral No.   (ibaalvaf.ibavavis)
+.                             (Linked A/H Referral Number)    (otarrefn)
+ACTNRQDT  DIM       8       Request Date (ccyymmdd)           (otarrqdt)
+ACTNRQTM  DIM       8       Request Time (hh:mm:ss)           (otarrqtm)
+ACTNRDEP  DIM       3       Requesting Department (Cat CG)    (otarrdep)
+ACTNADEP  DIM       3       Appt. with Department (Cat CG)    (otaradep)
+ACTNPRDT  DIM       8       Preferred Date (ccyymmdd)         (otarprdt)
+ACTNPRHS  DIM       3       Preferred Hospital                (otarprhs)
+ACTNPRSI  DIM       6       Preferred Site                    (otarprsi)
+ACTNCLID  DIM       6       Clinic Id                         (otarclid)
+ACTNVIST  DIM       3       Visit Type (Cat CV)               (otarvist)
+ACTNTRRQ  DIM       3       Transport Required (Cat OB)       (otartrrq)
+ACTNPCOM  DIM       50      Presenting Complaint              (otarpcom)
+ACTNFINC  DIM       3       Financial Class (Cat CL)          (otarfinc)
+ACTNPRIO  DIM       3       Priority (Cat PR)                 (otarprio)
+ACTNSORF  DIM       3       Source of Referral (ostcatg)      (otarsorf)
+ACTNSARR  DIM       3       Special Arrangements (Cat SA)     (otarsarr)
+ACTNSTAT  DIM       1       Status  0 - Requested             (otarstat)
+.                                   1 - Pending Reschedule
+ACTNRREQ  DIM       3       Reason for Request (Cat VU)       (otarrreq)
+ACTNCDAT  DIM       8       Create Request Date (ccyymmdd)    (otarcdat)
+ACTNCTIM  DIM       8       Create Request Time (hh:mm:ss)    (otarctim)
+ACTNCUID  DIM       10      User who created Request          (otarcuid)
+ACTNINTR  DIM       1       Interpreter Req'd (Y/N)           (otarintr)
+ACTNCOMM  DIM       800     Comments                          (outrcmaf)
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CODE      DIM       2
+COMCOUNT  FORM      2
+CURRDATE  DIM       8
+CURRTIME  DIM       8
+DIM14     DIM       14
+ENDCTYP   DIM       6
+EXTCOUNT  FORM      10
+RECCOUNT  FORM      10
+SAVECODE  DIM       3
+SAVKEY33  DIM       33
+SITECODE  DIM       6
+STRTCTYP  DIM       6
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+PIPE      INIT      "|"
+.
+.
+PRGID     INIT      "EXTRACTN"
+PRGNAM    INIT      "Outpatient Action List Extraction"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * O/P Action extract
+.
+MAIN1000  CALL      GHOS0000               * get hospital code
+          BRANCH    EXIT,MAIN0100          * nothing or exitchar entered
+.
+          CALL      GCAN0000               * get cancellation code
+          BRANCH    EXIT,MAIN0100          * nothing or exitchar entered
+.
+          CALL      GSIT0000               * get site code
+          BRANCH    EXIT,MAIN0100          * exitchar entered
+.
+          CALL      GSCT0000               * get starting clinic type
+          BRANCH    EXIT,MAIN0100          * exitchar entered
+.
+          CALL      GECT0000               * get ending clinic type
+          BRANCH    EXIT,MAIN0100          * exitchar entered
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN5000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN5000  CALL      CFIL0000               * create file
+          BRANCH    EXIT,MAIN0100          * file exists
+.
+          CALL      PROC0000               * process
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"outartaf";
+          OPEN      OUTARTA2,"outartaf"
+.
+          DISPLAY   *P64:24,"outctyaf";
+          OPEN      OUTCTYA1,"outctyaf"
+.
+          DISPLAY   *P64:24,"outrcmaf";
+          OPEN      OUTRCMA1,"outrcmaf"
+.
+          DISPLAY   *P64:24,"outsitaf";
+          OPEN      OUTSITA1,"outsitaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"pathspaf";
+          OPEN      PATHSPA1,"pathspaf"
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          MOVE      ONE,CNEWDS
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run data extraction                     *
+.*                        TRUE  (1)  Exit option selected                    *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". O/P Action List ":
+                                           "Data Extract & Cancel":
+                    *P1:6,*V2LON,TWO,*HOFF,". O/P Action List Report Only"
+.
+OPTN0500  KEYIN     *P1:8,*EL,"Select Option : ":
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000:            * run extraction
+                            OPTN9000             * run report
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                                  CFIL0000       Called by: MAIN0000       *
+.*                         Create the extract file                           *
+.*****************************************************************************
+.
+CFIL0000  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          IF        COPTION = 1
+            OPEN      ACTNTEXT,"convactn"
+          ELSE
+            OPEN      ACTNTEXT,"convactn.tst"
+          ENDIF
+          TRAPCLR   IO
+          BRANCH    OVRCD,CFIL5000
+.
+          DISPLAY   *P1:23,*B,*EF,"The extract file convactn.";
+          IF        COPTION = 1
+            DISPLAY   "txt";
+          ELSE
+            DISPLAY   "tst";
+          ENDIF
+          DISPLAY   " already exists."
+CFIL1000  KEYIN     *P1:24,"Overwrite it (",*V2LON,*DV,ANSY,*HOFF,"/":
+                    *V2LON,*DV,ANSN,*HOFF,")?":
+                    *P21:24,*V2LON,ANS
+.
+          REP       UPPLOW,ANS
+          MATCH     ANSY,ANS                * "Y" entered ?
+          GOTO      CFIL2000 IF EQUAL       * yes - continue
+.
+          MATCH     ANSN,ANS                * "N" entered ?
+          GOTO      CFIL9100 IF EQUAL       * no
+.
+          BEEP
+          GOTO      CFIL1000
+.
+.         Delete the existing file
+.
+CFIL2000  CLOSE     ACTNTEXT,DELETE
+.
+.         Create a new extract file
+.
+CFIL5000  IF        COPTION = 1
+            PREP      ACTNTEXT,"convactn"
+          ELSE
+            PREP      ACTNTEXT,"convactn.tst"
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      CFIL9999
+.
+CFIL9100  MOVE      ONE,EXIT
+.
+CFIL9999  RETURN
++
+.*****************************************************************************
+.*                               GHOS0000              Called by: MAIN0000   *
+.*                    Get the user to input the required hospital code       *
+.* Requires: IBCNMHOS - multi hospital parameter                             *
+.* Returns: EXIT  0 - Ok to continue                                         *
+.*                1 - Nothing or exitchar entered                            *
+.*          PTHSHOSP - Hospital required code                                *
+.*****************************************************************************
+.
+GHOS0000  COMPARE   ONE,IBCNMHOS                 * using multi-campus ?
+          GOTO      GHOS9999 IF NOT EQUAL        * no - finished
+.
+          MOVE      TWENTY3,ECOL
+          MOVE      TEN,EVERT
+          DISPLAY   *P1:10,*EF,"Hospital            :"
+          MOVE      SP3,CKYIDEF3                 * no default value
+          MOVE      ZERO,CKYIMAND                * not mandatory
+.
+          CALL      PATHSPKY
+          BRANCH    EXIT,GHOS9100:               * nothing or spaces entered
+                         GHOS9100                * exitchar entered
+.
+          DISPLAY   *P30:10,*EL,PTHSNAME
+.
+          MOVE      ZERO,EXIT
+          GOTO      GHOS9999
+.
+GHOS9100  MOVE      ONE,EXIT
+.
+GHOS9999  RETURN
++
+.*****************************************************************************
+.*                               GCAN0000              Called by: MAIN0000   *
+.*                    Get the user to input the cancellation code            *
+.* Returns: EXIT  0 - Ok to continue                                         *
+.*                1 - Nothing or exitchar entered                            *
+.*          SAVECODE - Cancellation code (CB)                                *
+.*****************************************************************************
+.
+GCAN0000  BRANCH    COPTION,GCAN1000:            * Extract and Cancel
+                            GCAN9000             * Report Only
+.
+GCAN1000  MOVE      TWENTY3,ECOL
+          MOVE      TEN1,EVERT
+          PACK      CODE,ANSC,ANSB
+          DISPLAY   *P1:11,"Cancellation Reason :"
+          MOVE      SP3,CKYIDEF3                 * no default value
+          MOVE      ZERO,CKYIMAND                * not mandatory
+.
+          CALL      PATCODKY
+          BRANCH    EXIT,GCAN9100:               * nothing or spaces entered
+                         GCAN9100                * exitchar entered
+.
+          MOVE      ACODE,SAVECODE               * save code
+          DISPLAY   *P30:11,*EL,TDESC
+.
+GCAN9000  MOVE      ZERO,EXIT
+          GOTO      GCAN9999
+.
+GCAN9100  MOVE      ONE,EXIT
+.
+GCAN9999  RETURN
++
+.*****************************************************************************
+.*                               GSIT0000              Called by: MAIN0000   *
+.*                    Get the user to input the O/P site code                *
+.* Returns: EXIT  0 - Ok to continue                                         *
+.*                1 - Exitchar entered                                       *
+.*          SITECODE - O/P Site code                                         *
+.*****************************************************************************
+.
+GSIT0000  MOVE      TWENTY3,ECOL
+          MOVE      TEN2,EVERT
+          DISPLAY   *P1:12,*EL,"O/P Site            :"
+.
+          CALL      OUTSITKY
+          BRANCH    EXIT,GSIT9100:               * nothing or spaces entered
+                         GSIT9100                * exitchar entered
+.
+          MOVE      OSTSITE,IDDD
+          DISPLAY   *P30:12,*EL,OSTDESC
+.
+GSIT9000  MOVE      ZERO,EXIT
+          GOTO      GSIT9999
+.
+GSIT9100  MOVE      ONE,EXIT
+.
+GSIT9999  RETURN
++
+.*****************************************************************************
+.*                               GSCT0000              Called by: MAIN0000   *
+.*                    Get the user to input the starting clinic type         *
+.* Returns: EXIT  0 - Ok to continue                                         *
+.*                1 - Exitchar entered                                       *
+.*          STRTCTYP - Starting Clinic Type                                  *
+.*****************************************************************************
+.
+GSCT0000  MOVE      TWENTY3,ECOL
+          MOVE      TEN4,EVERT
+          DISPLAY   *P1:14,*EL,"Start Clinic Type   :"
+          MOVE      SP6,CKYIDEF6                 * no default value
+          MOVE      ZERO,CKYIMAND                * not mandatory
+.
+          CALL      KYOUTCTY
+          BRANCH    EXIT,GSCT8000:               * nothing or spaces entered
+                         GSCT9100                * exitchar entered
+.
+          MOVE      OCTCTYP,STRTCTYP             * save code
+          DISPLAY   *P30:14,*EL,OCTDESC
+          GOTO      GSCT9000
+.
+GSCT8000  MOVE      SP6,STRTCTYP
+          DISPLAY   *P23:14,*V2LON,"Start"
+.
+GSCT9000  MOVE      ZERO,EXIT
+          GOTO      GSCT9999
+.
+GSCT9100  MOVE      ONE,EXIT
+.
+GSCT9999  RETURN
++
+.*****************************************************************************
+.*                               GECT0000              Called by: MAIN0000   *
+.*                    Get the user to input the ending clinic type           *
+.* Returns: EXIT  0 - Ok to continue                                         *
+.*                1 - Exitchar entered                                       *
+.*          ENDCTYP - Ending Clinic Type                                     *
+.*****************************************************************************
+.
+GECT0000  MOVE      TWENTY3,ECOL
+          MOVE      TEN5,EVERT
+          DISPLAY   *P1:15,*EL,"End   Clinic Type   :"
+          MOVE      SP6,CKYIDEF6                 * no default value
+          MOVE      ZERO,CKYIMAND                * not mandatory
+.
+          CALL      KYOUTCTY
+          BRANCH    EXIT,GECT8000:               * nothing or spaces entered
+                         GECT9100                * exitchar entered
+.
+          MOVE      OCTCTYP,ENDCTYP              * save code
+          DISPLAY   *P30:15,*EL,OCTDESC
+.
+          MATCH     STRTCTYP,ENDCTYP
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,*B,"End code less than start code.  ";
+            CALL      HITENTER
+            GOTO      GECT0000
+          ENDIF
+.
+          GOTO      GECT9000
+.
+GECT8000  MOVE      "~~~~~~",ENDCTYP
+          DISPLAY   *P23:15,*V2LON,"End"
+.
+GECT9000  MOVE      ZERO,EXIT
+          GOTO      GECT9999
+.
+GECT9100  MOVE      ONE,EXIT
+.
+GECT9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*   Loop through the Outpatient Action List file and extract each record    *
+.*****************************************************************************
+.
+PROC0000  MOVE      ZERO,RECCOUNT                * initialise record count
+          MOVE      ZERO,EXTCOUNT                * initialise extract count
+          DISPLAY   *P1:24,*EL,"Processing:";
+.
+          CALL      IBACLOCK                     * get current date/time
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      CTIMEIS,CURRTIME
+          REP       " 0",CURRTIME
+.
+          PACK      KEY33,ZERO,SP70
+PROC0400  CALL      RSOTART2                     * position at start of file
+PROC0500  CALL      RKOTART2                     * read next record
+          BRANCH    OVRCD,PROC9000               * eof - finished
+.
+          TYPE      OTARSTAT                     * numeric status ?
+          GOTO      PROC9000 IF NOT EQUAL        * no
+.
+          MOVE      OTARSTAT,FORM1
+          BRANCH    FORM1,PROC1000:              * Pending Reschedule
+                          PROC9000:              * Booked
+                          PROC9000               * Cancelled
+.
+PROC1000  IF        IBCNMHOS = 1
+            MATCH     PTHSHOSP,OTARPRHS          * same hospital code ?
+            GOTO      PROC0500 IF NOT EQUAL      * no - get next record
+          ENDIF
+.
+          MATCH     OSTSITE,OTARPRSI             * same site ?
+          GOTO      PROC0500 IF NOT EQUAL        * no - ignore record
+.
+          MATCH     STRTCTYP,OTARCLTY            * clinic type in range ?
+          GOTO      PROC0500 IF LESS             * no - ignore record
+.
+          MATCH     OTARCLTY,ENDCTYP             * clinic type in range ?
+          GOTO      PROC0500 IF LESS             * no - ignore record
+.
+          IF        COPTION = 1
+            PACK      SAVKEY33,OTARSTAT,OTARRQDT,OTARRQTM,OTARURNO,OTARREFN
+          ENDIF
+.
+          ADD       ONE,RECCOUNT                 * increment record counter
+.
+          DISPLAY   *P13:24,*V2LON,RECCOUNT
+.
+          MOVE      OTARURNO,ACTNURNO
+          SQUEEZE   ACTNURNO
+          MOVE      OTARREFN,ACTNAVIS
+          SQUEEZE   ACTNAVIS
+          MOVE      OTARRQDT,ACTNRQDT
+          SQUEEZE   ACTNRQDT
+          MOVE      OTARRQTM,ACTNRQTM
+          SQUEEZE   ACTNRQTM
+          MOVE      OTARRDEP,ACTNRDEP
+          SQUEEZE   ACTNRDEP
+          MOVE      OTARADEP,ACTNADEP
+          SQUEEZE   ACTNADEP
+          MOVE      OTARPRDT,ACTNPRDT
+          SQUEEZE   ACTNPRDT
+          MOVE      PTHSHOSP,ACTNPRHS
+          SQUEEZE   ACTNPRHS
+          MOVE      OTARPRSI,ACTNPRSI
+          SQUEEZE   ACTNPRSI
+          MOVE      OTARCLID,ACTNCLID
+          SQUEEZE   ACTNCLID
+          MOVE      OTARVIST,ACTNVIST
+          SQUEEZE   ACTNVIST
+          MOVE      OTARTRRQ,ACTNTRRQ
+          SQUEEZE   ACTNTRRQ
+          MOVE      OTARPCOM,ACTNPCOM
+          STRIP     ACTNPCOM
+          MOVE      OTARFINC,ACTNFINC
+          SQUEEZE   ACTNFINC
+          MOVE      OTARPRIO,ACTNPRIO
+          SQUEEZE   ACTNPRIO
+          MOVE      OTARSORF,ACTNSORF
+          SQUEEZE   ACTNSORF
+          MOVE      OTARSARR,ACTNSARR
+          SQUEEZE   ACTNSARR
+          MOVE      OTARSTAT,ACTNSTAT
+          SQUEEZE   ACTNSTAT
+          MOVE      OTARRREQ,ACTNRREQ
+          SQUEEZE   ACTNRREQ
+          MOVE      OTARCDAT,ACTNCDAT
+          SQUEEZE   ACTNCDAT
+          MOVE      OTARCTIM,ACTNCTIM
+          SQUEEZE   ACTNCTIM
+          MOVE      OTARCUID,ACTNCUID
+          SQUEEZE   ACTNCUID
+.
+          MATCH     "1",OTARINTR
+          IF        @EQUAL
+            MOVE      ANSY,ACTNINTR
+          ELSE
+            MOVE      ANSN,ACTNINTR
+          ENDIF
+.
+          CALL      GCOM0000                     * get action related comments
+.
+          WRITE     ACTNTEXT,SEQ;*+,ACTNURNO,PIPE,ACTNAVIS,PIPE,ACTNRQDT,PIPE:
+                                    ACTNRQTM,PIPE,ACTNRDEP,PIPE,ACTNADEP,PIPE:
+                                    ACTNPRDT,PIPE,ACTNPRHS,PIPE,ACTNPRSI,PIPE:
+                                    ACTNCLID,PIPE,ACTNVIST,PIPE,ACTNTRRQ,PIPE:
+                                    ACTNPCOM,PIPE,ACTNFINC,PIPE,ACTNPRIO,PIPE:
+                                    ACTNSORF,PIPE,ACTNSARR,PIPE,ACTNSTAT,PIPE:
+                                    ACTNRREQ,PIPE,ACTNCDAT,PIPE,ACTNCTIM,PIPE:
+                                    ACTNCUID,PIPE,ACTNINTR,PIPE,ACTNCOMM,*-
+.
+          ADD       ONE,EXTCOUNT                 * increment extract count
+.
+          IF        COPTION = 1
+            MOVE      "3",OTARSTAT               * update status to cancelled
+            MOVE      SAVECODE,OTARRCAN          * load cancellation reason
+            MOVE      CURRDATE,OTARCADT          * load cancellation date
+            MOVE      CURRTIME,OTARCATM          * load cancellation time
+            MOVE      "EXTRACTN",OTARCAUS        * load cancellation user
+            CALL      UPOTART2
+.
+            MOVE      SAVKEY33,KEY33
+            GOTO      PROC0400                   * get next record
+          ELSE
+            GOTO      PROC0500                   * get next record
+          ENDIF
+.
+PROC9000  DISPLAY   *P1:22,*EF,"Extraction complete.":
+                    *P1:23,*V2LON,EXTCOUNT,*HOFF," O/P Action records ";
+          IF        COPTION = 1
+            DISPLAY   "extracted.";
+          ELSE
+            DISPLAY   "listed.";
+          ENDIF
+          DISPLAY   *P1:24;
+          CALL      HITENTER
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                            GCOM0000             Called by: PROC0000       *
+.*               Load 10 lines of action-related comments from outrcmaf      *
+.* Requires: OTARREFN - Referral visit number                                *
+.* Returns:  ACTNCOMM - action related comments (10 lines max.)              *
+.*****************************************************************************
+.
+GCOM0000  CLEAR     ACTNCOMM
+          MOVE      ZERO,COMCOUNT                * init. comment line count
+.
+          MATCH     SP10,OTARCMID                * comments on file ?
+          GOTO      GCOM9999 IF EQUAL            * no - finished
+.
+          PACK      KEY13,OTARCMID,SP20
+          CALL      RSOTRCM1                     * position on visit/type
+GCOM0500  CALL      RKOTRCM1                     * read next record
+          BRANCH    OVRCD,GCOM9000               * eof - finished
+.
+          MATCH     OTARCMID,OTRCUNIQ            * same visit still ?
+          GOTO      GCOM9000 IF NOT EQUAL        * no - finished
+.
+.         A valid comment record has been found, so save it to the comment
+.         variable
+.
+          APPEND    OTRCCOMM,ACTNCOMM
+          ADD       ONE,COMCOUNT                 * increment comment line count
+          IF        COMCOUNT < 10
+            GOTO      GCOM0500
+          ENDIF
+.
+GCOM9000  IF        COMCOUNT > 0
+            RESET     ACTNCOMM
+            STRIP     ACTNCOMM
+          ENDIF
+.
+GCOM9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       KYOUTCTY
+          INC       OUTDSCTY
+          INC       OUTSITDS
+          INC       OUTSITKY
+          INC       PATCODKY
+          INC       PATHSPKY
+.
+          INC       OUTARTIO/INC
+          INC       OUTCTYIO/INC
+          INC       OUTRCMIO/INC
+          INC       OUTSITIO/INC
+          INC       PATCODIO/INC
+          INC       PATHSPIO/INC

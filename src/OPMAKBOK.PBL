@@ -1,0 +1,718 @@
+.*********************************************************************
+.*                  NRBK0000                    Called by : xxxx0000 *
+.*        Generate a new booking number unless user is in the        *
+.*        (B)ooking number or Admission no. options (TYPEFLAG=5 or 6)*
+.*        Returns : BKREBOOK      booking number                     *
+.*********************************************************************
+..----------------------------------------------------------------------
+. Program       : OPMAKBOK.PBL
+.
+. Modifications :
+.-----------------------------------------------------------------------
+. V11.03.01 09/02/2023  Ebon Clements     TSK 0909393
+.           Added SAVOHOSP to VINN0000 and DEAI0000
+.           Added hospital to oprsesaf(1-6) and oprdetfa(1&5) indexes
+. V11.02.01 24/08/2022  Ebon Clements     TSK 0904278
+.           Added SAVPRV4, SAVPRV5 and SAVPRV6 to VINN0000 and DEAI0000
+. V10.14.01 24/05/2019  Peter Vela        TSK 0872587
+.           Changed MOVE to PACK when reading RABKREC1 in NBPF0000
+. V10.12.02 19/06/2018  Ebon Clements     TSK 0845588
+.           Added fasting dates to VINN0000 and DEAI0000
+. V10.12.01 02/05/2018  Richa Phogat      TSK 0843171
+.           Added new variable under VINN0000 and DEAI0000
+. V10.11.01 09/08/2017  Ebon Clements     TSK 0843373
+.           Check record exists prior to update of oprsesaf 
+. V10.08.01 14/04/2016  Ebon Clements     TSK 0313944    
+.           Added SAVMHRC to VINN0000 and DEAI0000
+. V10.06.01 05/05/2015  Don Nguyen        CAR 299117     
+.           Modified PSTDEA20 - clear OPDAACPD & OPDARICM before write
+. V10.05.01 21/08/2014  Jill Parkinson    CAR 299980     
+.           Added OPTHETAT functionality to write theatre audit details
+.           31/07/2014  Ebon Clements     CAR 283332
+.           Added SAVPCOM to SAVAPRC in VINN0000 and DEAI0000
+. V10.04.01 18/02/2014  Peter Vela        CAR 218689
+.           Move REQUESTN to OPDAREQN before WROPDEA1
+. V10.01.02 28/05/2013  Jill Parkinson    CAR 285919
+.           Corrected DEAI000 save variables to not all use SAVURNO
+. V10.01.01 26/03/2013  Patrick Adair     CAR 281548
+.           Corrected DEA variable save/restore to cater for all fields
+.-----------------------------------------------------------------------
+. V10.00.01 19/03/2010  Steve Armstrong   CAR 135505
+.           Added HL7TRGID & HL7INCLD setting for all broadcast messages
+.--------------------------------------------------------
+. V9.10.01  03/09/2008  Davin         CAR 147323
+.                       Send hl7 message for new bookings (added call DGCLIS12)
+. V9.08.01  23/10/2006  Peter Vela    CAR 118228
+.                       Fixed validation for overlap start time
+. V9.07.01  20/09/2006  Peter Vela    CAR 188228
+.                       If there is overlap then calculate default start timwe
+.                       from oprralaf
+. V9.04.01  03/10/2005  Mike Laming   CAR 52354 
+.                       Add OPDACSST & OPDACSDT (Consent)
+. V9.03.02  22/08/2003  Jill Habasque CAR 41815 
+.                       Changed to find last valid booking in oppstdea
+. V9.03.01  07/08/2003  Jill Habasque CAR 41815 
+.                       Changed check of opdastat and fixed read/write/updates
+.                       of bokdiaaf
+. V9.02.04  14/03/2003  Ebon Clements SRF 21034 
+.                       Added SAVE of OPDAUNIT that was added to OPRDEAFD
+. V9.02.03  14.11.2002  Jill Habasque SRF 23805
+.                       Commented out move of CURBKTYP to BKRETYPE
+. V9.02.02  26.11.2001  Ashwin
+.                       Save variable for OPDAEQR3
+. V9.02.01  29.11.2001  B.G.Ackland              
+.                       Remove pi's from Program
+. V9.01.03  14.11.2001  Ashwin
+.                       Save variables of equipment in detail file
+. V9.01.02  19.08.2001  Jill Habasque
+.                       Commented out call to OPPSTPMI
+. V9.01.01  13.08.2001  Ashwin - HPS
+.                       Cleared file variables.
+.---------------------------------------------------------
+NRBK0000  MOVE      " 10",PRXCODE   * System Lock Sector 10
+          CALL      GETSLK00        * Get System Lock of Sector 10
+          READ      CONTROLF,TEN;*1,BKREBOOK  * pos 1 because BKREBOOK is form8
+          ADD       ONE,BKREBOOK
+          WRITAB    CONTROLF,TEN;*1,BKREBOOK
+          CALL      RELSLK00        * Release System Lock of Sector 10
+          SUB       ONE,BKREBOOK
+.
+.         check to see if booking number exists
+.
+          COMPARE   ZERO,BKREBOOK
+          GOTO      NRBK0000 IF EQUAL       * zero not allowed
+.
+          MOVE      BKREBOOK,KEY8
+          UNPACK    KEY8,KEY2,KEY6
+          CALL      RDAPRAM1                * see if there is a pre-adm record
+          BRANCH    OVRCD,NRBK1000          * no pre-adm, try booking file
+          GOTO      NRBK0000                * invalid number, generate another
+.
+NRBK1000  CALL      RABKREC1                * see if there is a booking record
+          BRANCH    OVRCD,NRBK2000          * no booking, try admission
+          GOTO      NRBK0000                * invalid number, generate another
+.
+NRBK2000  CALL      RDAMISS1                * see if there is an admission rec
+          BRANCH    OVRCD,NRBK2500          * no admission, try visit file
+          GOTO      NRBK0000                * invalid number, generate another
+.
+NRBK2500  CALL      RDAVISA1                * see if there is a visit rec
+          BRANCH    OVRCD,NRBK9000          * no visit number, try outpatients
+          GOTO      NRBK0000                * invalid number, generate another
+NRBK9000  
+NRBK9999  RETURN
+.*********************************************************************
+.*                  NBPF0000                    Called by : xxxx0000 *
+.*        Update the required files upon a new booking               *
+.*        Posts to  oprdeafd, patmasfd or patprafd                   *
+.*********************************************************************
+NBPF0000  MOVE      SP10,OPDAUNIQ           * no unique number
+          CALL      VINN0000                * save deafd records
+          MOVE      BKREBOOK,OPDAADMN       * set up visit number
+          PACK      KEY19,SESNDATE,SESNTIME,SESNCODE
+          CALL      OPPSTDEA                * post to oprdeafd
+.
+.         write a bokrec record
+.
+          MOVE      PSNAME,BKRESNAM
+          MOVE      PURNO,BKREURNO
+.         MOVE      CURBKTYP,BKRETYPE
+          CALL      OPPSTBOK                * write to bokrecfd
+          COMPARE   ZERO,EXIT
+          GOTO      NBPF1000 IF EQUAL       * write succeded
+.
+.         update bokrec if it exists
+.
+.         MOVE      OPDAADMN,KEY8           * booking number
+          PACK      KEY8,OPDAADMN,SP70
+          CALL      RABKREC1                * see if it exists
+          BRANCH    OVRCD,NBPF1000          * no record
+          CALL      UPBKREC1                * update booking details
+.
+NBPF1000  
+.         MOVE      BKREBOOK,PURNO
+.         CALL      OPPSTPMI                * write to patprafd
+.         MOVE      ZERO,PURNO
+.
+.         Check if the session is now full
+.
+NBPF9000  CALL      OPCHKFUL
+          BRANCH    EXIT,NBPF9500           * session is not full
+          CALL      OPSUSPND                * suspend the session
+.
+NBPF9500  IF        OPCNCMBD=1
+            MOVE      OPDAPROV,BKDICODE     * defaults
+            MOVE      OPDADES1,BKDIDES1
+            MOVE      OPDADES2,BKDIDES2
+            MOVE      OPDADES3,BKDIDES3
+          ENDIF
+.
+          MATCH     SP9,BKDICODE
+          GOTO      NBPF9550 IF NOT EQUAL   * have a code
+.
+          MATCH     SP30,BKDIDES1
+          GOTO      NBPF9550 IF NOT EQUAL   * have a desc
+.
+          MATCH     SP30,BKDIDES2
+          GOTO      NBPF9550 IF NOT EQUAL   * have a desc
+.
+          MATCH     SP30,BKDIDES3
+          GOTO      NBPF9550 IF NOT EQUAL   * have a desc
+.
+          MATCH     SP30,BKDICOMM
+          GOTO      NBPF9999 IF EQUAL       * dont have comments
+.
+NBPF9550  MOVE      BKREBOOK,BKDIBOOK       * set booking number
+          MOVE      OPDAUNIQ,BKDIUNIQ       * set unique number
+          PACK      KEY18,BKDIBOOK,BKDIUNIQ,SP70  * set booking number
+          CALL      RABKDIA1
+          BRANCH    OVRCD,NBPF9600          * write new record
+.
+          CALL      UPBKDIA1                * update file
+          GOTO      NBPF9995
+.
+NBPF9600  CALL      WRBKDIA1                * write details
+.
+NBPF9995  
+.
+NBPF9999  RETURN
+.*******************************************************************************
+.                   OPSUSPND
+.    The function Sets the suspension flag by setting OPSESUSP=1.
+.
+.    PARAMETERS.
+.    KEY19    : Must be set to session date, time and clinic/doctor
+.
+.    RETURN PARAMETERS.
+.    EXIT = 1 : Session KEY19 not on file
+.    EXIT = 0 : No Problems
+.*******************************************************************************
+OPSUSPND  CALL      RDOPSES1           * get session details
+          BRANCH    OVRCD,SUSPND99
+.
+          MOVE      "2",AUDIFLAG       * before change audit
+          CALL      AUSES000           * write audit record
+          MOVE      ONE,OPSESUSP       * suspend session
+          CALL      UPOPSES1           * update record
+          MOVE      "3",AUDIFLAG       * after change audit
+          CALL      AUSES000           * write audit record
+.
+SUSPND80  
+.WRITE     HTMLFILE;"<H3 ALIGN=CENTER>":
+.
+.                                 "SESSION FULL - SUSPENDED</H3>"
+          MOVE      ZERO,EXIT
+          GOTO      SUSPND99
+.
+SUSPND99  RETURN
+.*******************************************************************************
+.                   OPCHKFUL
+.    The function checks if function is full by calculating the percentage
+.    utilization and comparing it to the system parameter OPCNFULL to
+.    determine whether the session suspension status
+. 
+.    PARAMETERS.
+.    KEY19    : Must be set to session date, time and clinic/doctor
+.
+.    RETURN PARAMETERS.
+.    EXIT = 1 : Session is not full or session does not exist.
+.    EXIT = 0 : session requires its suspension flag to be set.
+.*******************************************************************************
+OPCHKFUL  CALL      RDOPSES1                * get session details
+          COMPARE   ZERO,OPCNFULL
+          GOTO      CHKFUL44 IF NOT EQUAL   * using the system parameter
+.
+          SUB       OPSEBRKT,OPSEDURA       * Duration -= breaktime
+          COMPARE   OPSETIMB,OPSEDURA       * test duration is < than book time
+          GOTO      CHKFUL80 IF LESS        * duration is less -> full
+          GOTO      CHKFUL90                * session is not full
+.
+.         check against the system parameter
+.
+CHKFUL44  MOVE      OPSETIMB,FORM6P2   * Set up time booked in session
+          SUB       OPSEBRKT,OPSEDURA  * Duration -= breaktime
+          DIV       OPSEDURA,FORM6P2   * Time book = time book/duration
+          MULT      "100",FORM6P2      * convert to a percentage
+.
+          MOVE      FORM6P2,FORM3      * Get rid of fractions
+          COMPARE   OPCNFULL,FORM3     * test percentage full against sys param
+          GOTO      CHKFUL90 IF LESS
+.
+.         session is full
+.
+CHKFUL80  MOVE      ZERO,EXIT          * Signal session is full
+          GOTO      CHKFUL99
+.
+.         session is not full
+.
+CHKFUL90  MOVE      ONE,EXIT           * signal session is not full
+.
+CHKFUL99  RETURN
+.
+. ------------------------
+. ------- OPRSESFD -------
+. ------------------------
+.
+AUSES000  BRANCH    OPCNAUDS,AUSES999
+          PACK      SAVKEY20,KEY19,SP1      * save key19 on entry
+.
+          COMPARE   FIVE,AUDIFLAG        * test to delete B audit
+          GOTO      AUSES600 IF EQUAL
+.
+          COMPARE   THREE,AUDIFLAG       * is it an after change audit?
+          GOTO      AUSES100 IF EQUAL    * Yes. So don't change time
+.
+          CALL      IBACLOCK             * get current date
+          PACK      OPSEAUDD,CCC,CYY,CMM,CDD
+          REP       " 0",OPSEAUDD
+          MOVE      CTIMEIS,OPSEAUDT     * clock current time
+.
+AUSES100  MOVE      ONE,OPSEAUDS         * not printed
+          MOVE      PASSCODE,OPSEAUDO    * get user id
+          MOVE      PORT,OPSEAUDP        * get port number
+.
+          MOVE      AUDIFLAG,OPSEAUDR
+          REPLACE   "1A2B3C4D",OPSEAUDR
+          PACK      KEY19,OPSEAUDD,OPSEAUDT,OPSEAUDP,OPSEAUDR
+          CALL      AWOPSES              * write audit record
+          GOTO      AUSES995
+.
+.         now delete B audit
+.
+AUSES600  PACK      KEY19,OPSEAUDD,OPSEAUDT,OPSEAUDP,ANSB
+          CALL      ADOPSES              * delete audit record
+AUSES995  UNPACK    SAVKEY20,KEY19,ANS      * restore the key19
+.
+AUSES999  RETURN
+.
+.*********************************************************************
+.         calculate default start time
+.*********************************************************************
+CALDEF00  PACK      KEY26,SESNHOSP,SESNDATE,SESNTIME,SESNCODE,Z70
+          UNPACK    SESNTIME,CHOUR,ANS,CMIN
+.
+          CALL      RSOPDEA5
+CALDEF01  CALL      RPOPDEA5
+          BRANCH    OVRCD,CALDEF99
+.
+          MATCH     OPDAHOSP,SESNHOSP
+          GOTO      CALDEF90 IF NOT EQUAL
+.
+          MATCH     OPDADATE,SESNDATE
+          GOTO      CALDEF90 IF NOT EQUAL
+.
+          MATCH     OPDATIME,SESNTIME
+          GOTO      CALDEF90 IF NOT EQUAL
+.
+          MATCH     OPDACLIN,SESNCODE
+          GOTO      CALDEF90 IF NOT EQUAL
+.
+          COMPARE   THREE,OPDASTAT                 * must be booked status
+          GOTO      CALDEF01 IF EQUAL
+.
+.         we have found the last booking in the session
+.
+          UNPACK    OPDAEXPS,CHOUR,ANS,CMIN
+          MOVE      CHOUR,FORM4        * FORM4 will be totmins
+          MOVE      CMIN,FORM2
+.
+          MULT      "60",FORM4         * convert hours to minutes
+          ADD       FORM2,FORM4        * add the minutes
+          ADD       OPDAEXPD,FORM4     * add the duration for total mins
+          ADD       OPSEPREP,FORM4
+          IF        OPDAEXPD=0
+            ADD       ONE,FORM4
+          ENDIF
+.
+CALDEF33  COMPARE   "1440",FORM4       * test if added or subtracted
+          GOTO      CALDEF44 IF LESS
+          SUB       "1440",FORM4       * add a day from totmins
+          GOTO      CALDEF33
+.
+CALDEF44  MOVE      FORM4,SAVEF10      * save the new total mins
+          DIV       "60",FORM4
+          MOVE      FORM4,FORM2
+          MOVE      FORM2,CHOUR        * save the new hours
+.
+          MULT      "60",FORM4         * calculate remaining minutes
+          SUB       FORM4,SAVEF10
+          MOVE      SAVEF10,FORM2
+          MOVE      FORM2,CMIN         * save the new minutes
+.
+          REP       " 0",CHOUR
+          REP       " 0",CMIN
+          GOTO      CALDEF99
+.
+CALDEF90  PACK      KEY30,SESNDATE,SESNTIME,SESNCODE,SP70
+          CALL      RSOPRAL1
+          CALL      RKOPRAL1                          * Check for overlap at
+          BRANCH    OVRCD,CALDEF95                    * start of session
+.
+          MATCH     OPRLDATE,SESNDATE
+          GOTO      CALDEF95 IF NOT EQUAL
+.
+          MATCH     OPRLSTOR,SESNTIME
+          GOTO      CALDEF95 IF NOT EQUAL
+.
+          MATCH     OPRLSUOR,SESNCODE
+          GOTO      CALDEF95 IF NOT EQUAL
+.
+          MATCH     OPRLSTOR,OPRLSTNW
+          GOTO      CALDEF94 IF EQUAL
+          GOTO      CALDEF95 IF NOT LESS             
+.                                                    * If there is overlap then
+CALDEF94  MOVE      OPRLOVEN,SESNTIME                * assign default start time
+.                                                    * from opralaf
+CALDEF95  UNPACK    SESNTIME,CHOUR,ANS,CMIN
+
+CALDEF99  RETURN
+.
+.***********************************************************************
+.*  CENDTM00  :  Calculate an end time given a start time and duration *
+.*        Para's  : STARTIME      the start time                       *
+.*                  DURATION      the duration                         *
+.*        Returns : CENDTME       the end time                         *
+.***********************************************************************
+CENDTM00  UNPACK    STARTIME,CHOUR,ANS,CMIN
+          REP       " 0",CHOUR
+          REP       " 0",CMIN
+          MOVE      CHOUR,CCOL1             * the hours
+          MOVE      CMIN,FORM2              * the minutes
+.
+          ASSIGN    (CCOL1*60+FORM2),FORM4  * total minutes
+          ADD       DURATION,FORM4          * take of duration
+.
+. if duration -ve then means gone before 00:00
+.
+          IF        FORM4<0
+            ASSIGN    (1440+DURATION),FORM4
+          ENDIF
+.
+          ASSIGN    (FORM4/60),CCOL1        * total hours
+          ASSIGN    (FORM4-(CCOL1*60)),CCOL2    * total minutes
+.
+.         check hours aren't over 23
+.
+CENDTM50  COMPARE   "24",CCOL1
+          GOTO      CENDTM70 IF LESS        * hours not over 24
+.
+          SUB       "24",CCOL1
+          GOTO      CENDTM50
+.
+CENDTM70  MOVE      CCOL2,FORM2             * the minutes
+          PACK      CENDTME,CCOL1,COLON,FORM2
+          REP       " 0",CENDTME
+.
+CENDTM99  RETURN
+.***************************************************************************
+.*                  VINN0000                                               *
+.*              Move OPRDEAFD vars to save variables                       *
+.***************************************************************************
+VINN0000  MOVE      OPDADATE,SAVDATE
+          MOVE      OPDATIME,SAVTIME
+          MOVE      OPDACLIN,SAVCLIN
+          MOVE      DOPDASTA,SAVASTA
+          MOVE      OPDACASE,SAVCASE
+          MOVE      OPDAUNIQ,SAVUNIQ
+          MOVE      OPDAEXPS,SAVEXPS
+          MOVE      OPDAEXPD,SAVEXPD
+          MOVE      OPDAANAE,SAVANAE
+          MOVE      OPDATYPE,SAVTYPE
+          MOVE      OPDATRAN,SAVTRAN
+          MOVE      OPDAUSR1,SAVUSR1
+          MOVE      OPDAUSR2,SAVUSR2
+          MOVE      OPDAUSR3,SAVUSR3
+          MOVE      OPDAUSR4,SAVUSR4
+          MOVE      OPDAWAIT,SAVWAIT
+          MOVE      OPDAPROV,SAVPRV1
+          MOVE      OPDAPRV2,SAVPRV2
+          MOVE      OPDAPRV3,SAVPRV3
+          MOVE      OPDADES1,SAVDES1
+          MOVE      OPDADES2,SAVDES2
+          MOVE      OPDADES3,SAVDES3
+          MOVE      OPDACOMM,SAVCOMM
+          MOVE      OPDACANC,SAVCANC
+          MOVE      OPDATHET,SAVTHET
+          MOVE      OPDAPRE1,SAVPRE1
+          MOVE      OPDAPRE2,SAVPRE2
+          MOVE      OPDAPRE3,SAVPRE3
+          MOVE      OPDAPRE4,SAVPRE4
+          MOVE      OPDAPRE5,SAVPRE5
+          MOVE      OPDAPOS1,SAVPOS1
+          MOVE      OPDAPOS2,SAVPOS2
+          MOVE      OPDAPOS3,SAVPOS3
+          MOVE      OPDAPOS4,SAVPOS4
+          MOVE      OPDATDUR,SAVTDUR
+          MOVE      OPDAKNOW,SAVKNOW
+          MOVE      OPDACDAT,SAVOCDAT
+          MOVE      OPDASTAT,SAVSTAT
+          MOVE      OPDAEQR1,SAVEQR1
+          MOVE      OPDAEQR2,SAVEQR2
+          MOVE      OPDAEQR3,SAVEQR3
+          MOVE      OPDALEQR,SAVLEQR
+          MOVE      OPDAUNIT,SAVUNIT
+          MOVE      OPDAASRC,SAVASRC
+          MOVE      OPDACSST,SAVCSST
+          MOVE      OPDACSDT,SAVCSDT
+          MOVE      OPDAURNO,SAVURNO
+          MOVE      OPDAPROC,SAVPROC
+          MOVE      OPDACONT,SAVCONT
+          MOVE      OPDACRDT,SAVCRDT
+          MOVE      OPDACTIM,SAVCTIM
+          MOVE      OPDAWEBC,SAVWEBC
+          MOVE      OPDAUDAT,SAVUDAT
+          MOVE      OPDAUTIM,SAVUTIM
+          MOVE      OPDAWEBU,SAVWEBU
+          MOVE      OPDAPCOM,SAVPCOM
+          MOVE      OPDAVUN1,SAVVUN1
+          MOVE      OPDAVUN2,SAVVUN2
+          MOVE      OPDAPHMN,SAVPHMN
+          MOVE      OPDAREQN,SAVREQN
+          MOVE      OPDADES4,SAVDES4
+          MOVE      OPDADES5,SAVDES5
+          MOVE      OPDADES6,SAVDES6
+          MOVE      OPDAFAST,SAVFAST
+          MOVE      OPDAAPRC,SAVAPRC 
+          MOVE      OPDAMHRC,SAVMHRC
+          MOVE      OPDAPOWD,SAVPOWD
+          MOVE      OPDACTYP,SAVTYCL
+          MOVE      OPDAATYP,SAVTYPP
+          MOVE      OPDADTFF,SAVDTFF
+          MOVE      OPDADTFL,SAVDTFL
+          MOVE      OPDAPRV4,SAVPRV4
+          MOVE      OPDAPRV5,SAVPRV5
+          MOVE      OPDAPRV6,SAVPRV6
+          MOVE      OPDAHOSP,SAVOHOSP
+.
+VINN9999  RETURN
+.*******************************************************************************
+.                                 OPPSTDEA
+.    Post a OPRDEAFD record.
+.    Function : Post a booking details to OPRDEAFD and update session
+.               suspension status
+.    Parameters:
+.    CURSESS  - Current session in process.  Date Time Clinic/Doctor
+.    CURCASE  - Current case number of booking
+.
+.    Return Parameters:
+.    Exit = 0 - Booking posted, No problems
+.    Exit = 1 - Booking posted session is full
+.*******************************************************************************
+OPPSTDEA  MOVE      ONE,FORM3               * set cancelled case no. to first
+          PACK      KEY26,CURSESS,Z70
+          CALL      RSOPDEA5                * position fptr
+PSTDEA05  CALL      RPOPDEA5                * get last case no. in session
+          BRANCH    OVRCD,PSTDEA10
+.
+          PACK      KEY22,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP20
+          MATCH     KEY22,CURSESS           * test same session
+          GOTO      PSTDEA10 IF NOT EQUAL
+.
+          COMPARE   THREE,OPDASTAT           * find last valid booking
+          GOTO      PSTDEA05 IF EQUAL
+          MOVE      OPDACASE,FORM3
+          ADD       ONE,FORM3               * set next case no.
+PSTDEA10
+          CALL      DEAI0000                * restore saved oprdeafd variables
+.
+          MOVE      "42",FORM2              * get previous unique record
+          MOVE      " 42",PRXCODE   * System Lock Sector 42
+          CALL      GETSLK00        * Get System Lock of Sector 42
+          READ      CONTROLF,FORM2;*32,OPCNUNIQ
+          ADD       ONE,OPCNUNIQ            * set it to next unique number
+          WRITAB    CONTROLF,FORM2;*32,OPCNUNIQ
+          CALL      RELSLK00        * Release System Lock of Sector 42
+          MOVE      OPCNUNIQ,OPDAUNIQ
+.
+          UNPACK    CURSESS,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN
+          MOVE      FORM3,OPDACASE
+          MOVE      BKREBOOK,OPDAADMN       * restore Admission Number
+          MOVE      ZERO,OPDASTAT
+          PACK      KEY8,OPDAADMN,SP70
+          CALL      RDMISS1
+          BRANCH    OVRCD,PSTDEA20
+.
+          IF        ASTAT=1|ASTAT=2
+            MOVE      ASTAT,OPDASTAT
+          ENDIF
+.
+          IF        ASTAT=4
+            MOVE      TWO,OPDASTAT
+          ENDIF
+.
+          IF       ASTAT=3
+            MOVE     FOUR,OPDASTAT
+          ENDIF
+.
+PSTDEA20  MOVE      BKREURNO,OPDAURNO       * restore UR Number
+          MATCH     SP70,WATTRKEY
+          IF        @EQUAL
+            MOVE      SP70,OPDAPROC
+            MOVE      SP70,OPDACONT
+          ELSE
+            MOVE      WMCODE,OPDAPROC
+            MOVE      WMCNT,OPDACONT
+          ENDIF
+.
+          MOVE      SP70,OPDAPRE2
+          MOVE      SP70,OPDAPRE3
+          PACK      KEY26,CURSESS,OPDASTAT,FORM3
+.
+          CALL      IBACLOCK
+          PACK      OPDACRDT,CCC,CYY,CMM,CDD
+          REP       " 0",OPDACRDT
+.
+          CLOCK     TIME,OPDACTIM
+          MOVE      WBSEUID,OPDAWEBC
+.
+          MOVE      REQUESTN,OPDAREQN
+          MOVE      SP70,OPDAACPD           * All charges posted
+          MOVE      SP70,OPDARICM           * Reason Incomplete (Category Rt)
+.
+          CALL      WROPDEA1                * Operation details
+.
+          MOVE      "001",TADTTYPE
+          PROC      OPTHETAT                * write to theatre audit
+.
+          MOVE      ONE,AUDIFLAG            * add audit
+          CALL      AUDEA000                * write audit
+.
+          MOVE      ONE,HL7TRGID
+          MOVE      "OPMAKBOK",HL7INCLD
+          PROC      DGCLIS12                * send new booking message
+.
+          PACK      KEY22,CURSESS,SP20
+          CALL      RDOPSES1                * get session book time
+          IF        OVRCD=0
+            MOVE      TWO,AUDIFLAG          * before change audit
+            CALL      AUSES000              * write audit
+            ADD       OPDAEXPD,OPSETIMB     * Add duration to session book time
+            ADD       OPSEPREP,OPSETIMB     * Add patient prep time
+            CALL      UPOPSES1              * update book time
+            MOVE      THREE,AUDIFLAG        * after change audit
+            CALL      AUSES000              * write audit
+          ENDIF
+.
+          PACK      KEY19,CURSESS,SP20
+          CALL      OPCHKFUL                * check if session is full
+          BRANCH    EXIT,PSTDEA80           * exit=1 session is not full
+.
+          CALL      OPSUSPND                * suspend session
+          GOTO      PSTDEA90
+PSTDEA80
+          CALL      OPUNSPND                * unsuspend session
+          MOVE      ZERO,EXIT               * Signal rec. posted OK no Problems
+          GOTO      PSTDEA99
+PSTDEA90
+          MOVE      ONE,EXIT                * Signal rec.posted session now full
+PSTDEA99  RETURN
+.
+.*******************************************************************************
+.                   OPUNSPND
+.    The function Resets the suspension flag by setting OPSESUSP=0.
+. 
+.    PARAMETERS.
+.    KEY19    : Must be set to session date, time and clinic/doctor
+.
+.    RETURN PARAMETERS.
+.    EXIT = 1 : Session KEY19 not on file
+.    EXIT = 0 : No Problems
+.*******************************************************************************
+OPUNSPND  CALL      RDOPSES1           * get session details
+          BRANCH    OVRCD,UNSPND99
+.
+          MOVE      "2",AUDIFLAG       * before change audit
+          CALL      AUSES000           * write audit record
+          MOVE      TWO,OPSESUSP       * Unsuspend session
+          CALL      UPOPSES1           * update record
+          MOVE      "3",AUDIFLAG       * after change audit
+          CALL      AUSES000           * write audit record
+.
+UNSPND80  MOVE      ZERO,EXIT
+          GOTO      UNSPND99
+.
+UNSPND99  RETURN
++
+.***************************************************************************
+.*                            DEAI0000                                     *
+.*           Move Saved varibles into DEA variables                        *
+.***************************************************************************
+DEAI0000  MOVE      BKREBOOK,OPDAADMN
+          MOVE      SAVDATE,OPDADATE
+          MOVE      SAVTIME,OPDATIME
+          MOVE      SAVCLIN,OPDACLIN
+          MOVE      SAVASTA,DOPDASTA
+          MOVE      SAVCASE,OPDACASE
+          MOVE      SAVUNIQ,OPDAUNIQ
+          MOVE      SAVEXPS,OPDAEXPS
+          MOVE      SAVEXPD,OPDAEXPD
+          MOVE      SAVANAE,OPDAANAE
+          MOVE      SAVTYPE,OPDATYPE
+          MOVE      SAVTRAN,OPDATRAN
+          MOVE      SAVUSR1,OPDAUSR1
+          MOVE      SAVUSR2,OPDAUSR2
+          MOVE      SAVUSR3,OPDAUSR3
+          MOVE      SAVUSR4,OPDAUSR4
+          MOVE      SAVWAIT,OPDAWAIT
+          MOVE      SAVPRV1,OPDAPROV
+          MOVE      SAVPRV2,OPDAPRV2
+          MOVE      SAVPRV3,OPDAPRV3
+          MOVE      SAVDES1,OPDADES1
+          MOVE      SAVDES2,OPDADES2
+          MOVE      SAVDES3,OPDADES3
+          MOVE      SAVCOMM,OPDACOMM
+          MOVE      SAVCANC,OPDACANC
+          MOVE      SAVTHET,OPDATHET
+          MOVE      SAVPRE1,OPDAPRE1
+          MOVE      SAVPRE2,OPDAPRE2
+          MOVE      SAVPRE3,OPDAPRE3
+          MOVE      SAVPRE4,OPDAPRE4
+          MOVE      SAVPRE5,OPDAPRE5
+          MOVE      SAVPOS1,OPDAPOS1
+          MOVE      SAVPOS2,OPDAPOS2
+          MOVE      SAVPOS3,OPDAPOS3
+          MOVE      SAVPOS4,OPDAPOS4
+          MOVE      SAVTDUR,OPDATDUR
+          MOVE      SAVKNOW,OPDAKNOW
+          MOVE      SAVOCDAT,OPDACDAT
+          MOVE      SAVSTAT,OPDASTAT
+          MOVE      SAVEQR1,OPDAEQR1
+          MOVE      SAVEQR2,OPDAEQR2
+          MOVE      SAVEQR3,OPDAEQR3
+          MOVE      SAVLEQR,OPDALEQR
+          MOVE      SAVUNIT,OPDAUNIT
+          MOVE      SAVASRC,OPDAASRC
+          MOVE      SAVCSST,OPDACSST
+          MOVE      SAVCSDT,OPDACSDT
+          MOVE      SAVURNO,OPDAURNO
+          MOVE      SAVPROC,OPDAPROC
+          MOVE      SAVCONT,OPDACONT
+          MOVE      SAVCRDT,OPDACRDT
+          MOVE      SAVCTIM,OPDACTIM
+          MOVE      SAVWEBC,OPDAWEBC
+          MOVE      SAVUDAT,OPDAUDAT
+          MOVE      SAVUTIM,OPDAUTIM
+          MOVE      SAVWEBU,OPDAWEBU
+          MOVE      SAVPCOM,OPDAPCOM
+          MOVE      SAVVUN1,OPDAVUN1
+          MOVE      SAVVUN2,OPDAVUN2
+          MOVE      SAVPHMN,OPDAPHMN
+          MOVE      SAVREQN,OPDAREQN
+          MOVE      SAVDES4,OPDADES4
+          MOVE      SAVDES5,OPDADES5
+          MOVE      SAVDES6,OPDADES6
+          MOVE      SAVFAST,OPDAFAST
+          MOVE      SAVAPRC,OPDAAPRC
+          MOVE      SAVMHRC,OPDAMHRC
+          MOVE      SAVPOWD,OPDAPOWD
+          MOVE      SAVTYCL,OPDACTYP
+          MOVE      SAVTYPP,OPDAATYP
+          MOVE      SAVDTFF,OPDADTFF
+          MOVE      SAVDTFL,OPDADTFL
+          MOVE      SAVPRV4,OPDAPRV4
+          MOVE      SAVPRV5,OPDAPRV5
+          MOVE      SAVPRV6,OPDAPRV6
+          MOVE      SAVOHOSP,OPDAHOSP
+.
+DEAI9999  RETURN
+.

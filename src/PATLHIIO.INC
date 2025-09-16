@@ -1,0 +1,87 @@
+RSPTLH1   RESET     KEY19
+          READ      PATLHIS1,KEY19;;
+          RETURN
+.
+RAPTLH1   RESET     KEY19
+          MOVE      ZERO,OVRCD
+          READ      PATLHIS1,KEY19;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPTLH1   RESET     KEY19
+          MOVE      ZERO,OVRCD
+          READ      PATLHIS1,KEY19;DPTLHADM,PTLHDATE,DPTLHLCO:
+                                   PTLHTIME,PTLHSEID,PTLHSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTLHADM,PTLHADMN
+          MOVE      DPTLHLCO,PTLHLCOD
+          RETURN
+.
+RKPTLH1   MOVE      ZERO,OVRCD
+          READKS    PATLHIS1;DPTLHADM,PTLHDATE,DPTLHLCO:
+                             PTLHTIME,PTLHSEID,PTLHSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTLHADM,PTLHADMN
+          MOVE      DPTLHLCO,PTLHLCOD
+          RETURN
+.
+RPPTLH1   MOVE      ZERO,OVRCD
+          READKP    PATLHIS1;DPTLHADM,PTLHDATE,DPTLHLCO:
+                             PTLHTIME,PTLHSEID,PTLHSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTLHADM,PTLHADMN
+          MOVE      DPTLHLCO,PTLHLCOD
+          RETURN
+.
+UPPTLH1   MOVE      PTLHADMN,DPTLHADM
+          MOVE      PTLHLCOD,DPTLHLCO
+          UPDATE    PATLHIS1;DPTLHADM,PTLHDATE,DPTLHLCO:
+                             PTLHTIME,PTLHSEID,PTLHSPAR
+          RETURN
+.
+WRPTLH1   RESET     KEY19
+          MOVE      PTLHADMN,DPTLHADM
+          MOVE      PTLHLCOD,DPTLHLCO
+          WRITE     PATLHIS1,KEY19;KEY19:
+                                   PTLHTIME,PTLHSEID,PTLHSPAR
+          RETURN
+.
+DEPTLH1   RESET     KEY19
+          DELETE    PATLHIS1,KEY19
+          RETURN
+.
+RSPTLH2   RESET     KEY19
+          READ      PATLHIS2,KEY19;;
+          RETURN
+.
+RAPTLH2   RESET     KEY19
+          MOVE      ZERO,OVRCD
+          READ      PATLHIS2,KEY19;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPTLH2   RESET     KEY19
+          MOVE      ZERO,OVRCD
+          READ      PATLHIS2,KEY19;DPTLHADM,PTLHDATE,DPTLHLCO:
+                                   PTLHTIME,PTLHSEID,PTLHSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTLHADM,PTLHADMN
+          MOVE      DPTLHLCO,PTLHLCOD
+          RETURN
+.
+RKPTLH2   MOVE      ZERO,OVRCD
+          READKS    PATLHIS2;DPTLHADM,PTLHDATE,DPTLHLCO:
+                             PTLHTIME,PTLHSEID,PTLHSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTLHADM,PTLHADMN
+          MOVE      DPTLHLCO,PTLHLCOD
+          RETURN
+.
+RPPTLH2   MOVE      ZERO,OVRCD
+          READKP    PATLHIS2;DPTLHADM,PTLHDATE,DPTLHLCO:
+                             PTLHTIME,PTLHSEID,PTLHSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTLHADM,PTLHADMN
+          MOVE      DPTLHLCO,PTLHLCOD
+          RETURN
+.

@@ -1,0 +1,98 @@
+create table oprpimaf
+(
+  oppiunid    char(10) default ' ' not null,
+  oppitmno    char(1) default ' ' not null,
+  doppicnt    char(2) default ' ' not null,
+  oppiicde    char(15) default ' ' not null,
+  oppiiqty    decimal(3,0) default 0 not null,
+  oppiltsn    char(20) default ' ' not null,
+  oppicost    char(10) default ' ' not null,
+  oppiloca    char(3) default ' ' not null,
+  oppiuc01    char(3) default ' ' not null,
+  oppiuc02    char(3) default ' ' not null,
+  oppiuc03    char(3) default ' ' not null,
+  oppiuc04    char(3) default ' ' not null,
+  oppiuc05    char(3) default ' ' not null,
+  oppiuc06    char(3) default ' ' not null,
+  oppiuc07    char(3) default ' ' not null,
+  oppiuc08    char(3) default ' ' not null,
+  oppiuc09    char(3) default ' ' not null,
+  oppiuc10    char(3) default ' ' not null,
+  oppiuc11    char(3) default ' ' not null,
+  oppiuc12    char(3) default ' ' not null,
+  oppiuc13    char(3) default ' ' not null,
+  oppiuc14    char(3) default ' ' not null,
+  oppiuc15    char(3) default ' ' not null,
+  oppiuc16    char(3) default ' ' not null,
+  oppiuc17    char(3) default ' ' not null,
+  oppiuc18    char(3) default ' ' not null,
+  oppiuc19    char(3) default ' ' not null,
+  oppiuc20    char(3) default ' ' not null,
+  oppiuy01    char(1) default ' ' not null,
+  oppiuy02    char(1) default ' ' not null,
+  oppiuy03    char(1) default ' ' not null,
+  oppiuy04    char(1) default ' ' not null,
+  oppiuy05    char(1) default ' ' not null,
+  oppiuy06    char(1) default ' ' not null,
+  oppiuy07    char(1) default ' ' not null,
+  oppiuy08    char(1) default ' ' not null,
+  oppiuy09    char(1) default ' ' not null,
+  oppiuy10    char(1) default ' ' not null,
+  oppiut01    char(8) default ' ' not null,
+  oppiut02    char(8) default ' ' not null,
+  oppiut03    char(8) default ' ' not null,
+  oppiut04    char(8) default ' ' not null,
+  oppiut05    char(8) default ' ' not null,
+  oppiut06    char(8) default ' ' not null,
+  oppiut07    char(8) default ' ' not null,
+  oppiut08    char(8) default ' ' not null,
+  oppiut09    char(8) default ' ' not null,
+  oppiut10    char(8) default ' ' not null,
+  oppiuf01    decimal(6,0) default 0 not null,
+  oppiuf02    decimal(6,0) default 0 not null,
+  oppiuf03    decimal(6,0) default 0 not null,
+  oppiuf04    decimal(6,0) default 0 not null,
+  oppiuf05    decimal(6,0) default 0 not null,
+  oppiuf06    decimal(6,0) default 0 not null,
+  oppiuf07    decimal(6,0) default 0 not null,
+  oppiuf08    decimal(6,0) default 0 not null,
+  oppiuf09    decimal(6,0) default 0 not null,
+  oppiuf10    decimal(6,0) default 0 not null,
+  oppidtrt    char(6) default ' ' not null,
+  oppidumm    char(1) default ' ' not null,
+  oppionum    char(7) default ' ' not null,
+  oppiicos    char(15) default ' ' not null,
+  oppircnt    char(2) default ' ' not null,
+  oppicdat    char(8) default ' ' not null,
+  oppictim    char(8) default ' ' not null,
+  oppicuid    char(10) default ' ' not null,
+  oppibcod    char(60) default ' ' not null,
+  oppiaimp    char(1) default ' ' not null,
+  oppiudat    char(8) default ' ' not null,
+  oppiutim    char(8) default ' ' not null,
+  oppiuuid    char(10) default ' ' not null,
+  oppispar    char(24) default ' ' not null,
+  lf          char(1)
+);
+create unique index oprpima1 on oprpimaf
+(
+oppiunid,
+oppitmno,
+doppicnt
+);
+create unique index oprpima2 on oprpimaf
+(
+oppiicde,
+oppiunid,
+oppitmno,
+doppicnt
+);
+create unique index oprpima3 on oprpimaf
+(
+oppibcod,
+oppiunid,
+oppitmno,
+doppicnt
+);
+revoke all on oprpimaf from public ; 
+grant select on oprpimaf to public ; 

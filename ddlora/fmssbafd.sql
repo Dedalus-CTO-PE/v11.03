@@ -1,0 +1,122 @@
+create table fmsaudsa
+(
+  fmsaaudd    varchar2(8) default ' ' not null,
+  fmsaaudt    varchar2(8) default ' ' not null,
+  fmsaaudp    varchar2(2) default ' ' not null,
+  fmsaaudr    varchar2(1) default ' ' not null,
+  fmsaauds    number(1,0) default 0 not null,
+  fmsaaudo    varchar2(4) default ' ' not null,
+  fmsaledg    varchar2(2) default ' ' not null,
+  fmsasubj    varchar2(12) default ' ' not null,
+  fmsadesc    varchar2(35) default ' ' not null,
+  fmsacgrp    varchar2(5) default ' ' not null,
+  fmsaades    varchar2(35) default ' ' not null,
+  fmsappos    varchar2(5) default ' ' not null,
+  fmsatype    varchar2(1) default ' ' not null,
+  fmsastyp    varchar2(1) default ' ' not null,
+  fmsadtyp    varchar2(1) default ' ' not null,
+  fmsasec     varchar2(1) default ' ' not null,
+  fmsaref1    varchar2(25) default ' ' not null,
+  fmsaref2    varchar2(25) default ' ' not null,
+  fmsaref3    varchar2(25) default ' ' not null,
+  fmsaref4    varchar2(25) default ' ' not null,
+  fmsadat1    varchar2(8) default ' ' not null,
+  fmsadat2    varchar2(8) default ' ' not null,
+  fmsadat3    varchar2(8) default ' ' not null,
+  fmsadat4    varchar2(8) default ' ' not null,
+  fmsacod1    varchar2(3) default ' ' not null,
+  fmsacod2    varchar2(3) default ' ' not null,
+  fmsacod3    varchar2(3) default ' ' not null,
+  fmsacod4    varchar2(3) default ' ' not null,
+  fmsaamt1    number(18,6) default 0 not null,
+  fmsaamt2    number(18,6) default 0 not null,
+  fmsaamt3    number(18,6) default 0 not null,
+  fmsaamt4    number(18,6) default 0 not null,
+  fmsastat    number(2,0) default 0 not null,
+  fmsactrl    number(1,0) default 0 not null,
+  fmsaasst    number(1,0) default 0 not null,
+  fmsappt     number(1,0) default 0 not null,
+  fmsaonc     number(1,0) default 0 not null,
+  fmsaoncc    varchar2(3) default ' ' not null,
+  fmsacheq    varchar2(10) default ' ' not null,
+  fmsaaddt    varchar2(12) default ' ' not null,
+  fmsadpla    varchar2(1) default ' ' not null,
+  fmsaunit    varchar2(20) default ' ' not null,
+  fmsaaytd    number(1,0) default 0 not null,
+  fmsamult    number(8,2) default 0 not null,
+  fmsadiv     number(8,2) default 0 not null,
+  fmsabln     varchar2(12) default ' ' not null,
+  fmsadlev    varchar2(3) default ' ' not null,
+  fmsaspar    varchar2(17) default ' ' not null,
+  fmsalock    varchar2(2) default ' ' not null,
+  lf          varchar2(1) default ' ' not null
+)
+tablespace pas_data; 
+create index fmsaudsa on fmsaudsa
+(
+fmsaaudd,
+fmsaaudt,
+fmsaaudp,
+fmsaaudr
+)
+tablespace pas_indx; 
+create table fmssbaaf
+(
+  fmsaledg    varchar2(2) default ' ' not null,
+  fmsasubj    varchar2(12) default ' ' not null,
+  fmsadesc    varchar2(35) default ' ' not null,
+  fmsacgrp    varchar2(5) default ' ' not null,
+  fmsaades    varchar2(35) default ' ' not null,
+  fmsappos    varchar2(5) default ' ' not null,
+  fmsatype    varchar2(1) default ' ' not null,
+  fmsastyp    varchar2(1) default ' ' not null,
+  fmsadtyp    varchar2(1) default ' ' not null,
+  fmsasec     varchar2(1) default ' ' not null,
+  fmsaref1    varchar2(25) default ' ' not null,
+  fmsaref2    varchar2(25) default ' ' not null,
+  fmsaref3    varchar2(25) default ' ' not null,
+  fmsaref4    varchar2(25) default ' ' not null,
+  fmsadat1    varchar2(8) default ' ' not null,
+  fmsadat2    varchar2(8) default ' ' not null,
+  fmsadat3    varchar2(8) default ' ' not null,
+  fmsadat4    varchar2(8) default ' ' not null,
+  fmsacod1    varchar2(3) default ' ' not null,
+  fmsacod2    varchar2(3) default ' ' not null,
+  fmsacod3    varchar2(3) default ' ' not null,
+  fmsacod4    varchar2(3) default ' ' not null,
+  fmsaamt1    number(18,6) default 0 not null,
+  fmsaamt2    number(18,6) default 0 not null,
+  fmsaamt3    number(18,6) default 0 not null,
+  fmsaamt4    number(18,6) default 0 not null,
+  fmsastat    number(2,0) default 0 not null,
+  fmsactrl    number(1,0) default 0 not null,
+  fmsaasst    number(1,0) default 0 not null,
+  fmsappt     number(1,0) default 0 not null,
+  fmsaonc     number(1,0) default 0 not null,
+  fmsaoncc    varchar2(3) default ' ' not null,
+  fmsacheq    varchar2(10) default ' ' not null,
+  fmsaaddt    varchar2(12) default ' ' not null,
+  fmsadpla    varchar2(1) default ' ' not null,
+  fmsaunit    varchar2(20) default ' ' not null,
+  fmsaaytd    number(1,0) default 0 not null,
+  fmsamult    number(8,2) default 0 not null,
+  fmsadiv     number(8,2) default 0 not null,
+  fmsabln     varchar2(12) default ' ' not null,
+  fmsadlev    varchar2(3) default ' ' not null,
+  fmsaspar    varchar2(17) default ' ' not null,
+  fmsalock    varchar2(2) default ' ' not null,
+  lf          varchar2(1) default ' ' not null,
+constraint fmssbaa1 primary key( 
+fmsaledg,
+fmsasubj)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 
+create unique index fmssbaa2 on fmssbaaf
+(
+fmsaledg,
+fmsadesc,
+fmsasubj
+)
+  tablespace pas_indx; 

@@ -1,0 +1,1044 @@
+.******************************************************************************
+.* System         : Emergency                                                 *
+.* Program        : IBAEMR57.PBL                                              *
+.* Name           : Emergency Department Transfer of Care Extract             *
+.******************************************************************************
+.* Date           : 18/05/2018                                                *
+.* Author         : J.Tan                                                     *
+.* Modifications  :                                                           *
+.******************************************************************************
+.*        V11.00.01 11/01/2021  Jill Parkinson Task 0901607                   *
+.*                  Changed to compare year instead of century in VDAT0000    *
+.*        V10.14.01 08/07/2019  Ebon Clements  TSK 0876853                    *
+.*                  Added tempfile to only report a visit once from the       *
+.*                  EDWARD change table                                       *
+.*        V10.13.07 07/01/2019  Ebon Clements  TSK 0868751                    *
+.*                  Fixed date validation to allow dates > 2018 - VDAT0000    *
+.*        V10.13.06 28/11/2018  Ebon Clements  TSK 0865961                    *
+.*                  Report records from EDWARD change table                   *
+.*        V10.13.05 28/11/2018  Ebon Clements  TSK 0867093                    *
+.*                  Don't report cancelled ED visits                          *
+.*        V10.13.04 17/10/2018  Don Nguyen       TSK 0838558                  *
+.*                  Deleted temp files (WORK1 & WORK2) on program exit        *
+.*        V10.13.03 14/09/2018  Thanh T    TSK 0863130                        *
+.*                  ED Transfer of Care Header Row enhancement                *
+.*        V10.13.02 10/09/2018  Thanh T    TSK 0863130                        *
+.*                  ED Transfer of Care Header Row enhancement                *
+.*        V10.13.01 21/08/2018  Ebon Clements  TSK 0861413                    *
+.*                  Extract mode of arrival HDP values 01, 04 and 05          *
+.*        V10.12.02 03/07/2018  J.Tan      TSK 0848922                        *
+.*                  Fixed Given name to use field PMPXFNAM instead of PGNAME  *
+.*        V10.12.01 22/06/2018  J.Tan      TSK 0848922                        *
+.*                  Changed Time/Date leaving ambulance location & Trans.care *
+.*        V10.12.00 18/05/2018  J.Tan      TSK 0848922                        *
+.*                  Created program.                                          *
+.******************************************************************************
+.
+          INC       STD001FD
+.
+          INC       IBACONFD/INC
+          INC       IBASEQFD/INC
+          INC       EMRVISFD/INC
+          INC       PATMA1FD/INC
+          INC       PMSADWFD/INC
+          INC       PMSPX2FD/INC
+          INC       PATVISFD/INC
+          INC       PMSVX1FD/INC
+          INC       PATCONFD/INC
+          INC       PATCODFD/INC
+          INC       PATHSPFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+WORK1     FILE      ASCII, FIXED=824
+.
+.Transmission file layout
+.
+.NAME     TYPE    LENGTH    START   DESCRIPTION
+.----     ----    ------    -----   -----------
+XHINDIC   DIM       4         1   * Hospital id (patconfd.cfileno)
+XPINDIC   DIM      10         5   * Person Id Number (emrvisfd.emviurno)
+XPERSNO   DIM      10        15   * Person Visit Id (emrvisfd.demviadm)
+XPFNAME   DIM      80        25   * Patient first name (pmspx2fd.pmpxfnam)
+XPSNAME   DIM      40        105  * Patient Last name (patma1fd.ptmasnam)
+XPMODEA   DIM       2        145  * Mode of Arrival 01 - 10 (emrvisfd.emvimode)
+XPAMBLN   DIM      14        147  * Ambulance case number (emrvisfd.emviambl)
+XPATIME   DIM       4        161  * Arrival Time (emrvisfd.emvitime)
+XPADATE   DIM       8        165  * Arrival Date (emrvisfd.emvidate)
+XPTTRTM   DIM       4        173  * Triage Time (emrvisfd.emvitrtm)
+XPTTRDT   DIM       8        177  * Triage Date (emrvisfd.emvitrdt)
+XPTRIGC   DIM       1        185  * Triage Category (emrvisfd.emvitrig)
+XPTAATM   DIM       4        186  * Time leave ambulance loc.(emrvisfd.emviahtm)
+XPTAADT   DIM       8        190  * Date leave ambulance loc.(emrvisfd.emviahdt)
+XPTAHTM   DIM       4        198  * Time tran.from amb.to Hosp-emrvisfd.emviahtm
+XPTAHDT   DIM       8        202  * Date tran.from amb.to Hosp-emrvisfd.emviahdt
+XTCFNAM   DIM      80        210  * First name of ED staff modified trans.care
+XTCLNAM   DIM      40        290  * Last name of ED staff modified trans.care
+XTCTUPD   DIM       4        330  * Time of trans.care time was modified
+XTCDUPD   DIM       8        334  * Date of trans.care time was modified
+.
+. End of record              342
+.
+WORK2     FILE      ASCII, FIXED=824
+.
+.Transmission file layout with header
+.
+.NAME     TYPE    LENGTH    START   DESCRIPTION
+.----     ----    ------    -----   -----------
+HID       DIM      10         1   * Header Identifier
+HFACCODE  DIM       4        11   * Facility Code
+HSTRDATE  DIM       8        15   * Extract Start Date
+HENDDATE  DIM       8        23   * Extract Start Time
+HRUNDATE  DIM       8        31   * Run Date
+HRUNTIME  DIM       4        39   * Run Time
+HEXTRECS  DIM       8        43   * Number of Records Extracted
+HEXTTYPE  DIM      10        51   * Extract Type
+HEXTVERS  DIM       8        61   * Extract Version
+HSRCSYST  DIM      15        69   * Source System
+HSRCVERS  DIM       5        84   * Source Version
+HSPARES   DIM     253        89   * Spares
+.
+. End of record             342
+.
+.**********************************************************************
+.* Visit already reported tempfile                                    *
+.**********************************************************************
+TEMPFIL1  IFILE     SQL, FIXED=9, KEY="UC1-8"
+.
+.NAME     TYPE     LENGTH  PHYSICAL   START     DESCRIPTION
+.----     ----     ------  --------   -----     -----------
+TEMPADMN  DIM           8         8       1     ED Visit Number
+.
+.                         end of record   9 
+.
+ERASE     INIT      "iserase "
+ISBUILD   INIT      "isbuild "
+TEMPFILE  DIM       9
+UKEY      INIT      " 9 UC1-8"    * set up for record length & key
+.
+.        WORK AREA
+.
+CODEEA    INIT      "EA"
+CODECL    INIT      "CL"
+.
+CMDLINE   DIM       100
+COUNT     FORM      5
+CURRCENT  FORM      2             * current century
+CURRYEAR  FORM      2             * current Year
+.
+ERRFLAG   FORM      1
+ERRNUMB   FORM      5
+ERRMSG    DIM       52
+ENDDATE   DIM       8
+FORM3     FORM      3
+.
+DIM8      DIM       8
+DHOUR     DIM       2
+DMIN      DIM       2
+.
+TXTEXT    INIT      ".txt"
+FILENAME  DIM       8
+FILENAM2  DIM       8
+EXTFNAME  DIM       26
+HOSPID    DIM       3
+LOOPTYPE  FORM      1
+.
+RECNUMB   FORM      5
+RECNUMB2  FORM      5
+STRDATE   DIM       8
+TOTRECN   FORM      5
+.
+. Extract Header
+.
+HRID      INIT      "####SSHEADER"
+HREXTTYP  INIT      "ED"
+HREXTVER  INIT      "ED2007V2"
+HRSRCSYS  INIT      "WEBPAS"
+HRVERSN   DIM       5
+FORM8     FORM      8
+DIM3      DIM       3
+.
+PRGID     INIT      "IBAEMR57"
+PRGNAM    INIT      "ED Transfer of Care Extract"
+VERSION   INIT      "V11.03.00"
++
+.**********************************************************************
+.*                           MAINLINE                                 *
+.**********************************************************************
+ML0000    CALL      INIT0000                * initialization and open files
+ML1000    CALL      OPTN0000                * select options
+          BRANCH    OPTION,ML2000,ML2000,ML2000
+          GOTO      ML9999
+.
+ML2000    CALL      KEYD0000                * Keyin ending date
+          BRANCH    EXIT,ML1000
+.
+ML3000    CALL      KHOS0000
+          CALL      FILE0000                * setup the filename
+.
+ML4000    CALL      CONTQST                 * Ok to Continue (Y/N/C) ?
+          BRANCH    CEXIT,ML5000,ML4000,ML1000
+.                         Yes    No     Cancel
+.
+ML5000    CALL      PROC0000                * Processing emr discharged patients
+          CALL      ENDP0000                * End of processing
+          CALL      MVEXT000
+.
+ML9999    PREP      WORK1,FILENAME
+          CLOSE     WORK1,DELETE
+.
+          PREP      WORK2,FILENAM2
+          CLOSE     WORK2,DELETE
+.
+          CALL      KILL0000                * remove the tempfile
+.
+          CHAIN     PGM
+          STOP
++
+.******************************************************************************
+.*                                  INIT0000                                  *
+.*                      Initialization routine                                *
+.******************************************************************************
+INIT0000  CALL      DISPHEAD
+          CALL      IBACLOCK
+          DISPLAY   *P56:24,"Opening patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"pmsadwaf";
+          OPEN      PMSADWA1,"pmsadwaf"
+.
+          DISPLAY   *P64:24,"emrvisaf";
+          OPEN      EMRVISA1,"emrvisaf"         
+          OPEN      EMRVISA4,"emrvisaf"         
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          DISPLAY   *P64:24,"patvisaf";
+          OPEN      PATVISA1,"patvisaf"
+          DISPLAY   *P64:24,"pmsvx1af";
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,TEN;*54,CFILENO
+.
+          CALL      TFILENAM                     * Get temp file name
+          MOVE      TFILNAME,TEMPFILE
+.
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                  OPTN0000                                  *
+.*                      Main options                                          *
+.******************************************************************************
+OPTN0000  HLINE     *G37,2,57,80
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = All Patients":
+                    *P1:6,*V2LON,TWO,*HOFF," = Only Public Patients":
+                    *P1:7,*V2LON,THREE,*HOFF," = Specific patients":
+                    *P1:9,"Select Option : ";
+.
+OPTN1000  KEYIN     *P17:9,*EL,*V2LON,OPTION;
+.
+          COMPARE   ZERO,OPTION
+          GOTO      OPTN9000 IF EQUAL
+.
+          MOVE      ZERO,EXIT
+          BRANCH    OPTION,OPTN9999,OPTN9999,OPTN9999
+.
+          BEEP
+          GOTO      OPTN1000
+.
+OPTN9000  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.******************************************************************************
+.*                                  KDAT0000                                  *
+.*                      Keyin ending date                                     *
+.******************************************************************************
+KEYD0000  DISPLAY   *P1:11,*EL,"Start Date : ":
+                    *P1:12,*EL,"End   Date : ";
+.
+          MOVE      "11",CVERT
+          MOVE      "15",CCOL
+          UNPACK    SP6,CYEAR,CMON,CDAY
+          MOVE      CCC,CCENT
+          MOVE      ZERO,CHIGHLT
+          MOVE      ZERO,CDEFDTE
+          CALL      KEYDATE
+          BRANCH    OVRCD,KEYD9500
+          PACK      STRDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",STRDATE
+.
+          MOVE      "12",CVERT
+          MOVE      "15",CCOL
+          UNPACK    SP6,CYEAR,CMON,CDAY
+          MOVE      CCC,CCENT
+          MOVE      ZERO,CHIGHLT
+          MOVE      ZERO,CDEFDTE
+          CALL      KEYDATE
+          BRANCH    OVRCD,KEYD9500
+.
+          PACK      ENDDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",ENDDATE
+.
+.        The new ending date should be greater than the Last Ending Date
+.
+KEYD6000  MOVE      ZERO,EXIT
+          MATCH     ENDDATE,STRDATE
+          GOTO      KEYD9999 IF LESS
+          GOTO      KEYD9999 IF EQUAL
+.
+          UNPACK    STRDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+     DISPLAY   *P1:24,*EL,*B,*V2LON,"End Date must be greater than or equal to":
+                    "Start date ",CPCDATE,".  ";
+          CALL      HITENTER
+          GOTO      KEYD0000
+.
+KEYD9500  MOVE      ONE,EXIT
+KEYD9999  RETURN
++
+.******************************************************************************
+.*                                  FILE0000              Called by: ML0000   *
+.*                            Get Extract Filename                            *
+.******************************************************************************
+FILE0000  MOVE      "AMBv2",KEY5
+          MOVE      CFILENO,KEY6
+          SQUEEZE   KEY6
+          UNPACK    STRDATE,CCENT,CYEAR,CMON,CDAY         * start date
+          PACK      DIM8,CDAY,CMON,CCENT,CYEAR
+          MOVE      "-",KEY1
+.
+          UNPACK    ENDDATE,CCENT,CYEAR,CMON,CDAY         * end date
+          PACK      KEY8,CDAY,CMON,CCENT,CYEAR
+.
+          CLEAR     EXTFNAME
+          APPEND    KEY5,EXTFNAME
+          APPEND    KEY6,EXTFNAME
+          APPEND    DIM8,EXTFNAME
+          APPEND    KEY1,EXTFNAME
+          APPEND    KEY8,EXTFNAME
+          APPEND    SP70,EXTFNAME
+          RESET     EXTFNAME
+          STRIP     EXTFNAME
+.
+          DISPLAY   *P1:16,*EL,"Extract filename : ":
+                    *P21:16,*V2LON,*+,EXTFNAME,".txt";
+.
+          MOVE      "ED57",KEY4
+          PACK      FILENAME,KEY4,CDD,CMM,SP70
+          REP       " 0",FILENAME
+.
+          MOVE      "TM57",KEY4
+          PACK      FILENAM2,KEY4,CDD,CMM,SP70
+          REP       " 0",FILENAM2
+.
+FILE9999  RETURN
++
+.
+.******************************************************************************
+.*                                  PROC0000                                  *
+.*                      Processing discharges patients                        *
+.******************************************************************************
+.        Create the header record for the transmission file
+.
+PROC0000  MOVE      ZERO,ERRNUMB
+          MOVE      ZERO,RECNUMB
+          MOVE      ZERO,RECNUMB2
+          MOVE      ZERO,TOTRECN
+.
+          CLOSE     WORK1
+          PREP      WORK1,FILENAME
+.
+          CLOSE     WORK2
+          PREP      WORK2,FILENAM2
+.
+          CALL      CREA0000        * create tempfile
+.
+          DISPLAY   *P1:20,*EL,*V2LON,"** Processing Emergency Patients **":
+                    *P1:24,*EL,"Emergency No. : ";
+.
+          MOVE      ZERO,CPAGENO
+          MOVE      ZERO,COUNT
+          CALL      IBACLOCK
+          MOVE      CCC,CURRCENT
+          MOVE      CYY,CURRYEAR
+.
+          MOVE      ZERO,LOOPTYPE             * Loop emrvisaf or pmsadwaf
+.
+PROC0500  IF        LOOPTYPE=0
+            PACK      KEY24,STRDATE,SP70      * Key for emrvisaf
+          ELSE
+            PACK      KEY27,STRDATE,SP70      * Key for pmsadwaf
+          ENDIF
+.
+          IF        LOOPTYPE=0
+            CALL      RSEMVIS4                * Position emrvisaf
+          ELSE
+            CALL      RSPMADW1                * Position pmsadwaf
+          ENDIF
+.
+PROC1000  IF        LOOPTYPE=0
+            CALL      RKEMVIS4                * Read next emrvisaf
+            BRANCH    OVRCD,PROC5000
+.
+            MATCH     EMVIDATE,ENDDATE        * Exit after end date
+            GOTO      PROC5000 IF LESS
+          ELSE
+            CALL      RKPMADW1                * Read next pmsadwaf
+            BRANCH    OVRCD,PROC5000
+.
+            MATCH     PMAWCDAT,ENDDATE        * Exit after end date
+            GOTO      PROC5000 IF LESS
+.
+            PACK     KEY8,PMAWVISN,SP70       * Read emrvisaf
+            CALL     RDEMVIS1
+            BRANCH   OVRCD,PROC1000
+.
+            MATCH    STRDATE,EMVIDATE
+            IF       !@LESS
+              MATCH    EMVIDATE,ENDDATE       * Skip if already reported
+              GOTO     PROC1000 IF NOT LESS   * by visit date loop
+            ENDIF
+.
+            CALL     CREP0000                 * Skip if already reported by
+            BRANCH   EXIT,PROC1000            * another pmsadwf record
+          ENDIF
+.
+          COMPARE   FOUR,EMVISTAT           * Skip cancelled ED visits
+          GOTO      PROC1000 IF EQUAL
+.
+.         Check hospital id for multi hospital
+.
+          IF          IBCNMHOS=1
+            MATCH       SP10,HOSPID
+            IF          !@EQUAL
+              OPEN        PMSVX1A1,"pmsvx1af"
+              PACK        KEY8,EMVIADMN,SP8
+              CALL        RDVISA1
+              BRANCH      OVRCD,PROC1000
+              CALL        RDPMVX11
+              BRANCH      OVRCD,PROC1000
+              MATCH       PMVXMHOS,HOSPID
+              GOTO        PROC1000 IF NOT EQUAL    * different hospital
+            ENDIF
+          ENDIF
+.
+          ADD       ONE,COUNT               * Increment the record counter
+          IF        COUNT%10=1
+            DISPLAY   *P20:24,*V2LON,EMVIURNO;
+          ENDIF
+.
+          PACK      KEY5,CODEEA,EMVIMODE    * Check for Mode of arrival
+          CALL      RDCODE1
+          BRANCH    OVRCD,PROC1000
+.
+          MATCH     "01",THCSCOD
+          GOTO      PROC2000 IF EQUAL
+          MATCH     "04",THCSCOD
+          GOTO      PROC2000 IF EQUAL
+          MATCH     "05",THCSCOD
+          GOTO      PROC1000 IF NOT EQUAL
+.
+PROC2000  BRANCH    OPTION,PROC2200        * All patients
+.
+          MATCH     SP70,EMVICOMP
+          GOTO      PROC1000 IF EQUAL      * blank Compensation code
+.
+          PACK      KEY5,CODECL,EMVICOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD,PROC1000
+.
+          IF        OPTION=2
+            MATCH     "P",TCINDC1
+            GOTO      PROC2200 IF EQUAL    * Public patients
+          ENDIF
+          IF        OPTION=3
+            MOVE      ZERO,F6
+            MOVE      ZERO,F2
+            SQUEEZE   PTCDASC2
+            MOVE      PTCDASC2,F6
+            MOVE      F6,F2
+            COMPARE   "18",F2
+            GOTO      PROC2200 IF EQUAL    * specific patients
+          ENDIF
+          GOTO      PROC1000
+.
+PROC2200  PACK      KEY8,EMVIURNO,SP70
+          CALL      RDMAST1
+          IF        OVRCD=1
+            MATCH     ZEROUR,EMVIURNO
+            IF        @EQUAL
+              MOVE      "Missing PMI master record.",ERRMSG
+            ENDIF
+            CALL      PRTL0000
+            GOTO      PROC1000
+          ENDIF
+.
+          MOVE      EMVIURNO,KEY8
+          CALL      RDPMPX21
+          IF        OVRCD=1
+            MOVE      "Missing PMI master record.",ERRMSG
+            CALL      PRTL0000
+            GOTO      PROC1000
+          ENDIF
+.
+          DISPLAY   *P50:24,*V2LON,DEMVIADM;
+.
+          ADD       ONE,TOTRECN             * Total records read
+          CALL      CLER0000                * initialise all data fields
+          CALL      SFLD0000                * setup fields
+.
+          CALL      VALD0000
+          BRANCH    ERRFLAG,PROC1000        * found invalid fields
+.
+          CALL      WRIT0000
+          GOTO      PROC1000
+.
+PROC5000  IF        LOOPTYPE=0
+            MOVE      ONE,LOOPTYPE          * Now loop pmsadwaf
+            GOTO      PROC0500              * instead or emrvisaf
+          ENDIF
+.
+          CLOSE     WORK1
+          CALL      WTRHDR00
+          CALL      CPYDET00
+.
+          IF        ERRNUMB <>0
+            CALL      UND80
+            PRINT     *2,"Records Extract: ",RECNUMB:
+                      *N,*2,"Error Records  : ",ERRNUMB:
+                      *N,*N,*2,"Total Records Read : ",TOTRECN
+.
+            DISPLAY   *P1:24,*EL,*B,"Errors found.  ";
+            CALL      HITENTER
+          ENDIF
+.
+PROC9999  RETURN
++
+.******************************************************************************
+.*                                  CREP0000              Called by: PROC0000 *
+.* Only report this visit once from pmsadwaf.                                 *
+.* EXIT=0 report record. EXIT=1 Don't report record                           *
+.******************************************************************************
+CREP0000  PACK      KEY8,EMVIADMN,SP70
+          CALL      RDTEMP1
+          BRANCH    OVRCD,CREP9000
+.
+          MOVE      ONE,EXIT              * Skip record as it's already reported
+          GOTO      CREP9999  
+.
+CREP9000  MOVE      EMVIADMN,TEMPADMN
+.
+          PACK      KEY8,TEMPADMN,SP70    * Add visit to reported file
+          CALL      WRTEMP1
+ 
+          MOVE      ZERO,EXIT             * Report record
+          GOTO      CREP9999  
+.
+CREP9999  RETURN
++
+.******************************************************************************
+.*                                  WRIT0000              Called by: PROC0000 *
+.*                      Write the record details                              *
+.******************************************************************************
+WRIT0000  WRITE     WORK1,SEQ;XHINDIC,XPINDIC,XPERSNO,XPFNAME,XPSNAME:
+                              XPMODEA,XPAMBLN,XPATIME,XPADATE,XPTTRTM:
+                              XPTTRDT,XPTRIGC,XPTAATM,XPTAADT,XPTAHTM:
+                              XPTAHDT,XTCFNAM,XTCLNAM,XTCTUPD,XTCDUPD
+          ADD       ONE,RECNUMB
+.
+WRIT9999  RETURN
+.
+.******************************************************************************
+. Copy all the data from WORK1 to WORK2
+.******************************************************************************
+CPYDET00  COMPARE   ZERO,RECNUMB
+          GOTO      CPYDET99 IF EQUAL
+.
+          OPEN      WORK1,FILENAME
+.
+CPYDET20  READ      WORK1,SEQ;XHINDIC,XPINDIC,XPERSNO,XPFNAME,XPSNAME:
+                              XPMODEA,XPAMBLN,XPATIME,XPADATE,XPTTRTM:
+                              XPTTRDT,XPTRIGC,XPTAATM,XPTAADT,XPTAHTM:
+                              XPTAHDT,XTCFNAM,XTCLNAM,XTCTUPD,XTCDUPD
+.
+          GOTO      CPYDET80 IF OVER
+.
+          WRITE     WORK2,SEQ;XHINDIC,XPINDIC,XPERSNO,XPFNAME,XPSNAME:
+                              XPMODEA,XPAMBLN,XPATIME,XPADATE,XPTTRTM:
+                              XPTTRDT,XPTRIGC,XPTAATM,XPTAADT,XPTAHTM:
+                              XPTAHDT,XTCFNAM,XTCLNAM,XTCTUPD,XTCDUPD
+          GOTO      CPYDET20
+.
+CPYDET80  CLOSE     WORK1,DELETE
+.
+CPYDET99  RETURN
+.
+.******************************************************************************
+.* Write out extract header details                                           
+.******************************************************************************
+WTRHDR00  MOVE      HRID,HID
+          MOVE      CFILENO,HFACCODE       
+          MOVE      STRDATE,HSTRDATE
+          MOVE      ENDDATE,HENDDATE
+.
+          UNPACK    CDATE,CDAY,DIM1,CMON,DIM1,CCENT,CYEAR
+          PACK      HRUNDATE,CCENT,CYEAR,CMON,CDAY
+.
+          UNPACK    CTIMEIS,CHOUR,DIM1,CMIN,DIM2
+          PACK      HRUNTIME,CHOUR,CMIN
+. 
+          ASSIGN    (RECNUMB+1),FORM8
+          MOVE      FORM8,HEXTRECS
+          SQUEEZE   HEXTRECS
+          MOVE      HREXTTYP,HEXTTYPE
+          MOVE      HREXTVER,HEXTVERS
+          MOVE      HRSRCSYS,HSRCSYST
+.
+          UNPACK    VERSION,DIM3,DIM1,DIM2
+          PACK      HSRCVERS,DIM3,DIM2
+.
+          PACK      HSPARES,SP70,SP70,SP70,SP70
+.
+          WRITE     WORK2,SEQ;HID,HFACCODE,HSTRDATE,HENDDATE,HRUNDATE:
+                              HRUNTIME,HEXTRECS,HEXTTYPE,HEXTVERS,HSRCSYST:
+                              HSRCVERS 
+          ADD       ONE,RECNUMB2
+.
+WTRHDR99  RETURN
++
+.******************************************************************************
+.*                                  ENDP0000                                  *
+.*                             End of process                                 *
+.******************************************************************************
+ENDP0000  DISPLAY   *P1:24,*EL,*P19:24,*V2LON:
+                    "** Transfer of Care Extract Completed **",*W;
+ENDP9999  RETURN
++
+.******************************************************************************
+.*                                  SFLD0000                                  *
+.*                      Set up Extract fields                                 *
+.******************************************************************************
+SFLD0000  MOVE      CFILENO,XHINDIC       * hospital id
+          MOVE      EMVIURNO,XPINDIC      * ur number
+          SQUEEZE   XPINDIC
+          MOVE      DEMVIADM,XPERSNO      * visit number
+          SQUEEZE   XPERSNO 
+          MOVE      PMPXFNAM,XPFNAME      * patient first name
+          MOVE      PTMASNAM,XPSNAME      * patient last name
+          CALL      MARR0000              * mode of arrival
+          MOVE      EMVIAMBL,XPAMBLN      * ambulance case number
+.
+          UNPACK    EMVITIME,DHOUR,DIM1,DMIN
+          PACK      XPATIME,DHOUR,DMIN    * Arrival time (hhmm)
+          UNPACK    EMVIDATE,CCENT,CYEAR,CMON,CDAY
+          PACK      XPADATE,CDAY,CMON,CCENT,CYEAR  * Arrival Date (ddmmccyy)
+.
+          UNPACK    EMVITRTM,DHOUR,DIM1,DMIN
+          PACK      XPTTRTM,DHOUR,DMIN    * Triage Time
+          UNPACK    EMVITRDT,CCENT,CYEAR,CMON,CDAY
+          PACK      XPTTRDT,CDAY,CMON,CCENT,CYEAR  * Triage Date
+.
+          MATCH     SP70,EMVITRIG
+          IF        !@EQUAL
+            PACK      KEY5,ANSA,ANSA,EMVITRIG
+            CALL      RDCODE1
+            IF        OVRCD=0
+              MATCH     SP70,TCINDC1
+              IF        !@EQUAL
+                MOVE      TCINDC1,XPTRIGC  * Triage category
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          UNPACK    EMVIAHTM,DHOUR,DIM1,DMIN
+          PACK      XPTAATM,DHOUR,DMIN             * ambulance handover time
+.
+          UNPACK    EMVIAHDT,CCENT,CYEAR,CMON,CDAY
+          PACK      XPTAADT,CDAY,CMON,CCENT,CYEAR  * ambulance handover date
+.
+          UNPACK    EMVIAHTM,DHOUR,DIM1,DMIN
+          PACK      XPTAHTM,DHOUR,DMIN             * ambulance handover time
+.
+          UNPACK    EMVIAHDT,CCENT,CYEAR,CMON,CDAY
+          PACK      XPTAHDT,CDAY,CMON,CCENT,CYEAR  * ambulance handover date
+.
+          MOVE      SP70,XTCFNAM          * First name of staff mod.trans.care
+          MOVE      SP70,XTCLNAM          * Last name of staff modi.trans.care
+          MOVE      SP70,XTCTUPD          * Time of trans.care time was modified
+          MOVE      SP70,XTCDUPD          * Date of trans.care time was modified
+.
+SFLD9999  RETURN
++
+.******************************************************************************
+.         Set up Mode of arrival - HDP Equiv=1,4 or 5
+.******************************************************************************
+MARR0000  MATCH     SP70,EMVIMODE
+          GOTO      MARR9999 IF EQUAL
+.
+          PACK      KEY5,ANSE,ANSA,EMVIMODE
+          CALL      RDCODE1
+          BRANCH    OVRCD,MARR9999             * invalid code
+.
+          MATCH     SP4,THCSCOD
+          GOTO      MARR9999 IF EQUAL
+.
+          MOVE      SP70,KEY2
+          SQUEEZE   THCSCOD
+          UNPACK    THCSCOD,KEY2
+          MATCH     "01",KEY2
+          GOTO      MARR1000 IF EQUAL   * valid code
+          MATCH     "04",KEY2
+          GOTO      MARR2000 IF EQUAL   * valid code
+          MATCH     "05",KEY2
+          GOTO      MARR2000 IF EQUAL   * valid code
+          GOTO      MARR9999
+.
+MARR1000  MOVE      "01",XPMODEA       * Mode of arrival
+          GOTO      MARR9999
+.
+MARR2000  MOVE      "05",XPMODEA       * Mode of arrival
+MARR9999  RETURN
++
+.******************************************************************************
+.*                                  VALD0000                                  *
+.*                         Validate data before writing                       *
+.******************************************************************************
+VALD0000  MOVE      ZERO,ERRFLAG
+          MATCH     SP70,XHINDIC
+          IF        @EQUAL
+            MOVE      "Facility Identifier missing.",ERRMSG
+            CALL      PRTL0000 
+          ENDIF
+.
+          MATCH     SP70,XPFNAME
+          IF        @EQUAL
+            MOVE      "Patient First Name missing.",ERRMSG
+            CALL      PRTL0000 
+          ENDIF
+.
+          MATCH     SP70,XPSNAME
+          IF        @EQUAL
+            MOVE      "Patient Last name missing.",ERRMSG
+            CALL      PRTL0000 
+          ENDIF
+.
+          MATCH     SP70,XPMODEA
+          IF        @EQUAL
+            MOVE      "Mode of Arrival missing or invalid.",ERRMSG
+            CALL      PRTL0000 
+          ENDIF
+.
+          MATCH     SP70,XPAMBLN
+          IF        @EQUAL
+            MOVE      "Ambulance Case Number missing.",ERRMSG
+            CALL      PRTL0000 
+          ENDIF
+.
+          MOVE      XPATIME,KEY4
+          CALL      VTIM0000
+          IF        EXIT=1
+            MOVE      "Arrival Time missing or invalid.",ERRMSG
+            CALL      PRTL0000 
+          ENDIF
+.
+          MOVE      XPADATE,KEY8
+          CALL      VDAT0000
+          IF        EXIT=1
+            MOVE      "Arrival Date missing or invalid.",ERRMSG
+            CALL      PRTL0000 
+          ENDIF
+.
+          MOVE      XPTTRTM,KEY4
+          CALL      VTIM0000
+          IF        EXIT=1
+            MOVE      "Triage Time Missing or invalid.",ERRMSG
+            CALL      PRTL0000
+          ENDIF
+.
+          MOVE      XPTTRDT,KEY8
+          CALL      VDAT0000
+          IF        EXIT=1
+            MOVE      "Triage Date Missing or invalid.",ERRMSG
+            CALL      PRTL0000
+          ENDIF
+.
+          MATCH     SP70,XPTRIGC
+          IF        @EQUAL
+            MOVE      "Triage Category Missing or invalid.",ERRMSG
+            CALL      PRTL0000
+          ENDIF
+.
+          MOVE      XPTAATM,KEY4
+          CALL      VTIM0000
+          IF        EXIT=1
+           MOVE     "Time leaving ambulance location Missing or invalid.",ERRMSG
+            CALL      PRTL0000
+          ENDIF
+.
+          MOVE      XPTAADT,KEY8
+          CALL      VDAT0000
+          IF        EXIT=1
+           MOVE     "Date leaving ambulance location Missing or invalid.",ERRMSG
+            CALL      PRTL0000
+          ENDIF
+.
+          MOVE      XPTAHTM,KEY4
+          CALL      VTIM0000
+          IF        EXIT=1
+            MOVE      "Transfer of Care Time Missing or invalid.",ERRMSG
+            CALL      PRTL0000
+          ENDIF
+.
+          MOVE      XPTAHDT,KEY8
+          CALL      VDAT0000
+          IF        EXIT=1
+            MOVE      "Tranfer of Care Date Missing or invalid.",ERRMSG
+            CALL      PRTL0000
+          ENDIF
+.
+VALD9999  RETURN
++
+.******************************************************************************
+.*                                  VTIM0000                                  *
+.*                         Validate time (0000 to 2359)                       *
+.******************************************************************************
+VTIM0000  MATCH     SP70,KEY4
+          GOTO      VTIM9000 IF EQUAL     * Blank time
+.
+          UNPACK    SP70,KEY2,DIM2
+          UNPACK    KEY4,KEY2,DIM2
+          MOVE      ZERO,F2
+          MOVE      KEY2,F2
+          IF        F2<0 | F2>23
+            GOTO      VTIM9000           * Invalid hour
+          ENDIF
+.
+          MOVE      ZERO,F2
+          MOVE      DIM2,F2
+          IF        F2<0 | F2>59
+            GOTO      VTIM9000           * Invalid minute
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      VTIM9999
+.
+VTIM9000  MOVE      ONE,EXIT
+VTIM9999  RETURN
++
+.******************************************************************************
+.*                                  VDATE000                                  *
+.*                         Validate date (DDMMYYY)                            *
+.******************************************************************************
+VDAT0000  UNPACK    KEY8,XDAY,XMON,XCENT,XYEAR
+          MOVE      ZERO,F2
+          MOVE      XDAY,F2
+          IF        F2<1 | F2>31
+            GOTO      VDAT9000            * invalid day
+          ENDIF
+          MOVE      ZERO,F2
+          MOVE      XMON,F2
+          IF        F2<1 | F2>12
+            GOTO      VDAT9000            * invalid month
+          ENDIF
+          MOVE      ZERO,FORM2
+          MOVE      XCENT,FORM2
+          IF        FORM2<1 | FORM2>20
+            GOTO      VDAT9000            * invalid century
+          ENDIF
+          MOVE      ZERO,F2
+          MOVE      XYEAR,F2
+          IF        F2<1
+            GOTO      VDAT9000            * invalid year
+          ELSE
+            IF        FORM2=20 & F2>CURRYEAR
+              GOTO      VDAT9000          * maximum ccyy =  current ccyy
+            ENDIF
+          ENDIF
+          MOVE      ZERO,EXIT
+          GOTO      VDAT9999
+.
+VDAT9000  MOVE      ONE,EXIT
+VDAT9999  RETURN
++
+.******************************************************************************
+.*                                  PRTL0000              Called by: VALD0000 *
+.*                         Print error message                                *
+.******************************************************************************
+PRTL0000  IF        ERRNUMB=0
+            CALL      HEAD0000
+          ENDIF
+.
+          PRINT     *1,"| ",DEMVIADM,*12,"| ",EMVIURNO,*24,"|",ERRMSG,*80,"|"
+          ADD       ONE,ERRNUMB
+          MOVE      ONE,ERRFLAG
+.
+PRTL9999  RETURN
++
+.*****************************************************************************
+.*                             Print Heading                                 *
+.*                                HEAD0000                                   *
+.*****************************************************************************
+HEAD0000  CALL      HEAD80                  * Print the report header
+.
+          MOVE      "8",CLNO
+          IF        IBCNMHOS=1
+            PRINT     *20,"Hospital : ",PTHSNAME
+          ENDIF
+.
+          UNPACK    STRDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *20,"From : ",CPCDATE;
+.
+          UNPACK    ENDDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *40,"To : ",CPCDATE
+.
+          MOVE      "All Patients",KEY25
+          IF        OPTION=2
+            MOVE      "Only Public Patients",KEY25
+          ELSE
+            IF        OPTION=3
+              MOVE      "Specific Patients",KEY25
+            ENDIF
+          ENDIF
+          PRINT     *20,KEY25
+.
+          CALL      UND80
+          PRINT     *1,"|Visit No.",*12,"| U/R No.":
+                    *24,"|Error Message",*80,"|"
+          CALL      UND80
+.
+HEAD9999  RETURN
++
+.******************************************************************************
+. Move Extract to Web Directory
+.******************************************************************************
+MVEXT000  CLEAR     CMDLINE
+          APPEND    "ibaemr57.us1 ",CMDLINE
+          APPEND    FILENAM2,CMDLINE
+          APPEND    TXTEXT,CMDLINE
+          APPEND    SP1,CMDLINE
+          APPEND    EXTFNAME,CMDLINE
+          APPEND    TXTEXT,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.           
+MVEXT999  RETURN
++
+.------------------------------------------------------------
+. Clear Extract Variables
+.------------------------------------------------------------
+CLER0000  MOVE     SP70,XHINDIC   * Hospital id
+          MOVE     SP70,XPINDIC   * Person Id Number
+          MOVE     SP70,XPERSNO   * Person Visit Id
+          MOVE     SP70,XPFNAME   * Patient first name
+          MOVE     SP70,XPSNAME   * Patient Last name
+          MOVE     SP70,XPMODEA   * Mode of Arrival
+          MOVE     SP70,XPAMBLN   * Ambulance case number
+          MOVE     SP70,XPATIME   * Arrival Time
+          MOVE     SP70,XPADATE   * Arrival Date
+          MOVE     SP70,XPTTRTM   * Triage Time
+          MOVE     SP70,XPTTRDT   * Triage Date
+          MOVE     SP70,XPTRIGC   * Triage Category
+          MOVE     SP70,XPTAATM   * Time leave ambulance location
+          MOVE     SP70,XPTAADT   * Date leave ambulance location
+          MOVE     SP70,XPTAHTM   * Time tran.from amb.to Hospital
+          MOVE     SP70,XPTAHDT   * Date tran.from amb.to Hospital
+          MOVE     SP70,XTCFNAM   * First name of ED staff modified trans.care
+          MOVE     SP70,XTCLNAM   * Last name of ED staff modified trans.care
+          MOVE     SP70,XTCTUPD   * Time of trans.care time was modified
+          MOVE     SP70,XTCDUPD   * Date of trans.care time was modified
+.
+CLER9999  RETURN
++
+.*******************************************************************************
+.       Keyin hospital ID
+.*******************************************************************************
+KHOS0000  MOVE       ZERO,EXIT
+          MOVE       SP70,HOSPID
+          COMPARE    ONE,IBCNMHOS
+          GOTO       KHOS9999 IF NOT EQUAL
+.
+          DISPLAY    *P1:15,*EL,"Hospital Id : ";
+          MOVE       TEN5,ECOL
+          MOVE       "15",EVERT
+          MOVE       SP3,CKYIDEF3
+          MOVE       ZERO,CKYIMAND           * Not Mandatory
+          OPEN       PATHSPA1,"pathspaf"
+.
+          CALL       PATHSPKY
+          BRANCH     EXIT,KHOS1000,KHOS9000
+          MOVE       PTHSHOSP,HOSPID
+          MOVE       ZERO,EXIT
+          GOTO       KHOS9999
+.
+KHOS1000  MOVE       "All Hospitals",PTHSNAME
+          MOVE       SP70,HOSPID
+          MOVE       ZERO,EXIT
+          GOTO       KHOS9999
+.
+KHOS9000  MOVE       ONE,EXIT
+KHOS9999  RETURN
++
+.***********************************************************************
+.*                             CREA0000                                *
+.*                    create tempfile for details                      *
+.***********************************************************************
+CREA0000  CALL      KILL0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      TEMPFIL1,TEMPFILE            * open temp index file
+.
+CREA9999  RETURN
++
+.***********************************************************************
+.*                             KILL0000                                *
+.*                    Remove tempfile for details                      *
+.***********************************************************************
+KILL0000  CLOSE     TEMPFIL1                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILE       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILL9999 RETURN
++
+WRTEMP1   RESET     KEY8
+          WRITE     TEMPFIL1,KEY8;TEMPADMN
+          RETURN
+.
+RDTEMP1   RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READ      TEMPFIL1,KEY8;TEMPADMN
+          GOTO      OVERCOND IF OVER
+          RETURN
++
+.*******************************************************************************
+          INC       STD001IO
+          INC       PATHSPKY
+.
+          INC       IBASEQIO/INC
+          INC       EMRVISIO/INC
+          INC       PATCODIO/INC
+          INC       PATHSPIO/INC
+          INC       PATMA1IO/INC
+          INC       PMSADWIO/INC
+          INC       PMSPX2IO/INC
+          INC       PATVISIO/INC
+          INC       PMSVX1IO/INC
+          INC       WEBERRIO/INC
+          INC       TFILENAM
++

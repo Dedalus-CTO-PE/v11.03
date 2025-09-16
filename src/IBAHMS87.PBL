@@ -1,0 +1,1325 @@
+.***************************************************************************
+.* System    :   Patient System                                            *
+.* Program   :   IBAHMS87                                                  *
+.* Desc      :   Admissions Referral Report (Quote 7565 for Baranor)       *
+.***************************************************************************
+.* Date      :   13/04/1993                                                *
+.* Author    :   Steve Armstrong                                           *
+.* Function  :   Report for referring doctors, attending doctors and       *
+.*               postcodes for patients admitted in a given date range     *
+.*               (For Baranor Hospital)                                    *
+.* Mods:                                                                   * 
+.*        V10.04.02 13/06/2014 Steve Armstrong  CAR 301639                 *
+.*                  Moved call to TFILENAM into INIT0000                   *
+.*        V10.04.01 20/02/2013 J.Tan            CAR 297271                 *
+.*                  Mods to use HCP table instead of patdo1af file         *
+.***************************************************************************
+.*        V10.03.01 24/12/2012 Patrick Adair    CAR 261630                 *
+.*                  Removed port number from temp file name                *
+.***************************************************************************
+.*        V9.12.01  06/01/2010  Davin           CAR 212891                 *
+.*                  Added hospital selection for multihospital             *
+.*        V9.12.00  04/01/2010  Davin           CAR 212891                 *
+.*                  Ported from 6.17                                       *
+.*        V6.06.01  10/02/1999  Jill Habasque                              *
+.*                  Fixed DISPHEAD display                                 *
+.*        V6.05.01  08/12/1998 Jill Habasque                               *
+.*                  Removed CCENTRY                                        *
+.*        V6.00.02  23/04/1993  Graeme Williams                            *
+.*                  Added totals and changed formatting slightly           *
+.***************************************************************************
+.
+          INC       STD001FD
+.
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+.         Temporary File Definition
+.         -------------------------
+.
+BARTEMP1  IFILE SQL, FIXED=30, KEY="U1-10,11-14,15-24"
+BARTEMP2  IFILE SQL, FIXED=30, KEY="U11-14,1-10,15-24"
+BARTEMP3  IFILE SQL, FIXED=30, KEY="U15-24,1-10,11-14"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+XRDOCT     DIM       10          10          1      referring doctor code
+XPCODE     DIM       4           4           11     post code
+XADOCT     DIM       10          10          15     attending doctor code
+XNUMB      FORM      8           5           25     no. of admissions by treat.
+.                                                   doctor
+.
+.End of Record                               30
+.
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+.
+          INC       IBACONFD/INC
+          INC       PATCONFD/INC            * control file
+          INC       PATHSPFD/INC            * hospital file
+          INC       PATMA1FD/INC            * patient master file
+          INC       PATMI1FD/INC            * admissions file
+          INC       PATTRNFD/INC            * transfer file
+          INC       PMSVX1FD/INC            * Visit Extension file
+          INC       PMSHCPFD/INC            * HCP file
+.
+. PROGRAM CONSTANTS
+. -----------------
+.
+ERASE     INIT      "iserase "
+FINISH    INIT      "Finish"
+ISBUILD   INIT      "isbuild "
+OPTN1     INIT      "- By Referring Doctor"
+OPTN2     INIT      "- By Postcode"
+OPTN3     INIT      "- By Attending Doctor"
+PIPE      INIT      "|"
+START     INIT      "Start"
+
+UKEY1     INIT      " 30 U1-10,11-14,15-24"
+UKEY2     INIT      " U11-14,1-10,15-24"
+UKEY3     INIT      " U15-24,1-10,11-14"
+ZED6      INIT      "zzzzzz"
+ZED10     INIT      "zzzzzzzzzz"
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+CADOCT    DIM       10
+CMDLINE   DIM       80
+CPCODE    DIM       4
+CRDOCT    DIM       10
+CTOTAL    FORM      8
+.
+DIM3      DIM       3                       * for PATDOCDS
+DOCFNAM   DIM       40                      * formatted doctor name
+.
+EDOCT     DIM       10                      * end doctor code
+ENDDAT    DIM       8                       * ending admission date
+EPOST     DIM       4                       * end postcode
+.
+FEPOST    FORM      4                       * end postcode (form)
+FSPOST    FORM      4                       * start postcode (form)
+.
+GTOTAL    FORM      8
+.
+OPTDESC   DIM       21                      * option description
+.
+SAVADOC   DIM       10                      * saved attending doctor
+SAVPOST   DIM       4                       * saved postcode
+SAVRDOC   DIM       10                      * saved referring doctor
+SDOCT     DIM       10                      * start doctor code
+SPOST     DIM       4                       * start postcode
+STRTDAT   DIM       8                       * starting admission date
+.
+TEMPFILE  DIM       8
+DOCCODE   DIM       10                      * temporary doctor variable
+.
+UKEY      DIM       19
+.
+.
+PRGID     INIT      "IBAHMS87"
+PRGNAM    INIT      "ADMISSIONS REFERRAL REPORT"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialisation and open files
+          BRANCH    EXIT,ML9999            * using free format ref. doctor
+.
+ML0100    CALL      OPTN0000               * select options
+          BRANCH    EXIT,ML9999            * EXIT = 1 if 0 chosen in menu
+.
+ML0500    CALL      SDAT0000               * get starting admission date
+          BRANCH    EXIT,ML0100            * nothing input
+.
+          CALL      EDAT0000               * get ending admission date
+          BRANCH    EXIT,ML0500            * nothing input
+.
+          BRANCH    COPTION,ML1000:        * by referring doctor
+                            ML2000:        * by postcode
+                            ML3000         * by attending doctor
+.
+ML1000    CALL      SDOC0000               * get starting doctor
+          BRANCH    EXIT,ML0100            * exitchar input
+.
+          CALL      EDOC0000               * get ending doctor
+          BRANCH    EXIT,ML0100            * exitchar input
+.
+          CALL      KHOS0000               * Keyin hospital id
+.
+          CALL      CONTQST                * ok to continue ?
+          BRANCH    CEXIT,ML5000:          * yes
+                          ML0500:          * no
+                          ML0100           * cancel
+.
+ML2000    CALL      SPOS0000               * get starting postcode
+          BRANCH    EXIT,ML0100            * exitchar input
+.
+          CALL      EPOS0000               * get ending postcode
+          BRANCH    EXIT,ML0100            * exitchar input
+.
+          CALL      KHOS0000               * Keyin hospital id
+.
+          CALL      CONTQST                * ok to continue ?
+          BRANCH    CEXIT,ML5000:          * yes
+                          ML0500:          * no
+                          ML0100           * cancel
+.
+ML3000    CALL      SDOC0000               * get starting doctor
+          BRANCH    EXIT,ML0100            * exitchar input
+.
+          CALL      EDOC0000               * get ending doctor
+          BRANCH    EXIT,ML0100            * exitchar input
+.
+          CALL      KHOS0000               * Keyin hospital id
+.
+          CALL      CONTQST                * ok to continue ?
+          BRANCH    CEXIT,ML5000:          * yes
+                          ML0500:          * no
+                          ML0100           * cancel
+.
+ML5000    CALL      CREA0000               * create temporary file
+          CALL      PROC0000               * get data from admission file
+          CALL      PRNT0000               * print temp file data
+          CALL      KILL0000               * remove temp file
+          GOTO      ML0100                 * get next menu option
+.
+ML9999    CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"pmshcpaf";
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A3,"patmi1af"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"pattranf";
+          OPEN      PATTRAN2,"pattranf"
+.
+          DISPLAY   *P64:24,"pmsvx1af";
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,SEVENTY9;*115,PTCNDGUP,*116,PTCNDGUA,*239,PTCNDGAD:
+                                    *240,PTCNDGDS,*241,PTCNDGTR,*242,PTCNDGRG
+          READ      CONTROLF,TEN5;*249,CRDRTYP
+          COMPARE   TWO,CRDRTYP
+          GOTO      INIT8000 IF EQUAL
+.
+          DISPLAY   *P1:24,*EL,*B,"Unable to run report using free format ":
+                    "doctors.  ";
+          CALL      HITENTER
+          GOTO      INIT9500
+.
+INIT8000  MOVE      ONE,CNEWDS
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TEMPFILE
+.
+INIT9000  MOVE      ZERO,EXIT
+          GOTO      INIT9999
+.
+INIT9500  MOVE      ONE,EXIT
+.
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*    Returns:  EXIT    = FALSE (0)  Valid option selected                  *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  CALL      DISPHEAD
+          DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = By Referring Doctor":
+                    *P1:6,*V2LON,TWO,*HOFF," = By Postcode":
+                    *P1:7,*V2LON,THREE,*HOFF," = By Attending Doctor":
+                    *P1:9,"Select Option :"
+.
+OPTN1000  KEYIN     *P17:9,*EL,*DV,UNDLN1:
+                    *P17:9,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION
+          GOTO      OPTN9500 IF EQUAL            * exit
+.
+          BRANCH    COPTION,OPTN5000:            * by referring doctor
+                            OPTN5000:            * by postcode
+                            OPTN5000             * by attending doctor
+.
+          BEEP
+          GOTO      OPTN1000                     * invalid
+.
+OPTN5000  LOAD      OPTDESC,COPTION,OPTN1,OPTN2,OPTN3
+          DISPLAY   *P53:2,*V2LON,OPTDESC
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.****************************************************************************
+.*                                SDAT0000            Called by: ML0000     *
+.*                get the starting admission date                           *
+.* Returns : STRTDAT  (YYMMDD)                                              *
+.****************************************************************************
+.
+SDAT0000  DISPLAY   *P1:12,*EF,"Starting Admission Date : "
+          UNPACK    SP6,CYEAR,CMON,CDAY
+          MOVE      CCC,CCENT
+          MOVE      ZERO,CHIGHLT
+          MOVE      TEN2,CVERT                   * set keyin line
+          MOVE      TWENTY7,CCOL                 * set keyin column
+          CALL      KEYDATE                      * get date
+          BRANCH    OVRCD,SDAT9500
+.
+          PACK      STRTDAT,CCENT,CYEAR,CMON,CDAY
+.
+SDAT9000  MOVE      ZERO,EXIT
+          GOTO      SDAT9999
+.
+SDAT9500  MOVE      ONE,EXIT
+.
+SDAT9999  RETURN
++
+.****************************************************************************
+.*                                EDAT0000            Called by: ML0000     *
+.*                get the ending admission date                             *
+.* Returns:  ENDDAT  (YYMMDD)                                               *
+.****************************************************************************
+.
+EDAT0000  DISPLAY   *P1:13,*EF,"Ending   Admission Date : "
+          UNPACK    SP6,CYEAR,CMON,CDAY
+          MOVE      CCC,CCENT
+          MOVE      ZERO,CHIGHLT
+          MOVE      TEN3,CVERT                   * set keyin line
+          MOVE      TWENTY7,CCOL                 * set keyin column
+          CALL      KEYDATE                      * get date
+          BRANCH    OVRCD,EDAT9500
+.
+          PACK      ENDDAT,CCENT,CYEAR,CMON,CDAY
+.
+.         Check that the ending date is => starting date
+.
+          MATCH     STRTDAT,ENDDAT
+          GOTO      EDAT9000 IF NOT LESS
+.
+          DISPLAY   *P1:24,*EL,*B,"Ending date less than starting date.  ";
+          CALL      HITENTER
+          GOTO      EDAT0000
+.
+EDAT9000  MOVE      ZERO,EXIT
+          GOTO      EDAT9999
+.
+EDAT9500  MOVE      ONE,EXIT
+.
+EDAT9999  RETURN
++
+.****************************************************************************
+.*                                SDOC0000            Called by: ML0000     *
+.*                   get the starting doctor code                           *
+.* Returns :    EXIT   0 = valid input                                      *
+.*                     1 = exitchar input                                   *
+.*              SDOCT  - starting doctor code                               *
+.****************************************************************************
+.
+SDOC0000  MOVE      SP70,DOCCODE
+          KEYIN     *P1:15,*EF,"Starting Doctor : ",*DV,UNDLN6:  * get code
+                    *P19:15,*V2LON,DOCCODE:
+                    *P19:15,*DV,DOCCODE
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,SDOC1000:               * ? entered
+                         SDOC7500:               * valid code
+                         SDOC0500:               * nothing entered
+                         SDOC9000                * exitchar
+.
+          GOTO      SDOC0000                     * invalid code
+.
+SDOC0500  MOVE      SP70,SDOCT
+          DISPLAY   *P19:15,*V2LON,START
+          GOTO      SDOC7700
+.        
+SDOC1000  MOVE      ZERO,HLEF
+          CALL      GETSCR00
+SDOC1200  CALL      PATDOCDS                     * display codes on file
+.
+SDOC1500  KEYIN     *P1:24,*EL,"Doctor Code: ",*DV,UNDLN6:
+                    *P14:24,*V2LON,DOCCODE:
+                    *P14:24,*DV,DOCCODE
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,SDOC1200:               * ? entered
+                         SDOC7000:               * valid code
+                         SDOC5000:               * nothing entered
+                         SDOC8000                * exitchar
+.
+          GOTO      SDOC1500
+.
+SDOC5000  CALL      PUTSCR00
+          MOVE      SP70,SDOCT
+          DISPLAY   *P19:15,*V2LON,START
+          GOTO      SDOC7700
+.
+SDOC7000  CALL      PUTSCR00                     * restore screen
+          DISPLAY   *P19:15,*V2LON,DOCCODE
+SDOC7500  MOVE      DOCCODE,SDOCT
+          MOVE      SDOCT,KEY10
+          CALL      GDOC0000                     * get doctor name
+          DISPLAY   *P30:15,DOCFNAM
+SDOC7700  MOVE      ZERO,EXIT
+          GOTO      SDOC9999
+.
+SDOC8000  CALL      FRESCR00
+SDOC9000  MOVE      ONE,EXIT
+.
+SDOC9999  RETURN
++
+.****************************************************************************
+.*                                EDOC0000            Called by: ML0000     *
+.*                   get the ending doctor code                             *
+.* Returns :    EXIT   0 = valid input                                      *
+.*                     1 = exitchar input                                   *
+.*              EDOCT  - ending doctor code                                 *
+.****************************************************************************
+.
+EDOC0000  MOVE      SP70,DOCCODE
+          KEYIN     *P1:16,*EF,"Ending   Doctor : ",*DV,UNDLN6:  * get code
+                    *P19:16,*V2LON,DOCCODE:
+                    *P19:16,*DV,DOCCODE
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,EDOC1000:               * ? entered
+                         EDOC7500:               * valid code
+                         EDOC0500:               * nothing entered
+                         EDOC9000                * exitchar
+.
+          GOTO      EDOC0000                     * invalid code
+.
+EDOC0500  MOVE      ZED10,EDOCT
+          DISPLAY   *P19:16,*V2LON,FINISH
+          GOTO      EDOC7700
+.
+EDOC1000  MOVE      ZERO,HLEF
+          CALL      GETSCR00 
+EDOC1200  CALL      PATDOCDS                     * display codes on file
+.
+EDOC1500  KEYIN     *P1:24,*EL,"Doctor Code: ",*DV,UNDLN6:
+                    *P14:24,*V2LON,DOCCODE:
+                    *P14:24,*DV,DOCCODE
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,EDOC1200:               * ? entered
+                         EDOC7000:               * valid code
+                         EDOC5000:               * nothing entered
+                         EDOC8000                * exitchar
+.
+          GOTO      EDOC1500
+.
+EDOC5000  CALL      PUTSCR00
+          MOVE      ZED10,EDOCT
+          DISPLAY   *P19:16,*V2LON,FINISH
+          GOTO      EDOC7700
+.
+EDOC7000  CALL      PUTSCR00                     * restore screen
+          DISPLAY   *P19:16,*V2LON,DOCCODE
+EDOC7500  MATCH     SDOCT,DOCCODE
+          GOTO      EDOC7600 IF NOT LESS
+.
+          DISPLAY   *P1:24,*EL,*B,"Ending doctor less than starting doctor.  ";
+          CALL      HITENTER
+          GOTO      EDOC0000
+.
+EDOC7600  MOVE      DOCCODE,EDOCT
+          MOVE      EDOCT,KEY10
+          CALL      GDOC0000                     * get doctor name
+          DISPLAY   *P30:16,DOCFNAM
+EDOC7700  MOVE      ZERO,EXIT
+          GOTO      EDOC9999
+.
+EDOC8000  CALL      FRESCR00
+EDOC9000  MOVE      ONE,EXIT
+.
+EDOC9999  RETURN
++
+.***************************************************************************
+.*                                  CHK0000            Called by: SDOC0000 *
+.*             See what was input for doctor code                 EDOC0000 *
+.*      Returns: EXIT  0 = invalid                                         *
+.*                     1 = "?"                                             *
+.*                     2 = valid                                           *
+.*                     3 = nothing                                         *
+.*                     4 = exitchar                                        * 
+.***************************************************************************
+.
+CHK0000   PACK      DOCCODE,DOCCODE,SP10
+.
+          MATCH     SP10,DOCCODE                 * anything entered ?
+          GOTO      CHK9000 IF EQUAL             * no
+.
+          MATCH     EXITCHAR,DOCCODE             * exitchar entered ?
+          GOTO      CHK7000 IF EQUAL             * yes
+.
+          MATCH     QUEST,DOCCODE                * ? entered ?
+          GOTO      CHK8000 IF EQUAL             * yes
+.
+.         Code entered
+.
+          PACK      KEY10,DOCCODE
+          CALL      RDPMHCP1                     * code on file ?
+          BRANCH    OVRCD,CHK6000                * no
+.
+CHK5000   MOVE      TWO,EXIT                     * code entered
+          GOTO      CHK9999
+.
+CHK6000   DISPLAY   *P1:24,*EL,*B,"Doctor not on file. ";
+CHK6500   CALL      HITENTER
+          MOVE      ZERO,EXIT
+          GOTO      CHK9999
+.
+CHK7000   MOVE      FOUR,EXIT
+          GOTO      CHK9999
+.
+CHK8000   MOVE      ONE,EXIT
+          GOTO      CHK9999
+.
+CHK9000   MOVE      THREE,EXIT
+.
+CHK9999   RETURN
++
+.****************************************************************************
+.*                                GDOC0000            Called by: SDOC0000   *
+.*                   format the doctor's name                    EDOC0000   *
+.* Paramaters : KEY10  (Doctor Code)                             DISB0000   *
+.* Returns : DOCFNAME   (doctor name formatted)                  DISP0000   *
+.*                                                               HEAD0000   *
+.****************************************************************************
+.
+GDOC0000  CLEAR     DOCFNAM
+          APPEND    "Unknown Doctor",DOCFNAM
+          APPEND    " (",DOCFNAM
+          APPEND    KEY10,DOCFNAM
+          APPEND    ")",DOCFNAM
+          RESET     DOCFNAM
+          CALL      RDPMHCP1
+          BRANCH    OVRCD,GDOC9999
+.
+          MOVE      PMHCGNAM,PACGNAME
+          MOVE      PMHCSNAM,PACSNAME
+          MOVE      PMHCTITL,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,DOCFNAM
+.
+GDOC9999  RETURN
++
+.****************************************************************************
+.*                               SPOS0000             Called by: ML0000     *
+.*                   get the starting postcode                              *
+.* Returns :  SPOST                                                         *
+.****************************************************************************
+.
+SPOS0000  KEYIN     *P1:15,*EF,"Starting Postcode : ",*DV,UNDLN4:
+                    *P21:15,*V2LON,*DE,*JR,SPOST:
+                    *P21:15,*DV,SPOST
+.
+          PACK      SPOST,SPOST,SP4
+.
+          MATCH     SP4,SPOST                    * anything input ?
+          GOTO      SPOS9999 IF NOT EQUAL        * yes
+          DISPLAY   *P21:15,*V2LON,START         * no
+.
+SPOS9999  RETURN
++
+.****************************************************************************
+.*                               EPOS0000             Called by: ML0000     *
+.*                   get the ending postcode                                *
+.* Returns :    EPOST                                                       * 
+.**************************************************************************** 
+.  
+EPOS0000  KEYIN     *P1:16,*EL,"Ending   Postcode : ",*DV,UNDLN4:
+                    *P21:16,*V2LON,*DE,*JR,EPOST:
+                    *P21:16,*DV,EPOST
+.
+          PACK      EPOST,EPOST,SP4
+.
+          MATCH     SP4,EPOST                    * anything input ?
+          GOTO      EPOS5000 IF NOT EQUAL        * yes
+          MOVE      ZED10,EPOST                  * no
+          DISPLAY   *P21:16,*V2LON,FINISH
+          GOTO      EPOS9999
+.
+.         An ending postcode has been input, so check that it is not less
+.         than the starting postcode
+.
+EPOS5000  MATCH     SP4,SPOST                    * start postcode blank ?
+          GOTO      EPOS9999 IF EQUAL            * yes - no need to check
+.
+          MOVE      SPOST,FSPOST
+          MOVE      EPOST,FEPOST
+          COMPARE   FSPOST,FEPOST                * end pcode < start pcode ?
+          GOTO      EPOS9999 IF NOT LESS         * no
+          DISPLAY   *P1:24,*EL,*B,"Ending postcode less than starting ":
+                    "postcode.  ";
+          CALL      HITENTER
+          GOTO      EPOS0000
+.
+EPOS9999  RETURN
++
+.****************************************************************************
+.*                                PROC0000            Called by: ML0000     *
+.*                  loop through admissions file for date range             *
+.* Parameters : STRTDAT   (starting admission date)                         *
+.****************************************************************************
+.
+PROC0000  PACK      KEY16,STRTDAT,SP10
+          CALL      RDSMISS3                     * position in file
+PROC0500  CALL      RDKMISS3                     * read next admission record
+          BRANCH    OVRCD,PROC9999               * end of file - finish
+.
+          MATCH     ADATE,ENDDAT                 * valid date ?
+          GOTO      PROC9999 IF LESS             * no - finish
+.
+          UNPACK    ADATE,CCENT,CYEAR,CMON,CDAY        * display record
+          CALL      PACDATE
+          DISPLAY   *P1:24,*EL,"Processing : ",*V2LON,CPCDATE;
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDPMVX11                * read pmsvx1 before hospital check
+          IF        OVRCD=1
+            MOVE      SP70,PMVXMHOS
+          ENDIF
+          CALL      CHOS0000                     * check hospital
+          BRANCH    EXIT,PROC0500
+.
+.         If "By Referring doctor", check if in range
+.
+          IF        ASTAT = 1 | ASTAT = 5
+            GOTO      PROC0500
+          ENDIF
+.
+          IF        COPTION = 1
+            MATCH     SDOCT,PMVXRHC1             * doctor < start code ?
+            GOTO      PROC0500 IF LESS           * yes - ignore
+.
+            MATCH     PMVXRHC1,EDOCT             * doctor > end code ?
+            GOTO      PROC0500 IF LESS           * yes - ignore
+          ENDIF
+.
+.         Get the postcode from the patient master file
+.
+          MOVE      AURNO,KEY8
+          CALL      RDMAST1                      * read master record
+          BRANCH    OVRCD,PROC8000               * not on file
+.
+.         If "By Postcode", check if in range
+.
+          IF        COPTION = 2 
+            MATCH     SPOST,PPOST                * postcode < start pcode ?
+            GOTO      PROC0500 IF LESS           * yes - ignore
+.
+            MATCH     PPOST,EPOST                * postcode > end pcode ?
+            GOTO      PROC0500 IF LESS           * yes - ignore
+          ENDIF
+.
+          MOVE      PPOST,XPCODE
+PROC1000  MOVE      PMVXRHC1,XRDOCT
+.
+.         Get the initial attending doctor from the admission record of the
+.         transfer file
+.
+          PACK      KEY30,AADMNO,SP30
+          CALL      RDSTRAN2                     * position in file
+          CALL      RDKTRAN2                     * read next record
+          BRANCH    OVRCD,PROC8500               * end of file
+.
+          COMPARE   AADMNO,TADMN                 * same admission number ?
+          GOTO      PROC8500 IF NOT EQUAL        * no
+.
+          MATCH     ANSA,TMOVE                   * transfer type "A" ?
+          GOTO      PROC8500 IF NOT EQUAL        * no
+.
+.         If "By Attending Doctor", check if in range
+.
+          PACK      KEY10,TADOCT,SP70
+          IF        COPTION = 3
+            MATCH     SDOCT,KEY10                * doctor < start code ?
+            GOTO      PROC0500 IF LESS           * yes - ignore
+.
+            MATCH     KEY10,EDOCT                * doctor > end code ?
+            GOTO      PROC0500 IF LESS           * yes - ignore
+          ENDIF
+.
+          MOVE      KEY10,XADOCT
+PROC2000  PACK      KEY24,XRDOCT,XPCODE,XADOCT
+          CALL      RDTEMP1                      * record already on temp file ?
+          IF        OVRCD = 1
+            MOVE      ONE,XNUMB
+            CALL      WRTEMP1                    * write record
+          ELSE
+            ADD       ONE,XNUMB                   * yes - update
+            CALL      UPTEMP1
+          ENDIF
+          GOTO      PROC0500
+.
+PROC8000  DISPLAY   *P1:24,*EL,*B,"Patient master record not found for U/R ":
+                    *V2LON,AURNO,*HOFF,".  ";
+          CALL      HITENTER
+          MOVE      SP4,XPCODE
+          GOTO      PROC1000
+.
+PROC8500  DISPLAY   *P1:24,*EL,*B,"Patient transfer record not found for ":
+                    "admission ",*V2LON,AADMNO,*HOFF,". ";
+.         CALL      HITENTER
+          MOVE      SP10,XADOCT
+          GOTO      PROC2000
+.
+PROC9999  RETURN
++
+.****************************************************************************
+.*                                PRNT0000            Called by: ML0000     *
+.*                    print records from the temp file                      *
+.****************************************************************************
+.
+PRNT0000  DISPLAY   *P1:24,*EL,"Printing : ";
+          MOVE      ZERO,CPAGENO                 * Initialise print variables
+          MOVE      ZERO,CNOUNDLN
+          MOVE      ZERO,CLNO
+          CALL      IBACLOCK
+          CALL      HEAD0000                     * print first page header
+.
+          MOVE      ZED10,CADOCT                 * current attending doctor
+          MOVE      ZED10,CRDOCT                 * current referring doctor
+          MOVE      ZED10,CPCODE                 * current postcode
+.
+          MOVE      ZERO,GTOTAL                  * Initialise grand total
+.
+          MOVE      SP70,KEY24
+          BRANCH    COPTION,PRNT1000:            * by referring doctor
+                            PRNT2000:            * by postcode
+                            PRNT3000             * by attending doctor
+.
+. ------- By Referring Doctor ----------------------
+.
+PRNT1000  CALL      RSTEMP1                      * position at start of file
+PRNT1500  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,PRNT9500               * end of file - finished
+.
+          CALL      TOTL0000                     * print total if needed
+.
+          COMPARE   CLNO,FIFTY5                  * page full ?
+          CALL      HEAD0000 IF LESS             * yes
+.
+          DISPLAY   *P12:24,*EL,*V2LON,XRDOCT,SLASH,XPCODE,SLASH,XADOCT;
+          CALL      DISP0000                     * print record
+.
+          GOTO      PRNT1500                     * get next record
+.
+. ------- By Postcode ---------------------------
+.
+PRNT2000  CALL      RSTEMP2                      * position at start of file
+PRNT2500  CALL      RKTEMP2                      * read next record
+          BRANCH    OVRCD,PRNT9500               * end of file - finished
+.
+          CALL      TOTL0000                     * print total if needed
+.
+          COMPARE   CLNO,FIFTY5                  * page full ?
+          CALL      HEAD0000 IF LESS             * yes
+.
+          DISPLAY   *P12:24,*EL,*V2LON,XPCODE,SLASH,XRDOCT,SLASH,XADOCT;
+          CALL      DISP0000                     * print record
+.
+          GOTO      PRNT2500                     * get next record
+.
+. ------- By Attending Doctor -------------------
+.
+PRNT3000  CALL      RSTEMP3                      * position at start of file
+PRNT3500  CALL      RKTEMP3                      * read next record
+          BRANCH    OVRCD,PRNT9500               * end of file - finished
+.
+          CALL      TOTL0000                     * print total if needed
+.
+          COMPARE   CLNO,FIFTY5                  * page full ?
+          CALL      HEAD0000 IF LESS             * yes
+.
+          DISPLAY   *P12:24,*EL,*V2LON,XADOCT,SLASH,XRDOCT,SLASH,XPCODE;
+          CALL      DISP0000                     * print record
+.
+          GOTO      PRNT3500                     * get next record
+.
+PRNT9500  MOVE      ZED10,XADOCT                 * current attending doctor
+          MOVE      ZED10,XRDOCT                 * current referring doctor
+          MOVE      ZED10,XPCODE                 * current postcode
+          CALL      TOTL0000                     * print totals for last code
+.
+          COMPARE   CLNO,FIFTY5                  * page full ?
+          CALL      HEAD0000 IF LESS             * yes
+.
+          CALL      GTOT0000                     * print grand totals
+          CALL      LINE0000
+          PRINT     *N,*1,"*** End of Report ***"
+.
+PRNT9999  RETURN
++
+.****************************************************************************
+.*                            TOTL0000                 Called by: PRNT0000  *
+.*                  Print total if needed                                   *
+.****************************************************************************
+.
+TOTL0000  BRANCH    COPTION,TOTL1000:            * by referring doctor
+                            TOTL2000:            * by postcode
+                            TOTL3000             * by attending doctor
+.
+.         By referring doctor
+.
+TOTL1000  MATCH     XRDOCT,CRDOCT                * change in code ?
+          GOTO      TOTL9999 IF EQUAL            * no.
+.
+          MATCH     ZED10,CRDOCT                 * initial code ?
+          GOTO      TOTL8000 IF EQUAL            * yes, ignore
+.
+          PRINT     *1,PIPE,*44,PIPE,*55,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE:
+                    *N,*1,PIPE,*44,PIPE,*55,PIPE:
+                    *98,PIPE," Total ",*110,CTOTAL,*132,PIPE:
+                    *N,*1,PIPE,*44,PIPE,*55,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE
+          ADD       THREE,CLNO
+          GOTO      TOTL8000
+.
+.         By postcode
+.
+TOTL2000  MATCH     XPCODE,CPCODE                * change in code ?
+          GOTO      TOTL9999 IF EQUAL            * no.
+.
+          MATCH     ZED10,CPCODE                 * initial code ?
+          GOTO      TOTL8000 IF EQUAL            * yes, ignore
+.
+          PRINT     *1,PIPE,*12,PIPE,*55,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE:
+                    *N,*1,PIPE,*12,PIPE,*55,PIPE:
+                    *98,PIPE," Total ",*110,CTOTAL,*132,PIPE:
+                    *N,*1,PIPE,*12,PIPE,*55,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE
+          ADD       THREE,CLNO
+          GOTO      TOTL8000
+.
+.         By attending doctor
+.
+TOTL3000  MATCH     XADOCT,CADOCT                * change in code ?
+          GOTO      TOTL9999 IF EQUAL            * no.
+.
+          MATCH     ZED10,CADOCT                 * initial code ?
+          GOTO      TOTL8000 IF EQUAL            * yes, ignore
+.
+          PRINT     *1,PIPE,*44,PIPE,*87,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE:
+                    *N,*1,PIPE,*44,PIPE,*87,PIPE:
+                    *98,PIPE," Total ",*110,CTOTAL,*132,PIPE:
+                    *N,*1,PIPE,*44,PIPE,*87,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE
+          ADD       THREE,CLNO
+.
+.         Initialise for change in code
+.
+TOTL8000  MOVE      XADOCT,CADOCT
+          MOVE      XRDOCT,CRDOCT
+          MOVE      XPCODE,CPCODE
+.
+          MOVE      ZERO,CTOTAL
+.
+TOTL9999  RETURN
++
+.****************************************************************************
+.*                            GTOT0000                 Called by: PRNT0000  *
+.*                  Print total if needed                                   *
+.****************************************************************************
+.
+GTOT0000  BRANCH    COPTION,GTOT1000:            * by referring doctor
+                            GTOT2000:            * by postcode
+                            GTOT3000             * by attending doctor
+.
+.         By referring doctor
+.
+GTOT1000  PRINT     *1,PIPE,*44,PIPE,*55,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE:
+                    *N,*1,PIPE,*44,PIPE,*55,PIPE:
+                    *98,PIPE,"Grand Total",*110,GTOTAL,*132,PIPE:
+                    *N,*1,PIPE,*44,PIPE,*55,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE
+          ADD       THREE,CLNO
+          GOTO      GTOT9999
+.
+.         By postcode
+.
+GTOT2000  PRINT     *1,PIPE,*12,PIPE,*55,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE:
+                    *N,*1,PIPE,*12,PIPE,*55,PIPE:
+                    *98,PIPE,"Grand Total",*110,GTOTAL,*132,PIPE:
+                    *N,*1,PIPE,*12,PIPE,*55,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE
+          ADD       THREE,CLNO
+          GOTO      GTOT9999
+.
+.         By attending doctor
+.
+GTOT3000  PRINT     *1,PIPE,*44,PIPE,*87,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE:
+                    *N,*1,PIPE,*44,PIPE,*87,PIPE:
+                    *98,PIPE,"Grand Total",*110,GTOTAL,*132,PIPE:
+                    *N,*1,PIPE,*44,PIPE,*87,PIPE:
+                    *98,PIPE,"---------------------------------",*132,PIPE
+          ADD       THREE,CLNO
+.
+GTOT9999  RETURN
++
+.****************************************************************************
+.*                            DISP0000                 Called by: PRNT0000  *
+.*                  valid record so print it                                *
+.****************************************************************************
+.
+DISP0000  BRANCH    COPTION,DISP1000:            * by referring doctor
+                            DISP2000:            * by postcode
+                            DISP3000             * by attending doctor
+.
+. ------  By Referring Doctor --------------------
+.
+DISP1000  PRINT     *1,PIPE;
+          MATCH     SAVRDOC,XRDOCT               * same referring doctor still ?
+          GOTO      DISP1100 IF EQUAL            * yes - no need to print
+.  
+          MATCH     SP70,XRDOCT                  * is referring doctor blank ?
+          GOTO      DISP1050 IF NOT EQUAL        * no
+          PRINT     *3,"No referring doctor code";  * yes
+          GOTO      DISP1070
+.
+DISP1050  MOVE      XRDOCT,KEY10
+          CALL      GDOC0000                     * get formatted doctor name
+          PRINT     *3,DOCFNAM;
+DISP1070  MOVE      XRDOCT,SAVRDOC               * save new ref. doctor code
+          MOVE      ZED6,SAVPOST                  * clear saved postcode
+.
+DISP1100  PRINT     *44,PIPE;
+          MATCH     SAVPOST,XPCODE               * same postcode still ?
+          GOTO      DISP1200 IF EQUAL            * yes - no need to print
+.
+          MATCH     SP4,XPCODE                   * postcode blank ?
+          GOTO      DISP1150 IF NOT EQUAL        * no
+          PRINT     *46,"No P/Code";             * yes
+          GOTO      DISP1170
+.
+DISP1150  PRINT     *48,XPCODE;
+DISP1170  MOVE      XPCODE,SAVPOST               * save new postcode
+.
+DISP1200  MATCH     SP70,XADOCT                  * attending doctor blank ?
+          GOTO      DISP1300 IF NOT EQUAL        * no
+          PRINT     *55,PIPE,*57,"No attending doctor code";
+          GOTO      DISP1500
+.
+DISP1300  MOVE      XADOCT,KEY10
+          CALL      GDOC0000                     * get formatted doctor name
+          PRINT     *55,PIPE,*57,DOCFNAM;
+.
+DISP1500  PRINT     *98,PIPE,*110,XNUMB,*132,PIPE
+          GOTO      DISP9000
+.
+. ------- By Postcode ----------------------------------
+.
+DISP2000  PRINT     *1,PIPE;
+          MATCH     SAVPOST,XPCODE               * same postcode still ?
+          GOTO      DISP2100 IF EQUAL            * yes - no need to print
+.
+          MATCH     SP4,XPCODE                   * postcode blank ?
+          GOTO      DISP2050 IF NOT EQUAL        * no
+          PRINT     *3,"No P/Code";              * yes
+          GOTO      DISP2060
+.
+DISP2050  MOVE      XRDOCT,KEY10
+          CALL      GDOC0000                     * get formatted doctor name
+          PRINT     *5,XPCODE;
+DISP2060  MOVE      XPCODE,SAVPOST               * save new postcode
+          MOVE      ZED10,SAVRDOC                * clear saved ref. doctor code
+.
+DISP2100  PRINT     *12,PIPE;
+          MATCH     SAVRDOC,XRDOCT               * same referring doctor still ?
+          GOTO      DISP2200 IF EQUAL            * yes - no need to print
+.
+          MATCH     SP70,XRDOCT                  * ref. doctor blank ?
+          GOTO      DISP2150 IF NOT EQUAL        * no
+          PRINT     *14,"No referring doctor code";
+          GOTO      DISP2160
+.
+DISP2150  MOVE      XRDOCT,KEY10
+          CALL      GDOC0000
+          PRINT     *14,DOCFNAM;
+DISP2160  MOVE      XRDOCT,SAVRDOC               * save new ref. doctor
+.
+DISP2200  MATCH     SP70,XADOCT                  * att. doctor blank ?
+          GOTO      DISP2250 IF NOT EQUAL        * no
+          PRINT     *55,PIPE,*57,"No attending doctor code";  * yes
+          GOTO      DISP2260
+.
+DISP2250  MOVE      XADOCT,KEY10
+          CALL      GDOC0000                     * get formatted doctor name
+          PRINT     *55,PIPE,*57,DOCFNAM;
+.
+DISP2260  PRINT     *98,PIPE,*110,XNUMB,*132,PIPE
+          GOTO      DISP9000
+.
+. ------- By Attending Doctor ---------------------------------
+.
+DISP3000  PRINT     *1,PIPE;
+          MATCH     SAVADOC,XADOCT               * same attending doctor still ?
+          GOTO      DISP3100 IF EQUAL            * yes - no need to print
+.
+          MATCH     SP70,XADOCT                  * blank attending doctor ?
+          GOTO      DISP3050 IF NOT EQUAL        * no
+          PRINT     *3,"No attending doctor code";  * yes
+          GOTO      DISP3060
+.
+DISP3050  MOVE      XADOCT,KEY10
+          CALL      GDOC0000                     * get formatted doctor name
+          PRINT     *3,DOCFNAM;
+DISP3060  MOVE      XADOCT,SAVADOC               * save new att. doctor code
+          MOVE      ZED10,SAVRDOC                * clear saved ref. doctor code
+.
+DISP3100  PRINT     *44,PIPE;
+          MATCH     SAVRDOC,XRDOCT               * same referring doctor still ?
+          GOTO      DISP3200 IF EQUAL            * yes - no need to print
+.
+          MATCH     SP70,XRDOCT                  * referring doctor blank ?
+          GOTO      DISP3150 IF NOT EQUAL        * no
+          PRINT     *46,"No referring doctor code";  * yes
+          GOTO      DISP3160
+.
+DISP3150  MOVE      XRDOCT,KEY10
+          CALL      GDOC0000                     * get formatted doctor name
+          PRINT     *46,DOCFNAM;
+DISP3160  MOVE      XRDOCT,SAVRDOC
+.
+DISP3200  MATCH     SP4,XPCODE                   * postcode blank ?
+          GOTO      DISP3500 IF NOT EQUAL        * no
+          PRINT     *87,PIPE,*89,"No P/Code";
+          GOTO      DISP3600
+.
+DISP3500  PRINT     *87,PIPE,*91,XPCODE;
+.
+DISP3600  PRINT     *98,PIPE,*110,XNUMB,*132,PIPE
+.
+DISP9000  ADD       ONE,CLNO                     * increment line count
+          ADD       XNUMB,CTOTAL                 * increment total
+          ADD       XNUMB,GTOTAL                 * increment grand total
+.
+DISP9999  RETURN
++
+.****************************************************************************
+.*                            HEAD0000                 Called by: PRNT0000  *
+.*                       print page heading                                 *
+.****************************************************************************
+.
+HEAD0000  CALL      HEAD132                      * display page header
+          MOVE      ZED10,SAVRDOC                * re-initialise save variables
+          MOVE      ZED6,SAVPOST
+          MOVE      ZED10,SAVADOC
+.
+          UNPACK    STRTDAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *40,"Admission Date Range   From : ",CPCDATE,*N:
+                    *63,"To   :";
+          UNPACK    ENDDAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *70,CPCDATE
+.
+          BRANCH    COPTION,HEAD1000:            * by referring doctor
+                            HEAD2000:            * by postcode
+                            HEAD3000             * by attending doctor
+.
+. ------- By Referring doctor ------------------------
+.
+HEAD1000  PRINT     *N,*40,"Referring Doctor Range From :";
+          MATCH     SP70,SDOCT                   * doctor code blank ?
+          GOTO      HEAD1100 IF NOT EQUAL        * no
+          PRINT     *70,START                    * yes
+          GOTO      HEAD1200
+.
+HEAD1100  MOVE      SDOCT,KEY10
+          CALL      GDOC0000                     * format doctor name
+          PRINT     *70,SDOCT,*85,DOCFNAM
+.
+HEAD1200  PRINT     *63,"To   :";
+          MATCH     ZED10,EDOCT                  * doctor code zeds ?
+          GOTO      HEAD1300 IF NOT EQUAL        * no
+          PRINT     *70,FINISH,*N                * yes
+          GOTO      HEAD1400
+.
+HEAD1300  MOVE      EDOCT,KEY10
+          CALL      GDOC0000                     * format doctor name
+          PRINT     *70,EDOCT,*85,DOCFNAM,*N
+.
+HEAD1400  IF        IBCNMHOS=1
+            PRINT     *40,"Hospital : ",PTHSNAME
+            ADD       ONE,CLNO
+          ENDIF
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"Referring Doctor",*44,PIPE,*46,"Postcode":
+                    *55,PIPE,*57,"Attending Doctor",*98,PIPE,*100:
+                    "No.of Admissions by Att. Doctor",*132,PIPE
+          GOTO      HEAD4000
+.
+. ------- By Postcode ---------------------------------
+.
+HEAD2000  PRINT     *N,*40,"Postcode Range         From :";
+          MATCH     SP4,SPOST                    * start postcode blank ?
+          GOTO      HEAD2100 IF NOT EQUAL        * no
+          PRINT     *70,START                    * yes
+          GOTO      HEAD2200
+.
+HEAD2100  PRINT     *70,SPOST
+.
+HEAD2200  PRINT     *63,"To   : ";
+          MATCH     EPOST,ZED6                   * end postcode zeds ?
+          GOTO      HEAD2300 IF NOT EQUAL        * no
+          PRINT     *70,FINISH,*N                * yes
+          GOTO      HEAD2400
+.
+HEAD2300  PRINT     EPOST,*N
+.
+HEAD2400  IF        IBCNMHOS=1
+            PRINT     *40,"Hospital : ",PTHSNAME
+            ADD       ONE,CLNO
+          ENDIF
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"Postcode",*12,PIPE,*14,"Referring Doctor":
+                    *55,PIPE,*57,"Attending Doctor",*98,PIPE,*100:
+                    "No.of Admissions by Att. Doctor",*132,PIPE
+          GOTO      HEAD4000
+.
+. ------- By Attending Doctor ----------------------
+.
+HEAD3000  PRINT     *N,*40,"Attending Doctor Range From :";
+          MATCH     SP70,SDOCT                   * doctor code blank ?
+          GOTO      HEAD3100 IF NOT EQUAL        * no
+          PRINT     *70,START                    * yes
+          GOTO      HEAD3200
+.
+HEAD3100  MOVE      SDOCT,KEY10
+          CALL      GDOC0000                     * format doctor name
+          PRINT     *70,SDOCT,*85,DOCFNAM
+.
+HEAD3200  PRINT     *63,"To   :";
+          MATCH     ZED10,EDOCT                  * doctor code zeds ?
+          GOTO      HEAD3300 IF NOT EQUAL        * no
+          PRINT     *70,FINISH,*N                * yes
+          GOTO      HEAD3400
+.
+HEAD3300  MOVE      EDOCT,KEY10
+          CALL      GDOC0000                     * format doctor name
+          PRINT     *70,EDOCT,*85,DOCFNAM,*N
+.
+HEAD3400  IF        IBCNMHOS=1
+            PRINT     *40,"Hospital : ",PTHSNAME
+            ADD       ONE,CLNO
+          ENDIF
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"Attending Doctor",*44,PIPE,*46,"Referring ":
+                    "Doctor",*87,PIPE,*89,"Postcode",*98,PIPE,*100:
+                    "No. of Admissions by Postcode",*132,PIPE
+.
+HEAD4000  CALL      LINE0000                     * draw line across page
+.
+          MOVE      TEN2,CLNO                    * increment line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: HEAD0000  *
+.*                      draw line across page                     PRNT0000  *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+          ADD       ONE,CLNO
+.
+LINE9999  RETURN
++
+.**************************************************************************
+.*                              CREA0000               Called by: ML0000  *
+.*             create a new temporary file                                *
+.**************************************************************************
+.
+CREA0000  CALL      KILL0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          IF        COPTION = 1
+            PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY1
+          ELSE
+            IF        COPTION = 2
+              PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY1,UKEY2
+            ELSE
+              PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY1,UKEY3
+            ENDIF
+          ENDIF
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      BARTEMP1,TEMPFILE            * open temp index file
+          IF        COPTION = 2
+            OPEN      BARTEMP2,TEMPFILE
+          ENDIF
+          IF        COPTION = 3
+            OPEN      BARTEMP3,TEMPFILE
+          ENDIF
+.
+CREA9999  RETURN
++
+.****************************************************************************
+.*                              KILL0000               Called by: ML0000    *
+.*               close and erase the temporary file               CREA0000  *
+.****************************************************************************
+.
+KILL0000  CLOSE     BARTEMP1                     * close file
+          CLOSE     BARTEMP2
+          CLOSE     BARTEMP3
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILE       * set file erase command
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILL9999 RETURN
++
+.********************************************************************
+.         Enter selected Hospital code
+.********************************************************************
+KHOS0000  COMPARE   ONE,IBCNMHOS
+          GOTO      KHOS9000 IF NOT EQUAL
+.
+          DISPLAY   *P1:18,*EL,"Hospital: ";
+.
+          MOVE      "18",EVERT
+          MOVE      "11",ECOL
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND           * Not Mandatory
+          OPEN      PATHSPA1,"pathspaf"
+.
+          CALL      PATHSPKY
+          BRANCH    EXIT,KHOS3000,KHOS3000
+.
+KHOS2000  DISPLAY   *P20:18,*V2LON,PTHSNAME;
+          GOTO      KHOS9999
+.
+KHOS3000  MOVE      "All Hospitals",PTHSNAME
+          DISPLAY   *P20:18,*V2LON,PTHSNAME;
+.
+KHOS9000  MOVE      SP10,PTHSHOSP
+.
+KHOS9999  RETURN
++
+.********************************************************************
+.         Check selected Hospital code (if multi hospital)
+.********************************************************************
+CHOS0000  COMPARE   ONE,IBCNMHOS
+          GOTO      CHOS9000 IF NOT EQUAL
+.
+          PACK      PTHSHOSP,PTHSHOSP,SP70
+          MATCH     SP10,PTHSHOSP           * All Hospitals
+          GOTO      CHOS9000 IF EQUAL
+.
+          MATCH     PTHSHOSP,PMVXMHOS       * check hospital
+          GOTO      CHOS9500 IF NOT EQUAL
+.
+CHOS9000  MOVE      ZERO,EXIT
+          GOTO      CHOS9999
+.
+CHOS9500  MOVE      ONE,EXIT
+CHOS9999  RETURN
++
+.****************************************************************************
+.*        IO ROUTINES FOR TEMPORARY FILE                                    *
+.****************************************************************************
+.
+RSTEMP1   READ      BARTEMP1,KEY24;;
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          READ      BARTEMP1,KEY24;XRDOCT,XPCODE,XADOCT,XNUMB
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    BARTEMP1;XRDOCT,XPCODE,XADOCT,XNUMB
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     BARTEMP1,KEY24;KEY24,XNUMB
+          RETURN
+.
+UPTEMP1   UPDATE    BARTEMP1;XRDOCT,XPCODE,XADOCT,XNUMB
+          RETURN
+.
+.         2nd Index
+.
+RSTEMP2   READ      BARTEMP2,KEY24;;
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          READKS    BARTEMP2;XRDOCT,XPCODE,XADOCT,XNUMB
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.         3rd Index
+.
+RSTEMP3   READ      BARTEMP3,KEY24;;
+          RETURN
+.
+RKTEMP3   MOVE      ZERO,OVRCD
+          READKS    BARTEMP3;XRDOCT,XPCODE,XADOCT,XNUMB
+          GOTO      OVERCOND IF OVER
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       PATDOCDS                * doctor ? routine
+          INC       PATHSPKY
+          INC       TFILENAM                     * Generate Temp File Name
+.
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATHSPIO/INC            * hospital file
+          INC       PATMA1IO/INC            * patient master file
+          INC       PATMI1IO/INC            * admissions file
+          INC       PATTRNIO/INC            * transfer file
+          INC       PMSVX1IO/INC            * Visit Extension file
+          INC       PMSHCPIO/INC            * HCP file
+          INC       WEBERRIO/INC            * Web Server Error Logging
++

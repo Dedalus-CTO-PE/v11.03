@@ -1,0 +1,123 @@
+.
+.         INC       OUTSITIO.INC
+.
+.         FILE  I/O REQUESTS FOR SITE CODE FILE
+.
+.OVRCD    FORM      1         0=NOT OVER
+.                             1= OVER
+.KEY6     DIM       6         KEY FOR OUTSITA1
+.KEY36    DIM       36        KEY FOR OUTSITA2
+.KEY9     DIM       9         KEY FOR OUTSITA3
+.
+RDASITA1  RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      OUTSITA1,KEY6;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RDSSITA1  RESET     KEY6
+          READ      OUTSITA1,KEY6;;
+          RETURN  
+.
+RDSITA1   MOVE      ZERO,OVRCD
+          RESET     KEY6
+          READ      OUTSITA1,KEY6;OSTSITE,OSTDESC,OSTPASS,OSTFILE:
+                                  OSTSYST,OSTIRNG,OSTCHRG,OSTCATG:
+                                  DOSTMAXD,OTSTXBOK,OTSTXATT,OTSTACTV,OTSTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOSTMAXD,OSTMAXD
+          RETURN  
+.
+RDKSITA1  MOVE      ZERO,OVRCD
+          READKS    OUTSITA1;OSTSITE,OSTDESC,OSTPASS,OSTFILE:
+                             OSTSYST,OSTIRNG,OSTCHRG,OSTCATG:
+                             DOSTMAXD,OTSTXBOK,OTSTXATT,OTSTACTV,OTSTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOSTMAXD,OSTMAXD
+          RETURN  
+.
+RDPSITA1  MOVE      ZERO,OVRCD
+          READKP    OUTSITA1;OSTSITE,OSTDESC,OSTPASS,OSTFILE:
+                             OSTSYST,OSTIRNG,OSTCHRG,OSTCATG:
+                             DOSTMAXD,OTSTXBOK,OTSTXATT,OTSTACTV,OTSTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOSTMAXD,OSTMAXD
+          RETURN  
+.
+WRSITA1   RESET     KEY6
+          MOVE      OSTMAXD,DOSTMAXD
+          WRITE     OUTSITA1,KEY6;KEY6,OSTDESC,OSTPASS,OSTFILE:
+                                  OSTSYST,OSTIRNG,OSTCHRG,OSTCATG:
+                                  DOSTMAXD,OTSTXBOK,OTSTXATT,OTSTACTV,OTSTSPAR
+.
+          RETURN  
+.
+UPSITA1   MOVE      OSTMAXD,DOSTMAXD
+          UPDATE    OUTSITA1;OSTSITE,OSTDESC,OSTPASS,OSTFILE:
+                             OSTSYST,OSTIRNG,OSTCHRG,OSTCATG:
+                             DOSTMAXD,OTSTXBOK,OTSTXATT,OTSTACTV,OTSTSPAR
+          RETURN
+.
+DESITA1   RESET     KEY6
+          MOVE      ZERO,OVRCD
+          DELETE    OUTSITA1,KEY6
+          RETURN
+.
+. ------- SECOND KEY -------
+.
+RDASITA2  RESET     KEY36
+          MOVE      ZERO,OVRCD
+          READ      OUTSITA2,KEY36;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RDSSITA2  RESET     KEY36
+          READ      OUTSITA2,KEY36;;
+          RETURN  
+.
+RDKSITA2  MOVE      ZERO,OVRCD
+          READKS    OUTSITA2;OSTSITE,OSTDESC,OSTPASS,OSTFILE:
+                             OSTSYST,OSTIRNG,OSTCHRG,OSTCATG:
+                             DOSTMAXD,OTSTXBOK,OTSTXATT,OTSTACTV,OTSTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOSTMAXD,OSTMAXD
+          RETURN  
+.
+RDSITA2   MOVE      ZERO,OVRCD
+          RESET     KEY36
+          READ      OUTSITA2,KEY36;OSTSITE,OSTDESC,OSTPASS,OSTFILE:
+                                   OSTSYST,OSTIRNG,OSTCHRG,OSTCATG:
+                                   DOSTMAXD,OTSTXBOK,OTSTXATT,OTSTACTV,OTSTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOSTMAXD,OSTMAXD
+          RETURN
+.
+. ------- THIRD KEY -------
+.
+RDASITA3  RESET     KEY9
+          MOVE      ZERO,OVRCD
+          READ      OUTSITA3,KEY9;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDSSITA3  RESET     KEY9
+          READ      OUTSITA3,KEY9;;
+          RETURN
+.
+RDKSITA3  MOVE      ZERO,OVRCD
+          READKS    OUTSITA3;OSTSITE,OSTDESC,OSTPASS,OSTFILE:
+                             OSTSYST,OSTIRNG,OSTCHRG,OSTCATG:
+                             DOSTMAXD,OTSTXBOK,OTSTXATT,OTSTACTV,OTSTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOSTMAXD,OSTMAXD
+          RETURN
+.
+RDSITA3   MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      OUTSITA3,KEY9;OSTSITE,OSTDESC,OSTPASS,OSTFILE:
+                                   OSTSYST,OSTIRNG,OSTCHRG,OSTCATG:
+                                   DOSTMAXD,OTSTXBOK,OTSTXATT,OTSTACTV,OTSTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOSTMAXD,OSTMAXD
+          RETURN
+.

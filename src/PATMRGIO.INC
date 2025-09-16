@@ -1,0 +1,193 @@
+.
+. PATMRGIO.INC
+. ------------
+. Filename       :  patmrgaf.dat
+. Description    :  Merge U/R Request - File I/O Subroutines
+. Variables      :  OVRCD     FORM      1
+.                   KEY17     DIM       17
+.                   KEY24     DIM       24 
+.
+RAPTMRG1  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READ      PATMRGG1,KEY17;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSPTMRG1  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READ      PATMRGG1,KEY17;;
+          RETURN  
+.
+RDPTMRG1  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READ      PATMRGG1,KEY17;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                                   PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                                   PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+RKPTMRG1  MOVE      ZERO,OVRCD
+          READKS    PATMRGG1;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                             PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                             PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+RPPTMRG1  MOVE      ZERO,OVRCD
+          READKP    PATMRGG1;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                             PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                             PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+RLPTMRG1  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          CALL      RDPTMRG1
+          GOTO      OVERCOND IF OVER
+          MATCH     PORT,PTMRLOCK
+          RETURN    IF EQUAL
+          MATCH     SP2,PTMRLOCK
+          GOTO      OVERLOCK IF NOT EQUAL
+          MOVE      PORT,PTMRLOCK
+          UPDATE    PATMRGG1;*58,PTMRLOCK
+          RETURN
+.
+ULPTMRG1  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READ      PATMRGG1,KEY17;*58,PTMRLOCK
+          GOTO      OVERCOND IF OVER
+          MOVE      SP2,PTMRLOCK
+          UPDATE    PATMRGG1;*58,PTMRLOCK
+          RETURN
+.
+UPPTMRG1  MOVE      SP2,PTMRLOCK
+          MOVE      PTMRSTAT,DPTMRSTA
+          UPDATE    PATMRGG1;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                             PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                             PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          RETURN
+.
+WRPTMRG1  RESET     KEY17
+          MOVE      PTMRSTAT,DPTMRSTA
+          WRITE     PATMRGG1,KEY17;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                                   PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                                   PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          RETURN  
+.
+DEPTMRG1  RESET     KEY17
+          DELETE    PATMRGG1,KEY17
+          RETURN
+.
+RAPTMRG2  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READ      PATMRGG2,KEY17;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSPTMRG2  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READ      PATMRGG2,KEY17;;
+          RETURN  
+.
+RDPTMRG2  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READ      PATMRGG2,KEY17;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                                   PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                                   PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+RKPTMRG2  MOVE      ZERO,OVRCD
+          READKS    PATMRGG2;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                             PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                             PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+RPPTMRG2  MOVE      ZERO,OVRCD
+          READKP    PATMRGG2;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                             PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                             PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+.
+RAPTMRG3  MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READ      PATMRGG3,KEY25;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSPTMRG3  MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READ      PATMRGG3,KEY25;;
+          RETURN  
+.
+RDPTMRG3  MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READ      PATMRGG3,KEY25;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                                   PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                                   PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+RKPTMRG3  MOVE      ZERO,OVRCD
+          READKS    PATMRGG3;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                             PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                             PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+RPPTMRG3  MOVE      ZERO,OVRCD
+          READKP    PATMRGG3;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                             PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                             PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+.
+RAPTMRG4  MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READ      PATMRGG4,KEY25;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSPTMRG4  MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READ      PATMRGG4,KEY25;;
+          RETURN  
+.
+RDPTMRG4  MOVE      ZERO,OVRCD
+          RESET     KEY25
+          READ      PATMRGG4,KEY25;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                                   PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                                   PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+RKPTMRG4  MOVE      ZERO,OVRCD
+          READKS    PATMRGG4;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                             PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                             PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
+.
+RPPTMRG4  MOVE      ZERO,OVRCD
+          READKP    PATMRGG4;PTMROLUR,PTMRNWUR,PTMRRDTE,PTMRRHOS:
+                             PTMRAPPR,DPTMRSTA,PTMRSDTE,PTMRSTIM:
+                             PTMRLOCK,PTMRSENT,PTMRUSER,PTMRFILL
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMRSTA,PTMRSTAT
+          RETURN  
++

@@ -1,0 +1,49 @@
+.
+.  Mods : 08/10/92  Steve Armstrong
+.         Modified PRCMDEBT for change from FORM to DIM in FD
+.--------------------------------------------------------------
+RSPRCM1   RESET     KEY13
+          READ      PRICMNT1,KEY13;;
+          RETURN
+.
+RAPRCM1   RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      PRICMNT1,KEY13;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRCM1   RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      PRICMNT1,KEY13;PRCMDEBT,DPRCMSCN,DPRCMLNO,PRCMLINE
+          MOVE      DPRCMSCN,PRCMSCAN
+          MOVE      DPRCMLNO,PRCMCLNO
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPRCM1   MOVE      ZERO,OVRCD
+          READKS    PRICMNT1;PRCMDEBT,DPRCMSCN,DPRCMLNO,PRCMLINE
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRCMSCN,PRCMSCAN
+          MOVE      DPRCMLNO,PRCMCLNO
+          RETURN
+.
+RPPRCM1   MOVE      ZERO,OVRCD
+          READKP    PRICMNT1;PRCMDEBT,DPRCMSCN,DPRCMLNO,PRCMLINE
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRCMSCN,PRCMSCAN
+          MOVE      DPRCMLNO,PRCMCLNO
+          RETURN
+.
+UPPRCM1   MOVE      PRCMSCAN,DPRCMSCN
+          MOVE      PRCMCLNO,DPRCMLNO
+          UPDATE    PRICMNT1;PRCMDEBT,DPRCMSCN,DPRCMLNO,PRCMLINE
+          RETURN
+.
+WRPRCM1   RESET     KEY13
+          WRITE     PRICMNT1,KEY13;KEY13,PRCMLINE
+          RETURN
+.
+DEPRCM1   RESET     KEY13
+          DELETE    PRICMNT1,KEY13
+          RETURN
+.

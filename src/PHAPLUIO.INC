@@ -1,0 +1,52 @@
+.
+.         INCLUDE NAME : PHAPLUIO.PBL
+.
+.         FILE  I/O REQUESTS FOR PLURALS FILE
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY15   DIM             15             KEY FOR PHAPLUA1
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE PATAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+RSPHPL1   RESET     KEY15
+          READ      PHAPLUA1,KEY15;;
+          RETURN
+.
+RAPHPL1   MOVE      ZERO,OVRCD
+          READ      PHAPLUA1,KEY15;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPHPL1   MOVE      ZERO,OVRCD
+          RESET     KEY15
+          READ      PHAPLUA1,KEY15;PLDISP,PLUNIT,PLFILLER
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPHPL1   MOVE      ZERO,OVRCD
+          READKS    PHAPLUA1;PLDISP,PLUNIT,PLFILLER
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPHPL1   MOVE      ZERO,OVRCD
+          READKP    PHAPLUA1;PLDISP,PLUNIT,PLFILLER
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRPHPL1   RESET     KEY15
+          WRITE     PHAPLUA1,KEY15;KEY15,PLUNIT,PLFILLER
+          RETURN
+.
+UPPHPL1   UPDATE    PHAPLUA1;PLDISP,PLUNIT,PLFILLER
+          RETURN
+.
+DEPHPL1   RESET     KEY15
+          DELETE    PHAPLUA1,KEY15
+          RETURN
+.

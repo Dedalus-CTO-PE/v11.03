@@ -1,0 +1,917 @@
+.***************************************************************************
+.* System    :   Outpatients                                               *
+.* Program   :   IBAOUT13                                                  *
+.* Desc      :   Auto Open Outpatient Clinics                              *
+.***************************************************************************
+.* Date      :   30/11/2020                                                *
+.* Author    :   Ebon Clements                                             *
+.* Function  :   This program will open clinics that are configured        *
+.*               to auto open.                                             *
+.* Modifications  :                                                        *
+.***************************************************************************
+.*        V11.02.01 09/02/2022  Thanh T          TSK 0905641               *
+.*                  Recompiled as OUTHEDFD/OUTMA1FD changes                *
+.*        V11.01.04 12/01/2022  Ebon Clements TSK 0915646                  *
+.*                  Fixed OPENYEAR test to check if the clinic was last    *
+.*                  opened more than 1 year ago - SDAT0000                 *
+.*        V11.01.03 17/09/2021  Ebon Clements TSK 0911403                  *
+.*                  Don't open clinics on clinic leave dates - CHKOPN20    *
+.*        V11.01.02 30/07/2021  Ebon Clements TSK 0909660                  *
+.*                  Fixed visit type read for unavailable slots            *
+.*                  Chnaged CODE from DIM 2 to a DIM 3                     *
+.*        V11.01.01 28/06/2021  Ebon Clements TSK 0908293                  *
+.*                  Don't auto open clinics on public holidays             *
+.*        V11.00.01 08/02/2021  Ebon Clements TSK 0876663                  *
+.*                  Fixed outpatient site range test                       *
+.*        V11.00.00 30/11/2020  Ebon Clements TSK 0876663                  *
+.*                  Created program                                        *
+.***************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       IBACONFD/INC
+          INC       OUTBOAFD/INC
+          INC       OUTCONFD/INC
+          INC       OUTCLIFD/INC
+          INC       OUTCLVFD/INC
+          INC       OUTHEDFD/INC
+          INC       OUTHEDTD/INC
+          INC       OUTMA1FD/INC
+          INC       OUTMABFD/INC
+          INC       OUTOSFFD/INC
+          INC       OUTPHOFD/INC
+          INC       OUTSESFD/INC
+          INC       OUTSITFD/INC
+          INC       PATCODFD/INC
+          INC       WEBSECFD/INC
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+AUTOENDD  DATE      8   * Auto open weeks in advance end date
+CATEGORY  DIM       2        * category
+CODE      DIM       3
+CFILEPRE  DIM       3         * Current Open File Prefix for Outpatient Files
+CHECKDAT  DIM       8       
+COUNTS    FORM      2   * Counter in routine SESBOK00
+CURRDATE  DIM       8         * Current date (ccyymmdd)
+DAYCOUNT  FORM      1   * Day counter
+DESCRPT1  DIM       30
+DESCRPT2  DIM       30
+DIM4      DIM       4
+DISPSDAT  DIM       11
+ENDHOUR   FORM      2   * End Session Hour
+ENDMIN    FORM      2   * End Session Minutes
+FROMDTE   FORM      8   * Date in Form Format
+FROMSITE  DIM       6
+F5A       FORM      3
+HTMLFILE  FIFO      ASCII, FIXED=250
+LASTOPEN  DATE      8   * Last session open date
+LASTYEAR  FORM      4   * Last year
+MIN       DIM       2   * Minutes Variable
+MINTIME   FORM      2   * Set minutes to a form after computation
+MTHDTE    DIM       8[12][5]  * Session Dates    Months & Weekno contains Date
+NEWSLOTS  FORM      3
+MONTHNO   FORM      2   * Actual month no eg; Jan=1.....Dec=12
+MONTHNUM  FORM      2   * Actual month no eg; Jan=1.....Dec=12
+OTCLI001  DIM       6     * Clinic ID
+OTCLI002  DIM       8     * Doctor Code
+OTMAS001  DIM       1   * Day Indicator 1-7 1=Monday
+OTMAS002  DIM       5   * Start Time
+PRNTLOPN  DIM       10  * Print last date opened
+REVSLOTS  FORM      3   * Available Slot Number
+OPENSDAT  DIM       10  * Open session date
+OPENYEAR  FORM      4   * Last open year
+SLCOUNT   FORM      3   * Available Slot Number
+SLOTOPT   DIM       3   * Save the slot number for Special & New
+STRTHOUR  FORM      2   * Start HOUR
+STRTMIN   FORM      2   * Start MIN
+STATTIME  DIM       5   * Slot Time in Format: (HH:MM)
+SPCSLOTS  FORM      3   * Available Slot Number
+TODTE     FORM      8   * Date in Form Format
+TOOOSITE  DIM       6
+USAGDATE  DIM       8   * Date of Clinic
+WEEKDATE  DATE      8   * Week number working date
+WEEKDAY3  DIM       3
+WEEKNO    FORM      2   * Actual week no. in each month
+WEEKNUM   FORM      2   * Actual week no. in each month
+WORKDATE  DATE      8   * Calculated date to open
+W1        DIM       1   * Open week number 1
+W2        DIM       1   * Open week number 2
+W3        DIM       1   * Open week number 3
+W4        DIM       1   * Open week number 4
+W5        DIM       1   * Open week number 5
+.
+MON       INIT      "Mon"
+TUE       INIT      "Tue"
+WED       INIT      "Wed"
+THU       INIT      "Thu"
+FRI       INIT      "Fri"
+SAT       INIT      "Sat"
+SUN       INIT      "Sun"
+.
+PRGID     INIT      "IBAOUT13"
+PRGNAM    INIT      "Auto Open Outpatient Clinics"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialisation and open files
+.
+ML0100    CALL      OPTN0000               * select options
+          BRANCH    COPTION,ML1000,ML1000  * proceed with clean up
+.
+          GOTO      ML9999
+.
+ML1000    CALL      KSIT0000               * Keyin OP Site range
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,ML2000:          * yes
+                          ML0100:          * no
+                          ML0100           * cancel
+.
+ML2000    CALL      PROC0000               * process
+.
+ML9999    CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS   * Multi hospital parameter
+.
+          READ      CONTROLF,THIRTY1;*51,HOAUDA  * Read O/P audit indicator
+.
+          DISPLAY   *P64:24,"outsitaf";
+          OPEN      OUTSITA1,"outsitaf"
+.
+          DISPLAY   *P64:24,"outosfaf";
+          OPEN      OUTOSFA1,"outosfaf"
+.
+          DISPLAY   *P64:24,"outphoaf";
+          OPEN      OUTPHOA1,"outphoaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+.
+. Open outpatient file with site prefix
+.
+          MOVE      "out",CFILEPRE       * Save Current File Prefix
+          CALL      OPNOUT00             * Open Outpatient File
+.
+INIT9999  RETURN
++
+.------------------------------------------------------------
+. Open Outpateint Files
+.------------------------------------------------------------
+OPNOUT00  PACK      CFNAME,CFILEPRE,FILHEDA1  * Get the name of the HEDA1 file
+          CLOSE     OUTHEDA1
+          OPEN      OUTHEDA1,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILCLIA1  * Get the name of the CLIA1 file
+          CLOSE     OUTCLIA1
+          OPEN      OUTCLIA1,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILCLVA1  * Get the name of the CLVA1 file
+          CLOSE     OUTCLVA1
+          OPEN      OUTCLVA1,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILMA1A1  * Get the name of the MA1A1 file
+          CLOSE     OUTMA1A1
+          OPEN      OUTMA1A1,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILMASB1  * Get the name of the MASB1 file
+          CLOSE     OUTMASB1
+          OPEN      OUTMASB1,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILSESA1  * Get the name of the SESA1 file
+          CLOSE     OUTSESA1
+          OPEN      OUTSESA1,CFNAME
+.
+          PACK      CFNAME,CFILEPRE,FILBOKA1  * Get the name of the BOKA1 file
+          CLOSE     OUTBOKA1
+          OPEN      OUTBOKA1,CFNAME
+.
+          IF        HOAUDA=0
+            PACK      CFNAME,CFILEPRE,FILAUDBA
+            CLOSE     OUTAUDBA
+            OPEN      OUTAUDBA,CFNAME     * Clinic Session Booking File A Audit
+          ENDIF
+.
+OPNOUT99  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run clean up                           *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Auto Open Outpatient Clinics":
+                    *P1:6,*V2LON,TWO,*HOFF,". Report Outpatient Clinics to Open"
+.
+OPTN0500  KEYIN     *P1:8,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000,OPTN9000    * run clean-up
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.**********************************************************************
+.* KSIT0000 - Keyin Outpatient site from and to                       *
+.**********************************************************************
+.
+KSIT0000  DISPLAY   *P1:11,*EF:
+                    *P1:12,"Site Code From : ":
+                    *P1:13,"Site Code To   : ";
+.
+.-------- keyin site code from range -----
+.
+KSIT0500  MOVE      SP70,DESCRPT1
+          MOVE      SP6,FROMSITE
+          DISPLAY   *P20:12,UNDLN6;
+          KEYIN     *P20:12,*V2LON,FROMSITE;
+          DISPLAY   *P20:12,*EL,*V2LON,FROMSITE;
+.
+          PACK      FROMSITE,FROMSITE,SP70
+.
+          MATCH     SP70,FROMSITE                   * match for spaces
+          GOTO      KSIT0900 IF NOT EQUAL
+.
+          DISPLAY   *P20:12,*V2LON,"Start ";
+          MOVE      "Start ",DESCRPT1
+          GOTO      KSIT1000                         * goto 2nd range
+.
+.-------- check to see if exists ----
+.
+KSIT0900
+          PACK      KEY6,FROMSITE,SP70
+          CALL      RDSITA1
+          BRANCH    OVRCD OF KSIT0950
+.
+          MOVE      OSTDESC,DESCRPT1            * get description
+          DISPLAY   *P45:12,*EL,DESCRPT1;
+          GOTO      KSIT1000
+.
+.------- invalid ste code entered -----
+.
+KSIT0950  DISPLAY   *P1:24,*EL,*B,"Invalid Site Code - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      KSIT0500
+
+.
+.-------- keyin site code to range -----
+.
+KSIT1000  MOVE      SP70,DESCRPT2
+          DISPLAY   *P20:13,UNDLN6;
+          KEYIN     *P20:13,*V2LON,TOOOSITE;
+          DISPLAY   *P20:13,*EL,*V2LON,TOOOSITE;
+.
+          PACK      TOOOSITE,TOOOSITE,SP70
+.
+          MATCH     SP70,TOOOSITE
+          GOTO      KSIT9000 IF NOT EQUAL
+.
+          DISPLAY   *P20:13,*V2LON,"Finish";
+          MOVE      "Finish",DESCRPT2
+          MOVE      Z70,TOOOSITE
+          GOTO      KSIT9999
+.
+.
+.-------- validate end Site Code ------
+.
+KSIT9000  PACK      KEY6,TOOOSITE,SP70
+          CALL      RDSITA1                  * read clinic type file
+          BRANCH    OVRCD,KSIT9500
+.
+          MOVE      OSTDESC,DESCRPT2            * get description
+          DISPLAY   *P45:13,*EL,DESCRPT2;
+.
+.-------- check if code range is valid ----
+.
+          MATCH     FROMSITE,TOOOSITE
+          GOTO      KSIT9200 IF LESS
+          GOTO      KSIT9999
+.
+.--------- Invalid code range -----
+.
+KSIT9200
+          DISPLAY   *P1:24,*EL,*B,"2nd Range Must Be Greater Than 1st Range ":
+                            "- Hit <",*V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      KSIT1000
+.
+.-------- invalid Site code entered -----
+.
+KSIT9500  DISPLAY   *P1:24,*EL,*B,"Invalid Site Code - Hit <":
+                              *V2LON,"ENTER",*HOFF,"> To Continue ";
+          KEYIN     ANS;
+          DISPLAY  *P1:24,*EL;
+          GOTO      KSIT1000
+.
+KSIT9999  RETURN
+
++
+.**************************************************************************
+.*                               PROC0000              Called by: ML0000  *
+.*                                                                        *
+.**************************************************************************
+PROC0000  MOVE      ZERO,CPAGENO
+          CALL      IBACLOCK
+.
+          PACK      CURRDATE,CCC,CYY,CMM,CDD     * Current
+          REP       " 0",CURRDATE
+.
+          PACK      DIM4,CCC,CYY
+          REP       " 0",DIM4
+          MOVE      DIM4,LASTYEAR
+          SUB       ONE,LASTYEAR            * Last Year    
+.
+          CALL      HEAD0000                * Print heading
+.
+          PACK      KEY6,FROMSITE,SP70
+          CALL      RDSITA1                 * Check from site
+          IF        OVRCD<>1
+            GOTO      PROC1100
+          ENDIF
+.
+PROC1000  CALL      RDKSITA1                * Loop OP Sites
+          BRANCH    OVRCD,PROC9000
+.
+PROC1100  MATCH     OSTSITE,TOOOSITE        * Check site code to
+          GOTO      PROC9000 IF LESS
+.
+          MATCH     "1",OTSTACTV            * Site inactive
+          GOTO      PROC1000 IF EQUAL
+.
+          MATCH     OSTFILE,CFILEPRE        * Save Current File Prefix
+          IF        !@EQUAL
+            MOVE      OSTFILE,CFILEPRE      * Save Current File Prefix
+            CALL      OPNOUT00              * Open Outpatient Files
+          ENDIF
+.
+          PACK      KEY28,OSTSITE,SP70
+          CALL      RSOTHED1
+PROC3000  CALL      RKOTHED1                * Check slot templates for auto
+          BRANCH    OVRCD,PROC1000          * open clinics
+.
+          MATCH     OSTSITE,OTHESITE        * Correct site
+          GOTO      PROC1000 IF NOT EQUAL
+.
+          MATCH     OTHESDAT,CURRDATE       * Clinic schedule opened
+          GOTO      PROC3000 IF LESS
+.
+          MATCH     SP70,OTHEDTCC           * Clinic schedule closed
+          IF        !@EQUAL
+            MATCH     CURRDATE,OTHEDTCC     * Clinic schedule closed
+            GOTO      PROC3000 IF LESS
+          ENDIF
+.
+          MATCH     "1",OTHEAOPN            * Auto Open
+          GOTO      PROC3000 IF NOT EQUAL
+.
+          PACK      KEY18,OTHESITE,OTHECLIN,OTHEWDAY,OTHESTRT,SP70
+          CALL      RDMASA1
+          BRANCH    OVRCD,PROC3000
+.
+          BRANCH    OMASTAT,PROC3000        * Inactive
+.
+          MATCH     OTMADTCO,CURRDATE       * Clinic master not open
+          GOTO      PROC3000 IF LESS
+.
+          MATCH     SP70,OTMADTCC
+          IF        !@EQUAL
+            MATCH     CURRDATE,OTMADTCC     * Clinic closed
+            GOTO      PROC3000 IF LESS
+          ENDIF
+.
+          PACK      KEY20,OTHESITE,OTHECLIN,CURRDATE,SP70
+          CALL      RDCLIA1
+          IF        OVRCD=1
+            PACK      KEY20,OTHESITE,OTHECLIN,CURRDATE,SP70
+            CALL      RDSCLIA1              * Read Clinic Record
+            CALL      RDPCLIA1
+            BRANCH    OVRCD,PROC3000
+.
+            MATCH     OTHESITE,OCASITE
+            GOTO      PROC3000 IF NOT EQUAL
+.
+            MATCH     OTHECLIN,OCACLIN
+            GOTO      PROC3000 IF NOT EQUAL
+.
+          ENDIF
+.
+          CALL      SDAT0000                * Set Dates to open
+          CALL      OPEN0000                * Open clinics
+.           
+          GOTO      PROC3000
+.
+PROC9000  CALL      UND132
+.
+PROC9999  RETURN
++
+.*********************************************************************
+. Print heading
+.*********************************************************************
+HEAD0000  CALL      HEAD132
+.
+          IF        COPTION=1
+            PRINT     *20,"Open Clinics"
+          ELSE
+            PRINT     *20,"Report Only"
+          ENDIF
+.
+          PRINT     *20,"Site From : ",DESCRPT1," to ",DESCRPT2
+          ADD       TWO,CLNO
+.
+          CALL      UND132
+.
+          PRINT     *1,"| Site ",*34,"| Clinic ":
+                    *76,"| Last Opened":
+                    *90,"| Day Date/Time Opened ":
+                    *116,"| Schedule",*132,"|"
+
+          CALL      UND132
+.
+HEAD9999  RETURN
++
+.*********************************************************************
+. Set Dates to Open outpatient clinics
+.*********************************************************************
+SDAT0000  CALL      CLRD0000                * Clear open date array
+.
+          MATCH     SP70,OMADATE            * Blank last opened date
+          GOTO      SDAT0500 IF EQUAL
+.
+          MOVE      OMADATE,LASTOPEN        * Last sesson open date        
+.
+          UNPACK    LASTOPEN,CCENT,CYEAR,CMON,CDAY
+          CALL      DAYOFWEK
+.
+          COMPARE   WEEKDAY,OMADAY          * Error incorrect day of week      
+          GOTO      SDAT9999 IF NOT EQUAL   * Day of week, Mon=1, Tue=2,Sun=7
+.
+          PACK      DIM4,CCENT,CYEAR        * CCYY
+          REP       " 0",DIM4
+          MOVE      DIM4,OPENYEAR           * Last opened year
+.
+          COMPARE   LASTYEAR,OPENYEAR       * Last opened more than a year ago
+          GOTO      SDAT0500 IF LESS        * So start again at today
+.
+          GOTO      SDAT2000
+.
+.
+. If last open date blank set to first mathing day of the week in the future
+.
+SDAT0500  MOVE      CURRDATE,LASTOPEN    * Set last open date to today.
+.
+SDAT1000  UNPACK    LASTOPEN,CCENT,CYEAR,CMON,CDAY
+          CALL      DAYOFWEK
+.
+          COMPARE   WEEKDAY,OMADAY       * Find the correct day of the week
+          GOTO      SDAT2000 IF EQUAL    * Day of week, Mon=1, Tue=2,Sun=7
+.
+          ADD       ONE,LASTOPEN
+          GOTO      SDAT1000
+.
+.  Calculate the auto open end date for weeks in advance to open
+.
+SDAT2000  MOVE      ZERO,F3
+          SQUEEZE   OTHEAAOW
+          MOVE      OTHEAAOW,F3        * Auto Open Number of Weeks in Advance
+          ASSIGN    (F3 * 7),F5A       * Days in advance to open
+          MOVE      CURRDATE,AUTOENDD
+          ADD       F5A,AUTOENDD       * Auto open until end date
+.
+          MOVE      LASTOPEN,WORKDATE  * Set date to open clinic
+.
+SDAT3000  MATCH     WORKDATE,AUTOENDD  * Exit past auto open end date
+          GOTO      SDAT9999 IF LESS
+.
+          MATCH    "1", OTHEAOFR       * Weekly
+          GOTO     SDAT4000 IF EQUAL
+.
+          MATCH    "2", OTHEAOFR       * 2 Weekly
+          GOTO     SDAT5000 IF EQUAL
+.
+          MATCH    "4", OTHEAOFR       * 4 Weekly
+          GOTO     SDAT6000 IF EQUAL
+.
+          GOTO     SDAT9999            * Invalid frequence
+.
+. Weekly clinic
+.
+SDAT4000  CALL      SETD0000           * Set day of week to open array
+.
+          MOVE      "7",F2
+          ADD       F2,WORKDATE        * Add 1 week (7 days)
+          GOTO      SDAT3000
+.
+. 2 weekly Clinic
+.
+SDAT5000  CALL      SETD0000           * Set day of week to open array
+.
+          MOVE      "14",F2
+          ADD       F2,WORKDATE        * Add 2 weeks (14 days)
+          GOTO      SDAT3000
+.
+. 4 weekly Clinic
+.
+SDAT6000  CALL      SETD0000           * Set day of week to open array
+          MOVE      "28",F2
+          ADD       F2,WORKDATE        * Add 4 weeks (28 days)
+          GOTO      SDAT3000
+.
+SDAT9999  RETURN
++
+.*********************************************************************
+. Clear Dates to Open outpatient clinics
+.*********************************************************************
+CLRD0000  MOVE      SP70,MTHDTE[1][1]
+          MOVE      SP70,MTHDTE[1][2]
+          MOVE      SP70,MTHDTE[1][3]
+          MOVE      SP70,MTHDTE[1][4]
+          MOVE      SP70,MTHDTE[1][5]
+.
+          MOVE      SP70,MTHDTE[2][1]
+          MOVE      SP70,MTHDTE[2][2]
+          MOVE      SP70,MTHDTE[2][3]
+          MOVE      SP70,MTHDTE[2][4]
+          MOVE      SP70,MTHDTE[2][5]
+.
+          MOVE      SP70,MTHDTE[3][1]
+          MOVE      SP70,MTHDTE[3][2]
+          MOVE      SP70,MTHDTE[3][3]
+          MOVE      SP70,MTHDTE[3][4]
+          MOVE      SP70,MTHDTE[3][5]
+.
+          MOVE      SP70,MTHDTE[4][1]
+          MOVE      SP70,MTHDTE[4][2]
+          MOVE      SP70,MTHDTE[4][3]
+          MOVE      SP70,MTHDTE[4][4]
+          MOVE      SP70,MTHDTE[4][5]
+.
+          MOVE      SP70,MTHDTE[5][1]
+          MOVE      SP70,MTHDTE[5][2]
+          MOVE      SP70,MTHDTE[5][3]
+          MOVE      SP70,MTHDTE[5][4]
+          MOVE      SP70,MTHDTE[5][5]
+.
+          MOVE      SP70,MTHDTE[6][1]
+          MOVE      SP70,MTHDTE[6][2]
+          MOVE      SP70,MTHDTE[6][3]
+          MOVE      SP70,MTHDTE[6][4]
+          MOVE      SP70,MTHDTE[6][5]
+.
+          MOVE      SP70,MTHDTE[7][1]
+          MOVE      SP70,MTHDTE[7][2]
+          MOVE      SP70,MTHDTE[7][3]
+          MOVE      SP70,MTHDTE[7][4]
+          MOVE      SP70,MTHDTE[7][5]
+.
+          MOVE      SP70,MTHDTE[8][1]
+          MOVE      SP70,MTHDTE[8][2]
+          MOVE      SP70,MTHDTE[8][3]
+          MOVE      SP70,MTHDTE[8][4]
+          MOVE      SP70,MTHDTE[8][5]
+.
+          MOVE      SP70,MTHDTE[9][1]
+          MOVE      SP70,MTHDTE[9][2]
+          MOVE      SP70,MTHDTE[9][3]
+          MOVE      SP70,MTHDTE[9][4]
+          MOVE      SP70,MTHDTE[9][5]
+.
+          MOVE      SP70,MTHDTE[10][1]
+          MOVE      SP70,MTHDTE[10][2]
+          MOVE      SP70,MTHDTE[10][3]
+          MOVE      SP70,MTHDTE[10][4]
+          MOVE      SP70,MTHDTE[10][5]
+.
+          MOVE      SP70,MTHDTE[11][1]
+          MOVE      SP70,MTHDTE[11][2]
+          MOVE      SP70,MTHDTE[11][3]
+          MOVE      SP70,MTHDTE[11][4]
+          MOVE      SP70,MTHDTE[11][5]
+.
+          MOVE      SP70,MTHDTE[12][1]
+          MOVE      SP70,MTHDTE[12][2]
+          MOVE      SP70,MTHDTE[12][3]
+          MOVE      SP70,MTHDTE[12][4]
+          MOVE      SP70,MTHDTE[12][5]
+.
+CLRD9999  RETURN
++
+.*********************************************************************
+. Set Dates to Open array for outpatient clinics
+.*********************************************************************
+SETD0000  UNPACK    WORKDATE,D4,D2
+          MOVE      D2,MONTHNUM            * Set Month Number 1 = Jan 12 = Dec
+.
+          MOVE      ZERO,WEEKNUM            * Clear week number
+.
+          PACK      WEEKDATE,D4,D2,ZERO,ONE      * Start of month
+          UNPACK    WEEKDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      DAYOFWEK
+          MOVE      WEEKDAY,DAYCOUNT           * Day counter
+          IF        OMADAY >= DAYCOUNT
+             ADD      ONE,WEEKNUM              * Day found in first week
+          ENDIF
+.
+SETD1000  IF        DAYCOUNT>7
+            ADD       ONE,WEEKNUM                * Week of month counter
+            MOVE      ONE,DAYCOUNT               * Set day back to monday
+          ENDIF
+.     
+          MATCH     WORKDATE,WEEKDATE            * Exit found the date and
+          GOTO      SETD5000 IF EQUAL            * week count
+.
+          ADD       ONE,WEEKDATE                 * 
+          ADD       ONE,DAYCOUNT                 * Monday
+          GOTO      SETD1000 
+.
+SETD5000  MATCH     "1", OTHEAOFR       * Weekly
+          IF        @EQUAL
+            UNPACK    OTHEAOWM,W1,W2,W3,W4,W5
+            IF        WEEKNUM=1
+              MATCH     "1",W1                   * Open week 1
+              GOTO      SETD9999 IF NOT EQUAL
+            ENDIF
+.
+            IF        WEEKNUM=2
+              MATCH     "1",W2                   * Open week 2
+              GOTO      SETD9999 IF NOT EQUAL
+            ENDIF
+.
+            IF        WEEKNUM=3
+              MATCH     "1",W3                   * Open week 3
+              GOTO      SETD9999 IF NOT EQUAL
+            ENDIF
+.
+            IF        WEEKNUM=4
+              MATCH     "1",W4                   * Open week 4
+              GOTO      SETD9999 IF NOT EQUAL
+            ENDIF
+.
+            IF        WEEKNUM=5
+              MATCH     "1",W5                   * Open week 5
+              GOTO      SETD9999 IF NOT EQUAL
+            ENDIF
+          ENDIF
+
+          MOVE      WORKDATE,MTHDTE[MONTHNUM][WEEKNUM]  * Month and week
+.
+SETD9999  RETURN
++
+.*********************************************************************
+. Open outpatient clinics
+.*********************************************************************
+OPEN0000  MOVE      OTHESITE,WBSESIT       * Set site for common open code
+          MOVE      OTHECLIN,OTCLI001      * Clinic ID
+          MOVE      OTHEWDAY,OTMAS001      * Day Indicator 1-7 1=Monday
+          MOVE      OTHESTRT,OTMAS002      * Start Time
+.
+          MOVE      OTHECLIN,OTHED002      * CLINIC ID
+          MOVE      OTHEWDAY,OTHED003      * DAY INDICATOR
+          MOVE      OTHESTRT,OTHED004      * SESSION START TIME (HH:MM)
+          MOVE      OTHESHNO,OTHED005      * SCHEDULE NUMBER
+          MOVE      OTHESDAT,OTHED006      * SCHEDULE DATE (CCYYMMDD)
+.
+          CALL      SLOTOT00      * Get total slot & time statistics
+          CALL      SVVMON00      * Loop through months and save Sessions
+.
+OPEN9999  RETURN
++
+.------------------------------------------------------------
+. Loop through months and save Sessions
+. Set and save session details for each month
+.                                         called by: OUTSES00
+.------------------------------------------------------------
+SVVMON00  MOVE      ONE,MONTHNO
+          MOVE      ONE,WEEKNO
+          WHILE     (MONTHNO<=12)
+            CALL      IBACLOCK
+            WHILE     (WEEKNO<=5)
+              CALL      CHKOPN00
+              ADD       ONE,WEEKNO
+            DO
+            ADD       ONE,MONTHNO
+            MOVE      ONE,WEEKNO
+          DO
+SVVMON99  RETURN
++
+.------------------------------------------------------------
+. Check if session can be opened.
+.                                         called by: SVVMON00
+.------------------------------------------------------------
+CHKOPN00  MATCH     SP70,MTHDTE[MONTHNO][WEEKNO]      * = corresponding date
+          GOTO      CHKOPN99 IF EQUAL
+.
+          MATCH     OTHESDAT,MTHDTE[MONTHNO][WEEKNO]  * = corresponding date
+          GOTO      CHKOPN99 IF LESS
+.
+          MATCH     SP70,OTHEDTCC                     * Clinic closed
+          IF        !@EQUAL
+            MATCH     MTHDTE[MONTHNO][WEEKNO],OTHEDTCC
+            GOTO      CHKOPN99 IF LESS
+          ENDIF
+.
+          MATCH     CURRDATE,MTHDTE[MONTHNO][WEEKNO]  * Don't open in the past
+          GOTO      CHKOPN99 IF LESS
+.
+          PACK      KEY25,WBSESIT,OTCLI001,MTHDTE[MONTHNO][WEEKNO],OTMAS002,SP70
+          CALL      RDSESA1
+          COMPARE   ONE,OVRCD
+          GOTO      CHKOPN99 IF NOT EQUAL   * Session already open
+.
+          MOVE      MTHDTE[MONTHNO][WEEKNO],CHECKDAT
+.
+          PACK      KEY11,CHECKDAT,SP70 * Check for Public Holiday all hospitals
+          CALL      RDPHOA1
+          IF        OVRCD=1
+            IF        IBCNMHOS=1
+              PACK      KEY11,CHECKDAT,OTHEHOSP,SP70 * Check for Public Holiday
+              CALL      RDPHOA1                      * for the clinics hospital
+              BRANCH    OVRCD,CHKOPN20
+            ELSE
+              GOTO      CHKOPN20
+            ENDIF
+          ENDIF
+.
+          GOTO      CHKOPN99              * public holiday
+.
+. Check for clinic leave dates
+.
+CHKOPN20  PACK      KEY20,WBSESIT,OTCLI001,CHECKDAT,SP70 *Check for Clinic Leave
+          CALL      RDOTCLV1                             * Dates
+          BRANCH    OVRCD,CHKOPN30      * Not found do positional read
+.
+          GOTO      CHKOPN99            * Clinic leave date found
+
+CHKOPN30  PACK      KEY20,WBSESIT,OTCLI001,CHECKDAT,Z70 * Check for Clinic Leave
+          CALL      RSOTCLV1                            * Dates
+          CALL      RPOTCLV1
+          BRANCH    OVRCD,CHKOPN40
+.
+          MATCH     WBSESIT,OTCVSITE
+          GOTO      CHKOPN40 IF NOT EQUAL
+.
+          MATCH     OTCLI001,OTCVCLIN
+          GOTO      CHKOPN40 IF NOT EQUAL 
+.
+          MOVE      CHECKDAT,F8               * Move variables to forms...
+          MOVE      OTCVTDTE,TODTE
+          MOVE      OTCVFDTE,FROMDTE
+.                                       * Check if date within leave dates
+          IF        F8 >= FROMDTE & F8 <= TODTE
+            GOTO      CHKOPN99          * Clinic leave date found
+          ENDIF
+.
+CHKOPN40  IF        COPTION=1
+            CALL      OPNSES00            * Open Session
+          ELSE
+            MOVE      MTHDTE[MONTHNO][WEEKNO],OSEDATE      * Report only
+          ENDIF
+.
+CHKOPN80  CALL      PRIN0000                * Print clinic opened
+.
+CHKOPN99  RETURN
++
+.------------------------------------------------------------
+. Loop through months and save Sessions
++
+.*********************************************************************
+. Print clinic opened
+.*********************************************************************
+PRIN0000  MOVE      ZERO,F1
+          MOVE      OTHEWDAY,F1 
+          LOAD      WEEKDAY3,F1,MON,TUE,WED,THU,FRI,SAT,SUN
+.
+          MOVE      SP70,DISPSDAT
+          MATCH     SP70,OTHESDAT
+          IF        !@EQUAL
+            UNPACK    OTHESDAT,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE
+            MOVE      CPCDATE,DISPSDAT
+          ENDIF
+.
+          UNPACK    OMADATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,PRNTLOPN
+.
+          UNPACK    OSEDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,OPENSDAT
+.
+          PRINT     *1,"| ",OSTDESC,*34,"| ",OTHECLIN," - ",OCADESC:
+                    *76,"| ",PRNTLOPN:
+                    *90,"| ",WEEKDAY3,SP1,OPENSDAT," at ",OTHESTRT:
+                    *116,"| ",OTHESHNO,SP1,DISPSDAT,*132,"|"
+.
+          ADD       ONE,CLNO
+          COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS
+.
+PRIN9999  RETURN
++
+.------------------------------------------------------------
+. Get Code Description
+.------------------------------------------------------------
+GETCOD00  MOVE      SP70,TDESC
+          MOVE      SP70,ACODE
+          MOVE      SP70,THCSCOD
+          MOVE      SP70,PTCDLDES
+          MOVE      ZERO,TCFORM6
+.
+          UNPACK    SP70,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5:
+                         TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10:
+                         TCINDC11,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                         TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                         TCINDC21,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                         TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                         TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                         TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                         TCINDC41,PTCOACTV,PTCDNHCP,PTCDGRPV,PTCDHOSS
+.
+          UNPACK    SP70,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4,PTCDASC5
+          UNPACK    SP70,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9,PTCDAS10
+          UNPACK    SP70,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14,PTCDAS15
+          UNPACK    SP70,PTCDUDF2,PTCDUDF3,PTCDUDF4,PTCDUDF5,PTCDUDF6
+          UNPACK    SP70,PTCDUDF7,PTCDUDF8,PTCDUDF9,PTCDUD10,PTCDUD11
+          UNPACK    SP70,PTCDUD12,PTCDUD13,PTCDUD14
+.
+          MATCH     SP70,CODE
+          GOTO      GETCOD99 IF EQUAL
+.
+          PACK      KEY5,CATEGORY,CODE
+          CALL      RDCODE1
+          IF        OVRCD=1
+            MOVE      SP70,TDESC
+            MOVE      SP70,ACODE
+            MOVE      SP70,THCSCOD
+            MOVE      SP70,PTCDLDES
+            MOVE      ZERO,TCFORM6
+            UNPACK    SP70,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5:
+                           TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10:
+                           TCINDC11,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                           TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                           TCINDC21,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                           TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                           TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                           TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                           TCINDC41,PTCOACTV,PTCDNHCP,PTCDGRPV,PTCDHOSS
+            UNPACK    SP70,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4,PTCDASC5
+            UNPACK    SP70,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9,PTCDAS10
+            UNPACK    SP70,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14,PTCDAS15
+            UNPACK    SP70,PTCDUDF2,PTCDUDF3,PTCDUDF4,PTCDUDF5,PTCDUDF6
+            UNPACK    SP70,PTCDUDF7,PTCDUDF8,PTCDUDF9,PTCDUD10,PTCDUD11
+            UNPACK    SP70,PTCDUD12,PTCDUD13,PTCDUD14
+          ENDIF
+GETCOD99  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       OPENSESS
+          INC       DAYOFWEK
+.
+          INC       OUTBOAIO/INC
+          INC       OUTCLIIO/INC
+          INC       OUTCLVIO/INC
+          INC       OUTHEDIO/INC
+          INC       OUTMA1IO/INC
+          INC       OUTMABIO/INC
+          INC       OUTSESIO/INC
+          INC       OUTOSFIO/INC
+          INC       OUTPHOIO/INC
+          INC       OUTSITIO/INC
+          INC       PATCODIO/INC

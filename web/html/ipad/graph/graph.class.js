@@ -1,0 +1,1463 @@
+// jsVersion  : V10.12.00
+//
+// Source Code:  ./ipad/graph/graph.class.js
+//
+// Modification 
+//
+// Version         Date                         Responsible/Changes Made
+//------------------------------------------------------------------------------
+// V10.03.00       13/04/2012                   Version change
+// V10.01.00       13/04/2012                   Version change
+// V10.00.00       13/04/2012                   Created for Mobility Suite
+//
+
+/******************************************************************************
+ * Graph - creates a line graph
+ *          contains one or more dataSet objects 
+ *         (obj.data[0] = x axis values, obj.data[1] = y axis values )
+ *
+ * @public methods:
+ *    function draw()  
+ *    function getNumberOfDataSets()
+ *    function setMinDate(value)
+ *    function getMinDate()
+ *    function setMaxDate(value)
+ *    function getMaxDate()
+ *    function setNticks(value)
+ *    function setMinMax(value,n)
+ *    function setMinMaxWithDateRange(min,max)
+ *    function setLogScale(bool)
+ *    function addDataSet(array) //refer to DataSet class at the end of file
+ * @private methods:
+ *    function findScaleMinMax() 
+ *    function drawScale()
+ *    function niceNumber( x, round )
+ *    function expt( a, n )
+ *    function looseLabel( min, max, nticks, ctx)
+ *    function normaliseData()
+ *    function addDataSetProperties(name,color)
+ *    function addCoordinates(x,y)
+ *    function addPlacement(x,y) 
+ *    function drawLegends()
+ *    function drawPopUp(valueX,valueY,x,y)  
+ *    function formatTicks(nticks,date1)
+ *    function convertToDDD(day)
+ *    function convertToTwoDigits(value)
+ *    function convertToMMM(m)
+ *    function convertToMM(m)
+ *    function drawGraphBackground()
+ *    function convertMMMtoMM(m)
+ *
+ * created by: Saroeun Jaylen Soeur
+ * Date: 17/02/2011
+ *
+ * Date		Version		Author		CAR	  Description
+ * 28/02/2012   V10.00.04       Saroeun Soeur             changed drawPopUp
+ * 25/03/2011   V10.00.03       Saroeun Soeur   XXXXXX    fixed log scale to handle < 1 values
+ * 15/03/2011   V10.00.02       Saroeun Soeur   XXXXXX    added check to empty/null values
+ * 17/02/2011 	v10.00.01	Saroeun Soeur	XXXXXX    created graph.class.js
+ *
+ *****************************************************************************/
+function Graph(options) {
+  var options = {
+    _name:			options.name || 'new chart',
+    _parentDiv:			options.parentDiv || null,
+    _legendVisible:		options.legendVisible || false,
+    _width:			options.width || 450,
+    _height:            	options.height || 400,
+    _dataSets:          	options.dataSet || new Array(),
+    _backgroundColor:   	options.backgroundColor || '#ffffff',
+    _numberOfDataSets:  	options.numberOfDataSets || 0,
+    _minDate:			options.minDate || 0,
+    _maxDate:           	options.maxDate || 0,
+    _nticks:			options.nticks || 6,
+    _lineWidth:                 options.lineWidth || 1,
+    _commonFactorScale:         options.commonFactorScale || false,
+    _commonFactor:              options.commonFactor || 0,
+    _logScale:		        options.logScale || false
+  }
+
+  //global
+  var _graph = null;
+  var _graph2 = null;
+  var _scalingRatio = 0;
+  var _offset = 0;
+  var _graphMin = 0;
+  var _graphMax = 0;
+  var _labelSpacing = 0; 
+  var _numberOfLabels = 0;
+  var _arrayTouchValuesX = new Array();
+  var _arrayTouchValuesY = new Array();
+  var _arrayPlaceValuesX = new Array();
+  var _arrayPlaceValuesY = new Array();
+  var _arrayDataSetColor = new Array();
+  var _arrayDataSetName  = new Array();
+  var _loadOnce = true;
+  var savedPageX = "";
+
+  //constants
+  var OFFSET_LABEL = 10.5;
+  var MAX_DATASETS = 40;
+  var SPACING_X = 40.5;
+  var SPACING_Y = 20.1;
+  var INTERVAL_SPACING = 15;
+  var OFFSET_LEFT = 10.5;
+  var HOURS_IN_MILLISEC = 1000*60*60;
+
+  var that = this; //keep referrence of this object if context is changed
+
+  /**
+   * constructor
+   **/
+  if(options._parentDiv != null) {
+    var insertBeforeObj = null;
+    _graph = document.createElement('canvas');
+    _graph2 = document.createElement('canvas');
+    _graph.id = options._id+"graph";
+    _graph2.id = options._id+"graph2";
+
+    _graph.width = options._width;
+    _graph2.width = options._width;
+    _graph.height = options._height;
+    _graph2.height = options._height;
+
+    _graph.className = "graph";
+    _graph2.className = "graph2";
+    inserBeforeObj = options._parentDiv.childNodes[0];
+
+    if(insertBeforeObj == null) {
+      options._parentDiv.appendChild(_graph);
+      options._parentDiv.appendChild(_graph2);
+    }else{
+      options._parentDiv.insertBefore(_graph,insertBeforeObj);
+      options._parentDiv.insertBefore(_graph2,insertBeforeObj);
+    }
+
+   _graph2.style.position = "absolute";
+   _graph2.style.top = _graph.offsetTop+"px";
+   _graph2.style.left = _graph.offsetLeft+"px";
+   
+    /**************************************************************************
+     *	setting up event listeners
+     *************************************************************************/
+    _graph2.addEventListener('touchstart',function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if( e.touches[0].pageX > _graph.offsetLeft + SPACING_X + OFFSET_LEFT &&
+            e.touches[0].pageX < options._width + _graph.offsetLeft ) {
+          for(var l = 0; l < _arrayTouchValuesX.length; l++) {
+            if( parseInt(_arrayTouchValuesX[l],10) + _graph.offsetLeft < e.touches[0].pageX+10 &&
+                parseInt(_arrayTouchValuesX[l],10) + _graph.offsetLeft > e.touches[0].pageX-10) {
+
+                drawPopUp(_arrayPlaceValuesX[l],
+                         _arrayPlaceValuesY[l],
+                         _arrayTouchValuesX[l],
+                         _arrayTouchValuesY[l]);
+
+               return;
+            }
+          }
+
+       
+      var m = _graphMin*HOURS_IN_MILLISEC;
+      var date2 = new Date( m+_labelSpacing/_numberOfLabels*
+                                     (e.touches[0].pageX-_graph.offsetLeft-SPACING_X/0.67)*HOURS_IN_MILLISEC);
+
+      drawPopUp(date2, // value x axis
+                null, // value y axis
+                e.touches[0].pageX-_graph.offsetLeft, //position x v
+               e.touches[0].pageY-_graph.offsetTop); // position y
+      }
+    },true);
+
+
+    _graph2.addEventListener( 'mousemove', function(e) {
+       if( e.pageX > _graph.offsetLeft+SPACING_X+OFFSET_LEFT &&
+           e.pageX < options._width+_graph.offsetLeft ) {
+
+         for( var l = 0; l < _arrayTouchValuesX.length; l++ ) {
+           if( parseInt( _arrayTouchValuesX[l], 10 ) + _graph.offsetLeft < e.pageX + 10 && 
+               parseInt( _arrayTouchValuesX[l], 10 ) + _graph.offsetLeft  > e.pageX - 10 ) {
+
+	       drawPopUp( _arrayPlaceValuesX[l], //value X axis
+                          _arrayPlaceValuesY[l], //value y axis
+                          _arrayTouchValuesX[l], //x position
+                          _arrayTouchValuesY[l]); //y position
+               return;
+            }
+         }
+
+         var m = _graphMin * HOURS_IN_MILLISEC;
+
+         var date2 = new Date( m + _labelSpacing / _numberOfLabels * 
+                             ( e.pageX -_graph.offsetLeft-SPACING_X/0.67) * HOURS_IN_MILLISEC);
+
+         drawPopUp( date2, null, e.pageX -_graph.offsetLeft, null ); 
+
+       }
+
+       e.preventDefault();
+       e.stopPropagation();
+
+    },true);
+
+     _graph2.addEventListener( 'touchmove', function(e) {
+        if( e.touches[0].pageX > _graph.offsetLeft + SPACING_X + OFFSET_LEFT &&
+            e.touches[0].pageX < options._width + _graph.offsetLeft ) {
+          for(var l = 0; l < _arrayTouchValuesX.length; l++) {
+            if( parseInt(_arrayTouchValuesX[l],10) + _graph.offsetLeft < e.touches[0].pageX+10 && 
+                parseInt(_arrayTouchValuesX[l],10) + _graph.offsetLeft > e.touches[0].pageX-10) {
+
+                drawPopUp(_arrayPlaceValuesX[l],
+                         _arrayPlaceValuesY[l],
+                         _arrayTouchValuesX[l],
+                         _arrayTouchValuesY[l]);
+
+               return;
+            }
+          }
+
+          var m = _graphMin*HOURS_IN_MILLISEC;
+          var date2 = new Date( m+_labelSpacing/_numberOfLabels*
+                                     (e.touches[0].pageX-_graph.offsetLeft-SPACING_X/0.67)*HOURS_IN_MILLISEC);
+
+          drawPopUp(date2, // value x axis
+                    null, // value y axis
+                    e.touches[0].pageX-_graph.offsetLeft, //position x v
+                    e.touches[0].pageY-_graph.offsetTop); // position y 
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+    },true);
+
+     _graph2.addEventListener('touchend',function(e) {
+    //   that.draw();
+       e.preventDefault();
+       e.stopPropagation();
+    },true);
+
+     _graph2.addEventListener('mouseout',function(e) {
+       that.draw();
+       e.preventDefault();
+       e.stopPropagation();
+    },true);
+ 
+  };; //end constructor
+
+
+  /**
+   * private methods
+   **/
+
+  /******************************************************************************
+   * findScaleMinMax - scans through DataSet object to find max and min data 
+   *                   Y Axis range
+   *****************************************************************************/
+   function findScaleMinMax() {
+     var max = 0;
+     var min = 100000000;
+
+     if ( options._numberOfDataSets > 1) {
+       for( var i = 0; i < options._numberOfDataSets; i++) {
+         for(var j = 0; j < options._dataSets[i].getYAxisLength(); j++) {
+            var value  = parseFloat(options._dataSets[i].getYIndexOf(j));
+           if( value < min ) { 
+             if(options._logScale == false) {
+               min = value - 0.1;
+             }else {
+               if(value < 1) {
+                 min = 0;
+               }else {
+                 min = value;
+               }
+             }
+           }
+
+           if( value > max) 
+             max = value;
+         }        
+       }
+ 
+    }else {
+      for( var i = 0; i < options._numberOfDataSets; i++) {
+         for(var j = 0; j < options._dataSets[i].getYAxisLength(); j++) {
+
+           var value  = parseFloat( options._dataSets[i].getYIndexOf(j));
+
+           if( value < min ) {
+             if(options._logScale == false) {
+               min = value - 0.1;
+             }else {
+               if(value < 1) {
+                 min = 0;
+               }else {
+                 min = value;
+               }
+             }
+           }
+
+           if( value > max)
+             max = value;
+         }
+      }
+      
+      if (typeof options._dataSets[0] != 'undefined') {
+        var pMin = parseFloat(options._dataSets[0].getMinYAxis());
+        var pMax = parseFloat(options._dataSets[0].getMaxYAxis());
+        var refMin = parseFloat(options._dataSets[0].getRefMin());
+        var refMax = parseFloat(options._dataSets[0].getRefMax());
+        
+        if(options._logScale == false) {
+         //the reference min exist then make it the min value
+          if(!isNaN(refMin) && refMin < min ) {
+             min = refMin;
+          }else if ( !isNaN(pMin) && pMin < min) {
+             min = pMin;
+          }
+ 
+         //the reference max exist then make it the max value
+          if(!isNaN(refMax) && refMax > max) {
+            max = refMax;
+          }else if ( !isNaN(pMax) && pMax > max) {
+            max = pMax;
+          }
+        }
+      }
+    }
+
+    //return object to caller obj.max, obj.min
+     return {"max":max,"min":min};
+
+  };;//end findScaleMinMax
+
+
+  /****************************************************************************
+   * drawScale - draw the scale lines and labels y - x axis
+   ***************************************************************************/
+  function drawScale(){
+    var ctx = _graph.getContext( '2d' );
+    var interval =  (options._height / 10 ) / 2  ; 
+
+    if(options._numberOfDataSets > 0 ) {
+        if(_loadOnce) {
+          normaliseData();
+          _loadOnce = false;
+         }
+    }
+
+    var YAxisRangeObj = findScaleMinMax();
+
+    _offset = parseFloat( YAxisRangeObj.min );
+    
+     
+    //calculate the scaling ratio (max - min / n)
+     if(YAxisRangeObj.min == YAxisRangeObj.max) {
+       YAxisRangeObj.min = 0;
+       _offset = parseFloat(  YAxisRangeObj.min );
+     }
+    
+     _scalingRatio = parseFloat( ( parseFloat( YAxisRangeObj.max)  - 
+                                  parseFloat( YAxisRangeObj.min)) 
+                               / interval);
+    if(options._logScale == false) {
+      if (_scalingRatio > 1) {
+       _scalingRatio = Math.ceil(_scalingRatio)+0.5;
+      }else {
+         _scalingRatio = _scalingRatio +0.05;
+      }
+    }
+
+    
+    //draw y scale
+    ctx.beginPath();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#efefef"; //light grey
+
+    ctx.moveTo( SPACING_X+OFFSET_LEFT, 
+                SPACING_Y + ( SPACING_Y * 2 ) );
+
+    ctx.lineTo( SPACING_X+OFFSET_LEFT, 
+                SPACING_Y + ( SPACING_Y * 2 ) );
+
+    ctx.lineTo( SPACING_X+OFFSET_LEFT, 
+                options._height - ( SPACING_Y * 2 ) );
+
+    ctx.stroke();
+    ctx.closePath();
+    ctx.save();
+
+    //draw x scale
+    ctx.beginPath();
+
+    ctx.moveTo( SPACING_X + OFFSET_LEFT,
+                options._height - ( SPACING_Y * 2 ) - 0.5 );
+
+    ctx.lineTo( SPACING_X + OFFSET_LEFT,
+                options._height - ( SPACING_Y * 2 ) - 0.5 );
+
+    ctx.lineTo( options._width - ( SPACING_X * 2 ) + 92,
+                options._height -( SPACING_Y * 2 ) - 0.5 );
+
+    ctx.stroke();
+    ctx.closePath();
+    ctx.save();
+ 
+    ctx.beginPath();
+    ctx.font = "12px Arial";
+    ctx.fillStyle = "#000000";
+
+    //draw y index
+    for(i = 0, labelValue = YAxisRangeObj.min; i < interval; i++) {
+      var textLabel = ( parseFloat( labelValue ) ).toFixed( 2 );
+      var metric = ctx.measureText( textLabel );
+
+      ctx.moveTo( SPACING_X + OFFSET_LEFT, 
+                  options._height - ( SPACING_Y * 2 ) - INTERVAL_SPACING * i - 0.5 );
+
+      ctx.lineTo( SPACING_X + OFFSET_LEFT,
+                  options._height - ( SPACING_Y * 2 ) - INTERVAL_SPACING * i - 0.5 );
+
+      ctx.lineTo( SPACING_X + OFFSET_LEFT,
+                  options._height - ( SPACING_Y * 2 ) - INTERVAL_SPACING * i - 0.5 );
+
+      labelValue = parseFloat( labelValue ) + parseFloat( _scalingRatio );
+      
+      //draw line when i is even
+      if( i % 2 == 0) {
+         ctx.lineTo( options._width, 
+                     options._height - ( SPACING_Y * 2 ) - INTERVAL_SPACING * i - 0.5 );
+
+         if(options._logScale == true) {
+           textLabel = (Math.pow(10,textLabel)).toFixed(2);
+           metric = ctx.measureText( textLabel );
+         }
+
+         ctx.fillText( textLabel, 
+                       SPACING_X + 5.5 - metric.width,
+                       options._height - ( SPACING_Y * 2 ) - ( INTERVAL_SPACING * i ) + 3.5 );
+         
+       }
+    }
+
+    //create another branching statement here to create 
+    //other type of x-axis labeling system
+    looseLabel( ( Date.parse( options._minDate ) / HOURS_IN_MILLISEC ),
+                ( Date.parse( options._maxDate ) / HOURS_IN_MILLISEC ),
+                options._nticks, ctx);
+
+    ctx.stroke();
+    ctx.closePath();
+    ctx.save();
+
+   }; //end drawScales
+
+   /***************************************************************************
+    * niceNumber - 
+    **************************************************************************/
+   function niceNumber( x, round ) {
+     var expv;
+     var f;
+     var nf;
+
+     expv = Math.floor( Math.log( x ) / Math.LN10 );
+     f = x / expt( 10.00, expv );
+	 
+     if(round) {
+       if(f < 1.5) {
+         nf = 1.00;
+       }else if(f < 3.00){
+         nf = 2.00;
+       }else if( f < 7.00) {
+         nf = 5.00;
+       }else {
+         nf = 10.00;
+       }
+     }else {
+       if( f <= 1.00) {
+         nf = 1.00;
+       }else if ( f <= 2.00) {
+         nf = 2.00;
+       }else if ( f <= 5.00) {
+         nf = 5.00;
+       }else {
+         nf = 10.00;
+       }
+     }
+
+     return (nf * expt (10.00,expv));
+
+   };;// end niceNumber
+
+   /***************************************************************************
+    * expt -
+    **************************************************************************/
+   function expt( a, n ) {
+     var x = 1;
+     if(n > 0) {
+       for(;n > 0;n--)
+         x *= a;
+     }else {
+       for(;n > 0;n++)
+         x /= a;
+     }
+
+     return x;
+
+   };;//end expt
+
+   /***************************************************************************
+    *	Paul Heckbert nice label algorithm
+    **************************************************************************/
+   function looseLabel( min, max, nticks, ctx) {
+     var range = 0;
+     var interval = 0;
+     var found = false;
+     var range2 = 0;
+     var ratio = 0;
+     var minDate = "";
+     var numberOfLabels = 0;
+     var positionX = 0;
+     var positionY = 0;
+     var x = 0;
+     range = niceNumber( max - min, 0);
+     _labelSpacing = niceNumber( range / ( nticks - 1 ), 1 ) / 1.139;
+     _graphMin = Math.floor( ( min / _labelSpacing  ) * _labelSpacing );
+     _graphMax = Math.ceil( ( max / _labelSpacing ) * _labelSpacing );
+     x = _graphMin;
+
+     range2 = _graphMax - _graphMin;
+     ratio = range2 / (options._width - SPACING_X);//JAY
+
+     //added to space the labels at different ratios depending on nticks
+     if( nticks == 5 ) {
+        _numberOfLabels = range2 / ratio / ( nticks / 0.98 );
+     }else if(nticks == 8){
+        _numberOfLabels = range2 / ratio / ( nticks / 3.14 );
+     }else if(nticks == 4){
+        _numberOfLabels = range2 / ratio / ( nticks / 1.63 );
+     }else if(nticks == 12) {
+         _numberOfLabels = range2 / ratio / ( nticks / 2.139 );
+     }else if (nticks == 7) {
+        _numberOfLabels = range2 / ratio / ( nticks / 2.08 );
+     }else if (nticks == 9 ) {
+        _numberOfLabels = range2 / ratio / ( nticks / 1.47 );
+     }else if (nticks == 10 ) {
+        _numberOfLabels = range2 / ratio / ( nticks / 1.64 );
+     }else if (nticks == 6 ) {
+        _numberOfLabels = range2 / ratio / ( nticks / 1.43 );
+     }else {
+        _numberOfLabels = range2 / ratio / ( nticks / 2.139 );
+     }
+
+     for(; x <= _graphMax; x += _labelSpacing, interval++) {
+        var date1 = new Date( x * HOURS_IN_MILLISEC );
+	var text = formatTicks( nticks, date1 );
+    	var metric = ctx.measureText( text );
+      	
+        ctx.stroke();
+       	ctx.save();
+
+       	ctx.beginPath();
+       	ctx.font = "12px Arial";
+       	ctx.fillText( text,
+                      SPACING_X / 2 + _numberOfLabels * interval + OFFSET_LABEL,
+                      options._height - ( SPACING_Y * 2 ) + 25 );
+		
+	ctx.closePath();
+      	ctx.restore();
+
+        //store the first label (min date)	   
+	if( !found ) {
+	  found = true;
+	  minDate = new Date( x * HOURS_IN_MILLISEC );
+	}
+
+     }
+
+     var date1 = new Date( x * HOURS_IN_MILLISEC );
+     var text = formatTicks( nticks, date1 );
+ 
+     ctx.fillText( text,
+                   SPACING_X / 2 + _numberOfLabels * (interval) + OFFSET_LABEL,
+                   options._height - ( SPACING_Y * 2 ) + 25 );
+
+     //create array objects   
+     _arrayTouchValuesX = new Array();
+     _arrayTouchValuesY = new Array();
+     _arrayPlaceValuesX = new Array();  
+     _arrayPlaceValuesY = new Array();
+     _arrayDataSetColor = new Array();
+     _arrayDataSetName  = new Array();
+
+     for( var i = 0; i < options._numberOfDataSets; i++ ) {
+       var valueX = options._dataSets[i].getXIndexOf( 0 ); 
+       var valueY = options._dataSets[i].getYIndexOf( 0 );
+
+       //draw reference lines
+       if( options._numberOfDataSets == 1) {  
+       ctx.save();
+       ctx.beginPath();
+       ctx.strokeStyle = "#ffcccc";
+       ctx.fillStyle = "#ff0000";
+       var refMin = options._dataSets[0].getRefMin();
+       var refMax = options._dataSets[0].getRefMax();
+      
+       if(refMin != null ) {
+         ctx.moveTo( SPACING_X +OFFSET_LABEL+OFFSET_LEFT,
+                   options._height - ( SPACING_Y * 2 ) -
+                   ( INTERVAL_SPACING * refMin / _scalingRatio -
+                     INTERVAL_SPACING * _offset / _scalingRatio ) );
+
+         ctx.lineTo( SPACING_X + OFFSET_LABEL+OFFSET_LEFT,
+                   options._height - ( SPACING_Y * 2 ) -
+                   ( INTERVAL_SPACING * refMin / _scalingRatio -
+                     INTERVAL_SPACING * _offset / _scalingRatio ));
+        
+         ctx.lineTo(SPACING_X + OFFSET_LABEL+OFFSET_LEFT + options._width,
+                   options._height - ( SPACING_Y * 2 ) -
+                  ( INTERVAL_SPACING * refMin / _scalingRatio -
+                    INTERVAL_SPACING * _offset / _scalingRatio ));
+         ctx.fillText("Min",0,
+                       options._height - ( SPACING_Y * 2 ) -
+                     ( INTERVAL_SPACING * refMin / _scalingRatio -
+                       INTERVAL_SPACING * _offset / _scalingRatio ));
+       }
+       ctx.stroke();
+       ctx.restore();
+
+       ctx.beginPath();
+       ctx.strokeStyle = "#ffcccc";
+       ctx.fillStyle = "#ff0000";
+       if(refMax != null ) {
+         ctx.moveTo( SPACING_X +OFFSET_LABEL+OFFSET_LEFT,
+                   options._height - ( SPACING_Y * 2 ) -
+                   ( INTERVAL_SPACING * refMax / _scalingRatio -
+                     INTERVAL_SPACING * _offset / _scalingRatio ) );
+
+         ctx.lineTo( SPACING_X + OFFSET_LABEL+OFFSET_LEFT,
+                   options._height - ( SPACING_Y * 2 ) -
+                   ( INTERVAL_SPACING * refMax / _scalingRatio -
+                     INTERVAL_SPACING * _offset / _scalingRatio ));
+
+         ctx.lineTo(SPACING_X + OFFSET_LABEL+OFFSET_LEFT + options._width,
+                   options._height - ( SPACING_Y * 2 ) -
+                  ( INTERVAL_SPACING * refMax / _scalingRatio -
+                    INTERVAL_SPACING * _offset / _scalingRatio ));
+
+	 ctx.fillText("Max", 0,
+                       options._height - ( SPACING_Y * 2 ) -
+                     ( INTERVAL_SPACING * refMax / _scalingRatio -
+                       INTERVAL_SPACING * _offset / _scalingRatio ));
+
+       }
+       
+       ctx.stroke();
+       ctx.fill();
+       ctx.closePath();
+       ctx.restore();
+
+       }
+
+
+       ctx.save();
+       ctx.beginPath();
+       ctx.lineWidth = options._dataSets[i].getLineWidth();
+       ctx.lineCap = 'round';
+       ctx.lineJoin = 'round';
+       ctx.strokeStyle = options._dataSets[i].getLineColor();
+
+       if( typeof valueY != 'undefined' ) {
+         if( valueX != -1 ) {
+	    var dataSetDateValue = new Date( valueX );
+	    var dataSetDateMillisec = ( dataSetDateValue.getTime() );
+          
+	    positionX = (( dataSetDateMillisec - minDate.getTime() ) 
+                        / HOURS_IN_MILLISEC ) / _labelSpacing * _numberOfLabels; 
+
+            positionY = options._height - ( SPACING_Y * 2 ) - 
+                      ( INTERVAL_SPACING * valueY / _scalingRatio - 
+                        INTERVAL_SPACING * _offset / _scalingRatio );
+
+            if( valueY >= _offset ) {		
+	      ctx.moveTo( SPACING_X + positionX + OFFSET_LABEL+OFFSET_LEFT, positionY);
+            }
+          }
+       }
+
+       //draw the graph line
+       for( var j = 0; j < options._dataSets[i].getXAxisLength(); j++ ) {
+         valueX = options._dataSets[i].getXIndexOf(j);
+         valueY = options._dataSets[i].getYIndexOf(j);
+
+         positionY =  options._height - ( SPACING_Y * 2 ) - 
+                     ( INTERVAL_SPACING * valueY / _scalingRatio - 
+                       INTERVAL_SPACING * _offset / _scalingRatio )
+
+         if( typeof valueY != 'undefined' ) {
+           if( valueY != -1) {
+	     var dataSetDateValue = new Date( valueX );
+	     dataSetDateMillisec = ( dataSetDateValue.getTime() );
+
+             if( dataSetDateMillisec < minDate.getTime()) {
+               if( valueY >= _offset) {
+                 ctx.moveTo( SPACING_X+OFFSET_LEFT, positionY );
+               }
+             }else {
+               if( valueY >= _offset ) {
+                 positionX = ( ( dataSetDateMillisec - minDate.getTime() ) 
+                             / HOURS_IN_MILLISEC ) / _labelSpacing * _numberOfLabels; 
+	         ctx.lineTo( SPACING_X + positionX + OFFSET_LABEL+OFFSET_LEFT, positionY );
+               }
+             }
+           }
+          }
+       }
+	
+       ctx.stroke();
+       ctx.closePath();
+       ctx.restore();
+
+       //draw arc plot points
+       for( j = 0; j < options._dataSets[i].getXAxisLength(); j++ ) {
+	  var dataSetDate = new Date( options._dataSets[i].getXIndexOf( j ) );
+	  var dataSetDateToMillisec = ( dataSetDate.getTime() );
+          valueY = options._dataSets[i].getYIndexOf(j);
+
+  	  ctx.save();
+	  ctx.beginPath();
+	  ctx.fillStyle = options._dataSets[i].getLineColor();
+          ctx.lineWidth = options._dataSets[i].getLineWidth();
+	  
+          if( dataSetDateToMillisec > minDate.getTime() ) {
+            positionX = ( ( dataSetDateToMillisec - minDate.getTime() ) 
+                         / HOURS_IN_MILLISEC ) / _labelSpacing * _numberOfLabels; 
+
+            positionY = options._height - ( SPACING_Y * 2 ) - 
+                       ( INTERVAL_SPACING * valueY / _scalingRatio - 
+                         INTERVAL_SPACING * _offset / _scalingRatio );
+
+
+            if(typeof valueY != 'undefined') {
+              if(  valueY >= _offset) {
+         
+                //draw the plot point on the graph
+                ctx.arc( SPACING_X + positionX + OFFSET_LABEL+OFFSET_LEFT, positionY, 2, 0, 2 * Math.PI, true);
+ 
+
+                if(options._logScale == true) {
+                   valueY = Math.pow(10,valueY).toFixed(2);
+
+                   if(valueY <= 1 ) {
+                     valueY = "< 1";
+                   }
+                }
+
+                addPlacement(dataSetDate,valueY);
+
+                //store the coordinates
+                addCoordinates( SPACING_X + positionX + OFFSET_LABEL+OFFSET_LEFT, positionY);
+                addDataSetProperties( options._dataSets[i].getDataSetName(), options._dataSets[i].getLineColor());
+
+	        ctx.fill();
+                ctx.closePath();
+                ctx.restore();
+              }
+            }
+	  }
+
+       } //end arc drawing for loop
+
+     } //end main for loop
+
+   };; //end function drawScale
+
+   /***************************************************************************
+    * convert data to log scale
+    ***************************************************************************/
+    function normaliseData() {
+       if(options._logScale == true) {
+           for(var i = 0; i < options._numberOfDataSets; i++) {
+              for(var j = 0; j < options._dataSets[i].getXAxisLength(); j++) {
+                 var dataSet = options._dataSets[i];
+                 var value = dataSet.getYIndexOf(j);
+ 
+                  if(typeof value != 'undefined' && value.replace(/ /g,"").length != 0) {
+                    if(value > 1) {
+                      value = (Math.log(value) / Math.log(10));
+                    }else if ( value < 1) {
+                      value = 0;
+                    }
+                    dataSet.setYIndexOf(j,value);
+                  }
+              } 
+           }
+       }
+    }
+   /***************************************************************************
+    * addDataSetProperties
+    **************************************************************************/
+   function addDataSetProperties(name,color) {
+     _arrayDataSetName.push(name);
+     _arrayDataSetColor.push(color);
+   };; //end addDataSetProperties
+
+   /***************************************************************************
+    * addCoordinates
+    **************************************************************************/
+   function addCoordinates(x,y) {
+     _arrayTouchValuesX.push(x);
+     _arrayTouchValuesY.push(y);
+   };; //end addCoordinates
+
+   /***************************************************************************
+    * addPlacement
+    **************************************************************************/
+   function addPlacement(x,y) {
+     _arrayPlaceValuesX.push(x);
+     _arrayPlaceValuesY.push(y);
+   };; //end addPlacement
+
+   /***************************************************************************
+    * draw legend - when legend is set to visible 
+    **************************************************************************/
+   function drawLegends() {
+     var j = 0;
+     
+     if(options._legendVisible == true) {
+        var ctx = _graph.getContext('2d');
+        var count = 0;
+        for(var i = 0; i < options._numberOfDataSets; i++) {
+          if ( j+200+SPACING_X+40 > options._width) {
+             j = 0;
+             count += 12;
+          }
+          ctx.save();
+          ctx.beginPath();
+          ctx.font = '12px Arial ';
+          ctx.fillStyle = '#000000';
+          ctx.fillText(options._dataSets[i].getDataSetName().replace(/^\s*|\s+|\s*$/g," "),
+                       SPACING_X+j+40,20.5+count);
+          ctx.fill();
+          ctx.closePath();
+          ctx.restore();
+
+          ctx.save()
+          ctx.beginPath();
+          ctx.fillStyle = options._dataSets[i].getLineColor();
+          ctx.fillRect(SPACING_X+j+20,10.5+count,20,10);
+          j += 200;
+          ctx.fill();
+          ctx.closePath();
+          ctx.restore();
+       }
+     }
+   };; //drawLengends
+
+   /***************************************************************************
+    * drawPopUp
+    **************************************************************************/
+   function drawPopUp(valueX,valueY,x,y){
+        var ctx = _graph2.getContext('2d');
+        var dateStr = convertToTwoDigits(valueX.getDate())+" "
+                     +convertToMMM(valueX.getMonth())+" "+valueX.getFullYear();
+        var timeStr = convertToTwoDigits(valueX.getHours())+":"
+                     +convertToTwoDigits(valueX.getMinutes());
+        var oldXValue = x;
+        var count = 0;
+        var test = "";
+
+	var arrayValuesY = new Array();
+        var arrayDataColor = new Array();
+        var arrayDataName = new Array();
+
+     ctx.clearRect(0,0,options._width,options._height);
+
+       if(valueY != null) {
+           for( var i = 0; i <  _arrayTouchValuesX.length; i++) {
+             if(_arrayTouchValuesX[i] <  oldXValue + 2  &&
+                _arrayTouchValuesX[i] > oldXValue - 2) {
+               arrayValuesY.push(_arrayPlaceValuesY[i]);
+               arrayDataColor.push(_arrayDataSetColor[i]);
+               arrayDataName.push(_arrayDataSetName[i]);
+               count += 11;
+             }
+           }
+        }
+
+        ctx.beginPath();
+        ctx.lineWidth= 1;
+	ctx.strokeStyle = "#FFCC33" //light yellow
+	ctx.fillStyle="#FFFF99";
+
+        if(valueY != null) {
+          var hh = options._height/4;
+	  
+          if( (x+160) < options._width) {
+  	    ctx.moveTo(x,hh);
+   	    ctx.lineTo(x+10,hh-10); 
+	    ctx.lineTo(x+10,hh-10);
+	    ctx.lineTo(x+10,hh-20);
+	    ctx.lineTo(x+160,hh-20);
+	    ctx.lineTo(x+160,hh+8+count);
+	    ctx.lineTo(x+10,hh+8+count);
+	    ctx.lineTo(x+10,hh+20);
+	    ctx.lineTo(x+10,hh+10);
+	    ctx.lineTo(x,hh);
+          }else {
+  	    ctx.moveTo(x,hh);
+   	    ctx.lineTo(x-10,hh-10); 
+	    ctx.lineTo(x-10,hh-10);
+	    ctx.lineTo(x-10,hh-20);
+	    ctx.lineTo(x-160,hh-20);
+	    ctx.lineTo(x-160,hh+8+count);
+	    ctx.lineTo(x-10,hh+8+count);
+	    ctx.lineTo(x-10,hh+20);
+	    ctx.lineTo(x-10,hh+10);
+	    ctx.lineTo(x,hh);
+
+	  }
+        }
+
+	ctx.fill();
+	ctx.stroke();
+	ctx.closePath();
+	ctx.save();
+	ctx.restore();
+	
+	ctx.beginPath();
+	ctx.lineWidth =1;
+	ctx.strokeStyle = "#FFCC33" //light yellow
+
+		
+        if( (x+160) < options._width) {
+  	  ctx.moveTo(x,20);
+   	  ctx.lineTo(x+10,20-10); 
+	  ctx.lineTo(x+10,20-10);
+	  ctx.lineTo(x+10,20-20);
+	  ctx.lineTo(x+160,20-20);
+	  ctx.lineTo(x+160,20+20);
+	  ctx.lineTo(x+10,20+20);
+	  ctx.lineTo(x+10,20+20);
+	  ctx.lineTo(x+10,20+10);
+	  ctx.lineTo(x,20);
+        }else {
+  	  ctx.moveTo(x,20);
+   	  ctx.lineTo(x-10,20-10);
+	  ctx.lineTo(x-10,20-10);
+	  ctx.lineTo(x-10,20-20);
+	  ctx.lineTo(x-160,20-20);
+	  ctx.lineTo(x-160,20+20);
+	  ctx.lineTo(x-10,20+20);
+	  ctx.lineTo(x-10,20+20);
+	  ctx.lineTo(x-10,20+10);
+	  ctx.lineTo(x,20);
+
+	}
+
+	ctx.fillStyle="#FFFF99";
+	ctx.fill();
+	ctx.stroke();
+	ctx.closePath();
+	ctx.save();
+	ctx.restore();
+
+	ctx.beginPath();
+        // draw time line
+	ctx.strokeStyle = "#FFCC33" //light yellow
+        ctx.moveTo(oldXValue,5.5);
+        ctx.lineTo(oldXValue,5.5);
+        ctx.lineTo(oldXValue,options._height-SPACING_Y);
+
+        ctx.stroke();
+        ctx.fill();   
+        ctx.closePath();
+        ctx.save();
+        ctx.restore();
+
+        //write text 
+	ctx.beginPath();
+        ctx.fillStyle = '#000000';
+        ctx.font = "12px Arial";
+
+        if( (x+160) < options._width) {
+          ctx.fillText("Date "+dateStr,x+15,20);
+          ctx.fillText("Time "+timeStr,x+15,35);
+	}else {
+          ctx.fillText("Date "+dateStr,x-155,20);
+          ctx.fillText("Time "+timeStr,x-155,35);
+	}
+        ctx.save();
+        ctx.restore();
+
+
+	ctx.beginPath();
+        if(valueY != null) {
+           count = 0;
+           for( var i = 0; i < arrayValuesY.length; i++) {
+               ctx.font = "12px Arial";
+               ctx.fillStyle = '#000000';
+               if( (x+160) < options._width) {
+                ctx.fillText(arrayDataName[i].substring(0,9),x+15,options._height/4+4+count);
+                ctx.fillText(arrayValuesY[i].toString().replace(/ /g,""),x+120,options._height/4+4+count);
+	       }else {
+                ctx.fillText(arrayDataName[i].substring(0,9),x-155,options._height/4+4+count);
+                ctx.fillText(arrayValuesY[i].toString().replace(/ /g,""),x-40,options._height/4+4+count);
+               }
+               ctx.restore();
+               count += 11;
+           }
+        }
+
+        ctx.fill();
+        ctx.closePath();
+        ctx.save();
+        ctx.restore();
+        
+
+   };; //drawPopUp
+
+   /***************************************************************************
+    * formatTicks
+    *
+    * If you're showing seconds or minutes use 1, 2, 3, 5, 10, 15, 30 
+    * (I skipped 6, 12, 15, 20 because they don't "feel" right)
+    * for days use 1, 2, 7
+    * for weeks use 1, 2, 4 (13 and 26 fit the model but seem too odd to me)
+    * for months use 1, 2, 3, 4, 6
+    * for years use 1, 2, 5 and power-of-10 multiples
+    ******************************************************************************/
+   function formatTicks(nticks,date1) {
+     var year = date1.getFullYear()+"";
+     var month = date1.getMonth()+"";
+     switch(nticks) {
+       case 5: //yrs
+       case 9:
+         text = convertToMMM(month)+" "+year.substr(2,4);
+         break;
+       case 12: //hrs range 1 day
+         if(date1.getHours() < 10) 
+           text = "0"+date1.getHours()+":00";
+         else
+           text = date1.getHours()+":00";
+         break;
+       case 10:
+         text =  year;
+         break;
+       case 7: //days in 1 week
+         text = convertToDDD(date1.getDay())
+         break;
+       case 6:
+         text = date1.getDate()+"/"+convertToMM(month)+"/"+year.substr(2,4);
+         break;
+       case 4:
+         text = convertToMM(month)+"/"+year.substr(2,4);
+         break;
+       case 8:
+         text = convertToMM(month)+"/"+year.substr(2,4);
+         break;
+    }
+	
+    return text;	  
+ 
+   };; //end formatTicks
+
+   function convertToDDD(day) {
+     switch(parseInt(day,10)) {
+       case 0:
+         return "Sun";
+       case 1:
+         return "Mon";
+       case 2:
+         return "Tue";
+       case 3:
+	 return "Wed";
+       case 4:
+         return "Thu";
+       case 5:
+         return "Fri";
+       case 6:
+         return "Sat";
+     }
+   }
+  
+   function convertToTwoDigits(value) {
+      if(parseInt(value,10) <= 9) {
+         return "0"+value;
+      }else {
+         return value;
+      }
+   } 
+   
+   function convertToMMM(m) {
+     var MMM = "";
+     switch(parseInt(m,10)) {
+       case 0:
+         MMM = 'Jan';
+         break;
+       case 1:
+         MMM = 'Feb';
+         break;
+       case 2:
+         MMM = 'Mar';
+         break;
+       case 3:
+         MMM = 'Apr';
+         break;
+       case 4:
+         MMM = 'May';
+         break;
+       case 5:
+         MMM = 'Jun';
+         break;
+       case 6:
+         MMM = 'Jul';
+         break;
+       case 7:
+         MMM = 'Aug';
+         break;
+       case 8:
+         MMM = 'Sep';
+         break;
+       case 9:
+         MMM = 'Oct';
+         break;
+       case 10:
+         MMM = 'Nov';
+         break;
+       case 11:
+         MMM = 'Dec';
+         break;
+     }
+     return MMM;
+   }
+
+   function convertToMM(m) {
+     var month = "";
+
+     switch(parseInt(m,10)) {
+       case 0:
+         month = '01';
+         break;
+       case 1:
+         month = '02';
+         break;
+       case 2:
+         month = '03';
+         break;
+       case 3:
+         month = '04';
+         break;
+       case 4:
+         month = '05';
+         break;
+       case 5:
+         month = '06';
+         break;
+       case 6:
+         month = '07';
+         break;
+       case 7:
+         month = '08';
+         break;
+       case 8:
+         month = '09';
+         break;
+       case 9:
+         month = '10';
+         break;
+       case 10:
+         month = '11';
+         break;
+       case 11:
+         month = '12';
+         break;
+     }
+
+     return month;
+   };;
+
+   /***************************************************************************
+    *   draw graph background
+    **************************************************************************/
+   function drawGraphBackground() {
+     var ctx = _graph.getContext('2d');
+     var metric = ctx.measureText(options._title);
+
+     ctx.save();
+     ctx.beginPath();
+     ctx.fillStyle = options._backgroundColor;//grey background
+     ctx.fillRect(0,0,options._width,options._height);
+     ctx.fill();
+     ctx.closePath();
+     ctx.restore();
+   };
+
+  function convertMMMtoMM(value) {
+    switch(value) {
+      case "Jan" :
+        return "00";
+      case "Feb" :
+        return "01";
+      case "Mar" :
+        return "02";
+      case "Apr" :
+        return "03";
+      case "May" :
+        return "04";
+      case "Jun" :
+        return "05";
+      case "Jul" :
+        return "06";
+      case "Aug" :
+        return "07";
+      case "Sep" :
+        return "08";
+      case "Oct" :
+        return "09";
+      case "Nov" :
+        return "10";
+      case "Dec" :
+        return "11";
+    }
+  }
+
+
+  /**
+   * public methods
+   **/
+
+  /****************************************************************************
+   * draw - renders the graph
+   ***************************************************************************/
+  this.draw = function() {
+     var ctx = _graph.getContext('2d');
+     ctx.clearRect(0,0,options._width,options._height);
+     drawGraphBackground();
+     drawScale();
+     drawLegends();
+  };; //end draw();
+
+  this.getNumberOfDataSets = function() {
+    return options._numberOfDataSets;
+  }
+
+  this.setMinDate = function (value) {
+     options._minDate = value;
+  }
+  
+  this.getMinDate = function () {
+     return options._minDate;
+  }
+  
+  this.setMaxDate = function(value) {
+     options._maxDate = value;
+  }
+  
+  this.getMaxDate = function() {
+     return options._maxDate;
+  }
+  
+
+  this.setNticks = function(value) {
+     options._nticks = value;
+  }
+
+  this.setMinMax = function(value,nticks) {
+     var minDate = new Date();
+     var maxDate = new Date();
+
+     minDate.setDate(minDate.getDate() - value);
+     this.setMinDate(minDate);
+     this.setMaxDate(maxDate);
+     this.setNticks(nticks);
+     this.draw();
+  }
+ 
+  this.setMinMaxWithDateRange = function(min,max) {
+    var minDate1 = min;
+    var maxDate1 = max;
+    var min1 = new Date();
+    var max1 = new Date();
+    var diff = 0;
+    var dd = convertMMMtoMM(minDate1.substr(3,3));
+    var dd1 = convertMMMtoMM(maxDate1.substr(3,3));
+
+    var daysFactor = 1000*60*60*24;
+
+    min1.setFullYear(minDate1.substr(7,4),dd,minDate1.substr(0,2));
+    max1.setFullYear(maxDate1.substr(7,4),dd1,maxDate1.substr(0,2));
+    minDate = min1;
+    maxDate = max1;
+
+    that.setMinDate(min1);
+    that.setMaxDate(max1);
+
+    var diff = Math.ceil(max1.getTime() - min1.getTime());
+    diff /= daysFactor;
+
+    if(diff > 365*6) {
+      that.setNticks(10);
+      options._nticks = 10;
+    }else if (diff > 365*3) {
+      that.setNticks(9);
+      options._nticks = 9;
+    }else if(diff > 365*2) {
+      that.setNticks(5);
+      options._nticks = 5;
+    }else if(diff >= 29 * 6){
+      that.setNticks(4);
+      options._nticks = 4;
+    }else if(diff >= 29 * 3){
+      that.setNticks(8);
+      options._nticks = 8;
+    }else if(diff >= 29){
+      that.setNticks(6);
+      options._nticks = 6;
+    }else if(diff >= 6){
+      that.setNticks(7);
+      options._nticks = 7;
+    }else {
+     that.setNticks(12);
+     options._nticks = 12;
+    }
+
+    that.draw();
+    return options._nticks;
+  }
+
+  this.setLogScale = function(bool) {
+     options._logScale = bool;
+  }
+
+  /****************************************************************************
+   *    add data set to plot
+   ***************************************************************************/
+  this.addDataSet = function(dataset) { //s, lineColor, plotPoints,min,max,refMin,refMax) {
+     if(options._numberOfDataSets < MAX_DATASETS) {
+        options._dataSets[options._numberOfDataSets] = dataset;
+        options._numberOfDataSets++;
+        
+     }else {
+        alert('max dataset is '+MAX_DATASETS);
+     }
+  };
+
+} //end class graph
+
+
+/******************************************************************************
+ * class DataSet
+ *****************************************************************************/
+function DataSet(options) {
+
+   var options = {
+      _dataSetName:       options.dataSetName || '',
+      _lineColor:         options.lineColor || '#efefef',
+      _plotPoints:        options.plotPoints || null,
+      _lineWidth:         options.lineWidth || 1,
+      _maxYAxis:          options.maxYAxis || null,
+      _minYAxis:          options.minYAxis || null,
+      _refMin:		  options.refMin || null,
+      _refMax:            options.refMax || null
+   }
+
+   this.getRefMin = function() {
+      return options._refMin;
+   }
+
+   this.getRefMax = function() {
+      return options._refMin;
+   }
+ 
+   this.getXIndexOf = function(i) {
+       if( options._plotPoints[0] != 'undefined') {
+         if( i < options._plotPoints[0].length){
+            return options._plotPoints[0][i];
+         }else{
+            return -1;
+         }
+       }else {
+         return -1
+       }
+   }
+
+   this.getXAxisLength = function () {
+     return options._plotPoints[0].length;
+   }
+
+   this.getYAxisLength = function() {
+     return options._plotPoints[1].length;
+   }
+
+   this.getYIndexOf = function(i) {
+       if( options._plotPoints[1] != 'undefined') {
+         if( i < options._plotPoints[1].length){
+            return options._plotPoints[1][i];
+         }else{
+            return -1;
+         }
+       }else {
+         return -1
+       }
+   }
+
+   this.setYIndexOf = function(i,value) {
+       if( options._plotPoints[1] != 'undefined') {
+         if( i < options._plotPoints[1].length){
+             options._plotPoints[1][i] = value;
+         }
+       }
+   }
+
+   this.getMaxXAxis = function() {
+     return options._plotPoints[0];
+   }
+
+   this.getMinYAxis = function() {
+     return options._minYAxis;
+   }
+   
+   this.getMaxYAxis = function() {
+     return options._maxYAxis;
+   }
+
+   this.getMinXAxis = function() {
+     return options._minYAxis;
+   }
+
+   this.setLineWidth = function(value) {
+     options._lineWidth = value;
+   }
+
+   this.getLineWidth = function() {
+      return options._lineWidth;
+   }
+
+   this.setLineColor = function(color) {
+        options._lineColor = color;
+   }
+
+   this.getLineColor = function() {
+       return options._lineColor;
+   }
+
+   this.setDataSetName = function(name) {
+       options._dataSetName = name;
+   }
+
+   this.getDataSetName = function() {
+       return options._dataSetName;
+   }
+
+   this.getRefMin = function() {
+       return options._refMin;
+   } 
+
+   this.getRefMax = function() {
+       return options._refMax;
+   }
+} //end DataSet class
+
+

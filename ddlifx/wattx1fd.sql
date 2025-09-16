@@ -1,0 +1,76 @@
+create table wattx1af
+(
+  wttxurno    char(8) default ' ' not null,
+  wttxpcod    char(9) default ' ' not null,
+  wttxpcnt    char(2) default ' ' not null,
+  wttxplst    char(3) default ' ' not null,
+  wttxpowd    char(3) default ' ' not null,
+  wttxadmw    char(3) default ' ' not null,
+  wttxpsty    char(1) default ' ' not null,
+  wttxidyc    char(3) default ' ' not null,
+  wttxadmf    char(3) default ' ' not null,
+  wttxeqr1    char(3) default ' ' not null,
+  wttxeqr2    char(3) default ' ' not null,
+  wttxpast    char(3) default ' ' not null,
+  wttxcnsn    char(1) default ' ' not null,
+  wttxntgp    char(1) default ' ' not null,
+  wttxpatm    char(8) default ' ' not null,
+  wttxuidr    char(10) default ' ' not null,
+  wttxleqr    char(3) default ' ' not null,
+  wttxdprc    char(9) default ' ' not null,
+  wttxdpcn    char(2) default ' ' not null,
+  wttxcdte    char(8) default ' ' not null,
+  wttxctim    char(8) default ' ' not null,
+  wttxwebc    char(10) default ' ' not null,
+  wttxlupd    char(8) default ' ' not null,
+  wttxlupt    char(8) default ' ' not null,
+  wttxwebu    char(10) default ' ' not null,
+  wttxctyp    char(3) default ' ' not null,
+  wttxeqr3    char(3) default ' ' not null,
+  wttxptim    char(8) default ' ' not null,
+  wttxpotm    char(8) default ' ' not null,
+  wttxpans    char(3) default ' ' not null,
+  wttxpant    char(8) default ' ' not null,
+  wttx23hr    char(1) default ' ' not null,
+  wttxanae    char(3) default ' ' not null,
+  wttxboty    char(3) default ' ' not null,
+  wttxteam    char(5) default ' ' not null,
+  wttxfund    char(3) default ' ' not null,
+  wttxward    char(3) default ' ' not null,
+  wttxpref    char(3) default ' ' not null,
+  wttxnwhc    char(3) default ' ' not null,
+  wttxintd    char(3) default ' ' not null,
+  wttxmaut    char(1) default ' ' not null,
+  wttxexpd    char(8) default ' ' not null,
+  wttxtcrs    char(3) default ' ' not null,
+  wttxdisc    char(9) default ' ' not null,
+  wttxrtim    char(8) default ' ' not null,
+  wttxrcli    char(10) default ' ' not null,
+  wttxrclp    char(10) default ' ' not null,
+  wttxpsah    char(1) default ' ' not null,
+  wttxphos    char(3) default ' ' not null,
+  wttxprpb    char(3) default ' ' not null,
+  wttxaasc    char(4) default ' ' not null,
+  wttxud09    char(3) default ' ' not null,
+  wttxud10    char(3) default ' ' not null,
+  wttxud11    char(3) default ' ' not null,
+  wttxud12    char(3) default ' ' not null,
+  wttxud13    char(3) default ' ' not null,
+  wttxspar    char(23) default ' ' not null,
+  lf          char(1)
+);
+create unique index wattx1a1 on wattx1af
+(
+wttxurno,
+wttxpcod,
+wttxpcnt
+);
+create unique index wattx1a2 on wattx1af
+(
+wttxcdte,
+wttxurno,
+wttxpcod,
+wttxpcnt
+);
+revoke all on wattx1af from public ; 
+grant select on wattx1af to public ; 

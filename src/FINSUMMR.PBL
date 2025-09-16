@@ -1,0 +1,2139 @@
+.******************************************************************************
+.* System         :  Patient Billing                                          *
+.* Program        :  FINSUMMR                                                 *
+.* Description    :  Financial Summary Listing program                        *
+.******************************************************************************
+.* Author         :  J.Tan                                                    *
+.* Function       :  Full listing of patfinsf file                            *
+.*                   Copy of IBAADT36                                         *
+.* Modifications  :                                                           *
+.*        V11.03.01  06/12/2023  J.Tan          TSK 0940149                   *
+.*                   Mod checking FINAMT for Casepayment Pre-surgical day     *
+.*        V11.02.02  25/11/2022  J.Tan          TSK 0927091                   *
+.*                   Fixed Casepayment daycase lumpsum                        *
+.*        V11.02.01  24/03/2022  J.Tan          TSK 0917155                   *
+.*                   Fixed FINCODE for Pre-surgical(per-diem prior casepayment*
+.*                   Mod for CACCFEE=4                                        *
+.*        V11.00.01  03/03/2020  J.Tan          TSK 0838262                   *
+.*                   Added Effective from and to date to MBS Item file        *
+.*        V10.15.01  17/01/2020  J.Tan          TSK 0887223                   *
+.*                   Fixed ABF Credite notes                                  *
+.*        V10.14.01  28/06/2019  J.Tan          TSK 0857392                   *
+.*                   Mod for ABF record types                                 *
+.*        V10.13.01  06/12/2013 J.Tan         TSK 0859743                     *
+.*                   Mod for OTRECTYP=6 for Theatre item                      *
+.*                   13/03/2018 J.Tan  TSK 0848146                            *
+.*                   Fixed I*C rcpbnkaf                                       *
+.*                   09/02/2018 J.Tan  TSK 0848146                            *
+.*                   Created the new routine used for FI (IBABIL19)           *
+.******************************************************************************
+.
+          DEFPROC   FINSUMMR
+.
+          INC       PMSFCIFD/INC
+          INC       IBASEQFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+PATTEMP  IFILE  SQL, FIXED=63, KEY="U1-3,4-4,5-10,11-14,15-15,16-28,29-36,37-44+45-52"
+.
+. ----- Tempfile consists of following vars -----
+.
+. Name    Type      Length     Physical   Star   Description
+. ----    ----      ------     --------   -----  -----------
+.FINHOSP  DIM       3          3          1      Hospital ID
+.DFINSYS  DIM       1          1          4      SYSTEM INDICATOR
+.                                                1= AAE, 2=OUT, 3=INP, 4=GST
+.FINSITE  DIM       6          6          5      OUTPATIENT SITE
+.FINYEAR  DIM       4          4         11      FINANCIAL YEAR
+.FINTYPE  DIM       1          1         15      FINANCIAL TYPE
+.FINCODE  DIM       13         13        16      FINANCE CODE
+.PINVDTE  DIM       8          8         29      INVOICE DATE
+.PINVNO   DIM       8          8         37      INVOICE NUMBER
+DUNIQKEY  DIM       8          8         45      UNIQUE KEY
+.FINAMT   FORM      9.2        7         53      AMOUNT
+FPERIOD   FORM      3          3         60      PERIOD
+.                                        63      EOR
+. ----- EOR 63 -----
+.
+.
+DAYFLG    FORM      1
+DIM13A    DIM       13
+NOPERIOD  FORM      1
+NEGONE    FORM      "-1"
+RECCNT    FORM      8
+SUBOPT    FORM      1
+SUBTOT    FORM      9.2
+SFINSITE  DIM       5
+SFINSYS   FORM      1
+GNDTOT    FORM      9.2
+SFINCODE  DIM       13
+MSCFLAG   DIM       1
+SFINTYPE  DIM       1
+SFINHOSP  DIM       3
+SDIM10    DIM       10
+DIM10A    DIM       10
+SUBFIN    DIM       1
+PGSTTOT   FORM      1
+CRDFLAG   FORM      1
+SCRDFLAG  FORM      1
+STATUS    FORM       1
+SKEY13    DIM       13
+JRNLCOD   DIM       2
+CASHDESC  DIM       12
+SCASHDES  DIM       12
+CASHTYP   DIM       1
+SCASHTYP  DIM       1
+TOTONLY   FORM      "0"
+
+SJRNLCOD  DIM       2
+SJRNGCOD  DIM       2
+MISGRP    DIM       3
+.
+TOTCRD    FORM      9.2
+UNIQKEY   FORM      8
+.
+AAE       INIT      "A&E"
+OUT       INIT      "OUT"
+INP       INIT      "INP"
+INPAT     INIT      "Inpatient "
+AAEPAT    INIT      "A&E       "
+OUTPAT    INIT      "Outpatient"
+ALLPAT    INIT      "All       "
+INVOICE   INIT      "- Invoice "
+CASH      INIT      "- Cash    "
+JOURNAL   INIT      "- Journals"
+ALL       INIT      "- All     "
+.
+.******************************************************************************
+FINS0000  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+
+          OPEN      PATINVR1,"patinvrf"
+          OPEN      PATINVR2,"patinvrf"
+          OPEN      PATDRGA2,"patdrgaf"
+          OPEN      PMSCNOA4,"pmscnoaf"
+          OPEN      PMSFCIA1,"pmsfciaf"
+          OPEN      RCPBNKA1,"rcpbnkaf"
+.
+          MOVE      FOUR,OPTION        * default to All
+          IF        TRANTYPE=2 | TRANTYPE=3
+            MOVE      ONE,OPTION       * Invoices
+          ENDIF
+          IF        TRANTYPE=4
+            MOVE      THREE,OPTION     * Journals
+          ENDIF
+.
+          MOVE      FOUR,SUBOPT        * Default to Consolidated
+          IF        FSTSYS=1
+            MOVE      TWO,SUBOPT       * Emergency
+          ENDIF
+          IF        FSTSYS=2
+            MOVE      THREE,SUBOPT     * Outpatient
+          ENDIF
+          IF        FSTSYS=3
+            MOVE      ONE,SUBOPT       * Inpatient
+          ENDIF
+.
+          CALL      CRTT0000
+          BRANCH    EXIT,FINS9999
+.
+          CALL      INVN0000
+          BRANCH    NOPERIOD,FINS9999
+.
+          CALL      CRDN0000
+.
+          CALL      PRNT0000         * Print
+          CALL      KILL0000
+FINS9999  GOTO      ENDFINSM
+.
+. -----------------------------------------------------------------------------
+.         Create a temporary file
+. -----------------------------------------------------------------------------
+CRTT0000  DISPLAY   *P1:12,*EL,"Building temporary file.  Please wait...";
+          CALL      INDZ0000
+          DISPLAY   *P1:12,*EF;
+          BRANCH    OPCND OF CRTT9000
+.
+          MOVE      ZERO,EXIT
+          GOTO      CRTT9999
+.
+CRTT9000  MOVE      ONE,EXIT
+.
+CRTT9999  RETURN
++
+. -----------------------------------------------------------------------------
+.         Process invoices
+. -----------------------------------------------------------------------------
+INVN0000  DISPLAY    *P1:24,*EL,*P10:24,"Invoice Date :";
+.
+          MOVE       ZERO,NOPERIOD
+          MOVE       ZERO,RECCNT
+          MOVE       ZERO,UNIQKEY
+          PACK       KEY16,INVFDATE,SP20
+          CALL       RDSINV2
+.
+.             Main Loop
+.
+INVN1000  CALL       RDKINV2
+          BRANCH     OVRCD OF INVN9999
+.
+          ADD        ONE,RECCNT
+          IF         (RECCNT%50) = 0
+            DISPLAY    *P30:24,*V2LON,PINVDTE,SP1,RECCNT;
+          ENDIF
+.
+.         Ignore cancelled invoices
+.
+          COMPARE    ZERO,PINVADM
+          GOTO       INVN1000 IF EQUAL
+.
+          MOVE       SP70,ADATE
+          MOVE       SP70,DDATE
+          MOVE       ZERO,DAYFLG
+          PACK       KEY8,PINVADM
+          CALL       RDMISS1
+          IF         OVRCD<>1 & ASTAT=3
+            CALL       RDDSCH1
+            MATCH      ADATE,DDATE
+            IF         @EQUAL
+              MOVE       ONE,DAYFLG
+            ENDIF
+          ENDIF
+.
+          MOVE       SP10,PMVXMHOS
+          MOVE       PINVADM,KEY8
+          CALL       RDPMVX11
+          IF         IBCNMHOS=1
+            MATCH      SP10,HOSPID
+            IF         !@EQUAL
+              MATCH      PMVXMHOS,HOSPID
+              GOTO       INVN1000 IF NOT EQUAL
+            ENDIF
+          ENDIF
+.
+.         Determine which system this invoice is for
+.
+          BRANCH     PINVSYS,AAEI000,OUTI000,INPI000,OUTI000
+.
+          DISPLAY    *P1:12,*V2LON,*B,*EL,"** ERROR: Invalid PINVSYS of ":
+                     PINVSYS," for invoice ",PINVNO," **";
+          GOTO       INVN1000
+.
+. -----------------------------------------------------------------------------
+.         Process this A+E invoice
+. -----------------------------------------------------------------------------
+AAEI000   BRANCH     SUBOPT,INVN1000,AAEI050,INVN1000
+AAEI050   DISPLAY    *P50:24,"AE ";
+          MOVE       PINVADM,ATNUMB
+          PACK       KEY22,ATNUMB,PINVNO,SP10
+          CALL       RDSDTRE1
+AAEI100   CALL       RDKDTRE1
+          BRANCH     OVRCD,AAEI600
+.
+          MATCH      PINVNO,ATINVNO
+          GOTO       AAEI600 IF NOT EQUAL
+.
+          COMPARE    ATNUMB,PINVADM
+          GOTO       AAEI600 IF NOT EQUAL
+.
+.
+.         Only interested in invoice section
+.
+          BRANCH     ATRECTYP,AAEI200,AAEI300,AAEI400,AAEI300,AAEI200,AAEI200
+          GOTO       AAEI100
+.
+.         A+E misc charge
+.
+AAEI200   BRANCH     OPTION,AAEI205,AAEI100,AAEI100
+.   
+AAEI205   IF         TRANTYPE<>1
+            COMPARE    THREE,TRANTYPE
+            GOTO       AAEI100 IF NOT EQUAL  * Not running Item charges
+          ENDIF
+.
+          COMPARE    FIVE,ATRECTYP
+          GOTO       AAEI210 IF EQUAL     * Procedure
+          COMPARE    SIX,ATRECTYP
+          GOTO       AAEI210 IF EQUAL     * ABF
+.
+          MATCH      SP3,ATMISGRP
+          GOTO       AAEI210 IF NOT EQUAL
+.
+          MOVE       ATITEMNO,TITEMNO
+          CALL       GETM0000             * Get the miscellaneous group code
+          MOVE       MMSCGRP,ATMISGRP
+.
+AAEI210   MOVE       ANSA,FINTYPE
+          MOVE       ONE,FINSYS
+          MOVE       SP6,FINSITE
+          IF         PTCNMFEE = 1
+            MOVE       DATNUMB,KEY8
+            CALL       RDDETA1
+            PACK       FINCODE,ANSM,ADACOMP,ATMISGRP,SP20
+          ELSE
+            PACK       FINCODE,ANSM,ATMISGRP,ATITEMNO,SP20
+          ENDIF
+          MOVE       ATPATAMT,FINAMT
+.
+          PACK       FINDATE,PINVDTE
+.         PACK       FINDATE,ATDTEFFD,SP10
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+.
+          IF         IBCNUGST=2 & ATDTGSTM<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       ATDTGSTM,FINAMT
+            PACK       FINDATE,PINVDTE
+.           PACK       FINDATE,ATDTEFFD
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+            MOVE       ANSA TO FINTYPE
+          ENDIF
+.
+          BRANCH     NOPERIOD,INVN9999
+          GOTO       AAEI100
+.
+.         Process this cash receipt
+.
+AAEI300   BRANCH     OPTION,AAEI100,AAEI310,AAEI100
+.
+AAEI310   
+.         COMPARE    FOUR,ATPAYTYP               * Merchant card ?
+.         GOTO       AAEI100 IF EQUAL            * Yes, ignore
+.
+          MOVE       ATRECEPT,KEY12
+          CALL       RDRCBNK1
+          BRANCH     OVRCD,AAEI312
+.
+          MOVE       ZERO,FORM1
+          MOVE       RCBNTTYP,FORM1
+          BRANCH     FORM1,AAEI320,AAEI330,AAEI340,AAEI320
+AAEI312   PACK       FINCODE,SP20
+          MOVE       "ACASH -  A/E   ",FINCODE
+          GOTO       AAEI350
+.
+AAEI320   PACK       FINCODE,ANSB,RCBNRCOD,SP70
+          GOTO       AAEI350
+.
+AAEI330   PACK       FINCODE,ANSI,RCBNRCOD,SP70
+          GOTO       AAEI350
+.
+AAEI340   PACK       FINCODE,ANSC,SP70
+.
+AAEI350   MOVE       ANSB TO FINTYPE
+          MOVE       ONE,FINSYS
+          MOVE       SP6,FINSITE
+          MOVE       ATPATAMT TO FINAMT
+          MULT       NEGONE,FINAMT
+          PACK       FINDATE,ATDTEFFD
+          REP        " 0",FINDATE
+.
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+          GOTO       AAEI100
+.
+.         Process this journal
+.
+AAEI400   BRANCH     OPTION,AAEI100,AAEI100,AAEI410
+.  
+AAEI410   MOVE       ANSC TO FINTYPE
+          MOVE       ONE,FINSYS
+          MOVE       SP6,FINSITE
+          MOVE       ATPATAMT TO FINAMT
+          MULT       NEGONE,FINAMT
+.
+          PACK       FINCODE,SP20
+          IF         PTCNJFEE=1
+            PACK       FINCODE,PINVCLM,ATTYPE,SP20
+          ELSE
+            PACK       FINCODE,ATTYPE,SP20
+          ENDIF
+.         MOVE       "JOURNAL      ",FINCODE
+          PACK       FINDATE,ATDTEFFD
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+          GOTO       AAEI100
+.
+AAEI600   PACK       KEY22,PINVADM,PINVNO,SP70
+          GOTO       INVN1000
++
+. -----------------------------------------------------------------------------
+.       Process this outpatient invoice
+. -----------------------------------------------------------------------------
+OUTI000   BRANCH     SUBOPT,INVN1000,INVN1000
+          DISPLAY    *P50:24,"OP ";
+.
+          MOVE       "out",OSTFILE
+          MOVE       PINVSITE,KEY6
+          CALL       RDSITA1
+.
+          CLOSE      OUTDTRO1
+          PACK       CFNAME,OSTFILE,FILDTRO1
+          OPEN       OUTDTRO1,CFNAME
+.
+          MOVE       PINVADM,OTNUMB
+          PACK       KEY22,OTNUMB,PINVNO,SP10
+          CALL       RDSDTRO1
+OUTI100   CALL       RDKDTRO1
+          BRANCH     OVRCD,OUTI600
+.
+          MATCH      PINVNO,OTINVNO
+          GOTO       OUTI600 IF NOT EQUAL
+.
+          COMPARE    OTNUMB,PINVADM
+          GOTO       OUTI600 IF NOT EQUAL
+.
+.         Only interested in invoice section
+.
+          BRANCH     OTRECTYP,OUTI200,OUTI300,OUTI400
+          COMPARE    SIX,OTRECTYP
+          GOTO       OUTI200 IF EQUAL       * Theatre item
+          COMPARE    SEVEN,OTRECTYP
+          GOTO       OUTI200 IF EQUAL       * ABF
+          GOTO       OUTI100
+.
+.         Outpatient misc charge
+.
+OUTI200   BRANCH     OPTION,OUTI205,OUTI100,OUTI100
+.
+OUTI205   IF         TRANTYPE<>1
+            COMPARE    THREE,TRANTYPE
+            GOTO       OUTI100 IF NOT EQUAL  * Not running Item charges
+          ENDIF
+.
+          COMPARE    SEVEN,OTRECTYP
+          GOTO       OUTI210 IF EQUAL     * ABF
+.
+          MATCH      SP3,OTMISGRP
+          GOTO       OUTI210 IF NOT EQUAL
+.
+          MOVE       OTITEMNO,TITEMNO
+          CALL       GETM0000             * Get the miscellaneous group code
+          MOVE       MMSCGRP,OTMISGRP
+.
+OUTI210   MOVE       ANSA,FINTYPE
+          MOVE       TWO,FINSYS
+          MOVE       PINVSITE,FINSITE
+.
+          IF         PTCNMFEE = 1
+            MOVE       "out",OSTFILE
+            MOVE       PINVSITE,KEY6
+            CALL       RDSITA1
+            PACK       CFNAME,OSTFILE,FILBB1A1
+            CALL       OPOTBB11
+.
+            MOVE       OTNUMB,KEY8
+            CALL       RDBOKB1
+            PACK       FINCODE,ANSM,OBACOMP,OTMISGRP,SP20
+          ELSE
+            PACK       FINCODE,ANSM,OTMISGRP,OTITEMNO,SP20
+          ENDIF
+.
+          MOVE       OTPATAMT,FINAMT
+          PACK       FINDATE,PINVDTE
+.         PACK       FINDATE,OTDTEFFD
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+.
+          IF         IBCNUGST=2 & OTDTGSTM<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       OTDTGSTM,FINAMT
+            PACK       FINDATE,PINVDTE
+.           PACK       FINDATE,OTDTEFFD
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+            MOVE       ANSA TO FINTYPE
+          ENDIF
+.
+          GOTO       OUTI100
+.
+.         Process this cash receipt
+.
+OUTI300   BRANCH     OPTION,OUTI100,OUTI310,OUTI100
+.
+OUTI310   
+.         COMPARE    FOUR,OTPAYTYP               * Merchant card ?
+.         GOTO       OUTI100 IF EQUAL            * Yes, ignore
+.
+          MOVE       OTRECEPT,KEY12
+          CALL       RDRCBNK1
+          BRANCH     OVRCD,OUTI312
+.
+          MOVE       ZERO,FORM1
+          MOVE       RCBNTTYP,FORM1
+          BRANCH     FORM1,OUTI320,OUTI330,OUTI340,OUTI320
+OUTI312   PACK       FINCODE,SP20
+          MOVE       "ACASH -  O/P ",FINCODE
+          GOTO       OUTI350
+.
+OUTI320   PACK       FINCODE,ANSB,RCBNRCOD,SP70
+          GOTO       OUTI350
+.
+OUTI330   PACK       FINCODE,ANSI,RCBNRCOD,SP70
+          GOTO       OUTI350
+.
+OUTI340   PACK       FINCODE,ANSC,SP70
+.
+OUTI350   MOVE       ANSB TO FINTYPE
+          MOVE       TWO,FINSYS
+          MOVE       SP6,FINSITE
+          MOVE       OTPATAMT TO FINAMT
+          MULT       NEGONE,FINAMT
+          PACK       FINDATE,OTDTEFFD
+          REP        " 0",FINDATE
+.
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+          GOTO       OUTI100
+.
+.         Process this journal
+.
+OUTI400   BRANCH     OPTION,OUTI100,OUTI100,OUTI410
+.
+OUTI410   MOVE       ANSC TO FINTYPE
+          MOVE       TWO,FINSYS
+          MOVE       SP6,FINSITE
+          MOVE       OTPATAMT TO FINAMT
+          MULT       NEGONE,FINAMT
+.
+          IF         PTCNJFEE=1
+            PACK       FINCODE,PINVCLM,OTTYPE,SP20
+          ELSE
+            PACK       FINCODE,OTTYPE,SP20
+          ENDIF
+.         MOVE       "JOURNAL - O/P",FINCODE
+          PACK       FINDATE,OTDTEFFD
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+.
+          IF         IBCNUGST=2 & OTDTGSTM<>0
+            MOVE       ANSH,FINTYPE
+            MOVE       OTDTGSTM,FINAMT
+            MULT       NEGONE,FINAMT
+            PACK       FINDATE,OTDTEFFD
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+          ENDIF
+.
+          GOTO       OUTI100
+.
+OUTI600   PACK       KEY22,PINVADM,PINVNO,SP70
+          GOTO       INVN1000
+.
+. -----------------------------------------------------------------------------
+.         Process this inpatient invoice
+. -----------------------------------------------------------------------------
+INPI000   BRANCH     SUBOPT,INPI050,INVN1000,INVN1000
+.
+INPI050   DISPLAY    *P50:24,"IP ";
+          PACK       KEY22,PINVADM,PINVNO,SP6
+          CALL       RDSDTRN1
+INPI100   CALL       RDKDTRN1
+          BRANCH     OVRCD,INPI800
+.
+          MATCH      PINVNO,TREF
+          GOTO       INPI800 IF NOT EQUAL
+.
+.         Only interested in invoice section
+.
+          BRANCH     TRECTYPE,INPI200,INPI300,INPI300,INPI100,INPI500,INPI600
+          COMPARE    NINE,TRECTYPE
+          GOTO       INPI200 IF EQUAL               * ABF
+.
+          GOTO       INPI100
+.
+.         Inpatient accommodation
+.
+INPI200   BRANCH     OPTION,INPI210,INPI100,INPI100
+.
+INPI210   IF         TRANTYPE<>1
+            COMPARE    TWO,TRANTYPE                 * Accommodation ?
+            GOTO       INPI100 IF NOT EQUAL
+          ENDIF
+.
+          MOVE       ANSA TO FINTYPE
+          MOVE       THREE,FINSYS
+          MOVE       SP6,FINSITE
+          MOVE       TPATAMTT TO FINAMT
+          UNPACK     PINVDTE WITH CCENT,CYEAR,CMON,CDAY
+.         SUB        TPATAMTG FROM FINAMT
+.
+.         Check for Casemix Invoice
+.
+          COMPARE    ONE,PTINCMIX
+          GOTO       INPI220 IF NOT EQUAL
+.
+.         Casepayment pre-surgical day (ie. per diem prior casemix charge) will
+.         be grouped as Accommodation charge rather than Daily charge
+.
+          IF         PTDTDTYP=0
+            IF        FINAMT=0
+              IF        (PTDTLSPT<>0 | PTDTLSRB<>0)
+                GOTO       INPI216        * lumpsum
+              ENDIF
+            ENDIF
+            GOTO       INPI220
+          ENDIF
+.
+          MATCH      SP3,TCLMTYP
+          IF         @EQUAL
+            MOVE       PINVCLM,TCLMTYP
+          ENDIF
+          IF         CACCFEE=5
+            PACK       FINCODE,ANSD,TCLMTYP,SP20
+          ELSE
+            IF         CACCFEE=4
+              PACK       FINCODE,ANSD,TDWARD,TCLMTYP,SP20
+            ELSE
+              PACK       FINCODE,ANSD,TDWARD,SP20
+            ENDIF
+          ENDIF
+.         PACK       FINDATE,PTDTEFFD 
+          PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+.
+          IF         IBCNUGST=2 & PTDTGSTM<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       PTDTGSTM,FINAMT
+            PACK       FINDATE,PINVDTE
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+            MOVE       ANSA TO FINTYPE
+          ENDIF
+.
+INPI216   MATCH      SP3,TADMTYP
+          GOTO       INPI218 IF NOT EQUAL
+.
+          MOVE       TADMNO,KEY8
+          CALL       RDMISS1
+          MOVE       ATYPE,TADMTYP
+.
+INPI218   MOVE       PTDTLSPT,FINAMT
+          ADD        PTDTLSRB,FINAMT
+.
+          MATCH      SP3,TCLMTYP
+          IF         @EQUAL
+            MOVE       PINVCLM,TCLMTYP
+          ENDIF
+          IF         CACCFEE=5
+            PACK       FINCODE,ANSC,DAYFLG,TCLMTYP,SP20
+          ELSE
+            IF         CACCFEE=4
+              PACK       FINCODE,ANSC,DAYFLG,TADMTYP,TCLMTYP,SP20
+            ELSE
+              PACK       FINCODE,ANSC,DAYFLG,TADMTYP,SP20
+            ENDIF
+          ENDIF
+          PACK       FINDATE,PTDTEFFD
+          PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+.
+          IF         IBCNUGST=2 & PTDTGSTL<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       PTDTGSTL,FINAMT
+            PACK       FINDATE,PINVDTE
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+            MOVE       ANSA TO FINTYPE
+          ENDIF
+          GOTO       INPI100
+.
+INPI220   BRANCH     CACCFEE,INPI240:
+                             INPI250,INPI240,INPI240,INPI222
+.
+.         Accommodation by admission type
+.
+          MATCH      SP3,TADMTYP
+          GOTO       INPI221 IF NOT EQUAL
+.
+          MOVE       TADMNO,KEY8
+          CALL       RDMISS1
+          MOVE       ATYPE,TADMTYP
+.
+INPI221   PACK       FINCODE WITH ANSA,TADMTYP,SP20
+          GOTO       INPI230
+.
+.         Accommodation by claim type
+.
+INPI222   MATCH      SP3,TCLMTYP
+          GOTO       INPI223 IF NOT EQUAL
+.
+          MOVE       PINVCLM,TCLMTYP
+.
+INPI223   PACK       FINCODE WITH ANSA,TCLMTYP,SP20
+.
+INPI230
+.         PACK       FINDATE,PTDTEFFD
+          PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+.
+          IF         IBCNUGST=2 & PTDTGSTM<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       PTDTGSTM,FINAMT
+            PACK       FINDATE,PINVDTE
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+          ENDIF
+          GOTO       INPI100
+.
+.         Accommodation by ward/claim type
+.
+INPI240   MATCH      SP3,TCLMTYP
+          GOTO       INPI250 IF NOT EQUAL
+.
+          MOVE       PINVCLM,TCLMTYP
+.
+INPI250   MATCH      SP3,TDWARD
+          GOTO       INPI260 IF NOT EQUAL
+.
+          MOVE       "(",ANS
+          SCAN       ANS,TDDESC
+          GOTO       INPI255 IF NOT EQUAL
+.
+          BUMP       TDDESC
+          MOVE       TDDESC,TDWARD
+          GOTO       INPI260
+.
+INPI255   RESET      TDDESC,19
+          MOVE       TDDESC,TDWARD
+.
+INPI260   BRANCH     CACCFEE,INPI261,INPI262,INPI265,INPI280,INPI100
+          GOTO       INPI100
+.
+.         1 - Ward/claim type
+.
+INPI261   PACK       FINCODE,ANSA,TDWARD,TCLMTYP,SP20
+.         PACK       FINDATE,PTDTEFFD
+          PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+          IF         IBCNUGST=2 & PTDTGSTM<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       PTDTGSTM,FINAMT
+            PACK       FINDATE,PINVDTE
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+          ENDIF
+          GOTO       INPI100
+.
+.         2 - Ward/Adm type
+.
+INPI262   MATCH      SP3,TADMTYP
+          IF         @EQUAL
+            MOVE       TADMNO,KEY8
+            CALL       RDMISS1
+            MOVE       ATYPE,TADMTYP
+          ENDIF
+.
+          PACK       FINCODE,ANSA,TDWARD,TADMTYP,SP20
+.
+.         PACK       FINCODE,ANSA,TDWARD,TADMTYP,ZERO,SP20
+.         MOVE       TADMNO,KEY8
+.         CALL       RDMISS1
+.         BRANCH     OVRCD,INPI264
+.         IF         ASTAT=3
+.           CALL       RDDSCH1
+.           BRANCH     OVRCD,INPI264
+.           MATCH      ADATE,DDATE
+.           IF         @EQUAL
+.             PACK       FINCODE,ANSA,TDWARD,TADMTYP,ONE,SP20
+.           ENDIF
+.         ENDIF
+.
+INPI264   
+.         PACK       FINDATE,PTDTEFFD
+          PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+          IF         IBCNUGST=2 & PTDTGSTM<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       PTDTGSTM,FINAMT
+            PACK       FINDATE,PINVDTE
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+          ENDIF
+          GOTO       INPI100
+.
+.         3 - Ward/Claim/Adm.type
+.
+INPI265   MATCH      SP3,TADMTYP
+          GOTO       INPI272 IF NOT EQUAL
+.
+          MOVE       TADMNO,KEY8
+          CALL       RDMISS1
+          BRANCH     OVRCD,INPI272
+          MOVE       ATYPE,TADMTYP
+.
+INPI272   PACK       FINCODE,ANSA,TDWARD,TCLMTYP,TADMTYP,SP20
+.         PACK       FINDATE,PTDTEFFD
+          PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+          IF         IBCNUGST=2 & PTDTGSTM<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       PTDTGSTM,FINAMT
+            PACK       FINDATE,PINVDTE
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+          ENDIF
+          GOTO       INPI100
+.
+.         4 - Ward/adm type/claim type
+.
+INPI280   MATCH      SP3,TADMTYP
+          GOTO       INPI282 IF NOT EQUAL
+.
+          MOVE       TADMNO,KEY8
+          CALL       RDMISS1
+          BRANCH     OVRCD,INPI282
+          MOVE       ATYPE,TADMTYP
+.
+INPI282   PACK       FINCODE,ANSA,TDWARD,TADMTYP,TCLMTYP,SP20
+.         PACK       FINDATE,PTDTEFFD
+          PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+          IF         IBCNUGST=2 & PTDTGSTM<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       PTDTGSTM,FINAMT
+            PACK       FINDATE,PINVDTE
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+          ENDIF
+          GOTO       INPI100
+.
+.         Inpatient misc item
+.
+INPI300   BRANCH     OPTION,INPI310,INPI100,INPI100
+.
+INPI310   IF         TRANTYPE<>1
+            COMPARE    THREE,TRANTYPE                * Item charges ?
+            GOTO       INPI100 IF NOT EQUAL
+          ENDIF
+.
+          MOVE       ANSA TO FINTYPE
+          MATCH      SP3,TMISGRP
+          GOTO       INPI320 IF NOT EQUAL
+.
+          CALL       GETM0000
+          MOVE       MMSCGRP,TMISGRP
+.
+INPI320   MOVE       TADMNO,KEY8
+          CALL       RDMISS1
+.
+          IF         PTINCMIX=1
+            PACK       DIM1,DAYFLG,SP10
+            IF         PTCNMFEE = 1
+              PACK       FINCODE WITH ANST,DIM1,ACLAIM,TMISGRP,SP20
+            ELSE
+              PACK       FINCODE WITH ANST,DIM1,TMISGRP,TITEMNO,SP20
+            ENDIF
+          ELSE
+            IF         PTCNMFEE = 1
+              PACK       FINCODE WITH ANSM,ACLAIM,TMISGRP,SP20
+            ELSE
+              PACK       FINCODE WITH ANSM,TMISGRP,TITEMNO,SP20
+            ENDIF
+          ENDIF
+.
+          MOVE       THREE,FINSYS
+          MOVE       SP6,FINSITE
+          MOVE       TPATAMTT TO FINAMT
+.         PACK       FINDATE,PTDTEFFD
+          PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+          IF         IBCNUGST=2 & PTDTGSTM<>0
+            MOVE       ANSG,FINTYPE
+            MOVE       PTDTGSTM,FINAMT
+            PACK       FINDATE,PINVDTE
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+          ENDIF
+          GOTO       INPI100
+.
+.         Cash
+.
+INPI500   BRANCH     OPTION,INPI100,INPI505,INPI100
+.
+INPI505   
+.         COMPARE    FOUR,TPAYTYPE           * merchant card ?
+.         GOTO       INPI100 IF EQUAL        * yes, ignore
+.
+          MOVE       TRECEIPT,KEY12
+          CALL       RDRCBNK1
+          BRANCH     OVRCD,INPI510
+.
+          MOVE       ZERO,FORM1
+          MOVE       RCBNTTYP,FORM1
+          BRANCH     FORM1,INPI520,INPI530,INPI540,INPI520
+INPI510   PACK       FINCODE,ANSA,SP20
+          GOTO       INPI550
+.
+INPI520   PACK       FINCODE,ANSB,RCBNRCOD,SP20
+          GOTO       INPI550
+.
+INPI530   PACK       FINCODE,ANSI,RCBNRCOD,SP20
+          GOTO       INPI550
+.
+INPI540   PACK       FINCODE,ANSC,SP70
+.
+INPI550   MOVE       ANSB,FINTYPE
+          MOVE       THREE,FINSYS
+          MOVE       SP6,FINSITE
+          MOVE       TPATAMTT TO FINAMT
+          MULT       NEGONE,FINAMT
+          PACK       FINDATE,PTDTEFFD
+.         PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+.
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+          GOTO       INPI100
+.
+.         Process this journal
+.
+INPI600   BRANCH     OPTION,INPI100,INPI100,INPI610
+.
+INPI610   MOVE       ANSC TO FINTYPE
+          MOVE       THREE,FINSYS
+          MOVE       SP6,FINSITE
+          MOVE       TPATAMTT TO FINAMT
+          MULT       NEGONE,FINAMT
+.
+          PACK       FINCODE,TTYPE,SP20
+          COMPARE    ONE,PTCNJFEE
+          GOTO       INPI620 IF NOT EQUAL
+          PACK       FINCODE,PINVCLM,TTYPE,SP20
+.
+INPI620   PACK       FINDATE,PTDTEFFD
+.         PACK       FINDATE,PINVDTE
+          REP        " 0",FINDATE
+          CALL       CFIN0000
+          BRANCH     NOPERIOD,INVN9999
+.
+          IF         IBCNUGST=2 & PTDTGSTM<>0
+            MOVE       ANSH,FINTYPE
+            MOVE       PTDTGSTM,FINAMT
+            MULT       NEGONE,FINAMT
+            PACK       FINDATE,PTDTEFFD
+.           PACK       FINDATE,PINVDTE
+            REP        " 0",FINDATE
+            CALL       CFIN0000
+          ENDIF
+          GOTO       INPI100
+.
+INPI800   PACK       KEY22,PINVADM,PINVNO,SP70
+          GOTO       INVN1000
+.
+INVN9999  RETURN
++
+.----------------------------------------------------------------
+.         Check credit notes 
+.----------------------------------------------------------------
+CRDN0000  PACK       KEY18,INVFDATE,SP70
+          MOVE       ZERO,TOTCRD
+.
+          CALL       RSPMCNO4
+CRDN1000  CALL       RKPMCNO4
+          BRANCH     OVRCD,CRDN9999
+.
+          MATCH      PMCNDATE,INVTDATE
+          GOTO       CRDN9999 IF LESS
+.
+          MOVE       ZERO,FORM2
+          MOVE       PMCNSYST,FORM2
+          BRANCH     SUBOPT,CRDN2000,CRDN3000,CRDN4000
+          GOTO       CRDN6000
+.
+CRDN2000  COMPARE    THREE,FORM2
+          GOTO       CRDN1000 IF NOT EQUAL
+          GOTO       CRDN6000
+.
+CRDN3000  COMPARE    ONE,FORM2
+          GOTO       CRDN1000 IF NOT EQUAL
+          GOTO       CRDN6000
+.
+CRDN4000  COMPARE    TWO,FORM2
+          GOTO       CRDN1000 IF NOT EQUAL
+.
+CRDN6000  MOVE       PMCNINVN,KEY8
+          CALL       RDINV1
+          BRANCH     OVRCD,CRDN1000
+.
+          MOVE       SP10,PMVXMHOS
+          MOVE       PINVADM,KEY8
+          CALL       RDPMVX11
+          IF         IBCNMHOS=1
+            MATCH      SP10,HOSPID
+            IF         !@EQUAL
+              MATCH      PMVXMHOS,HOSPID
+              GOTO       CRDN1000 IF NOT EQUAL
+            ENDIF
+          ENDIF
+.
+          MOVE       ZERO,SUBTOT
+          MOVE       ZERO,LUMPFLAG
+          PACK       KEY22,PMCNVISN,PMCNINVN,SP70
+          PACK       KEY30,KEY22,SP70
+          CALL       RSPMFCI1
+CRDN8000  CALL       RKPMFCI1
+          BRANCH     OVRCD,CRDN8900
+          PACK       DIM22,PMFCVISN,PMFCINVN,SP70
+          MATCH      KEY22,DIM22
+          GOTO       CRDN8900 IF NOT EQUAL
+          MATCH      PMCNCRNO,PMFCCRNO
+          GOTO       CRDN8000 IF NOT EQUAL
+.
+          CALL       UPFIN000             * Update patfinsf
+          GOTO       CRDN8000
+.
+CRDN8900  
+          IF        SUBTOT<>PMCNAMNT
+            MOVE      PMCNAMNT,FORM12P2
+            SUB       SUBTOT,FORM12P2
+            ADD       FORM12P2,TOTCRD
+            PRINT     *1," **** CREDIT NOTE ",PMCNCRNO,"(",PMCNVISN,")":
+                      " PMSFCIAF ",SUBTOT:
+                      " PMSCNOAF ",PMCNAMNT:
+                      " = ",FORM12P2," TOTAL ",TOTCRD:
+                      " CONTACT IBA"
+          ENDIF
+          GOTO      CRDN1000
+.
+CRDN9999  RETURN
++
+.----------------------------------------------------------------
+.         Update patfinsf (financial file)
+.----------------------------------------------------------------
+UPFIN000  MOVE      PMFCCRDA,FINDATE
+          REP       " 0",FINDATE
+          MOVE      "F",FINTYPE             * for credit note
+.
+          MOVE      "0",KEY1
+          MATCH     ADATE,DDATE
+          IF        @EQUAL
+            MOVE      "1",KEY1              * daycase
+          ENDIF
+.
+.        update the summary financial file
+.
+          MOVE      PMFCRTYP,FORM1
+          BRANCH    FORM1,UPFIN020,UPFIN500,UPFIN500,UPFIN999:
+                          UPFIN999,UPFIN999,UPFIN999,UPFIN500:
+                          UPFIN780
+          GOTO      UPFIN999
+.
+.         Accommodation
+.
+UPFIN020  IF         TRANTYPE<>1
+            COMPARE   TWO,TRANTYPE                 * Accommodation ?
+            GOTO      UPFIN999 IF NOT EQUAL
+          ENDIF
+.
+          COMPARE   ONE,PTINCMIX
+          GOTO      UPFIN200 IF NOT EQUAL  * Not C/P
+.
+          MATCH     "1",PTINCRST
+          GOTO      UPFIN100 IF NOT EQUAL  * Not fully creditted
+.
+          MOVE      PMFCPTLS,FORM82
+          ADD       PMFCRBLS,FORM82
+.
+          COMPARE   ZERO,FORM82
+          GOTO      UPFIN100 IF EQUAL      * no lumpsum amount
+.
+          BRANCH    LUMPFLAG,UPFIN1000     * Lumpsum already been done
+          MOVE      ONE,LUMPFLAG
+          IF        CACCFEE=5
+            PACK      FINCODE,ANSH,KEY1,PMFCCTYP,SP70
+          ELSE
+            IF        CACCFEE=4
+              PACK      FINCODE,ANSH,KEY1,PMFCATYP,PMFCCTYP,SP70
+            ELSE
+              PACK      FINCODE,ANSH,KEY1,PMFCATYP,SP70
+            ENDIF
+          ENDIF
+          MOVE      FORM82,FINAMT
+          ADD       FINAMT,SUBTOT
+.
+          MOVE      PINVSYS,FINSYS
+          MOVE      PINVSITE,FINSITE
+          MOVE      "F",FINTYPE            * for lumpsum accommodation
+          CALL      CFIN0000
+.
+          IF        IBCNUGST=2 & PMFCGSTL<>0
+            MOVE      PMFCGSTL,FINAMT
+            ADD       FINAMT,SUBTOT
+            MOVE      "Y",FINTYPE          * for lumpsum accommodation
+            MOVE      PMFCCRDA,FINDATE
+            REP       " 0",FINDATE
+            CALL      CFIN0000
+          ENDIF
+.
+UPFIN100  IF          CACCFEE=5
+            PACK      FINCODE,ANSJ,PMFCCTYP,SP70  * daily charge
+          ELSE
+            IF        CACCFEE=4
+              PACK      FINCODE,ANSJ,PMFCWARD,PMFCCTYP,SP70  * daily charge
+            ELSE
+              PACK      FINCODE,ANSJ,PMFCWARD,SP70  * daily charge
+            ENDIF
+          ENDIF
+          GOTO      UPFIN400
+.
+.         Store Fincode with subfix of G non CP, so that it appears before
+.         C/P  credit notes
+.
+UPFIN200  MOVE      "G",ANS                * not C/P casemix credit note
+          BRANCH    CACCFEE OF UPFIN210,UPFIN220,UPFIN230,UPFIN240,UPFIN242
+.
+.         Use Admission type as financial code
+.
+          PACK      FINCODE WITH ANS,PMFCATYP,SP70
+          GOTO      UPFIN400
+.
+.         Use ward and claim type as financial code
+.
+UPFIN210  PACK      FINCODE WITH ANS,PMFCWARD,PMFCCTYP,SP70
+          GOTO      UPFIN400
+.
+.         Use ward and admission type
+.
+UPFIN220  PACK      FINCODE,ANS,PMFCWARD,PMFCATYP,SP70
+          GOTO      UPFIN400
+.
+.         Use ward,claim and admission type
+.
+UPFIN230  PACK      FINCODE,ANS,PMFCWARD,PMFCCTYP,PMFCATYP,SP70
+          GOTO      UPFIN400
+.
+.         Use ward and claim type as financial code
+.
+UPFIN240  PACK      FINCODE,ANS,PMFCWARD,PMFCATYP,PMFCCTYP,SP70
+          GOTO      UPFIN400
+.
+.         Use Claim type as financial code
+.
+UPFIN242  PACK      FINCODE WITH ANS,PMFCCTYP,SP70
+          GOTO      UPFIN400
+.
+.         the amount from the financial summary file
+.
+UPFIN400  MOVE      PMFCCAMT,FINAMT
+          ADD       FINAMT,SUBTOT
+          MOVE      PMFCCRDA,FINDATE
+          REP       " 0",FINDATE
+.
+          MOVE      PINVSYS,FINSYS
+          MOVE      PINVSITE,FINSITE
+          MOVE      "F",FINTYPE              * Credit note
+          CALL      CFIN0000
+.
+          IF        IBCNUGST=2 & PMFCCGST<>0
+            MOVE      PMFCCGST,FINAMT
+            ADD       FINAMT,SUBTOT
+            MOVE      "Y",FINTYPE            * GST Credit note
+            MOVE      PMFCCRDA,FINDATE
+            REP       " 0",FINDATE
+            CALL      CFIN0000
+          ENDIF
+          GOTO      UPFIN999
+.
+.        - Miscellaneous or Theatre record
+.
+UPFIN500  IF         TRANTYPE<>1
+            COMPARE   THREE,TRANTYPE                * Item charges ?
+            GOTO      UPFIN999 IF NOT EQUAL
+          ENDIF
+.
+          COMPARE   ONE,PTINCMIX
+          GOTO      UPFIN700 IF NOT EQUAL
+.
+          IF        PTCNMFEE=1
+            PACK      FINCODE,ANSP,KEY1,PMFCCTYP,PMFCMGRP,SP20
+.                             Misc. Charge, Episode, Claim Code, Item Code
+          ELSE
+            PACK      FINCODE,ANSP,KEY1,PMFCMGRP,PMFCITEM,SP20
+.                             Misc. Charge, Episode, Group Code, Item Code
+          ENDIF
+          GOTO      UPFIN800
+.
+UPFIN700  IF        PTCNMFEE=1
+            PACK      FINCODE,ANSQ,PMFCCTYP,PMFCMGRP,SP20
+.                             Misc. Charge, Claim Code, Item Code
+          ELSE
+            PACK      FINCODE,ANSQ,PMFCMGRP,PMFCITEM,SP20
+.                             Misc. Charge, Group Code, Item Code
+          ENDIF
+          GOTO      UPFIN800
+.
+UPFIN780  PACK      FINCODE,ANSM,PMFCCTYP,SP70     * ABF
+.
+UPFIN800  MOVE      PMFCCAMT,FINAMT
+          ADD       FINAMT,SUBTOT
+          MOVE      PINVSYS,FINSYS
+          MOVE      PINVSITE,FINSITE
+          MOVE      "F",FINTYPE              * Credit note
+          MOVE      PMFCCRDA,FINDATE
+          REP       " 0",FINDATE
+          CALL      CFIN0000
+.
+          IF        IBCNUGST=2 & PMFCCGST<>0
+            MOVE      PMFCCGST,FINAMT
+            ADD       FINAMT,SUBTOT
+            MOVE      "Y",FINTYPE            * GST Credit note
+            MOVE      PMFCCRDA,FINDATE
+            REP       " 0",FINDATE
+            CALL      CFIN0000
+          ENDIF
+.
+UPFIN999  RETURN
++
+.*******************************************************************************
+.*        PRNT0000 - Print records from tempfile                               *
+.*******************************************************************************
+PRNT0000  MOVE       "60",CLNO
+          MOVE       ZERO,SFINSYS
+          MOVE       SP10,SFINSITE
+          MOVE       ZERO,SUBTOT
+          MOVE       ZERO,GNDTOT
+          MOVE       ZERO,RECFLAG
+          MOVE       ZERO,DAYFLG
+          MOVE       SP20,CASHDESC
+          MOVE       SP20,SCASHDES
+          MOVE       SP70,SFINCODE
+          MOVE       SP1,MSCFLAG   
+          MOVE       SP10,SFINTYPE
+          MOVE       SP10,SFINHOSP
+          PACK       DIM13,SP20
+          MOVE       SP20,DIM13A
+          MOVE       SP10,DIM10
+          MOVE       SP10,SDIM10
+          MOVE       SP10,SUBFIN
+          MOVE       ZERO,PGSTTOT
+          MOVE       ZERO,CRDFLAG
+          MOVE       ZERO,SCRDFLAG
+          MOVE       SP10,JRNLCOD
+          MOVE       SP10,SJRNLCOD
+          MOVE       SP70,SKEY13
+          PACK       KEY52,SP70
+          CALL       RDSTEMP
+PRNT1000  CALL       RDKTEMP
+          BRANCH     OVRCD,PRNT9000
+.
+.         Fincode with subfix of G for Non CP credit notes
+.
+          MOVE       ZERO,CRDFLAG
+          MATCH      "F",FINTYPE
+          GOTO       PRNT1002 IF EQUAL
+          MATCH      "Y",FINTYPE
+          GOTO       PRNT1004 IF NOT EQUAL
+.
+PRNT1002  REP        "FAYG",FINTYPE        * Credit notes for Accm and GST
+          MOVE       ONE,CRDFLAG
+          MOVE       SP10,ANS
+          UNPACK     FINCODE,ANS,KEY12
+          MATCH      "G",ANS
+          IF         @EQUAL
+            MOVE       "N",ANS               * non C/P Acc.
+            PACK       FINCODE,ANS,KEY12
+          ENDIF
+.
+.         COMPARE    "60",CLNO
+.         GOTO       PRNT1500 IF EQUAL
+.
+.
+PRNT1004  COMPARE    ONE,HOSPFLAG
+          GOTO       PRNT1010 IF NOT EQUAL
+.
+          MATCH      SP10,SFINHOSP
+          GOTO       PRNT1010 IF EQUAL
+          MATCH      FINHOSP,SFINHOSP
+          IF         !@EQUAL
+            CALL       PSUT0000
+            CALL       PTOT0000
+            GOTO       PRNT1500
+          ENDIF
+.
+PRNT1010  MATCH      SP70,SFINTYPE
+          GOTO       PRNT1015 IF EQUAL
+.
+          MATCH      FINTYPE,SFINTYPE
+          IF         !@EQUAL
+            CALL       PSUT0000
+            CALL       PTOT0000
+            GOTO       PRNT1500
+          ENDIF
+.
+PRNT1015  MATCH      "A",FINTYPE
+          GOTO       PRNT1020 IF EQUAL     * Fees
+.
+          MATCH      "B",FINTYPE
+          GOTO       PRNT1300 IF EQUAL     * cash
+.
+          MATCH      "C",FINTYPE
+          GOTO       PRNT1400 IF EQUAL     * Journal
+.
+          MATCH      "G",FINTYPE
+          GOTO       PRNT1420 IF EQUAL     * GST 
+.
+          MATCH      "H",FINTYPE
+          GOTO       PRNT1440 IF EQUAL     * GST Journal
+.
+          GOTO       PRNT8000
+.
+PRNT1020  
+.         MOVE       ZERO,CRDFLAG
+          MOVE       SP10,JRNLCOD
+          MOVE       SP10,SJRNLCOD
+          CMATCH     "A",FINCODE
+          GOTO       PRNT1200 IF EQUAL     * Accommodation
+          CMATCH     "C",FINCODE
+          GOTO       PRNT1200 IF EQUAL     * casemix Accommodation
+          CMATCH     "D",FINCODE
+          GOTO       PRNT1200 IF EQUAL     * casemix Accommodation
+.
+          CMATCH     "H",FINCODE
+          GOTO       PRNT1190 IF EQUAL     * Lumpsum credit note accm.
+          CMATCH     "J",FINCODE
+          GOTO       PRNT1190 IF EQUAL     * Daily charge credit note accm.
+          CMATCH     "N",FINCODE
+          GOTO       PRNT1190 IF EQUAL     * Credit note Accm.
+.
+.         Item
+.
+PRNT1100  MOVE       SP1,DIM1
+          UNPACK     FINCODE,ANS
+.
+          MATCH      "P",ANS
+          GOTO       PRNT1110 IF EQUAL     * Credit Item C/P
+          MATCH      "T",ANS
+          GOTO       PRNT1130 IF NOT EQUAL * Not Item C/P
+          GOTO       PRNT1120
+.
+.         Casepayment
+.
+PRNT1110  
+.         MOVE       ONE,CRDFLAG
+.
+PRNT1120  IF         PTCNMFEE=1
+            UNPACK     FINCODE,ANS,DIM1,DIM3,MISGRP  * episode/clm/misc.grp
+            PACK       DIM10,DIM1,DIM3,MISGRP,SP10
+          ELSE
+            UNPACK     FINCODE,ANS,DIM1,MISGRP,DIM9  * episode/misc.grp/itm
+            PACK       DIM10,DIM1,MISGRP,SP10
+            MATCH      SP3,MISGRP
+            IF         @EQUAL
+              PACK       DIM10,DIM1,DIM9,SP10
+            ENDIF
+          ENDIF
+          GOTO      PRNT1150
+.
+.         Non Casepayment
+.
+PRNT1130  IF         PTCNMFEE=1
+            UNPACK     FINCODE,ANS,DIM3,MISGRP       * claim/misc.group
+            PACK       DIM10,DIM1,DIM3,MISGRP,SP10
+          ELSE
+            UNPACK     FINCODE,ANS,MISGRP,DIM9       * misc.group/item code
+            PACK       DIM10,DIM1,MISGRP,SP10
+            MATCH      SP3,MISGRP
+            IF         @EQUAL
+              PACK       DIM10,DIM1,DIM9,SP10
+            ENDIF
+          ENDIF
+.
+PRNT1150  MATCH      DIM10,SDIM10
+          GOTO       PRNT1450 IF NOT EQUAL
+.
+          MATCH      MSCFLAG,ANS
+          GOTO       PRNT1500 IF EQUAL
+          GOTO       PRNT1450
+.
+.         Accommodation
+.
+PRNT1190  
+.         MOVE       ONE,CRDFLAG            * flag for credit note
+          MATCH      FINCODE,DIM13
+          GOTO       PRNT1500 IF EQUAL
+.
+          CALL       PSUT0000               * print sub total
+          COMPARE    CRDFLAG,SCRDFLAG
+          GOTO       PRNT1500 IF EQUAL
+.
+          CALL       PTOT0000
+          MOVE       CRDFLAG,SCRDFLAG
+          GOTO       PRNT1500
+.
+.         Accommodation
+.
+PRNT1200  MATCH      FINCODE,DIM13
+          GOTO       PRNT1500 IF EQUAL
+          GOTO       PRNT1450
+.
+.         Cash
+.
+PRNT1300  MOVE       SP10,JRNLCOD
+          MOVE       SP10,SJRNLCOD
+          MOVE       ZERO,CRDFLAG
+          UNPACK     FINCODE,CASHTYP,CASHDESC
+          IF         FINSYS=3
+            MATCH      ANSA,CASHTYP
+            IF         @EQUAL
+              MOVE      "PATIENT     ",CASHDESC
+            ELSE
+              MATCH     ANSB,CASHTYP
+              IF        @EQUAL
+                MOVE      "HEALTH FUND ",CASHDESC
+              ELSE
+                MOVE      "INSURANCE   ",CASHDESC
+              ENDIF
+            ENDIF
+          ELSE
+            MOVE      "CASH/NON-INP",CASHDESC
+          ENDIF
+.
+.         MATCH      CASHDESC,SCASHDES
+          MATCH      FINCODE,SFINCODE
+          GOTO       PRNT1500 IF EQUAL
+          GOTO       PRNT1450
+.
+.         Journals
+.
+PRNT1400  UNPACK     FINCODE,JRNLCOD
+          MATCH      JRNLCOD,SJRNLCOD
+          GOTO       PRNT1500 IF EQUAL
+          GOTO       PRNT1450
+.
+.         GST
+.
+PRNT1420  MOVE       SP10,JRNLCOD
+          MOVE       SP10,SJRNLCOD
+          MATCH      FINCODE,DIM13A
+          GOTO       PRNT1500 IF EQUAL
+          CALL       PSUT0000               * print sub total
+.
+          COMPARE    CRDFLAG,SCRDFLAG
+          GOTO       PRNT1500 IF EQUAL
+.
+          CALL       PTOT0000
+          MOVE       CRDFLAG,SCRDFLAG
+          GOTO       PRNT1500
+.
+.         GST Journal
+.
+PRNT1440  UNPACK     FINCODE,JRNLCOD
+          MATCH      JRNLCOD,SJRNGCOD
+          GOTO       PRNT1500 IF EQUAL
+          GOTO       PRNT1450
+.
+PRNT1450  CALL       PSUT0000               * print sub total
+          COMPARE    CRDFLAG,SCRDFLAG
+          GOTO       PRNT1500 IF EQUAL
+.
+          CALL       PTOT0000
+          MOVE       CRDFLAG,SCRDFLAG
+.
+.         Print the record
+.
+PRNT1500  COMPARE    ZERO,FINAMT
+          GOTO       PRNT8000 IF EQUAL
+.
+          COMPARE    "59",CLNO
+          CALL       HEAD0000 IF NOT LESS
+.
+          MOVE       ZERO,PINVADM
+          PACK       KEY8,PINVNO
+          CALL       RDINV1
+.
+          BRANCH     TOTONLY,PRNT2000
+          IF         OVRCD = 1
+            PRINT      *1,FINSYS,*10,FINSITE,*20,FINYEAR,*25,FINTYPE:
+                       *30,FINCODE,*47,PINVDTE,*62,PINVNO:
+                       *82,"********",*95,FINAMT
+          ELSE
+            PRINT      *1,FINSYS,*10,FINSITE,*20,FINYEAR,*25,FINTYPE:
+                       *30,FINCODE,*47,PINVDTE,*62,PINVNO,*82,PINVADM,*95,FINAMT
+          ENDIF
+          ADD        ONE,CLNO
+.
+PRNT2000  MOVE       SP1,DIM1
+          MOVE       SP1,MSCFLAG
+.
+          UNPACK     FINCODE,ANS
+          MATCH      "A",FINTYPE
+          GOTO       PRNT6000 IF NOT EQUAL
+.         MOVE       ZERO,CRDFLAG
+.
+          CMATCH     "M",ANS               * Misc.item ?
+          GOTO       PRNT2200 IF EQUAL
+          CMATCH     "Q",ANS
+          GOTO       PRNT3000 IF NOT EQUAL
+.
+PRNT2200  IF         PTCNMFEE=1
+            UNPACK     FINCODE,ANS,DIM3,MISGRP       * claim/misc.group
+            MOVE       ANS,SUBFIN
+            MOVE       FINCODE,SKEY13
+            PACK       SDIM10,SP1,DIM3,MISGRP,SP10
+          ELSE
+            UNPACK     FINCODE,ANS,MISGRP,DIM9       * misc.group/item code
+            MOVE       ANS,SUBFIN
+            MOVE       FINCODE,SKEY13
+            PACK       SDIM10,SP1,MISGRP,SP10
+            MATCH      SP3,MISGRP
+            IF         @EQUAL
+              PACK       SDIM10,SP1,DIM9,SP10
+            ENDIF
+          ENDIF
+          MOVE       ONE,RECFLAG
+          MOVE       ANS,MSCFLAG
+          GOTO       PRNT8000
+.
+PRNT3000  CMATCH     "T",ANS
+          GOTO       PRNT3200 IF EQUAL               * C/P Credit note item
+          CMATCH     "P",ANS
+          GOTO       PRNT4000 IF NOT EQUAL
+.
+PRNT3200  IF         PTCNMFEE=1
+            UNPACK     FINCODE,ANS,DIM1,DIM3,MISGRP  * epsde/clm/misc.grp
+            MOVE       FINCODE,SKEY13
+            MOVE       ANS,SUBFIN
+            PACK       SDIM10,DIM1,DIM3,MISGRP,SP10
+          ELSE
+            UNPACK     FINCODE,ANS,DIM1,MISGRP,DIM9  * epsde/misc.grp/itm
+            MOVE       FINCODE,SKEY13
+            MOVE       ANS,SUBFIN
+            PACK       SDIM10,DIM1,MISGRP,SP10
+            MATCH      SP3,MISGRP
+            IF         @EQUAL
+              PACK       SDIM10,DIM1,DIM9,SP10
+            ENDIF
+          ENDIF
+          MOVE      ONE,RECFLAG       * flag for mis.item
+          MOVE      ANS,MSCFLAG       * "T" for casemix & "M" for normal
+          GOTO      PRNT8000
+.
+PRNT4000  
+.         CMATCH    "N",ANS
+.         IF        @EQUAL
+.           MOVE      ONE,SCRDFLAG
+.         ENDIF
+.
+          MOVE      FINCODE,DIM13
+          UNPACK    FINCODE,SUBFIN
+          MOVE      TWO,RECFLAG       * accommodations
+          GOTO      PRNT8000
+.
+PRNT6000  MOVE      ZERO,CRDFLAG
+          MATCH     "B",FINTYPE
+          IF        @EQUAL
+            IF        FINSYS = 3
+              UNPACK    FINCODE,CASHTYP,CASHDESC
+              MATCH     ANSA,CASHTYP
+              IF        @EQUAL
+                MOVE      "PATIENT     ",CASHDESC
+              ELSE
+                MATCH     ANSB,CASHTYP
+                IF        @EQUAL
+                  MOVE      "HEALTH FUND ",CASHDESC
+                ELSE
+                  MOVE      "INSURANCE   ",CASHDESC
+                ENDIF
+              ENDIF
+            ELSE
+              MOVE      "CASH/NON-INP",CASHDESC
+            ENDIF
+.
+            MOVE      CASHTYP,SCASHTYP
+            MOVE      CASHDESC,SCASHDES
+            MOVE      FINCODE,SFINCODE
+            MOVE      THREE,RECFLAG          * cash
+          ENDIF
+.
+          MATCH     "C",FINTYPE
+          IF        @EQUAL
+            UNPACK    FINCODE,JRNLCOD
+            MOVE      JRNLCOD,SJRNLCOD
+            MOVE      FOUR,RECFLAG           * journals
+          ENDIF
+.
+          MATCH      "G",FINTYPE
+          IF         @EQUAL
+            MOVE       FIVE,RECFLAG          * GST
+            MOVE       FINCODE,DIM13A
+            MOVE       FINCODE,SUBFIN
+          ENDIF
+.
+          MATCH      "H",FINTYPE
+          IF         @EQUAL
+            MOVE       SIX,RECFLAG          * GST Journal
+            UNPACK     FINCODE,JRNLCOD
+            MOVE       JRNLCOD,SJRNGCOD
+          ENDIF
+.
+PRNT8000  MOVE       FINSYS,SFINSYS
+          MOVE       FINSITE,SFINSITE
+          MOVE       FINTYPE,SFINTYPE
+          MOVE       FINHOSP,SFINHOSP
+          ADD        FINAMT,SUBTOT
+          ADD        FINAMT,GNDTOT
+          MOVE       CRDFLAG,SCRDFLAG
+          GOTO       PRNT1000
+.
+PRNT9000  MOVE       SP20,FINCODE
+          IF         CLNO=60
+            CALL       HEAD0000
+          ENDIF
+          CALL       PSUT0000
+          CALL       PTOT0000
+          PRINT      *1,"** End of Report **"
+.
+PRNT9999  RETURN
++
+.*******************************************************************************
+.*        PSUT0000 - Print sub-totals                                          *
+.*******************************************************************************
+PSUT0000  COMPARE    ZERO,SUBTOT
+          GOTO       PSUT9999 IF EQUAL
+.
+          MOVE       SP10,DIM3
+          LOAD       DIM3,SFINSYS,AAE,OUT,INP
+.
+          IF         SFINSYS=2
+            MOVE       SFINSITE,DIM3
+          ENDIF
+.
+          BRANCH     TOTONLY,PSUT0200
+          CALL       UND132
+PSUT0200  BRANCH     RECFLAG,PSUT1000,PSUT2000,PSUT3000,PSUT4000,PSUT5000:
+                             PSUT6000
+.
+PSUT1000  MATCH      "Q",SUBFIN
+          GOTO       PSUT1200 IF EQUAL
+          MATCH      "P",SUBFIN
+          GOTO       PSUT1400 IF NOT EQUAL
+.
+.         Credit notes
+.
+PSUT1200  IF         HOSPFLAG=1
+            IF         PTCNMFEE=1
+              PRINT      *1,SFINHOSP:
+                         *5,DIM3," SUB-TOTAL CRD NOTES(CLAIM/ITEM GROUP): ":
+                         SKEY13;
+.                        SDIM10;
+            ELSE
+              PRINT      *1,SFINHOSP:
+                         *5,DIM3," SUB-TOTAL CRD NOTES(MISC.ITEM GROUP): ":
+                         SKEY13;
+.                        SDIM10;
+            ENDIF
+            MOVE       SP70,SKEY13
+          ELSE
+            IF         PTCNMFEE=1
+              PRINT   *1,DIM3," SUB-TOTAL CRD NOTES(CLAIM/ITEM GROUP): ":
+.                        SDIM10;
+                         SKEY13;
+            ELSE
+              PRINT    *1,DIM3," SUB-TOTAL CRD NOTES(MISC.ITEM GROUP): ":
+.                        SDIM10;
+                         SKEY13;
+            ENDIF
+          ENDIF
+          MATCH      "P",SUBFIN
+          GOTO       PSUT1800 IF NOT EQUAL     * Not C/P
+          GOTO       PSUT1600
+.
+PSUT1400  IF         HOSPFLAG=1
+            IF         PTCNMFEE=1
+              PRINT      *1,SFINHOSP:
+                         *5,DIM3," SUB-TOTAL (CLAIM/ITEM GROUP): ",SDIM10;
+            ELSE
+              PRINT      *1,SFINHOSP:
+                         *5,DIM3," SUB-TOTAL (MISC.ITEM GROUP): ",SDIM10;
+            ENDIF
+          ELSE
+            IF         PTCNMFEE=1
+              PRINT      *1,DIM3," SUB-TOTAL (CLAIM/ITEM GROUP): ",SDIM10;
+            ELSE
+              PRINT      *1,DIM3," SUB-TOTAL (MISC.ITEM GROUP): ",SDIM10;
+            ENDIF
+          ENDIF
+          MATCH      "T",SUBFIN
+          GOTO       PSUT1800 IF NOT EQUAL     * Not C/P
+.
+PSUT1600  UNPACK     SDIM10,KEY1
+          MATCH      "1",KEY1
+          IF         @EQUAL
+            PRINT      " - SAMEDAY",*93,SUBTOT
+          ELSE
+            PRINT      " - MSO",*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT1800  PRINT      *93,SUBTOT
+          GOTO       PSUT8000
+.
+PSUT2000  MATCH      "H",SUBFIN
+          GOTO       PSUT2300 IF EQUAL
+          MATCH      "J",SUBFIN
+          GOTO       PSUT2200 IF EQUAL
+          MATCH      "N",SUBFIN
+          GOTO       PSUT2400 IF NOT EQUAL
+.
+          IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP,*5,DIM3," SUB-TOTAL (CRD NOTES ACCOM): ":
+                       DIM13,*93,SUBTOT
+          ELSE
+            PRINT      *1,DIM3," SUB-TOTAL (CRD NOTES ACCOM): ":
+                       DIM13,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT2200  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,DIM3," SUB-TOTAL (CRD NOTES DAILY CHARGE ACCOM): ":
+                       DIM13,*93,SUBTOT
+          ELSE
+            PRINT      *1,DIM3," SUB-TOTAL (CRD NOTES DAILY CHARGE ACCOM): ":
+                       DIM13,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT2300  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP,*5,DIM3," SUB-TOTAL (CRD NOTES LUMPSUM): ":
+                       DIM13,*93,SUBTOT
+          ELSE
+            PRINT      *1,DIM3," SUB-TOTAL (CRD NOTES LUMPSUM): ":
+                       DIM13,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT2400  MATCH      "C",SUBFIN
+          GOTO       PSUT2420 IF EQUAL
+          MATCH      "D",SUBFIN
+          GOTO       PSUT2430 IF EQUAL
+.
+          IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,DIM3," SUB-TOTAL (ACCOMMODATION): ",DIM13,*93,SUBTOT
+          ELSE
+            PRINT      *1,DIM3," SUB-TOTAL (ACCOMMODATION): ",DIM13,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT2420  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,DIM3," SUB-TOTAL (LUMPSUM ACCOMMODATION): ":
+                       DIM13,*93,SUBTOT
+          ELSE
+            PRINT      *1,DIM3," SUB-TOTAL (LUMPSUM ACCOMMODATION): ":
+                       DIM13,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT2430  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,DIM3," SUB-TOTAL (DAILY CHARGE ACCOMMODATION): ":
+                       DIM13,*93,SUBTOT
+          ELSE
+            PRINT      *1,DIM3," SUB-TOTAL (DAILY CHARGE ACCOMMODATION): ":
+                       DIM13,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT3000  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+.                      *5,DIM3," SUB-TOTAL (CASH): ",SCASHTYP," - ",SCASHDES:
+                       *5,DIM3," SUB-TOTAL (CASH): ",SCASHTYP," - ",SFINCODE:
+                       *93,SUBTOT
+          ELSE
+.           PRINT      *1,DIM3," SUB-TOTAL (CASH): ",SCASHTYP," - ",SCASHDES:
+            PRINT      *1,DIM3," SUB-TOTAL (CASH): ",SCASHTYP," - ",SFINCODE:
+                       *93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT4000  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,"SUB-TOTAL (JOURNAL): ",SJRNLCOD,*93,SUBTOT
+          ELSE
+            PRINT      *1,"SUB-TOTAL (JOURNAL): ",SJRNLCOD,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT5000  MATCH      "H",SUBFIN
+          GOTO       PSUT5200 IF EQUAL
+          MATCH      "J",SUBFIN
+          GOTO       PSUT5300 IF EQUAL
+          MATCH      "N",SUBFIN
+          GOTO       PSUT5400 IF EQUAL
+          MATCH      "Q",SUBFIN
+          GOTO       PSUT5500 IF EQUAL
+          MATCH      "P",SUBFIN
+          GOTO       PSUT5600 IF EQUAL
+.
+          IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP,*5,"SUB-TOTAL (GST) : ",DIM13A,*93,SUBTOT
+          ELSE
+            PRINT      *1,"SUB-TOTAL (GST) : ",DIM13A,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT5200  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,"SUB-TOTAL (CRD NOTES GST LUMPSUM) : ":
+                       DIM13A,*93,SUBTOT
+          ELSE
+            PRINT      *1,"SUB-TOTAL (CRD NOTES GST LUMPSUM) : ":
+                       DIM13A,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT5300  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,"SUB-TOTAL (CRD NOTES GST DAILY CHARGE) : ":
+                       DIM13A,*93,SUBTOT
+          ELSE
+            PRINT      *1,"SUB-TOTAL (CRD NOTES GST DAILY CHARGE) : ":
+                       DIM13A,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT5400  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,"SUB-TOTAL (CRD NOTES GST ACCOMMODATION) : ":
+                       DIM13A,*93,SUBTOT
+          ELSE
+            PRINT      *1,"SUB-TOTAL (CRD NOTES GST ACCOMMODATION) : ":
+                       DIM13A,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT5500  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,"SUB-TOTAL (CRD NOTES GST MISC.ITEM) : ":
+                       DIM13A,*93,SUBTOT
+          ELSE
+            PRINT      *1,"SUB-TOTAL (CRD NOTES GST MISC.ITEM) : ":
+                       DIM13A,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT5600  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,"SUB-TOTAL (CRD NOTES GST C/P MISC.ITEM) : ":
+                       DIM13A,*93,SUBTOT
+          ELSE
+            PRINT      *1,"SUB-TOTAL (CRD NOTES GST C/P MISC.ITEM) : ":
+                       DIM13A,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT6000  IF         HOSPFLAG=1
+            PRINT      *1,SFINHOSP:
+                       *5,"SUB-TOTAL (GST JOURNAL) : ",SJRNGCOD,*93,SUBTOT
+          ELSE
+            PRINT      *1,"SUB-TOTAL (GST JOURNAL) : ",SJRNGCOD,*93,SUBTOT
+          ENDIF
+          GOTO       PSUT8000
+.
+PSUT8000  CALL       UND132
+          MOVE       ZERO,SUBTOT
+PSUT9999  RETURN
++
+.*******************************************************************************
+.*        PTOT0000 - Print totals                                              *
+.*******************************************************************************
+PTOT0000  COMPARE    ZERO,GNDTOT
+          GOTO       PTOT9999 IF EQUAL
+          PRINT      *1,"TOTAL : ",*93,GNDTOT
+          PRINT      "*=======================================":
+                     "========================================":
+                     "========================================":
+                     "===========*"
+          ADD        ONE,CLNO
+          MOVE       ZERO,GNDTOT
+PTOT9999  RETURN
++
+.*******************************************************************************
+.*        HEAD0000 - Heading                                                   *
+.*******************************************************************************
+HEAD0000  CALL       HEAD132
+.
+          MOVE       SP20,DIM10
+          LOAD       DIM10,OPTION,INVOICE,CASH,JOURNAL,ALL
+.
+          MOVE       SP20,DIM10A
+          LOAD       DIM10A,SUBOPT,INPAT,AAEPAT,OUTPAT,ALLPAT
+.
+          IF         OPTION=1
+            IF         TRANTYPE=2
+              PRINT      *40,"System : ",DIM10A,"   ",DIM10," Accommodation"
+            ELSE
+              PRINT      *40,"System : ",DIM10A,"   ",DIM10," Item Charges"
+            ENDIF
+          ELSE
+            PRINT      *40,"System : ",DIM10A,"   ",DIM10
+          ENDIF
+.
+          UNPACK     INVFDATE,CCENT,CYEAR,CMON,CDAY
+          CALL       PACDATE
+          PRINT      *40,"Fromdate : ",CPCDATE;
+          UNPACK     INVTDATE,CCENT,CYEAR,CMON,CDAY
+          CALL       PACDATE
+          PRINT      *65,"To : ",CPCDATE
+.
+          CALL       UND132
+          PRINT      *1,"System",*10,"Site",*20,"Year",*25,"Type":
+                     *30,"Financial Code",*47,"Invoice date",*62,"Invoice No":
+                     *79,"Admission No.",*95,"    Amount"
+          CALL       UND132
+          ADD        THREE,CLNO
+HEAD9999  RETURN
++
+.*******************************************************************************
+.         Subroutine to get the misc group of a given item
+.*******************************************************************************
+GETM0000   MOVE       SP3,MMSCGRP
+.
+.          Check if this charge is numeric (ie. a MBS Item number)
+.
+           TYPE      TITEMNO
+           GOTO      GETM1000 IF NOT EQUAL
+.
+.          Code is numeric - check that it is a valid MBS item number
+.
+           PACK      KEY9 WITH TITEMNO,SP5
+           PACK      KEY17,KEY9,CURRDATE,SP70
+           CALL      PATITMRD
+           BRANCH    OVRCD OF GETM1000        * It might be a valid misc charge
+.
+           MOVE      IMISGRP,MMSCGRP
+           GOTO      GETM9999
+.
+GETM1000   MOVE      "0  ",MCLMCOD
+           PACK      KEY29,MCLMCOD,SP6,SP3,TITEMNO,CURRDATE,SP10
+           CALL      PATMCHRD                * read Misc.Charges file 
+           COMPARE   ZERO,EXIT
+           GOTO      GETM9999 IF EQUAL       * it's active
+.
+GETM9000   MOVE       SP3,MMSCGRP
+.
+GETM9999   RETURN
++
+.
+.*******************************************************************************
+.       Creating an indexed file based on port
+.*******************************************************************************
+INDZ0000  
+.       CHECK IF PREVIOUSLY EXISTS..IF SO DELETED IT 
+.
+          CALL          KILL0000
+          DISPLAY       *P1:12,*EF
+          CLEAR         CMDLINE
+          APPEND        "isbuild ",CMDLINE
+          APPEND        FNAMEI,CMDLINE
+        APPEND   " 63 u1-3,4-4,5-10,11-14,15-15,16-28,29-36,37-44+45-52",CMDLINE
+.       APPEND   " 63 u1-4,5-10,11-14,15-15,16-28,29-36,37-44,45-52",CMDLINE
+          RESET         CMDLINE
+.
+          EXECUTE      CMDLINE,TASKID
+          MOVE         ZERO,OVRCD
+          TRAP         OVERCOND IF IO
+          OPEN         PATTEMP,FNAMEI
+          TRAPCLR      IO
+.
+          MOVE         OVRCD,OPCND
+          BRANCH       OPCND,INDZ8000
+          GOTO         INDZ9999
+.
+INDZ8000  DISPLAY      *P20:24,*B,*V2LON:
+                       "** The Index File Not Created **",*W2;
+INDZ9999  RETURN
++
+.*******************************************************************************
+.       Deleting an indexed file based on port
+.*******************************************************************************
+KILL0000  CLOSE         PATTEMP
+	  MOVE          ZERO,STATUS
+.
+          CLEAR         CMDLINE
+          APPEND        "iserase ",CMDLINE
+          APPEND        FNAMEI,CMDLINE
+          RESET         CMDLINE
+          EXECUTE       CMDLINE,TASKID
+          DISPLAY       *P1:12,*EF
+          RETURN
++
+.*******************************************************************************
+.         CFIN0000 - Find out which financial year and period this is in
+.*******************************************************************************
+CFIN0000  MOVE      ZERO,NOPERIOD
+          UNPACK    FINDATE,DIM8
+.
+          REP       " 0",DIM8
+          MATCH     "00000000",DIM8
+          IF        @EQUAL
+            MOVE      PINVDTE,DIM8
+            REP       " 0",DIM8
+            MOVE      DIM8,FINDATE
+          ENDIF
+.
+          MATCH     INVFDATE,DIM8
+          GOTO      CFIN9999 IF LESS
+          MATCH     DIM8,INVTDATE
+          GOTO      CFIN9999 IF LESS
+.
+          PACK      KEY14,FINDATE,SP6   * Position to this date
+          CALL      RDSDRGA2            * Go to this date in the file
+          CALL      RDKDRGA2            * Get the first record on or after date
+          BRANCH    OVRCD,CFIN6000      * No records in file.
+.
+          MATCH     DRGFDTE,FINDATE     * Is the date before the from date ?
+          GOTO      CFIN6000 IF LESS    * Yes. Date not found in file.
+.
+.         Period record found
+.
+          MOVE      DRGYR,FINYEAR       * Save financial year
+          MOVE      DRGNUM,FORM2
+          MOVE      FORM2,FOFFSET      * Save period offset
+.
+.         Check if this is in a prior financial year
+.
+          PACK      FINDATE,CCC,CYY,CMM,CDD
+          REP       " 0",FINDATE
+.
+CFIN1000  PACK      KEY14,FINDATE,SP6   * Position to this date
+          CALL      RDSDRGA2            * Go to this date in the file
+          CALL      RDKDRGA2            * Get the first record on or after date
+          BRANCH    OVRCD,CFIN7000      * No records in file.
+.
+          MATCH     DRGFDTE,FINDATE     * Is the date before the from date ?
+          GOTO      CFIN7000 IF LESS    * Yes. Date not found in file.
+.
+          MATCH     DRGYR,FINYEAR       * Is this the same as the request date?
+          GOTO      CFIN5000 IF EQUAL   * Yes. Continue Processing
+.
+.         If this the first day of the financial year, then let all invoiced
+.         data go through as normal
+.
+          MATCH     "01",DRGNUM         * Is this the first period of year ?
+          GOTO      CFIN3000 IF NOT EQUAL
+.
+          MATCH     FINDATE,DRGFDTE     * Is this date the start of period ?
+          GOTO      CFIN3000 IF NOT EQUAL
+.
+.         Only allow invoices to go into the actual year.
+.
+          CMATCH    ANSA,FINTYPE
+          GOTO      CFIN3000 IF NOT EQUAL
+.
+.         Invoice on the first day of the financial year. Allow to go into
+.         previous year.
+.
+          GOTO      CFIN5000
+.
+.         Put the figures into the prior year column of report
+.
+CFIN3000  MOVE      TEN4,FOFFSET        * Put into the Prior year variable
+          MOVE      DRGYR,FINYEAR       * Put into the current financial year
+.
+.         Post the data to the tempfile
+.
+CFIN5000  ADD       ONE,UNIQKEY
+          MOVE      FOFFSET,FPERIOD
+          MOVE      UNIQKEY,DUNIQKEY
+          MOVE      PMVXMHOS,FINHOSP
+          IF        HOSPFLAG=1
+            PACK      KEY52,FINHOSP,FINSYS,FINSITE,FINYEAR,FINTYPE,FINCODE:
+                            PINVDTE,PINVNO,DUNIQKEY,SP20
+          ELSE
+            MOVE      SP10,FINHOSP
+            PACK      KEY52,FINHOSP,FINSYS,FINSITE,FINYEAR,FINTYPE,FINCODE:
+                            PINVDTE,PINVNO,DUNIQKEY,SP20
+          ENDIF
+.
+          CALL      WRTEMP 
+.
+          GOTO      CFIN9000            * Finished
+.
+.         The requested date does not exist in the date range file.
+.
+CFIN6000  UNPACK    FINDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          KEYIN     *P1:24,*EL,*V2LON,*B:
+                    *DV,PINVADM," ** Date ",*DV,CPCDATE," not in Period Range":
+                    " file. Hit <ENTER> to retry ",*EOFF,ANS;
+ 
+.         CMATCH    EXITCHAR,ANS
+          CMATCH    "E",ANS
+          GOTO      CFIN8000 IF EQUAL
+          GOTO      CFIN0000
+.
+.         The current date does not exist in the date range file.
+.
+CFIN7000  UNPACK    FINDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          KEYIN     *P1:24,*EL,*V2LON,*B:
+                    *DV,PINVADM," ** Date ",*DV,CPCDATE," not in Period Range":
+                    " file. Hit <ENTER> to retry ",*EOFF,ANS;
+.
+.         CMATCH    EXITCHAR,ANS
+          CMATCH    "E",ANS
+          GOTO      CFIN8000 IF EQUAL
+          GOTO      CFIN1000
+.
+.         Finished update of fees invoice file
+.
+CFIN8000  MOVE      ONE,NOPERIOD
+CFIN9000  
+CFIN9999  RETURN
++
+.*******************************************************************************
+.
+WRTEMP   PACK      DPINVADM,PINVADM
+         RESET     KEY52
+         WRITE     PATTEMP,KEY52;KEY52,FINAMT,FPERIOD
+         RETURN  
+.  
+RDSTEMP  RESET     KEY52
+         READ      PATTEMP,KEY52;;
+         RETURN 
+.
+RDKTEMP  MOVE      ZERO,OVRCD
+         READKS    PATTEMP;FINHOSP,DFINSYS,FINSITE,FINYEAR,FINTYPE,FINCODE:
+                           PINVDTE,PINVNO,DUNIQKEY,FINAMT,FPERIOD
+         GOTO      OVERCOND IF OVER
+         MOVE      DFINSYS,FINSYS
+         MOVE      DUNIQKEY,UNIQKEY
+         RETURN  
+.
+.==============================================================================
+.
+          INC       IBAOVRIO/INC            * Over flags
+          INC       PMSFCIIO/INC
+          INC       IBASEQIO/INC
+          INC       WEBERRIO/INC
+
+.
+ENDFINSM  ENDPROC
++

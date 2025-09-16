@@ -1,0 +1,515 @@
+.------------------------------------------------------------------------------
+. Program       : RCPWEB02
+.
+. Function      : XML Remote Scripting and lists For Receipting
+.                 Report/Option  1 - GETCAC00 get drawer code default chq acc
+.                 Report/Option  2 - VLDPSW00 validate cashier Id password
+.                 Report/Option  3 - Suspense allocation
+.                 Report/Option  4 - Multi-Hospital check
+.
+. Modifications :
+. =============
+. V11.01.01  29/04/2021  Ebon Clements    TSK 0886847
+.            Added hospital output to suspense allocation list - SUSLIS00
+. V10.14.01  20/03/2019  J.Tan            TSK 0857392
+.            Changed RCP Transaction count from DIM3 to DIM5
+. V10.08.02 30/08/2016  J.Tan           TSK 0819992
+.            Mods RCDTALLO to 2 instead of 0 for Suspense register
+. V10.08.01 06/06/2016  Jill Parkinson TSK 0819992
+.           Added loopcntr to stop suspense list timing out
+. V10.03.04 16/07/2013  Jill Parkinson CAR 287923
+.           Added include of PATCONFD
+. V10.03.03 22/04/2012  J.Tan         CAR 281302
+.           Mods to remove zero amt of receipt from Suspense Allocation list
+. V10.03.02 18/04/2012  J.Tan         CAR 252226
+.           Mods for Credit Card surcharge of Cash Drawer
+. V10.03.01 02/02/2012  J.Tan         CAR 246107
+.           Mods checking for inactive cash drawers
+. V10.01.01 21/02/2011  Mike Laming   CAR 233901
+.           Recompiled for RCPDTEaf - New fields added
+. V9.12.01  10/10/2010  J.Tan         CAR 174079
+.           Mods for Action Plan
+. V9.11.01  03/03/2009  Jill Habasque CAR 168446
+.           Added output of RCDTTDAT in SUSROW00
+. V9.10.01  09/09/2008  J.Tan                                CAR 178190
+.           Mods checking for Cancelled receipt for Suspense Allocation List
+. V9.04.01  19/08/2004  Lina Vo                              CAR 52746
+.           Added VLDHOS00 - Multi-Hospital check to match register hosptial Id
+.           with admission hospital Id
+.------------------------------------------------------------------------------
+. V9.03.02  09/02/2004  Jill Habasque                        CAR 44081
+.           Added Suspense Allocation
+. V9.03.01  10/11/2003  Lina Vo                              CAR 44073
+.           Added Validate Drawer Id password (VLDPSW00)
+.           Removed VLDCSH00 because rcpcshaf file no longer used.  Replaced 
+.           with GETCAC00 - get drawer code default cheque account.
+. V9.03.00  09/10/2003  Tracey Nguyen                        CAR 43980
+.           Created Program. Added VLDCSH00
+.------------------------------------------------------------------------------
+
+. FILE DEFINITIONS INCLUDES
+. =========================
+          INC       IBAWEBDF
+          INC       WEBDATDF
+.
+          INC       PATCONFD/INC
+          INC       PATCOMM/INC             * IBA Control file
+          INC       PATDHEAD/INC
+          INC       PATCALAG/INC
+          INC       PATHSPFD/INC
+          INC       DEBDBTFD/INC            * Debtor file
+          INC       IBASMAFD/INC            * Common system master file
+.
+          INC       PATVISFD/INC
+          INC       PATPFAFD/INC
+          INC       PMSVX1FD/INC
+          INC       RCPCIDFD/INC            * Cashier Id Table
+          INC       RCPREGFD/INC            * Register Table
+          INC       RCPDTEFD/INC            * Receipt Details Table
+          INC       RCPBNKFD/INC            * Receipt Bank Header Table
++
+.
+. PROGRAM VARIABLES
+. =================
+LOOPCNTR  FORM      8
+PASSWORD  DIM       6                      * Validation Password
+PATLINK   DIM       127   
+RCDTE002  DIM       12
+RCDTE003  DIM       5
+UPDATETY  DIM       1                      * Update Type
+VALDCODE  DIM       70                     * Validation Code
+INVOICEN  DIM       12
+.
++
+
+.------------------------------------------------------------------------------
+PRGID     INIT      "RCPWEB02"
+VERSION   INIT      "V11.03.00"
+PRGNAM    INIT      "XML Remote Receipting Code Validation Service"
+.------------------------------------------------------------------------------
+.
+          CALL      WEBINT00                * Initialise Fifo Etc.
+          CALL      INIT0000                * Open Files
+.
+MAIN1000  CALL      WEBRED00                * Read Fifo WEBPID and USERID
+.
+          COMPARE   "999",REPORTNO          * End Server Process if Option=999
+          GOTO      MAIN9999 IF EQUAL
+.
+          BRANCH    REPORTNO,MAIN1100,MAIN1200,MAIN1300,MAIN1400,MAIN1500
+          PACK      WEBTITLE,PRGID,SP1,VERSION,SP1,PRGNAM,SP70
+          MOVE      "INVALID OPTION",WEBTITLE
+          CALL      WEBERR00                * Create Output File and 
+                                            * Write HTML Page Header
+          GOTO      MAIN1000
+.
+MAIN1100  CALL      GETCAC00                * get Cashier id default chq acc  
+          GOTO      MAIN1000
+.
+MAIN1200  CALL      VLDPSW00                * Validate Cashier id password  
+          GOTO      MAIN1000
+.
+MAIN1300  CALL      SUSP0000                * Suspense allocation
+          GOTO      MAIN1000
+.
+MAIN1400  CALL      VLDHOS00                * Multi Hospital check          
+          GOTO      MAIN1000
+.
+MAIN1500  CALL      ACTPLN00                * Check Action Plan option
+          GOTO      MAIN1000
+.
+MAIN9999  MOVE      "SERVER SHUTDOWN COMPLETE",WEBTITLE
+          CALL      WEBERR00
+          STOP
++
+.------------------------------------------------------------------------------
+. Open Files and Initialize Variables
+.------------------------------------------------------------------------------
+INIT0000  OPEN      RCPCIDA1,"rcpcidaf"     * Cashier Id File
+          OPEN      RCPDTEA4,"rcpdteaf"     * Receipt Detail table
+          OPEN      RCPBNKA1,"rcpbnkaf"     * Receipt Bank header table
+          OPEN      RCPREGA1,"rcpregaf"     * Register table
+          OPEN      PATHSPA1,"pathspaf"
+. 
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,HUND14;*249,PTCNDFUP
+.
+
+.
+INIT9999  RETURN
++
+.------------------------------------------------------------
+. Process Fields
+.------------------------------------------------------------
+PROFLD00  BRANCH    REPORTNO,PROFLD99,PROFLD99,PROFLD30
+.
+PROFLD30  BRANCH    FLDSETNO,PROFLD31
+          GOTO      PROFLD99
+.
+PROFLD31  CALL      SUSLIS00
+          GOTO      PROFLD99
+.
+PROFLD99  RETURN
+.------------------------------------------------------------------------------
+. Clear Parameters
+.------------------------------------------------------------------------------
+CLRPAR00  MOVE      SP70,VALDCODE
+          MOVE      SP70,PASSWORD
+          MOVE      SP70,UPDATETY
+          MOVE      SP70,RCDTE002
+          MOVE      SP70,RCDTE003
+          MOVE      SP70,ADMISSNO
+          MOVE      SP70,INVOICEN
+.
+CLRPAR99  RETURN
++
+.------------------------------------------------------------------------------
+. Set Parameters
+.------------------------------------------------------------------------------
+SETPAR00  MATCH     "valdcode=",QRYNAME
+          IF        @EQUAL
+            MOVE      QRYDATA,VALDCODE
+            GOTO      SETPAR99
+          ENDIF
+.
+          MATCH     "password=",QRYNAME
+          IF        @EQUAL
+            PACK      PASSWORD,QRYDATA,SP70
+            GOTO      SETPAR99
+          ENDIF
+.
+          MATCH     "updatety=",QRYNAME
+          IF        @EQUAL
+            PACK      UPDATETY,QRYDATA,SP70
+            GOTO      SETPAR99
+          ENDIF
+.
+          MATCH     "admissno=",QRYNAME
+          IF        @EQUAL
+            MOVE      QRYDATA,ADMISSNO
+            GOTO      SETPAR99
+          ENDIF
+.
+          MATCH     "invoicen=",QRYNAME
+          IF        @EQUAL
+            MOVE      QRYDATA,INVOICEN
+            GOTO      SETPAR99
+          ENDIF
+.
+SETPAR99  RETURN
++
+.------------------------------------------------------------------------------
+. Get cashier code default cheque account.
+. Use validateRCP() function to call this remote script
+.------------------------------------------------------------------------------
+GETCAC00  CALL      XMLHED00
+          BRANCH    EXIT,GETCAC99
+.
+          PACK      KEY6,VALDCODE,SP70
+          CALL      RDCIDA1                * Yes, read Cashier file
+          BRANCH    OVRCD,GETCAC90         * Not found, display error message
+.
+          MATCH     "1",RCCIACTV
+          GOTO      GETCAC92 IF EQUAL      * Inactive
+.
+          WRITE     HTMLFILE;"<RETURN_VALUE TYPE=SIMPLE>":
+                              RCCICHQA,"|",RCCIINVR,"|",RCCIDEPR:
+                             "</RETURN_VALUE>"
+          GOTO      GETCAC98
+.
+GETCAC90  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=ERROR>":
+                             "Invalid Cashier Id Code - ",KEY6:
+                             "</RETURN_VALUE>"
+          GOTO      GETCAC98
+.
+GETCAC92  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=ERROR>":
+                             "Inactive Cashier Id Code - ",KEY6:
+                             "</RETURN_VALUE>"
+          GOTO      GETCAC98
+.
+GETCAC98  CALL      XMLEND00
+GETCAC99  RETURN
++
+.------------------------------------------------------------------------------
+. Validate cashier code password.
+.------------------------------------------------------------------------------
+VLDPSW00  CALL      XMLHED00
+          BRANCH    EXIT,VLDPSW99
+.
+          PACK      KEY6,VALDCODE,SP70
+          CALL      RDCIDA1                * Yes, read Cashier file
+          BRANCH    OVRCD,VLDPSW90         * Not found, display error message
+.
+          MATCH     RCPPASS,SP10
+          IF        @EQUAL
+            MATCH     PASSWORD,SP10
+            GOTO      VLDPSW91 IF NOT EQUAL
+          ELSE
+            MATCH     PASSWORD,SP10
+            GOTO      VLDPSW92 IF EQUAL
+            MATCH     PASSWORD,RCPPASS
+            GOTO      VLDPSW93 IF NOT EQUAL
+          ENDIF
+.
+          WRITE     HTMLFILE;"<RETURN_VALUE TYPE=SIMPLE>":
+                             "Password Verified Correct":
+                             "</RETURN_VALUE>"
+          GOTO      VLDPSW98
+.
+VLDPSW90  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=ERROR>":
+                             "Invalid Cashier Id Code - ",KEY6:
+                             "</RETURN_VALUE>"
+          GOTO      VLDPSW98
+.
+VLDPSW91  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=ERROR>":
+                             "No Password Required for Cash Drawer. ":
+                             "</RETURN_VALUE>"
+          GOTO      VLDPSW98
+.
+VLDPSW92  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=ERROR>":
+                             "Password Required for Cash Drawer. ":
+                             "</RETURN_VALUE>"
+          GOTO      VLDPSW98
+.
+VLDPSW93  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=ERROR>":
+                             "Invalid Password for Cash Drawer. ":
+                             "</RETURN_VALUE>"
+          GOTO      VLDPSW98
+.
+VLDPSW98  CALL      XMLEND00
+VLDPSW99  RETURN
++
+.------------------------------------------------------------------------------
+. Multi-Hospital check - Register Hospital Id must match Admission Hospital Id
+.------------------------------------------------------------------------------
+VLDHOS00  CALL      XMLHED00
+          BRANCH    EXIT,VLDHOS99
+.
+          COMPARE   ONE,IBCNMHOS           * Ignore if not Multi-hospital
+          GOTO      VLDHOS80 IF NOT EQUAL
+.
+          PACK      KEY3,VALDCODE,SP70
+          CALL      RDREGA1
+          BRANCH    OVRCD,VLDHOS90         * Not found, display error message
+.
+          PACK      KEY8,ADMISSNO,SP70
+          CALL      RDPMVX11
+          BRANCH    OVRCD,VLDHOS80         * Not found, ignore               
+.
+          MATCH     REGHOSP,PMVXMHOS
+          GOTO      VLDHOS91 IF NOT EQUAL
+.
+          WRITE     HTMLFILE;"<RETURN_VALUE TYPE=SIMPLE>":
+                             "Hospital Matched":
+                             "</RETURN_VALUE>"
+          GOTO      VLDHOS98
+.
+VLDHOS80  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=SIMPLE>":
+                             "Not Muli-Hospital":
+                             "</RETURN_VALUE>"
+          GOTO      VLDHOS98
+.
+VLDHOS90  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=ERROR>":
+                             "Invalid Register Code - ",KEY3:
+                             "</RETURN_VALUE>"
+          GOTO      VLDHOS98
+.
+VLDHOS91  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=ERROR>":
+                             "The Register's Hospital Id (",REGHOSP:
+                             ") does not match the Visit's Hospital Id (":
+                             PMVXMHOS,").</RETURN_VALUE>"
+          GOTO      VLDHOS98
+.
+VLDHOS98  CALL      XMLEND00
+VLDHOS99  RETURN
++
+.------------------------------------------------------------------------------
+.         Check if option to Activate Action plan is available
+.         (Only available if there is no record in patpfaaf file)
+.------------------------------------------------------------------------------
+ACTPLN00  CALL      XMLHED00
+          BRANCH    EXIT,ACTPLN99
+.
+          MOVE      ONE,F1              * Default Action Plan - Not available
+          MATCH     "1",PTCNDFUP
+          GOTO      ACTPLN80 IF NOT EQUAL  
+.         
+          OPEN      PATPFAA1,"patpfaaf"
+          SQUEEZE   INVOICEN
+          MOVE      ZERO,F8
+          MOVE      INVOICEN,F8
+          MOVE      F8,KEY8
+          CALL      RDPTPFA1
+          COMPARE   ZERO,OVRCD
+          GOTO      ACTPLN80 IF EQUAL   * already exist
+          MOVE      ZERO,F1             * Action Plan available
+.
+ACTPLN80  WRITE     HTMLFILE;"<RETURN_VALUE TYPE=SIMPLE>":
+                              F1:
+                             "</RETURN_VALUE>"
+          GOTO      ACTPLN98
+.
+ACTPLN98  CALL      XMLEND00
+ACTPLN99  RETURN
++
+.------------------------------------------------------------------------------
+. Suspense Allocation
+.------------------------------------------------------------------------------
+SUSP0000  MOVE      ZERO,EXIT
+.
+          MATCH     SP70,UPDATETY
+          GOTO      SUSP1000 IF EQUAL
+.
+          GOTO      SUSP9000
+.
+SUSP1000  CALL      WEBHED00   * Create Output File and Write HTML Page Header
+          BRANCH    EXIT,SUSP9999
+.
+          CALL      WEBBOD00   * Process Web Body
+.
+          CALL      WEBEND00   * Process End of HTML File
+          GOTO      SUSP9999
+.
+SUSP9000  MOVE      "Invalid Update Type",WEBTITLE
+          CALL      WEBERR00
+          MOVE      ONE,EXIT
+          GOTO      SUSP9999
+.
+SUSP9999  RETURN
++
+.------------------------------------------------------------------------------
+. Suspense List   
+.------------------------------------------------------------------------------
+SUSLIS00  UNPACK    DIM127,D1,LINKPRG,DIM127
+          UNPACK    DIM127,D1,LINKREP,DIM127
+          UNPACK    DIM127,D1,LINKTEM,DIM127
+.
+          MOVE      ZERO,LOOPCNTR
+          PACK      KEY18,TWO,SP70
+          CALL      RSRCDTE4
+SUSLIS10  CALL      RKRCDTE4
+          BRANCH    OVRCD,SUSLIS99
+.
+          MATCH     "2",RCDTALLO
+          GOTO      SUSLIS99 IF NOT EQUAL
+.
+          ADD       ONE,LOOPCNTR
+          IF        LOOPCNTR = 500
+            WRITE     HTMLFILE;"// ",LOOPCNTR
+            MOVE      ZERO,LOOPCNTR
+          ENDIF
+.
+          MOVE      RCDTRECN,KEY12
+          CALL      RDRCBNK1
+          BRANCH    OVRCD,SUSLIS10
+.
+          MATCH     "1",RCBNSTAT
+          GOTO      SUSLIS10 IF EQUAL       * Cancelled
+.
+          PACK      KEY3,RCDTREGI,SP70
+          CALL      RDREGA1
+          IF        OVRCD<>1
+            COMPARE   "99",REGIBACD
+            GOTO      SUSLIS10 IF NOT EQUAL
+          ENDIF
+.
+SUSLIS20  CALL      SUSROW00
+          GOTO      SUSLIS10 
+          
+SUSLIS99  RETURN
+.------------------------------------------------------------------------------
+. Suspense Row    
+.------------------------------------------------------------------------------
+SUSROW00  REP       " +",RCDTRECN
+          REP       " +",RCDTTCNT
+          CLEAR     PATLINK
+          APPEND    LINKPRG,PATLINK
+          APPEND    ".pbl?reportno=",PATLINK
+          APPEND    LINKREP,PATLINK
+          APPEND    "&template=",PATLINK
+          APPEND    LINKTEM,PATLINK
+          APPEND    "&rcpbk001=",PATLINK
+          APPEND    RCDTRECN,PATLINK
+          APPEND    "&rcpde003=",PATLINK
+          APPEND    RCDTTCNT,PATLINK
+          APPEND    "&susalloc=1",PATLINK
+          RESET     PATLINK
+          REP       "+ ",RCDTRECN
+          REP       "+ ",RCDTTCNT
+.
+          IF        RCDTAMNT=0
+            CLEAR     PATLINK
+            APPEND    "javascript:linkReceipt('",PATLINK
+            APPEND    RCDTRECN,PATLINK
+            APPEND    "','",PATLINK
+            APPEND    RCDTTCNT,PATLINK
+            APPEND    "')",PATLINK
+            APPEND    SP70,PATLINK
+            RESET     PATLINK
+          ENDIF
+.
+          MOVE      SP70,KEY7
+          MATCH     SP8,RCDTSPDT
+          IF        !@EQUAL
+            MOVE      "RedText",KEY7
+          ENDIF
+.
+          MOVE      SP70,PTHSNAME
+.
+          IF        IBCNMHOS=1
+            PACK      KEY3,RCDTMHOS,SP70
+            CALL      RDPTHSP1
+            IF        OVRCD=1
+              MOVE      RCDTMHOS,PTHSNAME
+            ENDIF
+          ENDIF
+.
+          WRITE     HTMLFILE;"t.addRow(#"",PATLINK,"#",":
+                             "#"",RCDTRECN,"#",":
+                             "#"",RCDTTCNT,"#",":
+                             "#"",RCDTNAME,"#",":
+                             "#"",RCDTADD1,RCDTADD2,RCDTADD3,RCDTADD4:
+                                  RCDTPOST,"#",":
+                             "#"",RCDTREFR,"#",":
+                             "#"",RCDTAMNT,"#",":
+                             "#"",RCDTDISC,"#",":
+                             "#"",RCDTTCNT,"#",":
+                             "#"",RCDTTDAT,"#",":
+                             "#"",KEY7,"#",":
+                             "#"",PTHSNAME,"#");"
+SUSROW99  RETURN
+.------------------------------------------------------------------------------
+
+.
+. INPUT/OUTPUT INCLUDES
+. =====================
+          INC       IBASMAIO/INC            * Common system master file
+          INC       DEBDBTIO/INC            * Debtor Table
+.
+          INC       PATHSPIO/INC
+          INC       PATVISIO/INC
+          INC       PATPFAIO/INC
+          INC       PMSVX1IO/INC
+.
+          INC       RCPCIDIO/INC            * Cashier Id Table
+          INC       RCPREGIO/INC            * Register Table
+          INC       RCPDTEIO/INC            * Receipt Details Table
+          INC       RCPBNKIO/INC            * Receipt Bank Header Table
+
+.
++
+.
+. SUBROUTINE INCLUDES
+. ===================
+          INC       IBAWEBCD
+          INC       DAYOFWEK
+          INC       WEBDATCD
+.
++
+.------------------------------------------------------------------------------
+. END OF PROGRAM
+.------------------------------------------------------------------------------
+

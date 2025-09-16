@@ -1,0 +1,640 @@
+.*****************************************************************************
+.* System    :   Referrals / Waiting List                                    *
+.* Program   :   IBACOM11                                                    *
+.* Desc      :   Process an eReferral change doc loader XML File             *
+.*****************************************************************************
+.* Date      :   09/01/2018                                                  *
+.* Author    :   Ebon Clements                                               *
+.* Function  :   This program will open an eReferral XML doc File and        *
+.*               load the details into obsecoaf or obspcoaf                  *
+.* Mods      :                                                               *
+.* V10.15.01     30/10/2019 Ebon Clements    TSK 0883549                     *
+.*               Link the document to the eReferral if the eReferral         *
+.*               is not linked to a visit.                                   *
+.* V10.14.01     27/08/2019 Ebon Clements    TSK 0880418                     *
+.*               Added max of 9999 documents per Referral ID error           *
+.*               RDHD9100                                                    *
+.*               Added mandatory Referral ID error - RDHD9200                *
+.*               Added no matching Referral ID error - RDHD9000              *
+.* V10.13.02     17/09/2018 Don Nguyen       TSK 0845295                     *
+.*               Increased size of command line & full file path variable    *
+.* V10.13.01     01/08/2018 Ebon Clements    TSK 0845295                     *
+.*               Changed to accept path and file as two keyings              *
+.*               Added move of file to processed or error directory          *
+.* V10.12.01     30/01/2018 Ebon Clements    TSK 0845295                     *
+.*               Pack keys prior to obsecoaf and obspcoaf writes             *
+.* V10.12.00     08/01/2018 Ebon Clements    TSK 0845295                     *
+.*               Created program from EADMNXML                               *
+.*****************************************************************************
+          INC       STD002FD
+.
+          INC       PATCONFD/INC
+          INC       PATMA1FD/INC
+          INC       PMSEERFD/INC        *eReferral pending error table
+          INC       COMERHFD/INC        *eReferral pending header table
+          INC       TFILEVAR/INC 
+          INC       WEBERRFD/INC 
+          INC       OBSAUDFD/INC
+          INC       OBSPCOFD/INC
+          INC       OBSECOFD/INC
+          INC       OBSPCTFD/INC
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+FLATFILE  FILE      ASCII,FIXED=4000             * XML File
+.
+. eReferral Delimited
+. -------------------------
+EREFHTXT  FILE      HL7,FIXED=1000
+.
+.Name     Type      Size      Start
+XMRBHOSP  DIM       3         Hospital (pathspaf)
+XMRDOCID  DIM       3         document  id
+XMRBEAID  DIM       20        eReferral ID
+XMRBMURN  DIM       8         mrn
+XMRDCTID  DIM       3         document type id
+XMRDCTYP  DIM       3         document type
+XMRLSMDT  DIM       8         last modified date
+
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CMDLINE   DIM       600
+DATSTRNG  DIM       300
+DIM100    DIM       100
+F20       FORM      20
+LASTCHAR  DIM       1
+LINCOUNT  FORM      8
+MESSGKEY  INIT      "1                   "
+ADMSURNM  INIT      "PatientSurname"
+TAGSTRNG  DIM       300
+TYPEFLAG  FORM      1             * information type flag
+TODAY     DIM       8
+DIM8      DIM       8
+CWEBCLOC  DIM       4
+.                                    0 = start tag value
+.                                    1 = end tag value
+.                                    2 = data value
+SECTION   FORM      2
+.
+HEADERFN  DIM       8     * Header Temp File Name
+DETAILFN  DIM       8     * Deatil Temp File Name
+.
+FILENAM1  DIM       20
+FILENAM2  DIM       20
+NWFILENM  DIM       100
+TMPSTRNG  DIM       4000
+XMLFILEN  DIM       127   * XML File Name
+XMLFPATH  DIM       127   * XML File Path
+XMLFLNAM  DIM       300   * XML File Name (full path)
+FORM20    FORM      20
+TIME      DIM       8
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+ANSUR     INIT      "UR"
+ANS001    INIT      "001"
+ENDSTRNG  INIT      ">"
+PIPE      INIT      "|"
+SEDSTRNG  INIT      "sed 's/<\/[^>]*>/&\n/g'"
+TILDA     INIT      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+PDF       INIT      ".pdf"
+DASH      INIT      "-"
+.
+.
+PRGID     INIT      "IBACOM11"
+PRGNAM    INIT      "eReferral document history XML load"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      SETX0000
+          CALL      INIT0000               * initialisation and open files
+.
+MAIN0500  CALL      GPTH0000               * get path name
+          BRANCH    EXIT,MAIN9999          * nothing input
+.
+          CALL      GFIL0000               * get filename 
+          BRANCH    EXIT,MAIN9999          * nothing input
+.
+          CALL      CFIL0000               * copy file
+          BRANCH    EXIT,MAIN9999          * unable to copy
+.
+          CALL      OPEN0000               * open text file
+          BRANCH    EXIT,MAIN9999          * unable to open .txt file
+.
+          CALL      PROC0000               * process
+.
+MAIN9999  STOP                             * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                     * display heading
+.
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      OBSAUDA1,"obsaudaf"
+          OPEN      OBSPCOA1,"obspcoaf"
+          OPEN      OBSECOA1,"obsecoaf"
+          OPEN      OBSPCTA1,"obspctaf"
+          OPEN      COMERHA6,"comerhaf"
+.
+          OPEN      CONTROLF,"controlf"
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,HEADERFN
+          REP       " 0",HEADERFN
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000              Called by: MAIN0000   *
+.*            Open the copied ".txt" file prior to processing                *
+.*****************************************************************************
+.
+OPEN0000  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      EREFHTXT,HEADERFN            * open text file
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Header File not found.  ";
+            CALL      HITENTER
+            GOTO      OPEN9100
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  CALL      MERR0000                * Move file to errors directory
+          MOVE      ONE,EXIT
+          GOTO      OPEN9999
+.
+OPEN9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*             Loop through the XML Response file and display the data       *
+.*****************************************************************************
+.
+PROC0000  CALL      RDHD0000
+          BRANCH    EXIT,PROC9999
+.
+          CLOSE     EREFHTXT,DELETE        * Delete Temporary File
+          CALL      MPRC0000               * Move file to processed directory
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.         write eReferral header to table
+.*****************************************************************************
+RDHD0000  READ      EREFHTXT,SEQ;XMRBHOSP,XMRDOCID,XMRBEAID,XMRBMURN:
+                                 XMRDCTID,XMRDCTYP,XMRLSMDT
+.
+          READ      CONTROLF,NINTY1;*219,CWEBCLOC
+          PACK      NWFILENM,SP70,SP70
+.
+          MATCH     "00000000000000000000",XMRBEAID  * Error if no ReferralID
+          GOTO      RDHD9200 IF EQUAL                * supplied
+.
+RDHD1000  PACK      KEY40,XMRBEAID,SP70
+          CALL      RACMERH6
+RDHD2000  CALL      RKCMERH6
+          BRANCH    OVRCD,RDHD9000
+.
+          MATCH     CMRHEREF,XMRBEAID
+          GOTO      RDHD9000 IF NOT EQUAL
+.
+          CALL      IBACLOCK
+          PACK      DIM8,CCC,CYY,CMM,CDD
+          REP       " 0",DIM8
+          PACK      TODAY,DIM8,SP70
+          CLOCK     TIME,CTIMEIS
+.
+          MATCH     CMRHVISN,SP70
+          IF        @EQUAL
+                                                  * write to obsecoaf new
+            PACK    KEY24,XMRBEAID,TILDA
+            CALL    RSOBECO1
+            CALL    RPOBECO1
+            IF      OVRCD=1
+              MOVE    "   1",OBECCPID
+            ELSE
+              MATCH   XMRBEAID,OBECEAID
+              IF      @EQUAL
+                MOVE    OBECCPID,FORM4
+                IF      FORM4=9999
+                  GOTO    RDHD9100          * Max of 9999 documents reached
+                ENDIF
+                ADD     ONE,FORM4
+                MOVE    FORM4,OBECCPID
+              ELSE
+                MOVE    "   1",OBECCPID
+              ENDIF
+            ENDIF  
+. 
+            PACK    OBECEAID,XMRBEAID
+
+            MATCH   XMRLSMDT,SP70
+            IF      @EQUAL
+              PACK    OBECINDT,SP70
+            ELSE
+              PACK    OBECINDT,XMRLSMDT
+            ENDIF
+.
+            PACK    OBECCTYP,XMRDCTID
+            PACK    OBECINTM,TIME
+            PACK    OBECINUS,SP70
+            PACK    OBECFEXT,PDF        
+            PACK    OBECSLID,CWEBCLOC
+.
+            PACK    KEY24,OBECEAID,OBECCPID,SP70
+            CALL    WROBECO1
+.
+            REP     " 0",OBECEAID
+            REP     " 0",OBECCPID
+            PACK    KEY4,CWEBCLOC,SP70
+            CALL    RDOBPT1
+            STRIP   OBPTSDIR
+            PACK    NWFILENM,OBPTSDIR,OBECEAID,DASH,OBECCPID,SP70
+            STRIP   NWFILENM
+.
+            CALL    MVDC0000             * move temp to episodeId+correspodent.pdf
+.
+            PACK    CMRHLHDT,XMRDCTID
+            MATCH   "999",CMRHLHDT
+            IF      @EQUAL
+              PACK    CMRHLHRD,TODAY
+            ENDIF
+            PACK    CMRHUDAT,TODAY
+            PACK    CMRHUTIM,TIME
+.
+            CALL    UPCMERH6           
+.
+          ELSE
+            PACK    KEY20,CMRHURNO,CMRHVISN,TILDA
+            CALL    RSOBPC1
+            CALL    RPOBPC1
+            IF      OVRCD=1
+              MOVE    "   1",OBPCCPID
+            ELSE
+              MATCH   CMRHURNO,OBPCURNO
+              IF      @EQUAL
+                MATCH   CMRHVISN,OBPCCVIS
+                IF      @EQUAL
+                  MOVE    OBPCCPID,FORM4
+                  ADD     ONE,FORM4
+                  MOVE    FORM4,OBPCCPID
+                ELSE
+                  MOVE    "   1",OBPCCPID
+                ENDIF
+              ELSE
+                MOVE    "   1",OBPCCPID
+              ENDIF
+            ENDIF  
+. 
+            PACK    OBPCURNO,CMRHURNO
+            PACK    OBPCCVIS,CMRHVISN,SP70
+            PACK    OBPCINDT,XMRLSMDT
+            PACK    OBPCCTYP,XMRDCTID
+            PACK    OBPCINTM,SP70
+            PACK    OBPCINUS,SP70
+            PACK    OBPCFEXT,PDF
+            PACK    OBPCMDEL,SP70
+            PACK    OBPCSLID,CWEBCLOC
+            PACK    OBPCSLEV,SP70
+            PACK    OBPCCOM1,SP70
+            PACK    OBPCCOM2,SP70
+            PACK    OBPCCFRM,SP70
+            PACK    OBPCCTOO,SP70
+            PACK    OBPCUDF1,SP70
+            PACK    OBPCUDF2,SP70
+            PACK    OBPCUYN1,SP70
+            PACK    OBPCUYN2,SP70
+            PACK    OBPCUDD1,SP70
+            PACK    OBPCUDD2,SP70
+            PACK    OBPCDTLU,DIM8
+            PACK    OBPCTMLU,TIME
+            PACK    OBPCLUID,SP70
+            PACK    OBPCACAT,SP70
+            PACK    OBPCACOD,SP70
+            PACK    OBPCEAID,CMRHEREF
+.
+            PACK    KEY20,OBPCURNO,OBPCCVIS,OBPCCPID,SP70
+            CALL    WROBPC1
+.
+            MOVE    ANSA,OBAUTYPE           * Add
+            CALL    OBSAUD00                * Clinical Documents Audit
+.
+            PACK    KEY24,OBPCEAID,OBPCCPID
+            CALL    RAOBECO1
+            IF      OVRCD<>1
+              GOTO    RDHD3000
+            ENDIF
+. 
+            PACK    OBECEAID,OBPCEAID
+            PACK    OBECCPID,OBPCCPID
+            PACK    OBECINDT,XMRLSMDT
+            PACK    OBECCTYP,XMRDCTID
+            PACK    OBECINTM,SP70
+            PACK    OBECINUS,SP70
+            PACK    OBECFEXT,PDF
+            PACK    OBECSLID,OBPCSLID
+            PACK    OBECURNO,OBPCURNO
+            PACK    OBECSPAR,SP70
+.
+            CALL    WROBECO1
+.
+RDHD3000    REP     " 0",OBPCCVIS
+            REP     " 0",OBPCCPID
+            PACK    KEY4,CWEBCLOC,SP70
+            CALL    RDOBPT1
+            STRIP   OBPTSDIR
+            PACK    NWFILENM,OBPTSDIR,OBECEAID,DASH,OBECCPID,SP70
+            MATCH   OBPCCVIS,SP70
+            IF      !@EQUAL      
+              PACK    NWFILENM,OBPTSDIR,OBPCCVIS,DASH,OBPCCPID,SP70
+            ENDIF
+            STRIP   NWFILENM
+            CALL    MVDC0000                       * move temp to urn+corepodent.pdf
+.
+            PACK    CMRHLHDT,XMRDCTID
+            MATCH   "999",CMRHLHDT
+            IF      @EQUAL
+              PACK    CMRHLHRD,TODAY
+            ENDIF
+            PACK    CMRHUDAT,TODAY
+            PACK    CMRHUTIM,TIME
+.
+            CALL    UPCMERH6
+.
+            PACK      KEY8,CMRHURNO           * validate UR
+            CALL      RDMAST1
+            IF        OVRCD<>1
+              MATCH     "1",PTMXSIN4
+              IF        !@EQUAL
+                PACK      KEY8,CMRHURNO         * validate UR
+                CALL      RLPTMAS1
+                IF        OVRCD=0
+                  MOVE      "1",PTMXSIN4
+                  CALL      UPMAST1
+                  CALL      UUPTMAS1
+                ENDIF
+              ENDIF
+            ENDIF
+.
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      RDHD9999
+.
+RDHD9000  CLOSE     EREFHTXT,DELETE        * Delete Temporary File
+          DISPLAY   *P1:24,*EL,*B,"No matching Referral ID found.  ";
+          CALL      HITENTER
+          CALL      MERR0000                * Move file to errors directory
+          CALL      RPDF0000                * Remove temp .pdf file
+          MOVE      ONE,EXIT
+          GOTO      RDHD9999
+.
+RDHD9100  CLOSE     EREFHTXT,DELETE        * Delete Temporary File
+          DISPLAY   *P1:24,*EL,*B,"Max of 9999 documents for Referral ":
+                                  "exceeded - ",XMRBEAID;
+          CALL      HITENTER
+          CALL      MERR0000                * Move file to errors directory
+          CALL      RPDF0000                * Remove temp .pdf file
+          MOVE      ONE,EXIT
+          GOTO      RDHD9999
+.
+RDHD9200  CLOSE     EREFHTXT,DELETE        * Delete Temporary File
+          DISPLAY   *P1:24,*EL,*B,"ERROR: XML ReferralID is mandatory..  ";
+          CALL      HITENTER
+          CALL      MERR0000                * Move file to errors directory
+          CALL      RPDF0000                * Remove temp .pdf file
+          MOVE      ONE,EXIT
+          GOTO      RDHD9999
+.
+RDHD9999  RETURN
+.****************************************************************************
+.*                                                                          *
+.*        MVDC0000                                                          *
+.****************************************************************************
+MVDC0000  
+          CLEAR     CMDLINE
+          APPEND    "ibacom11pdf.us1 ",CMDLINE
+          APPEND    HEADERFN,CMDLINE
+          APPEND    ".pdf",CMDLINE
+          APPEND    " ",CMDLINE
+          APPEND    NWFILENM,CMDLINE           * filename 
+          APPEND    ".pdf",CMDLINE           * filename 
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          MATCH     "0       ",TASKID
+          IF        @EQUAL
+            MOVE      ZERO,EXIT
+          ELSE
+            DISPLAY   *P1:24,*EL,*B,"Unable to move pdf. ";
+            CALL      HITENTER
+            CALL      MERR0000                * Move file to errors directory
+            MOVE      ONE,EXIT
+          ENDIF
+.
+MVDC9999  RETURN
+.
+.****************************************************************************
+.*                                                                          *
+.*        RPDF0000  - Remove temporary pdf file                             *
+.****************************************************************************
+RPDF0000  MATCH     SP70,HEADERFN
+          GOTO      RPDF9999 IF EQUAL
+.
+          MATCH     "00000000",HEADERFN
+          GOTO      RPDF9999 IF EQUAL
+.
+          CLEAR     CMDLINE
+          APPEND    "rm ",CMDLINE
+          APPEND    HEADERFN,CMDLINE
+          APPEND    ".pdf",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+RPDF9999  RETURN
+
++
+.*****************************************************************************
+.*                          CFIL0000               Called by: MAIN0000       *
+.*          Copy the XML file to a ".txt" file so TBL can open it            *
+.* Requires: XMLFLNAM - eReferral XML Response File name                    *
+.* Returns : TEMPFILE - temporary ".txt" filename                            *
+.*           EXIT  0 = file successfully copied                              *
+.*                 1 = unable to copy file                                   *
+.*****************************************************************************
+.
+.
+CFIL0000  STRIP     XMLFLNAM
+          CLEAR     CMDLINE
+          APPEND    "ibacom11xml.us1 ",CMDLINE
+          APPEND    HEADERFN,CMDLINE
+          APPEND    " ",CMDLINE
+          APPEND    HEADERFN,CMDLINE
+          APPEND    ".pdf ",CMDLINE           * filename 
+          APPEND    XMLFLNAM,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          MATCH     "0       ",TASKID
+          IF        @EQUAL
+            MOVE      ZERO,EXIT
+          ELSE
+            DISPLAY   *P1:24,*EL,*B,"Unable to convert XML file.  ";
+            CALL      HITENTER
+            CALL      MERR0000                * Move file to errors directory
+            MOVE      ONE,EXIT
+          ENDIF
+.
+CFIL9999  RETURN
++
+.*******************************************************************************
+.*                          GPTH0000                 Called by: MAIN0000       *
+.* Keyin the eReferral XML file path name                                     *
+.*******************************************************************************
+.
+GPTH0000  KEYIN     *P1:11,*EL,"File Path : ":
+                    *P13:11,XMLFPATH
+.
+          PACK      XMLFPATH,XMLFPATH,SP70
+          MATCH     SP70,XMLFPATH
+          GOTO      GPTH9100 IF EQUAL
+.
+          SQUEEZE   XMLFPATH
+          ENDSET    XMLFPATH
+          CMATCH    SLASH,XMLFPATH
+          IF        !@EQUAL
+            APPEND    SLASH,XMLFPATH
+          ENDIF
+          RESET     XMLFPATH
+.
+          MOVE      ZERO,EXIT
+          GOTO      GFIL9999
+.
+GPTH9100  MOVE      ONE,EXIT
+.
+GPTH9999  RETURN
++
+.*****************************************************************************
+.*                          GFIL0000               Called by: MAIN0000       *
+.*                       Keyin the response file name                        *
+.* Returns:  XMLFLNAM - eReferral XML Response File name                     *
+.*           EXIT  0 = valid filename input                                  *
+.*                 1 = nothing input                                         *
+.*****************************************************************************
+.
+GFIL0000  KEYIN     *P1:12,*EL,"Filename (excluding path): ":
+                    *P28:12,XMLFILEN
+.
+          PACK      XMLFILEN,XMLFILEN,SP30
+          MATCH     SP30,XMLFILEN
+          GOTO      GFIL9100 IF EQUAL
+.
+          PACK      XMLFLNAM,XMLFPATH,XMLFILEN,SP70   * Full name and path
+          SQUEEZE   XMLFLNAM
+          MOVE      ZERO,EXIT
+          GOTO      GFIL9999
+.
+GFIL9100  MOVE      ONE,EXIT
+.
+GFIL9999  RETURN
++
+.------------------------------------------------------------
+. Clinical Documents Audit: Add, Update, View and Delete
+. Input - OBAUTYPE (A,U,V,D)
+.------------------------------------------------------------
+OBSAUD00  MOVE      OBPCURNO,OBAUURNO
+          MOVE      OBPCCVIS,OBAUVISN
+          MOVE      OBPCCPID,OBAUCORR
+          CALL      IBACLOCK
+          PACK      OBAUDATE,CCC,CYY,CMM,CDD
+          REP       " 0",OBAUDATE
+          PACK      OBAUTIME,CTIMEIS
+          MOVE      SP70,OBAUWEBU
+          MOVE      SP70,OBAUREAS
+          PACK      OBAUSPAR,SP70
+.
+          MATCH     ANSU,OBAUTYPE
+          IF        @EQUAL
+            MOVE      OBPCUDF1,OBAUREAS
+          ENDIF
+.
+          PACK      KEY47,OBAUURNO,OBAUVISN,OBAUCORR,OBAUDATE:
+                          OBAUTIME,OBAUWEBU,OBAUTYPE,SP70
+          CALL      RAOBAUD1
+          IF        OVRCD=1
+            CALL      WROBAUD1
+          ENDIF
+.
+OBSAUD99  RETURN
++
+.*******************************************************************************
+.* Move input file to processed directory                                      *
+.*******************************************************************************
+MPRC0000  MATCH     SP70,XMLFPATH
+          GOTO      MPRC9999 IF EQUAL
+          GOTO      MPRC9999 IF EOS
+.
+          MATCH     SP70,XMLFLNAM
+          GOTO      MPRC9999 IF EQUAL
+          GOTO      MPRC9999 IF EOS
+.
+          CLEAR     CMDLINE
+          APPEND    "mv ",CMDLINE
+          APPEND    XMLFLNAM,CMDLINE
+          APPEND    " ",CMDLINE
+          APPEND    XMLFPATH,CMDLINE
+          APPEND    "processed/",CMDLINE
+          APPEND    XMLFILEN,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+MPRC9999  RETURN
++
+.*******************************************************************************
+.* Move input file to error directory                                          *
+.*******************************************************************************
+MERR0000  MATCH     SP70,XMLFPATH
+          GOTO      MERR9999 IF EQUAL
+          GOTO      MERR9999 IF EOS
+.
+          MATCH     SP70,XMLFLNAM
+          GOTO      MERR9999 IF EQUAL
+          GOTO      MERR9999 IF EOS
+.
+          CLEAR     CMDLINE
+          APPEND    "mv ",CMDLINE
+          APPEND    XMLFLNAM,CMDLINE
+          APPEND    " ",CMDLINE
+          APPEND    XMLFPATH,CMDLINE
+          APPEND    "errors/",CMDLINE
+          APPEND    XMLFILEN,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+MERR9999  RETURN
++
+.=========================================================================
+. I/O Includes
+.=========================================================================
+          INC       STD002IO
+          INC       TFILENAM     
+          INC       PATMA1IO/INC
+          INC       PMSEERIO/INC        *eReferral pending error table
+          INC       WEBERRIO/INC
+          INC       COMERHIO/INC
+          INC       OBSAUDIO/INC
+          INC       OBSPCOIO/INC
+          INC       OBSECOIO/INC
+          INC       OBSPCTIO/INC
+.

@@ -1,0 +1,301 @@
+.**************************************************************************
+.*  DGPMIEAL  :  Enquire Alias details for a Datagate request             *
+.*               ~~~~~~~~~~~~~~~~~~~~~                                    *
+.*                                                                        *
+.*  Author    :  ROD   (07/12/95)                                         *
+.*  Mods      :                                                           *
+.*           V10.04.02 16/06/2014  Steve Armstrong   CAR 301639           *
+.*                     Moved call to TFILENAM into DGINI000 (DGSRVPMI)    *
+.*                     and changed filename variable to FNAMEA            *
+.*           V10.04.01 24/04/2014  Steve Armstrong   CAR 261630           *
+.*                     Mods for non-port based tempfile use.              *
+.**************************************************************************
+.*           V10.02.02 13/07/2011  Steve Armstrong   CAR 240722           *
+.*                     Further mods to cater for second given name as     *
+.*                     part of PATGSRFD keys                              *
+.*           V10.02.01 22/06/2011  Steve Armstrong   CAR 240722           *
+.*                     Mods to cater for changes to PATGSRFD:             *
+.*                       - GSRSNAM & GSRGNAM extended to 30 chars.        *
+.*                       - PTGSGNM2 added.                                *
+.*                       - all indexes changed in length.                 *
+.**************************************************************************
+.*            V9.02.01 09/09/2001  Sandra Barcham                         *
+.*                     Add DOB & SEX to patgsrnf                          *
+.*            V9.00.00 18/06/2001  Mike Laming                            *
+.*                     Add new Alias fields GSRSEX & GSRDOB               *
+.*                     (for RCH & SVHM)                                   *
+.*            V5.10.B01 29/03/2001  Glenn Saunders                        *
+.*                     Remove access to PTCNSNDX and associated processing*
+.*            V5.07.00 22/12/1998  Davin                                  *
+.*                     Y2K mods                                           *
+.*            V5.04.01 16/04/1997  Steve Armstrong                        *
+.*                     Mods to use separate inbound & outbound comms      *
+.*                     clients for PMI requests (DGATEIN/DGATEOUT)        *
+.*                                                                        *
+.**************************************************************************
+          DEFPROC   DGPMIEAL
+ IFGE     $$VER,7
+.
+MAXRECS   FORM      2
+LSRCHKEY  DIM       115
+NUMFOUND  FORM      2
+LASTKEY   DIM       115
+MOREDATA  FORM      1
+.
+TEMPFIL1  IFILE     SQL, FIXED=100, KEY="D1-30,31-60"                    * I900
+.GSRSNAM   30     1     * surname alias
+.GSRGNAM   30    31     * given name 1 alias
+.PTGSGNM2  30    61     * given name 2 alias
+.GSRSEX    1     91     * sex of alias                                   * I900
+.GSRDOB    8     92     * date-of-birth for alias                        * I900
+.End or record  100                                                      * C900
+.
++
+.*************************************************************************
+.*  DGPMIEAL  :  Process datagate Enquire Alias message                  *
+.*************************************************************************
+DGPMIEAL  MOVE      "EAL",RPLYHEAD
+.
+          READ      DGATEOUT;PURNO,MAXRECS,LSRCHKEY
+.
+          CALL      VALID000                      * validate U/R number
+          BRANCH    EXIT,DGEAL900                 * error
+.
+          CALL      GETAL000                      * get/write the alias's
+.
+          ADD       ONE,SUCCPROC                  * increm # success transactns
+          GOTO      DGEAL999
+.
+. --- send back an Error response ---
+.
+DGEAL900  PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                            DGMISC3,SP1
+          ADD       ONE,ERRRPROC                  * increm # error transactions
+.
+DGEAL999  GOTO      DGEALEND                      * got end of procedure
++
+.***************************************************************************
+.*  VALID000  :  read patients details & make sure we have a valid patient *
+.*               Returns:  EXIT=0 --> Valid patient,   EXIT=1 --> ERROR    *
+.***************************************************************************
+VALID000  MOVE      PURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,VALID850                * no master details
+.
+          MOVE      PURNO,KEY8
+          CALL      RDPMPX21                      * get extension record
+.
+. make sure we have a surname record
+.
+.        using given/surname file
+.
+VALID200  PACK      KEY115,PURNO,SP70,SP70
+          CALL      RSPTGSR1
+          CALL      RKPTGSR1
+          BRANCH    OVRCD,VALID860
+.
+          MATCH     GSRURNO,PURNO
+          GOTO      VALID860 IF NOT EQUAL
+.
+VALID700  MOVE      ZERO,EXIT                     * we have a valid patient
+          GOTO      VALID999
+.
+VALID850  MOVE      "Patient Master details not found",RPLYDESC
+          MOVE      "01100",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      VALID999
+.
+VALID860  MOVE      "Missing surname record",RPLYDESC
+          MOVE      "02104",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      VALID999
+.
+VALID999  RETURN
++
+.***************************************************************************
+.*  GETAL000  :  get the alias's of the patient                            *
+.***************************************************************************
+GETAL000  CALL      CRET0000                      * create/clear temp file
+          CALL      CLERT000
+.
+          MOVE      ZERO,NUMFOUND                 * no. of alias's found
+          MOVE      ZERO,MOREDATA                 * init more data flag
+          PACK      LASTKEY,SP70,SP70             * save key if more data
+.
+. make sure LSRCHKEY has the U/R Number in it (Ledge made LSRCHKEY a DIM 61)
+.
+          MATCH     SP70,LSRCHKEY
+          IF        @EQUAL
+            PACK      LSRCHKEY,PURNO,ZEROUR,SP70,SP70
+          ENDIF
+.
+. load into a temp file all alias's found
+.
+.        using given/surname file
+.
+GETAL300  PACK      KEY115,LSRCHKEY,SP70,SP70
+          CALL      RSPTGSR1
+GETAL350  CALL      RKPTGSR1
+          BRANCH    OVRCD,GETAL500
+.
+          MATCH     GSRURNO,PURNO
+          GOTO      GETAL500 IF NOT EQUAL
+.
+          MATCH     GSRSNAM,PTMASNAM              * real name or alias?
+          GOTO      GETAL450 IF NOT EQUAL
+.
+          MATCH     GSRGNAM,PMPXFNAM              * real name or alias?
+          GOTO      GETAL450 IF NOT EQUAL
+.
+          MATCH     PTGSGNM2,PMPXSNAM             * real name or alias?
+          GOTO      GETAL450 IF NOT EQUAL
+.
+          MATCH     PBDATE,GSRDOB                 * real name or alias?
+          GOTO      GETAL450 IF NOT EQUAL
+.
+          MATCH     PSEX,GSRSEX                   * real name or alias?
+          GOTO      GETAL350 IF EQUAL
+.
+. we have an alias, so store it in the temp file
+.
+GETAL450  ADD       ONE,NUMFOUND                  * increment no. alias's found
+.
+          IF        NUMFOUND=MAXRECS
+            PACK      LASTKEY,PURNO,ZEROUR,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                              GSRSEX
+          ENDIF
+.
+.   if the max records to be returned is reached, then stop but set more flag
+.
+          IF        NUMFOUND>MAXRECS
+            MOVE      ONE,MOREDATA                * set more data flag
+            SUB       ONE,NUMFOUND
+            GOTO      GETAL500                  
+          ENDIF
+.
+          CALL      WRTEMP1
+.
+          GOTO      GETAL350                      * get next from surname
+.
+. we have no more alias's to search for so send reply message as successful
+.     NB.  SP1 at end of reply has been added because the interpreter does
+.     not place a "|" after the last field, and Datagate requires this.  By
+.     putting an extra field on the end (which is blank), a "|" will then
+.     be added after the last field.
+.
+GETAL500  IF        MOREDATA=0
+            PACK      LASTKEY,SP70,SP70           * dont need if no more data
+          ENDIF
+.
+          MOVE      "00000",RPLYCODE              * successful message
+          MOVE      SP50,RPLYDESC                 * clear error description
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                            DGMISC3,NUMFOUND,MOREDATA,LASTKEY,SP1;
+.
+. did we find any alias's?
+.
+          COMPARE   ZERO,NUMFOUND
+          GOTO      GETAL700 IF EQUAL
+.
+.     now write all the alias's found from the temp file to datagate
+.
+          MOVE      ZERO,FORM2
+          PACK      KEY60,SP70
+          CALL      RSTEMP1
+GETAL600  CALL      RKTEMP1
+          BRANCH    OVRCD,GETAL700
+.
+          ADD       ONE,FORM2
+.
+. if last alias to write then dont write using repeating group delimeter
+.
+          IF        FORM2=ONE
+            WRITE     DGATEIN;GSRSNAM,GSRGNAM,PTGSGNM2,GSRSEX,GSRDOB,SP1;      
+          ELSE
+            WRITE     DGATEIN;*SR,GSRSNAM,*SF,GSRGNAM,PTGSGNM2,GSRSEX,GSRDOB:
+                              SP1;
+          ENDIF
+          GOTO      GETAL600
+.
+GETAL700  WRITE     DGATEIN;
+.
+GETAL999  CALL      KILL0000                      * erase temp file
+          RETURN
+.
+.
+.
+OVERCOND  MOVE      ONE,OVRCD
+          RETURN
+.
+OVERLOCK  MOVE      TWO,OVRCD
+          RETURN
+.
++
+.*************************************************************************
+.*  KILL0000  :  erase temporary file                                    *
+.*************************************************************************
+KILL0000  CLOSE     TEMPFIL1
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAMEA,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+KILL9999  RETURN
++
+.*************************************************************************
+.*                             CRET0000            Called by:            *
+.*                      create temporary file                            *
+.*************************************************************************
+CRET0000  CALL      KILL0000                       * make sure clear temp file
+.
+          CLEAR     CMDLINE 
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAMEA,CMDLINE
+          APPEND    " 100 D1-30,31-60",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPFIL1,FNAMEA
+.
+CRET9999  RETURN
++
+.*************************************************************************
+.*                             CLERT000            Called by:            *
+.*                      clear temporary file                             *
+.*************************************************************************
+CLERT000  MOVE      SP70,KEY60
+          CALL      RSTEMP1                      * position at start of file
+          CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,CLERT999               * eof - finished
+.
+          PACK      KEY60,GSRSNAM,GSRGNAM
+          CALL      DETEMP1                      * delete record
+          GOTO      CLERT000
+.
+CLERT999  RETURN
++
+.*************************************************************************
+.*  Temp I/O's                                                           *
+.*************************************************************************
+RSTEMP1   RESET     KEY60
+          READ      TEMPFIL1,KEY60;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    TEMPFIL1;GSRSNAM,GSRGNAM,PTGSGNM2,GSRSEX,GSRDOB
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   RESET     KEY60
+          WRITE     TEMPFIL1,KEY60;GSRSNAM,GSRGNAM,PTGSGNM2,GSRSEX,GSRDOB
+.
+DETEMP1   DELETE    TEMPFIL1,KEY60
+          RETURN
+.
+. IO's go in here
+.
+ XIF
+DGEALEND  ENDPROC

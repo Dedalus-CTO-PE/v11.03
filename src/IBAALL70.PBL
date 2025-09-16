@@ -1,0 +1,639 @@
+.**********************************************************************
+.* System   : Alied Health                                            *
+.* Program  : IBAALL70                                                *
+.* Desc     : Allied Health VACS Report                               *
+.**********************************************************************
+.* Date     :  18/07/2001                                             *
+.* Author   :  Ebon Clements                                          *
+.*                                                                    *
+.* Mods     :                                                         *
+.**********************************************************************
+.*        V11.02.01 07/02/2022  Thanh T       TSK 0896905             *
+.*                  Recompiled for ALLDEPFD changes                   *
+.*        V10.04.01 12/06/2014  Steve Armstrong   CAR 301639          *
+.*                  Moved call to TFILENAM into INIT0000 and added    *
+.*                  call to KILL0000 on exit of program.              *
+.**********************************************************************
+.*        V10.03.01 10/12/2012  Ebon Clements     CAR 261630          *
+.*                  Removed port number from temp file name           *
+.**********************************************************************
+.*        V9.05.B02 20/02/2006  Ebon Clements     CAR 76341           *
+.*                  Added referral and encounter file audit           *
+.*        V9.05.B01 20/12/2005  Ebon Clements CAR 76341               *
+.*                  Key length changes for encounter number           *
+.**********************************************************************
+.*        V9.02.03  28/05/2002 Ebon Clements  18065                   *
+.*                  Mods to display encounters with no clinic type.   *
+.*                  Mods to only include patients with a patient      *
+.*                  indicator of Outpatient. Cat GI ind 1 = 0         *
+.*                  A VACS attendance must have a VACS chargeable     *
+.*                  service and a claim code with Ind 9 = P or 2      *
+.*        V9.02.02  14/05/2002 Ebon Clements  17473                   *
+.*                  Fixed VACS code heading                           *
+.*                  Changed tempfile port number to be PORT not CPORT *
+.*        V9.02.01  11/09/2001 Mike Laming                            *
+.*                  Add code to print VACS Code Description (Cat CQ)  *
+.*        V9.00.B00  18/7/2001 Ebon Clements                          *
+.*                  Created program                                   *
+.**********************************************************************
+.
+          INC       STD001FD
+          INC       ALLCONFD/INC
+          INC       PATCODFD/INC     * codes file
+          INC       IBASEQFD/INC     
+          INC       PATVISFD/INC     * Visit File
+          INC       PATDO1FD/INC     * Doctor file
+          INC       ALLENCFD/INC     * Allied Health Encounter Table
+          INC       ALLREFFD/INC     * Allied Health Referral Table
+          INC       ALLDEPFD/INC     * Allied Health Department Table
+          INC       ALLSERFD/INC     * Allied Health Service Table
+          INC       OUTCTYFD/INC     * clinic type file
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
++
+.**********************************************************************
+.*                         TEMPFILE DEFINITIONS                       *
+.**********************************************************************
+.
+TEMPFIL1  IFILE     SQL, FIXED=23, KEY="U1-3,4-6,7-12"
+.
+.NAME     TYPE     LENGTH  PHYSICAL   START     DESCRIPTION
+.----     ----     ------  --------   -----     -----------
+XXVACS    DIM           3         3       1     VACS Code (Category CQ)
+XXDEPT    DIM           3         3       4     Department
+XXCTYP    DIM           6         6       7     Clinic Type 
+XXTATT    FORM          8         5      13     Total Attendances 
+XXTVAC    FORM          8         5      18     Total VACS Attendances
+.
+.                  end of record   23    
+.
+ERASE     INIT      "iserase "
+ISBUILD   INIT      "isbuild "
+TEMPFILE  DIM       8
+UKEY      INIT      " 23 U1-3,4-6,7-12" * set up for record length & key
+.
+CMDLINE   DIM       50
+COUNTER   FORM      8
+CODE      DIM       2
+DEPTCODE  DIM       3
+ECOL1     FORM      2
+FROMDATE  DIM       8
+FNAMEI    DIM       8
+SITE      DIM       6        * site code
+TODATE    DIM       8
+PRTODATE  DIM       10       * Display date from
+PRTDEPT   DIM       20       * Department Description 
+PRFRDATE  DIM       10       * Display date to
+PRINCTYP  DIM       19       * Clinic Type description for print
+PRINDEPT  DIM       19       * Department Description  
+PRVACS    DIM       3        * Print VACS code
+SAVVACS   DIM       3        * Save VACS code
+SAVCTYP   DIM       6        * Save clinic type
+VACSFLAG  FORM      1        * VACS Flag
+WTDESC    DIM       20       * Total Line VACS Description             *I-90201
+YYTVAC    FORM      8        * Grand total VAC Attendances
+YYTATT    FORM      8        * Grand total Attendances
+.
+CATCL     INIT      "CL"
+CATCQ     INIT      "CQ"                                               *I-90201
+.
+PRGID     INIT      "IBAALL70"
+PRGNAM    INIT      "Allied Health VACS Report"
+VERSION   INIT      "V11.03.00"
++
+.**********************************************************************
+.*                         MAINLINE                                   *
+.**********************************************************************
+.
+ML0000    CALL      INIT0000        * initialisation
+.
+ML1000    CALL      OPTN0000        * select option
+          BRANCH    EXIT,ML9000
+.
+          BRANCH    OPTION,ML2000
+.
+ML2000    CALL      KCOD0000        * keyin department code CAT CG
+          BRANCH    EXIT,ML2500,ML1000
+
+ML2500    CALL      DATE0000        * keyin date range
+.
+          CALL      CONTQST         * ok to continue
+          BRANCH    CEXIT,ML3000,ML2000,ML9000    * 1=Yes, 2=No, 3=Cancel
+.
+ML3000    CALL      CREA0000        * create tempfile
+          CALL      ALEN0000        * process data
+          CALL      PRIN0000        * print routine
+          CALL      ENDP0000        * end of report
+          CALL      KILL0000        * remove the tempfile
+          GOTO      ML1000
+.
+ML9000    CALL      KILL0000        * remove the tempfile
+          CHAIN     PGM
++
+.**********************************************************************
+.*                         INIT0000                                   *
+.*                      Initialisation                                *
+.**********************************************************************
+.
+INIT0000  CALL      DISPHEAD
+.
+          DISPLAY   *P64:24,"patcodes";             * Codes File
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patvisaf";             * Visit File
+          OPEN      PATVISA1,"patvisaf"
+.
+          DISPLAY   *P64:24,"patdo1af";             * Doctors file
+          OPEN      PATDO1A1,"patdo1af"
+.
+          DISPLAY   *P64:24,"allencaf";             * Encounter Table
+          OPEN      ALLENCA4,"allencaf"
+.
+          DISPLAY   *P64:24,"allrefaf";             * Referral Table
+          OPEN      ALLREFA1,"allrefaf"
+.
+          DISPLAY   *P64:24,"alldepaf";             * Department Table
+          OPEN      ALLDEPA1,"alldepaf"
+.
+          DISPLAY   *P64:24,"allseraf";             * Service Table
+          OPEN      ALLSERA1,"allseraf"
+.
+          PACK      CFNAME WITH UID,FILCTYA1        * OUTCTYFD
+          DISPLAY   *P64:24,CFNAME;
+          OPEN      OUTCTYA1,CFNAME
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          CALL      TFILENAM                     * Get temp file name
+          MOVE      TFILNAME,TEMPFILE
+.
+          RETURN
++
+.***********************************************************************
+.*                             CREA0000                                *
+.*                    create tempfile for details                      *
+.***********************************************************************
+CREA0000  CALL      KILL0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      TEMPFIL1,TEMPFILE            * open temp index file
+.
+CREA9999  RETURN
++
+.***********************************************************************
+.*                             KILL0000                                *
+.*                    Remove tempfile for details                      *
+.***********************************************************************
+KILL0000  CLOSE     TEMPFIL1                     * close file
+.
+          CLEAR     CMDLINE                                 
+          PACK      CMDLINE,ERASE,TEMPFILE       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.                                                           
+KILL9999 RETURN    
++
+.***************************************************************************
+.*                               DATE0000                                  *
+.*                          accept date range                              *
+.***************************************************************************
+.
+.---------- keyin first date range -------
+.
+DATE0000    MOVE       FALSE,EXIT
+            DISPLAY    *P1:9,*EF,"Service Date From :":
+                          *P1:10,"Service Date To   :";
+.
+            MOVE      "9",CVERT
+            MOVE      "9",EVERT
+            CALL      IBACLOCK 
+            MOVE      CCC,CCENT
+            MOVE      CYY,CYEAR
+            MOVE      CMM,CMON
+            MOVE      CDD,CDAY
+            CALL      KEYDATE                          * enter the from date
+            PACK      FROMDATE,CCENT,CYEAR,CMON,CDAY   * move to form field
+            REP       " 0",FROMDATE                    * from date
+.
+            MOVE       "10",CVERT
+            MOVE       "10",EVERT
+            CALL      KEYDATE                          * enter the from date
+            PACK      TODATE,CCENT,CYEAR,CMON,CDAY     * move to form field
+            REP       " 0",FROMDATE                    * from date
+.
+            MATCH      FROMDATE,TODATE
+            GOTO       DATE9999 IF NOT LESS
+.
+            DISPLAY    *P1:24,*EL,*B,"2nd Range Must Be Greater Than 1st ":
+                       "Range - Hit <",*V2LON,"ENTER",*HOFF,"> To Continue ";
+            KEYIN      ANS;
+            DISPLAY    *P1:24,*EL;
+            GOTO       DATE0000
+.
+DATE9999    RETURN
++
+.**********************************************************************
+.*                      ALEN0000                                      *
+.*                      Process Data                                  *
+.**********************************************************************
+ALEN0000  PACK      KEY24,FROMDATE,SP70
+          CALL      RSALENC4
+ALEN1000  CALL      RKALENC4
+          BRANCH    OVRCD,ALEN9999
+.
+          MATCH     ALENSDAT,TODATE
+          GOTO      ALEN9999 IF LESS
+.
+          MATCH     "1",ALENRSTA                 * Don not include cancelled
+          GOTO      ALEN1000 IF EQUAL            * encounters
+.
+          MOVE      ZERO,VACSFLAG
+.
+          PACK      KEY8,ALENVISN                * Check if a single department
+          CALL      RDALREF1                     * has been selected
+          BRANCH    OVRCD,ALEN1000
+.
+          MATCH     SP70,DEPTCODE
+          IF        !@EQUAL
+            MATCH     DEPTCODE,ALREDEPT
+            GOTO      ALEN1000 IF NOT EQUAL
+          ENDIF
+.
+          PACK      KEY3,ALREDEPT                * Check if department uses 
+          CALL      RDALDEP1                     * VACS reporting
+          BRANCH    OVRCD,ALEN1000
+.
+          MATCH     "1",ALDEVACS
+          GOTO      ALEN1000 IF NOT EQUAL
+.
+          MATCH     SP70,ALENTYPE                * Only include if the patient
+          GOTO      ALEN1000 IF EQUAL            * type is outpatient 
+.                                                * Cat GI Ind 1=0
+          PACK      KEY5,ANSG,ANSI,ALENTYPE,SP70
+          CALL      RDCODE1
+          IF        OVRCD = 1
+            GOTO      ALEN1000
+          ELSE
+            MATCH     ANSO,TCINDC1
+            GOTO      ALEN1000 IF NOT EQUAL
+          ENDIF
+.
+          PACK      KEY9,ALREDEPT,ALENSERV,SP70    * VACS charge
+          CALL      RDALSER1
+          BRANCH    OVRCD,ALEN1000
+.
+          MATCH     "1",ALSRVACS
+          GOTO      ALEN2000 IF NOT EQUAL
+.
+          PACK      KEY5,ANSC,ANSL,ALENCOMP,SP70   * VACS Attendance if ind 9
+          CALL      RDCODE1                        * cat CL = (P)ublic        
+          IF        OVRCD = 1
+            GOTO      ALEN2000
+          ELSE
+            MATCH     ANSP,TCINDC9                        
+            GOTO      ALEN1500 IF EQUAL
+.
+            MATCH     "2",TCINDC9                        
+            GOTO      ALEN1500 IF EQUAL
+.
+            GOTO      ALEN2000
+          ENDIF
+.
+ALEN1500  MOVE      ONE,VACSFLAG
+.
+ALEN2000  PACK      KEY12,IDDD,ALENCLIN        * Read Clinic Type
+          CALL      RDCTYA1
+          IF        OVRCD=1
+            MOVE    SP70,OCTVACS               * Set up blank VACS code for
+          ENDIF
+.
+          PACK      KEY12,OCTVACS,ALREDEPT,ALENCLIN  * Store Each VACS Code 
+          CALL      RDTEMP1
+          IF        OVRCD = 1
+            MOVE      OCTVACS,XXVACS
+            MOVE      ALREDEPT,XXDEPT
+            MOVE      ALENCLIN,XXCTYP
+            MOVE      ONE,XXTATT
+            MOVE      ZERO,XXTVAC
+            IF        VACSFLAG = 1
+              MOVE      ONE,XXTVAC   
+            ENDIF
+            CALL      WRTEMP1
+          ELSE
+            ADD       ONE,XXTATT
+            IF        VACSFLAG = 1
+              ADD       ONE,XXTVAC   
+            ENDIF
+            CALL      UPTEMP1
+          ENDIF
+.
+          PACK      KEY12,OCTVACS,Z70       * Store Total For Each VACS Code 
+          CALL      RDTEMP1
+          IF        OVRCD = 1
+            MOVE      OCTVACS,XXVACS
+            MOVE      Z70,XXDEPT
+            MOVE      Z70,XXCTYP
+            MOVE      ONE,XXTATT
+            MOVE      ZERO,XXTVAC
+            IF        VACSFLAG = 1
+              MOVE      ONE,XXTVAC   
+            ENDIF
+            CALL      WRTEMP1
+          ELSE
+            ADD       ONE,XXTATT
+            IF        VACSFLAG = 1
+              ADD       ONE,XXTVAC   
+            ENDIF
+            CALL      UPTEMP1
+          ENDIF
+.
+          PACK      KEY12,Z70               * Store Grand Total
+          CALL      RDTEMP1
+          IF        OVRCD = 1
+            MOVE      Z70,XXVACS
+            MOVE      Z70,XXDEPT
+            MOVE      Z70,XXCTYP
+            MOVE      ONE,XXTATT
+            MOVE      ZERO,XXTVAC
+            IF        VACSFLAG = 1
+              MOVE      ONE,XXTVAC   
+            ENDIF
+            CALL      WRTEMP1
+          ELSE
+            ADD       ONE,XXTATT
+            IF        VACSFLAG = 1
+              ADD       ONE,XXTVAC   
+            ENDIF
+            CALL      UPTEMP1
+          ENDIF
+.
+          GOTO        ALEN1000
+.
+ALEN9999  RETURN
++
+.**********************************************************************
+.*                           ENDP0000                                 *
+.*                      Print the end of the report                   *
+.**********************************************************************
+ENDP0000  CALL      UND80                    * finish off report
+.
+          PRINT     *N,"                            *** End of Report ***"
+ENDP9999  RETURN
++
+.**********************************************************************
+.*                         PRIN0000                                   *
+.*                        Print Data                                  *
+.**********************************************************************
+.
+PRIN0000  CALL      HEAD0000
+.
+          MOVE      ZERO,COUNTER
+          MOVE      SP70,SAVVACS
+          PACK      KEY12,SP70
+          CALL      RDSTEMP1
+PRIN1000  CALL      RDKTEMP1
+          BRANCH    OVRCD,PRIN9999
+.
+          MATCH     Z70,XXVACS
+          GOTO      PRIN5000 IF EQUAL       * Print Grand Total
+          ADD       ONE,COUNTER
+.
+          COMPARE   ONE,COUNTER
+          IF        !@EQUAL
+            MATCH     SAVCTYP,XXCTYP              * Print total for clinic type
+            IF        !@EQUAL
+              PRINT     *1,"|",*8,"|",*10,"Total":
+                        *30,"|",*52,"|",*54,YYTATT,*66,"|":
+                        *68,YYTVAC,*80,"|"
+              MOVE      ZERO,YYTATT
+              MOVE      ZERO,YYTVAC
+            ENDIF
+          ENDIF
+.
+.-------- print detail line -----
+.
+          MATCH     Z70,XXCTYP             * Print Total for each VACS Code
+          IF        @EQUAL
+            MOVE      SP70,WTDESC           * Clear Description        *I-90201
+            MATCH     SP70,XXVACS
+            GOTO      PRIN1500 IF EQUAL
+.
+            PACK      KEY5,CATCQ,XXVACS                                *I-90201
+            CALL      RDCODE1                                          *I-90201
+            COMPARE   ZERO,OVRCD                                       *I-90201
+            MOVE      TDESC,WTDESC IF EQUAL                            *I-90201
+.
+PRIN1500    CALL      UND80
+            ADD       ONE,CLNO
+            PRINT     *1,"|",*3,"Total Code ",XXVACS:
+                      " - ",WTDESC:                                    *I-90201
+                      *52,"|",*54,XXTATT,*66,"|":
+                      *68,XXTVAC,*80,"|"
+            CALL      UND80
+            ADD       ONE,CLNO
+            MOVE      ZERO,COUNTER                                     *I-90201
+            GOTO      PRIN1000
+          ENDIF
+.
+PRIN2000  MOVE      XXVACS,PRVACS
+          MATCH     SAVVACS,XXVACS
+          IF        @EQUAL
+            MOVE     SP70,PRVACS
+          ENDIF
+.
+          MOVE      SP70,PRINCTYP
+          MATCH     SP70,XXCTYP
+          GOTO      PRIN4000 IF EQUAL
+.
+          PACK      KEY12,IDDD,XXCTYP         * Read Clinic to get VACS Code
+          CALL      RDCTYA1
+          IF        OVRCD = 1
+            CLEAR     PRINCTYP
+            APPEND    "Invalid Type ",PRINCTYP
+            APPEND    XXCTYP,PRINCTYP
+            RESET     PRINCTYP
+          ELSE
+            MOVE      OCTDESC,PRINCTYP
+            MATCH     OCTGRP,XXDEPT
+            IF        !@EQUAL
+              CLEAR     PRINCTYP
+              APPEND    "Incorrect Type ",PRINCTYP
+              APPEND    XXCTYP,PRINCTYP
+              RESET     PRINCTYP
+            ENDIF
+          ENDIF
+.
+PRIN4000  MOVE      SP70,PRINDEPT
+          PACK      KEY5,ANSC,ANSG,XXDEPT
+          CALL      RDCODE1
+          IF        OVRCD = 1
+            CLEAR     PRINDEPT
+            APPEND    "Invalid Dept ",PRINDEPT
+            APPEND    XXDEPT,PRINDEPT
+            RESET     PRINDEPT
+
+          ELSE
+            MOVE     TDESC,PRINDEPT
+          ENDIF
+.
+          PRINT     *1,"|",*3,PRVACS,*8,"|",*10,PRINDEPT:
+                      *30,"|",*32,PRINCTYP,*52,"|",*54,XXTATT:
+                      *66,"|",*68,XXTVAC,*80,"|"
+.
+          ADD       XXTATT,YYTATT
+          ADD       XXTVAC,YYTVAC
+          MOVE      XXVACS,SAVVACS
+.
+          ADD       ONE,CLNO
+          COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS
+.
+          GOTO      PRIN1000              * read next record
+.
+PRIN5000  CALL      UND80
+            ADD       ONE,CLNO
+            PRINT     *1,"|",*3,"Grand Total":
+                      *52,"|",*54,XXTATT,*66,"|":
+                      *68,XXTVAC,*80,"|"
+.
+PRIN9999  RETURN
++
+.**********************************************************************
+.*                      OPTN0000                                      *
+.*                      Main Option Screen                            *
+.**********************************************************************
+.
+OPTN0000  MOVE      FALSE,EXIT
+          HLINE     *G37,2,53,80
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Allied Health VACS Report";
+.
+OPTN1000  DISPLAY   *P1:7,*EL,"Option : ";
+          KEYIN     *P10:7,*V2LON,OPTION;
+.
+          BRANCH    OPTION,OPTN9999
+.
+          COMPARE   ZERO,OPTION
+          GOTO      OPTN9000 IF EQUAL
+          BEEP
+          GOTO      OPTN1000
+.
+OPTN9000  MOVE      TRUE,EXIT
+.
+OPTN9999  RETURN
++
+.*********************************************************************
+.         print a new page
+.*********************************************************************
+HEAD0000  CALL      HEAD80
+.
+          UNPACK    FROMDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,PRFRDATE         * formatted start date
+          UNPACK    TODATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,PRTODATE         * formatted start date
+.
+          MATCH     SP70,DEPTCODE
+          IF        @EQUAL             
+            MOVE      "All Departments",PRTDEPT
+            GOTO      HEAD5000
+          ENDIF
+.
+          PACK      KEY5,ANSC,ANSG,DEPTCODE
+          CALL      RDCODE1
+          IF        OVRCD = 1
+            MOVE     "Invalid Department",PRTDEPT
+          ELSE
+            MOVE     TDESC,PRTDEPT 
+          ENDIF
+.
+HEAD5000  PRINT     *10,"From : ",PRFRDATE," to ",PRTODATE:
+                    *45,"Department : ",PRTDEPT
+.
+          CALL      UND80
+          PRINT     *1,"| VACS ",*8,"| Department",*30,"| Clinic Type":
+                    *52,"| Total ",*66,"| VACS ":
+                    *80,"|"
+          PRINT     *1,"| Code ",*8,"|",*30,"|":
+                    *52,"| Attendances",*66,"| Attendances":
+                    *80,"|"
+.
+          CALL      UND80
+.
+HEAD9999  RETURN
++
+.******************************************************************************
+.*                                 KCOD0000              Called By : ML2000   *
+.*                         Keyin codes                                        *
+.******************************************************************************
+KCOD0000  MOVE      SP70,DEPTCODE
+          MOVE      SP70,PRTDEPT
+          MOVE      "CG",CODE
+          MOVE      "29",ECOL1
+          MOVE      "19",ECOL
+          MOVE      "8",EVERT 
+          DISPLAY    *P1:8,*EF,"Department Code :"
+          CALL      KEYINCOD
+          BRANCH    EXIT,KCOD1000:          * Nothing entered
+                         KCOD2000           * Exitchar entered
+.
+KCOD1000  DISPLAY   *PECOL1:EVERT,*V2LON,TDESC;
+          MOVE      ACODE,DEPTCODE
+.
+KCOD2000  RETURN
++
+.**********************************************************************
+.*              I/O SUBROUTINE FOR TEMPFILE                           *
+.**********************************************************************
+.
+RDSTEMP1  MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      TEMPFIL1,KEY12;;
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDKTEMP1  MOVE      ZERO,OVRCD
+          READKS    TEMPFIL1;XXVACS,XXDEPT,XXCTYP,XXTATT,XXTVAC
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   RESET     KEY12
+          WRITE     TEMPFIL1,KEY12;KEY12,XXTATT,XXTVAC
+          RETURN
+.
+RDTEMP1   RESET     KEY12
+          MOVE      ZERO,OVRCD
+          READ      TEMPFIL1,KEY12;XXVACS,XXDEPT,XXCTYP,XXTATT,XXTVAC
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPTEMP1   RESET     KEY12
+          UPDATE    TEMPFIL1;XXVACS,XXDEPT,XXCTYP,XXTATT,XXTVAC
+          RETURN
+.
+.**********************************************************************
+.*              I/O INCLUDES FOR FILES AND GENERAL ROUTINES           *
+.**********************************************************************
+.
+          INC       PATCODIO/INC
+          INC       PATVISIO/INC
+          INC       PATDO1IO/INC
+          INC       ALLENCIO/INC
+          INC       ALLREFIO/INC
+          INC       ALLDEPIO/INC
+          INC       ALLSERIO/INC
+          INC       IBASEQIO/INC     
+          INC       OUTCTYIO/INC
+          INC       WEBERRIO/INC
+.
+          INCLUDE   STD001IO
+          INC       KEYINCOD
+          INC       PATDSCOD
+          INC       TFILENAM
+.

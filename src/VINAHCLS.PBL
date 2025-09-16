@@ -1,0 +1,1514 @@
+.*****************************************************************************
+.* System    :   Allied Health                                               *
+.* Program   :   VINAHCLS                                                    *
+.* Desc      :   Fixit to report on and/or close referrals with no activity  *
+.*               since the entered cut-off date                              *
+.*****************************************************************************
+.* Date      :   03/02/2016                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will allow the user to report on and           *
+.*               optionally close episodes, as well as their linked programs *
+.*               where there has been no activity against the episode for a  *
+.*               defined period of time.                                     *
+.* Mods      :                                                               *
+.*****************************************************************************
+.*        V11.01.03 01/09/2021  Ebon Clements    TSK 0907466                 *
+.*                  Added VALP - Victorian artifical limb program            *
+.*        V11.01.02 01/09/2021  Ebon Clements    TSK 0907466                 *
+.*                  Added VALP - Victorian artifical limb program            *
+.*        V11.01.01 29/03/2021  Ebon Clements    TSK 0902602                 *
+.*                  2021 Vic health department changes                       *
+.*                  Added programs HEN, TPN and HBD                          *
+.*****************************************************************************
+.*        V11.00.02 11/05/2020  Ebon Clements    TSK 0891032                 *
+.*                  Removed 2020 Vic health department changes (Task 088624) *
+.*        V11.00.01 03/04/2020  Ebon Clements    TSK 0888624                 *
+.*                  Added programs HEN, TPN and HBD                          *
+.*****************************************************************************
+.*        V10.14.02 07/05/2019  Steve Armstrong  TSK 0874431                 *
+.*                  Added check for EXIT value after return from CVIN0000.   *
+.*        V10.14.01 17/04/2019  Steve Armstrong  TSK 0868837                 *
+.*                  Recompiled for changes to ALLHDTFD.                      *
+.*****************************************************************************
+.*        V10.08.02 27/04/2016  Steve Armstrong  TSK 0817342                 *
+.*                  Added population of ALREUC33 in CLSE0000.                *
+.*        V10.08.01 29/03/2016  Steve Armstrong  TSK 0321541                 *
+.*                  Mods to exclude referrals on or after the cut-off date   *
+.*****************************************************************************
+.*        V10.07.01 11/03/2016  Steve Armstrong  TSK 0321541                 *
+.*                  Mods to CVIN0000 to ensure that the VINAH program type   *
+.*                  matches the one selected.                                *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       ALLAUDFD/INC
+          INC       ALLCONFD/INC
+          INC       ALLENCFD/INC
+          INC       ALLHDTFD/INC
+          INC       ALLLNKFD/INC
+          INC       ALLQUEFD/INC
+          INC       ALLREFFD/INC
+          INC       ALLRLNFD/INC
+          INC       ALLSTSFD/INC
+          INC       HL7CISFD/INC
+          INC       HL7INBFD/INC
+          INC       IBACONFD/INC
+          INC       NHIMASFD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATMA1FD/INC
+          INC       PATNIDFD/INC
+          INC       PMSPX2FD/INC
+          INC       PMSQPTFD/INC
+          INC       WEBSECFD/INC
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+BOXOPT    FORM      2
+CISMFLAG  FORM      1
+CLREASON  DIM       3             * Closure reason (Cat LL)
+CODE      DIM       2             * for PATCODKY
+COMPREAS  DIM       3             * completion reason code
+CURRDATE  DIM       8             * current date (ccyymmdd)
+CUTOFFDT  DIM       8             * cut off date (ccyymmdd)
+DEPTCODE  DIM       3             * department code
+DEPTDESC  DIM       20            * department description
+DIM4      DIM       4
+IBAMFLAG  FORM      1
+IMONTH    FORM      2
+ICENTYR   FORM      4
+LINKFLAG  FORM      1             * other linked episode flag
+.                                    0 = No other linked active episodes, so
+.                                        referral-in can be closed
+.                                    1 = Other linked active episodes, so
+.                                        referral-in cannot be closed, only
+.                                        the current episode
+MESSAGID  DIM       20
+NMPNUMB   DIM       20
+PMIDTFLG  FORM      1             * PMI Details flag
+.                                    0 = PMI details found
+.                                    1 = Error finding PMI details
+PROGCODE  DIM       6
+PROGDESC  DIM       47
+PROGTYPE  FORM      2             * VINAH Program Type
+.                                    1 = HARP
+.                                    2 = HBPCCT
+.                                    3 = MH
+.                                    4 = PC
+.                                    5 = PAC
+.                                    6 = RIR
+.                                    7 = SACS
+.                                    8 = SOP
+.                                    9 = TCP
+.                                   10 = HEN
+.                                   11 = TPN
+.                                   12 = HBD
+.                                   13 = VALP
+RECCOUNT  FORM      10            * total record count
+REFLFLAG  FORM      1             * Referral Flag
+.                                    0 = Referral-In record being processed
+.                                    1 = Episode record being processed
+REFLTYPE  DIM       1             * referral type (I or D)
+SAVKEY8E  DIM       8             * saved episode visit number
+SAVKEY8R  DIM       8             * saved referral-in visit number
+SAVKEY30  DIM       30            * saved key for episode being processed
+SAVSECTN  DIM       1             * saved section flag
+SECTNCNT  FORM      10            * section count
+TRIGFLAG  FORM      1             * audit trigger flag
+.                                    0 = trigger audit record
+.                                    0 = don't trigger audit record
+VISITNUM  DIM       8             * visit number
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+CATZG     INIT      "zG"
+CLOSCMNT  INIT      "Closed due to no activity"
+LOWCASEL  INIT      "l"
+PIPE      INIT      "|"
+PRGDES01  INIT      "Hospital Admission Risk Program                "
+PRGDES02  INIT      "Hospital Based Palliative Care Consultancy Team"
+PRGDES03  INIT      "Medi-Hotel                                     "
+PRGDES04  INIT      "Palliative Care                                "
+PRGDES05  INIT      "Post Acute Care                                "
+PRGDES06  INIT      "Residential In-Reach                           "
+PRGDES07  INIT      "Sub-acute Ambulatory Care Services             "
+PRGDES08  INIT      "Specialist Clinics (Outpatients)               "
+PRGDES09  INIT      "Transition Care Program                        "
+PRGDES10  INIT      "Home Enteral Nutrition                         "
+PRGDES11  INIT      "Total Parenteral Nutrition                     "
+PRGDES12  INIT      "Home Based Dialysis                            "
+PRGDES13  INIT      "Victorian Artificial Limb Program              "
+PROCCOD1  INIT      "HARP  "
+PROCCOD2  INIT      "HBPCCT"
+PROCCOD3  INIT      "MH    "
+PROCCOD4  INIT      "PC    "
+PROCCOD5  INIT      "PAC   "
+PROCCOD6  INIT      "RIR   "
+PROCCOD7  INIT      "SACS  "
+PROCCOD8  INIT      "SOP   "
+PROCCOD9  INIT      "TCP   "
+PROCCD10  INIT      "HEN   "
+PROCCD11  INIT      "TPN   "
+PROCCD12  INIT      "HBD   "
+PROCCD13  INIT      "VALP  "
+REPDESC1  INIT      " - Report Only      "
+REPDESC2  INIT      " - Report and Fixit "
+TILDA42   INIT      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+.
+.
+PRGID     INIT      "VINAHCLS"
+PRGNAM    INIT      "Close Inactive Referrals"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with fixit
+.
+MAIN1000  CALL      DBOX0000
+          BRANCH    EXIT,MAIN0100          * nothing entered
+.
+MAIN1500  CALL      GDEP0000               * get department code
+          BRANCH    EXIT,MAIN1000:         * nothing entered
+                         MAIN0100          * exitchar entered
+.
+MAIN2000  CALL      GDAT0000               * get cut off date
+          BRANCH    EXIT,MAIN1500          * nothing entered
+.
+MAIN3000  CALL      GCLO0000               * get episode closure reason code
+          BRANCH    EXIT,MAIN2000:         * nothing entered
+                         MAIN0100          * exitchar entered
+.
+          CALL      GREF0000               * get referral type code
+          BRANCH    EXIT,MAIN2000:         * nothing entered
+                         MAIN0100          * exitchar entered
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN5000:        * yes
+                          MAIN3000:        * no
+                          MAIN0100         * cancel
+.
+MAIN5000  CALL      PROC0000               * process
+          GOTO      MAIN0100
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"allrefaf";
+          OPEN      ALLREFA1,"allrefaf"
+          OPEN      ALLREFA6,"allrefaf"
+.
+          DISPLAY   *P64:24,"allaudre";
+          OPEN      ALLAUDRE,"allaudre"
+.
+          DISPLAY   *P64:24,"alleaudf";
+          OPEN      ALLAUDA1,"allaudaf"
+.
+          DISPLAY   *P64:24,"allencaf";
+          OPEN      ALLENCA6,"allencaf"
+.
+          DISPLAY   *P64:24,"allhdtaf";
+          OPEN      ALLHDTA7,"allhdtaf"
+.
+          DISPLAY   *P64:24,"alllnkaf";
+          OPEN      ALLLNKA3,"alllnkaf"
+.
+          DISPLAY   *P64:24,"allrlnaf";
+          OPEN      ALLRLNA1,"allrlnaf"
+          OPEN      ALLRLNA2,"allrlnaf"
+.
+          DISPLAY   *P64:24,"allstsdf";
+          OPEN      ALLSTSA1,"allstsaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"pmspx2af";
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,HUND06;*225,ALCNDEVP  * use event program for VINAH
+.
+          MOVE      ONE,CNEWDS
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        Get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run fixit                               *
+.*                        TRUE  (1)  Exit option selected                    *
+.*              COPTION  1 = Report Only                                     *
+.*                       2 = Report and Fixit                                *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Report Only":
+                    *P1:6,*V2LON,TWO,*HOFF,". Run Report and Fixit"
+.
+OPTN0500  KEYIN     *P1:8,*EL,"Select Option : ":
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000:            * run report only
+                            OPTN9000             * run report and fixit
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  LOAD      CPHDROPT,COPTION,REPDESC1,REPDESC2
+          MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               GDEP0000              Called by: MAIN0000   *
+.*                  Get the department code                                  *
+.* Returns:  EXIT  0 = Ok to continue                                        *
+.*                 1 = Nothing entered                                       *
+.*           DEPTCODE - Department Code (alldepaf)                           *
+.*           DEPTDESC - Department Description                               *
+.*****************************************************************************
+.
+GDEP0000  MOVE      TEN1,EVERT
+          MOVE      TWENTY1,ECOL
+          PACK      CODE,ANSC,ANSG
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND
+          MOVE      ZERO,CKYIMODE
+.
+GDEP1000  DISPLAY   *P1:11,*EF,"Department        :"
+          CALL      PATCODKY
+          BRANCH    EXIT,GDEP9100:               * nothing input
+                         GDEP9200:               * exitchar input
+                         GDEP9100                * spaces input
+.
+.         Make sure that this is a VINAH Department
+.
+          MATCH     SP1,TCINDC8
+          GOTO      GDEP8000 IF EQUAL
+.
+          TYPE      TCINDC8
+          GOTO      GDEP8000 IF EQUAL
+.
+          MOVE      TCINDC8,ANS
+.
+          MATCH     "E",ANS
+          IF        @EQUAL
+            MOVE      "10",FORM2                 * HEN
+            GOTO      GDEP8100
+          ENDIF
+.
+          MATCH     "L",ANS
+          IF        @EQUAL
+            MOVE      "11",FORM2                 * TPN
+            GOTO      GDEP8100
+          ENDIF
+.
+          MATCH     "D",ANS
+          IF        @EQUAL
+            MOVE      "12",FORM2                 * HBD
+            GOTO      GDEP8100
+          ENDIF
+.
+          MATCH     "V",ANS
+          IF        @EQUAL
+            MOVE      "13",FORM2                 * VALP
+            GOTO      GDEP8100
+          ENDIF
+.
+          REP       "I1H2M3P4A5R6S7O8T9",ANS
+          MOVE      ZERO,FORM2
+          MOVE      ANS,FORM2
+          BRANCH    FORM2,GDEP8100:              * HARP
+                          GDEP8100:              * HBPCCT
+                          GDEP8100:              * MH
+                          GDEP8100:              * PC
+                          GDEP8100:              * PAC
+                          GDEP8100:              * RIR
+                          GDEP8100:              * SACS
+                          GDEP8100:              * SOP
+                          GDEP8100               * TCP
+.
+.         Department is not valid for program type
+.
+GDEP8000  DISPLAY   *P1:24,*EL,*B,"Department is not valid for program type.  ";
+          CALL      HITENTER
+          GOTO      GDEP1000
+.
+.         Check department is valid for option selected
+.
+GDEP8100  COMPARE   FORM2,PROGTYPE
+          GOTO      GDEP9000 IF EQUAL
+          GOTO      GDEP8000
+.
+.         Note: Both active and inactive codes acceptable (hence no
+.               check has been done for this)
+.
+GDEP9000  DISPLAY   *P30:11,TDESC
+          MOVE      ACODE,DEPTCODE
+          MOVE      TDESC,DEPTDESC
+          MOVE      ZERO,EXIT
+          GOTO      GDEP9999
+.
+GDEP9100  MOVE      ONE,EXIT
+          GOTO      GDEP9999
+.
+GDEP9200  MOVE      ONE,EXIT
+.
+GDEP9999  RETURN
++
+.*****************************************************************************
+.*                               GCLO0000              Called by: MAIN0000   *
+.*                  Get the reason for closure                               *
+.* Returns:  EXIT  0 = Ok to continue                                        *
+.*                 1 = Nothing entered                                       *
+.*           CLREASON - Closure Reason (Cat LL)                              *
+.*****************************************************************************
+.
+GCLO0000  MOVE      TEN3,EVERT
+          MOVE      TWENTY1,ECOL
+          PACK      CODE,ANSL,ANSL
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND
+          MOVE      ZERO,CKYIMODE
+.
+GCLO1000  DISPLAY   *P1:13,*EF,"Closure Reason    :"
+          CALL      PATCODKY
+          BRANCH    EXIT,GCLO9100:               * nothing input
+                         GCLO9200:               * exitchar input
+                         GCLO9100                * spaces input
+.
+          MATCH     ANSI,PTCOACTV
+          IF        @EQUAL
+            DISPLAY   *P1:24,*EL,*B,"Code is not active.  ";
+            CALL      HITENTER
+            GOTO      GCLO1000
+          ENDIF
+.
+          DISPLAY   *P30:13,TDESC
+          MOVE      ACODE,CLREASON
+          MOVE      ZERO,EXIT
+          GOTO      GCLO9999
+.
+GCLO9100  MOVE      ONE,EXIT
+          GOTO      GCLO9999
+.
+GCLO9200  MOVE      ONE,EXIT
+.
+GCLO9999  RETURN
++
+.****************************************************************************
+.*                             GDAT0000                Called by: MAIN0000  *
+.*                       Get the cut-off date                               *
+.* Returns: CUTOFFDT - cut-off date (ccyymmdd)                              *
+.*          CURRDATE - Current Date (ccyymmdd)                              *
+.****************************************************************************
+.
+GDAT0000  DISPLAY   *P1:12,*EF,"Cut-Off Date      :"
+          MOVE      ONE,CCENTRY
+          MOVE      TEN2,CVERT
+          MOVE      TWENTY1,CCOL
+          MOVE      ONE,CCANLDTE
+.
+          CALL      IBACLOCK                     * load current date
+.
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          UNPACK    SP8,CCENT,CYEAR,CMON,CDAY
+.
+GDAT0500  CALL      KEYDATE
+          BRANCH    OVRCD,GDAT9100
+          PACK      CUTOFFDT,CCENT,CYEAR,CMON,CDAY
+.
+          MATCH     CURRDATE,CUTOFFDT            * date in past ?
+          GOTO      GDAT9000 IF LESS             * yes
+.
+          DISPLAY   *P1:24,*EL,*B,"Cut-Off date not prior to current date.  ";
+          CALL      HITENTER
+          GOTO      GDAT0500
+.
+GDAT9000  MOVE      ZERO,EXIT
+          GOTO      GDAT9999
+.
+GDAT9100  MOVE      ONE,EXIT
+.
+GDAT9999  RETURN
++
+.****************************************************************************
+.*                             GREF0000                Called by: MAIN0000  *
+.*                   Get the type of referral                               *
+.* Requires: PROGTYPE - VINAH Program Type                                  *
+.* Returns:  REFLTYPE - Type of Referral                                    *
+.*                       D = Definite                                       *
+.*                       I = Indefinite                                     *
+.*           EXIT  0 = Ok to continue                                       *
+.*                 1 = Nothing entered                                      *
+.****************************************************************************
+.
+GREF0000  BRANCH    PROGTYPE,GREF9999:           * HARP
+                             GREF9999:           * HBPCCT
+                             GREF9999:           * MH
+                             GREF9999:           * PC
+                             GREF9999:           * PAC
+                             GREF9999:           * RIR
+                             GREF9999:           * SACS
+                             GREF1000:           * SOP
+                             GREF9999:           * TCP
+                             GREF9999:           * HEN
+                             GREF9999:           * TPN
+                             GREF9999:           * HBD
+                             GREF9999            * VALP
+.
+GREF1000  KEYIN     *P1:14,*EF,"Type of Referral  :":
+                    *P1:24,"(",*V2LON,*DV,ANSD,*HOFF,")efinite, (":
+                    *V2LON,*DV,ANSI,*HOFF,")ndefinite":
+                    *P21:14,*V2LON,REFLTYPE
+.
+          PACK      REFLTYPE,REFLTYPE,SP1
+          MATCH     SP1,REFLTYPE                 * anything entered ?
+          GOTO      GREF9100 IF EQUAL            * no - finished
+.
+          REP       UPPLOW,REFLTYPE
+          MATCH     ANSD,REFLTYPE
+          IF        @EQUAL
+            DISPLAY   *P21:14,*V2LON,"Definite"
+            GOTO      GREF9000
+          ENDIF
+.
+          MATCH     ANSI,REFLTYPE
+          IF        @EQUAL
+            DISPLAY   *P21:14,*V2LON,"Indefinite"
+            GOTO      GREF9000
+          ENDIF
+.
+          BEEP
+          GOTO      GREF1000
+.
+GREF9000  DISPLAY   *P1:24,*EL;
+          MOVE      ZERO,EXIT
+          GOTO      GREF9999
+.
+GREF9100  MOVE      ONE,EXIT
+.
+GREF9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.* Requires: DEPTCODE - Department code (Cat CG)                             *
+.*           CURRDATE - Current date (ccyymmdd)                              *
+.*****************************************************************************
+.
+PROC0000  MOVE      ZERO,CPAGENO                 * set report variables
+          MOVE      ONE,CNOUNDLN
+          CALL      IBACLOCK
+          IF        COPTION = 1
+            MOVE      ZERO,SAVSECTN              * set for waiting section
+          ELSE
+            MOVE      ONE,SAVSECTN               * set for active section
+          ENDIF
+.
+          CALL      HEAD0000
+.
+          MOVE      ZERO,RECCOUNT                * initialise total record count
+          MOVE      ZERO,SECTNCNT                * initialise section count
+          DISPLAY   *P1:24,*EL,"Processing:";
+.
+          CALL      GPCR0000                     * get program completion reas.
+          IF        EXIT = 1
+            DISPLAY   *P1:24,*EL,*B,"Program Completion Reason code not found.":
+                      "  ";
+            CALL      HITENTER
+            PRINT     *1,"Program Completion Reason code not found"
+            GOTO      PROC9000
+          ENDIF
+.
+.         Loop through the active referrals for a department looking for
+.         episode referrals
+.         If the "Report Only" option has been selected, then include both
+.         "Waiting" and "Active" referrals
+.         If the "Report and Fixit" option has been selected, then only include
+.         "Active" referrals
+.
+          IF        COPTION = 1
+            PACK      KEY30,DEPTCODE,ZERO,SP30   * report only
+          ELSE
+            PACK      KEY30,DEPTCODE,ONE,SP30    * report and fixit
+          ENDIF
+          CALL      RSALREF6                     * position before dept code
+PROC0500  CALL      RKALREF6                     * read next record
+          BRANCH    OVRCD,PROC9000               * eof - finished
+.
+          MATCH     DEPTCODE,ALREDEPT            * same dept code still ?
+          GOTO      PROC9000 IF NOT EQUAL        * no - finished
+.
+          IF        COPTION = 1
+            MATCH     "0",ALRESTAT               * waiting status ?
+            GOTO      PROC1000 IF EQUAL          * yes - ok to continue
+          ENDIF
+.
+          MATCH     "1",ALRESTAT                 * active status still ?
+          GOTO      PROC9000 IF NOT EQUAL        * no - finished
+.
+PROC1000  DISPLAY   *P13:24,*EL,*V2LON,ALREVISN;
+.
+          MATCH     CUTOFFDT,ALRERDAT            * referral date < cut off date?
+          GOTO      PROC0500 IF NOT LESS         * no - ignore
+.
+.         Check if this is an episode referral
+.
+          MATCH     "1",ALREUYN4                 * referral in record ?
+          GOTO      PROC0500 IF EQUAL            * yes - ignore episode
+.
+.         We have an episode, so make sure it's a VINAH related episode.
+.         First check using Cat zG, otherwise default back to Cat CG
+.         (which we know already is a valid VINAH department).
+.
+          CALL      CVIN0000                     * still VINAH referral ?
+          BRANCH    EXIT,PROC0500                * no - ignore record
+.
+.         We have a VINAH episode referral, so make sure that the referral type
+.         is valid
+.
+          CALL      CREF0000                     * valid referral type ?
+          BRANCH    EXIT,PROC0500                * no - ignore episode
+.
+.         Now make sure that the episode is linked to a referral-in
+.         which is also active
+.
+          PACK      KEY16,ALREVISN,SP20
+          CALL      RSALRLN2                     * position before episode
+          CALL      RKALRLN2                     * read next record
+          BRANCH    OVRCD,PROC0500               * eof - ignore episode
+.
+          MATCH     ALREVISN,ALRLLNKV            * same episode still ?
+          GOTO      PROC0500 IF NOT EQUAL        * no - ignore episode
+.
+          MOVE      ALRLVISN,SAVKEY8R            * save referral in key
+          MOVE      ALREVISN,SAVKEY8E            * save current episode key
+          PACK      SAVKEY30,ALREDEPT,ALRESTAT,ALRERDAT,ALREHCP,ALREVISN
+.
+          MOVE      ALRLVISN,KEY8
+          CALL      RDALREF1                     * referral in found ?
+          BRANCH    OVRCD,PROC0500               * no - ignore episode
+.
+.         The referral-in can have a status of "Waiting" or "Active"
+.         regardless of which option is being run
+.
+          MATCH     "1",ALRESTAT                 * active status ?
+          IF        !@EQUAL
+            MATCH     "0",ALRESTAT               * no - waiting status ?
+            GOTO      PROC0500 IF NOT EQUAL      * no - ignore episode
+          ENDIF
+.
+.         Check if the referral-in is linked to other waiting or active episodes
+.
+          CALL      CLIN0000
+.
+.         Check if there has been any contacts since the cut-off date,
+.         OR if there any linked O/P bookings since the cut-off date or into
+.         the future
+.
+          CALL      ACTV0000                     * any activity ?
+          BRANCH    EXIT,PROC0500                * yes - ignore episode
+.
+.         We have found an inactive episode referral for reporting/closing.
+.         Reposition back on the original episode (and lock the record if
+.         we are running option 2) before reporting.
+.
+          MOVE      SAVKEY30,KEY30
+          IF        COPTION = 1
+            CALL      RDALREF6                   * record on file ?
+          ELSE
+            CALL      RLALREF6                   * record on file and locked ?
+          ENDIF
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Unable to reposition on ":
+                      "episode referral ",*V2LON,SAVKEY8E;
+            CALL      HITENTER
+            PRINT     *1,"Unable to reposition on episode referral ":
+                      SAVKEY8E
+            GOTO      PROC9000
+          ENDIF
+          IF        OVRCD = 2
+            DISPLAY   *P1:24,*EL,*B,"Unable to lock episode referral ":
+                      *V2LON,SAVKEY8E;
+            PRINT     *1,"Unable to lock episode referral ",SAVKEY8E
+            GOTO      PROC0500
+          ENDIF
+.
+.         Check if we have changed report sections (from "waiting" to
+.         "active")
+.
+PROC5500  MATCH     SAVSECTN,ALRESTAT            * same section still ?
+          GOTO      PROC6000 IF EQUAL            * yes
+.
+          IF        SECTNCNT > 0
+            CALL      LINE0000
+          ENDIF
+.
+          PRINT     *N,*1,"Total Waiting Records: ",SECTNCNT
+          MOVE      ALRESTAT,SAVSECTN            * no - save new section
+          CALL      HEAD0000                     * print new page/header
+          MOVE      ZERO,SECTNCNT                * reset section count
+.
+PROC6000  ADD       ONE,RECCOUNT                 * increment total record count
+          ADD       ONE,SECTNCNT                 * increment section count
+.
+          CALL      DISP0000                     * print episode details
+          BRANCH    PMIDTFLG,PROC0500            * error on patient find
+.
+.         Important Note: This code only applies to "active" records as
+.                         we are not closing "waiting" records.
+.
+          IF        COPTION = 2
+            CALL      CLSE0000                   * close the episode record
+.
+            CALL      CLSR0000                   * close the program ref. record
+.
+            MOVE      SAVKEY30,KEY30
+            CALL      RSALREF6                   * reposition after update
+          ENDIF
+.
+          GOTO      PROC0500                     * get next episode
+.
+PROC9000  DISPLAY   *P1:23,*EF,"Processing completed.":
+                    *P1:24,*V2LON,RECCOUNT,*HOFF," records processed.  ";
+          CALL      HITENTER
+.
+          CALL      LINE0000
+          PRINT     *N,*1,"Total Active Records  : ",SECTNCNT:
+                    *N,*1,"Grand Total of Records: ",RECCOUNT,*N,*N:
+                    *1,"*** End of Report ***"
+          GOTO      PROC9999
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                               ACTV0000              Called by: PROC0000   *
+.*      Check for any contact activity that has occurred for this episode    *
+.*      since the cut-off date OR for the presence of any future linked O/P  *
+.*      bookings.                                                            *
+.* Requires: SAVKEY8E - Current Episode visit number                         *
+.*           CURRDATE - Date this program is executed (ccyymmdd)             *
+.*           CUTOFFDT - Cut-Off date (ccyymmdd)                              *
+.* Returns:  EXIT  0 = no contact since cut-off date and no future activity  *
+.*                 1 = contact since cut-off date and/or future activity     *
+.*****************************************************************************
+.
+.         First check for any previous contact since the cut-off date
+.
+ACTV0000  PACK      KEY32,SAVKEY8E,CUTOFFDT,SP70
+          CALL      RSALENC6                     * position before episode/date
+ACTV0500  CALL      RKALENC6                     * read next record
+          BRANCH    OVRCD,ACTV5000               * eof - no contacts found
+.
+          MATCH     SAVKEY8E,ALENVISN            * same episode still ?
+          GOTO      ACTV5000 IF NOT EQUAL        * no - no contacts found
+.
+          MATCH     "1",ALENRSTA                 * cancelled contact ?
+          GOTO      ACTV0500 IF EQUAL            * yes - ignore contact
+.
+.         A contact has been found, so we can ignore this episode
+.
+          GOTO      ACTV9100
+.
+.         No contacts found, so now check for past or future linked O/P bookings
+.
+ACTV5000  PACK      KEY24,SAVKEY8E,CUTOFFDT,SP30
+          CALL      RSALLNK3                     * position before episode/date
+ACTV5500  CALL      RKALLNK3                     * read next record
+          BRANCH    OVRCD,ACTV9000               * eof - no future bookings
+.
+          MATCH     SAVKEY8E,ALLNVISN            * same episode still ?
+          GOTO      ACTV9000 IF NOT EQUAL        * no - no future bookings
+.
+          MATCH     "1",ALLNSTAT                 * cancelled booking ?
+          GOTO      ACTV5500 IF EQUAL            * yes - ignore record
+.
+          GOTO      ACTV9100                     * booking found
+.
+ACTV9000  MOVE      ZERO,EXIT
+          GOTO      ACTV9999
+.
+ACTV9100  MOVE      ONE,EXIT
+.
+ACTV9999  RETURN
++
+.*****************************************************************************
+.*                               CLIN0000              Called by: PROC0000   *
+.*             Check if other linked episodes are active or not.             *
+.* We can only close a referral-in if all the linked episodes are closed.    *
+.* Requires: SAVKEY8R - Visit number for Referral-In that is linked to the   *
+.*                      Current Episode                                      *
+.* Returns:  LINKFLAG  0 = close both episode and referral-in                *
+.*                     1 = only close current episode (1 or more of the      *
+.*                         other linked referrals are active or waiting)     *
+.*****************************************************************************
+.
+.         Loop through all the linked episodes to the Referral-In and see if
+.         any are active (besides the current episode we are processing)
+.
+CLIN0000  PACK      KEY16,SAVKEY8R,SP20
+          CALL      RSALRLN1                     * position before referral in
+CLIN0500  CALL      RKALRLN1                     * read next record
+          BRANCH    OVRCD,CLIN9000               * eof - ok to continue
+.
+          MATCH     SAVKEY8R,ALRLVISN            * same referral in still ?
+          GOTO      CLIN9000 IF NOT EQUAL        * no - ok to continue
+.
+          MATCH     SAVKEY8E,ALRLLNKV            * current episode ?
+          GOTO      CLIN0500 IF EQUAL            * yes - ignore episode
+.
+          MOVE      ALRLLNKV,KEY8
+          CALL      RDALREF1                     * referral on file ?
+          BRANCH    OVRCD,CLIN0500               * ino - ignore record
+.
+          MATCH     "0",ALRESTAT                 * "waiting" referral ?
+          GOTO      CLIN9100 IF EQUAL            * yes - finished
+.
+          MATCH     "1",ALRESTAT                 * "active" referral ?
+          GOTO      CLIN9100 IF EQUAL            * yes - finished
+.
+          GOTO      CLIN0500                     * get next record
+.
+CLIN9000  MOVE      ZERO,LINKFLAG
+          GOTO      CLIN9999
+.
+CLIN9100  MOVE      ONE,LINKFLAG
+.
+CLIN9999  RETURN
++
+.*****************************************************************************
+.*                               GPCR0000              Called by: PROC0000   *
+.*         Get the default Program Completion Reason (HDP Default = "35")    *
+.* Returns:  COMPREAS  - Program Completion Reason code (Cat lG)             *
+.*           EXIT  0 = reason code found                                     *
+.*                 1 = no reason code found                                  *
+.*****************************************************************************
+.
+GPCR0000  PACK      KEY5,LOWCASEL,ANSG,SP5
+          CALL      RDSCODE1                     * position before category
+GPCR0500  CALL      RDKCODE1                     * read next record
+          BRANCH    OVRCD,GPCR9100               * eof - default not found
+.
+          MATCH     "lG",TCODE                   * category lG still ?
+          GOTO      GPCR9100 IF NOT EQUAL        * no - default not found
+.
+          MATCH     "35  ",THCSCOD               * "35" default found ?
+          GOTO      GPCR0500 IF NOT EQUAL        * no - get next record
+.
+          MATCH     "I",PTCOACTV                 * code active ?
+          GOTO      GPCR0500 IF EQUAL            * no - get next record
+.
+          MOVE      ACODE,COMPREAS               * save code
+.
+          MOVE      ZERO,EXIT
+          GOTO      GPCR9999
+.
+GPCR9100  MOVE      ONE,EXIT
+.
+GPCR9999  RETURN
++
+.****************************************************************************
+.*                            DISP0000                 Called by: PROC0000  *
+.*                  Valid record found so print it                          *
+.* Requires: Valid read on allrefaf record                                  *
+.* Returns:  CLNO - line count for current page                             *
+.*           PMIDTFLG - PMI Details flag                                    *
+.*                 0 = patient details found                                *
+.*                 1 = Error finding patient details                        *
+.****************************************************************************
+.
+.         We need the patient details for the report and for any
+.         generated HL7 messages
+.
+DISP0000  CALL      CLPATMAS
+          MOVE      "No patma1af record  ",PSNAME
+          MOVE      SP30,PGNAME
+          MOVE      ALREURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,DISP1000
+.
+          MOVE      ALREURNO,KEY8
+          CALL      RDPMPX21
+          IF        OVRCD = 1
+            MOVE      "No pmspx2af record  ",PGNAME
+          ENDIF
+.
+DISP1000  MOVE      OVRCD,PMIDTFLG               * load PMI details flag
+.
+          MOVE      SP10,KEY10
+          MATCH     SP8,ALREREXP
+          IF        !@EQUAL
+            UNPACK    ALREREXP,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE
+            MOVE      CPCDATE,KEY10
+          ENDIF
+.
+          UNPACK    ALRERDAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          PRINT     *1,PIPE,*3,ALRECTYP,*10,PIPE,*12,ALREURNO,*21,PIPE:
+                    *23,PSNAME,*44,PIPE,*46,PGNAME,*72,PIPE:
+                    *74,SAVKEY8E,*83,PIPE,*85,SAVKEY8R,*94,PIPE,*96,CPCDATE:
+                    *107,PIPE,*109,KEY10,*132,PIPE
+.
+          ADD       ONE,CLNO                     * increment line count
+.
+DISP9999  RETURN
++
+.****************************************************************************
+.*                            HEAD0000                 Called by: PROC0000  *
+.*                       Print page heading                                 *
+.* Returns:  CLNO - initialised line count for new page                     *
+.****************************************************************************
+.
+HEAD0000  CALL      HEAD132                      * display page header
+.
+          UNPACK    CUTOFFDT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          PRINT     *40,"Cut-Off Date    : ",CPCDATE,*N:
+                    *40,"Department      : ",DEPTCODE,"     (",DEPTDESC,")",*N;
+          IF        PROGTYPE = 8
+            PRINT     *40,"Type of Referral: ";
+            MATCH     ANSI,REFLTYPE
+            IF        @EQUAL
+              PRINT   "Indefinite",*N
+            ELSE
+              PRINT   "Definite",*N
+            ENDIF
+          ENDIF
+.
+          MATCH     "0",SAVSECTN
+          IF        @EQUAL
+            PRINT     *1,"Waiting Records Section"
+          ELSE
+            PRINT     *1,"Active Records Section"
+          ENDIF
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"Clinic",*10,PIPE,*12,"UR",*21,PIPE:
+                    *23,"Surname",*44,PIPE,*46,"Given Name",*72,PIPE:
+                    *74,"Episode",*83,PIPE,*85,"Program",*94,PIPE:
+                    *96,"Referral",*107,PIPE,*109,"Referral",*132,PIPE,*N:
+                    *1,PIPE,*3,"Type",*10,PIPE,*12,"Number",*21,PIPE:
+                    *44,PIPE,*72,PIPE,*74,"Visit",*83,PIPE,*85,"Visit":
+                    *94,PIPE,*96,"Date",*107,PIPE,*109,"Expiry Date",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          IF        PROGTYPE = 8
+            MOVE      TEN,CLNO                   * initialise line count
+          ELSE
+            MOVE      NINE,CLNO                  * initialise line count
+          ENDIF
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: PROC0000  *
+.*                      Draw line across page                     HEAD0000  *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.****************************************************************************
+.*                            CREF0000                 Called by: PROC0000  *
+.*    Check if Referral Type code is valid for type of referral selected    *
+.* Requires: ALRERTYP - Referral Type Code (Cat RI)                         *
+.*           REFLTYPE - Type of Referral - (D)efinite or (I)ndefinite       *
+.* Returns:  EXIT   0 = Valid Referral Type code                            *
+.*                  1 = Invalid Referral Type code                          *
+.****************************************************************************
+.
+CREF0000  BRANCH    PROGTYPE,CREF9000:           * HARP
+                             CREF9000:           * HBPCCT
+                             CREF9000:           * MH
+                             CREF9000:           * PC
+                             CREF9000:           * PAC
+                             CREF9000:           * RIR
+                             CREF9000:           * SACS
+                             CREF1000:           * SOP
+                             CREF9000:           * TCP
+                             CREF9000:           * HEN
+                             CREF9000:           * TPN
+                             CREF9000:           * HBD
+                             CREF9000            * VALP
+.
+CREF1000  MOVE      ANSI,TCINDC1                 * set default to indefinite
+.
+          MATCH     SP3,ALRERTYP                 * blank type of referral ?
+          GOTO      CREF2000 IF EQUAL            * yes - use default
+.
+          PACK      KEY5,ANSR,ANSI,ALRERTYP
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,CREF2000               * no - use default
+.
+          MATCH     SP1,TCINDC1                  * blank indicator 1 ?
+          IF        @EQUAL
+            MOVE      ANSI,TCINDC1               * yes - use default
+          ENDIF
+.
+.         Check the setting of Indicator 1 to make sure it is valid
+.         for the type of referral selected
+.
+CREF2000  MATCH     ANSI,REFLTYPE
+          IF        @EQUAL
+            MATCH     ANSI,TCINDC1
+            GOTO      CREF9000 IF EQUAL
+            GOTO      CREF9100
+          ENDIF
+.
+          MATCH     ANSD,REFLTYPE
+          IF        @EQUAL
+            MATCH     ANSI,TCINDC1
+            GOTO      CREF9000 IF NOT EQUAL
+            GOTO      CREF9100
+          ENDIF
+.
+CREF9000  MOVE      ZERO,EXIT
+          GOTO      CREF9999
+.
+CREF9100  MOVE      ONE,EXIT
+.
+CREF9999  RETURN
++
+.****************************************************************************
+.*                            DBOX0000                 Called by: MAIN0000  *
+.*                      Draw box for  program type selection                *
+.* Returns: EXIT   0 = option selected                                      *
+.*                 1 = exit selected                                        *
+.*          PROGTYPE - VINAH Program Type                                   *
+.*                      1 = HARP                                            *
+.*                      2 = HBPCCT                                          *
+.*                      3 = MH                                              *
+.*                      4 = PC                                              *
+.*                      5 = PAC                                             *
+.*                      6 = RIR                                             *
+.*                      7 = SACS                                            *
+.*                      8 = SOP                                             *
+.*                      9 = TCP                                             *
+.*                     10 = HEN                                             *
+.*                     11 = TPN                                             *
+.*                     12 = HBD                                             *
+.*                     13 = VALP                                            *
+.*          REFLTYPE - Referral Type (initialised to blank)                 *
+.****************************************************************************
+.
+DBOX0000  DISPLAY   *P1:10,*EF,"VINAH Program Type:"
+.
+          MOVE      ONE,BOXOPT
+          MOVE      ZERO,HLEF
+          CALL      GETSCR00                     * save screen
+.
+          BOX       1,27,6,52,24                  * draw box
+          BOXCLR    28,7,51,23                    * clear box
+          HLINE     *G37,8,28,51
+          HLINE     *G37,22,28,51
+.
+          DISPLAY   *P29:7,*V2LON,"Program Type Selection",*HOFF:
+                    *P29:9,*HON,SP1,ONE,*HOFF,*P33:9,"HARP":
+                    *P29:10,*V2LON,SP1,TWO,*HOFF,*P33:10,"HBPCCT":
+                    *P29:11,*V2LON,SP1,THREE,*HOFF,*P33:11,"MH":
+                    *P29:12,*V2LON,SP1,FOUR,*HOFF,*P33:12,"PC":
+                    *P29:13,*V2LON,SP1,FIVE,*HOFF,*P33:13,"PAC":
+                    *P29:14,*V2LON,SP1,SIX,*HOFF,*P33:14,"RIR":
+                    *P29:15,*V2LON,SP1,SEVEN,*HOFF,*P33:15,"SACS":
+                    *P29:16,*V2LON,SP1,EIGHT,*HOFF,*P33:16,"SOP":
+                    *P29:17,*V2LON,SP1,NINE,*HOFF,*P33:17,"TCP":
+                    *P29:18,*V2LON,TEN,*HOFF,*P33:18,"HEN":
+                    *P29:19,*V2LON,TEN1,*HOFF,*P33:19,"TPN":
+                    *P29:20,*V2LON,TEN2,*HOFF,*P33:20,"HBD":
+                    *P29:21,*V2LON,TEN3,*HOFF,*P33:21,"VALP"
+.
+          DISPLAY   *P29:23,"e",*V2LON,ANSX,*HOFF,"it"
+.
+.         Keyin in option selection
+.
+DBOX1000  KEYIN     *P34:23,*EOFF,D2
+.
+          PACK      D2,D2,SP70
+          REP       UPPLOW,D2
+          SQUEEZE   D2
+          TYPE      D2                          * numeric input ?
+          GOTO      DBOX6000 IF EQUAL            * yes
+.
+          GOTO      DBOX7000 IF DOWN             * down arrow
+          GOTO      DBOX8000 IF UP               * up arrow
+          GOTO      DBOX1000 IF LEFT             * left arrow
+          GOTO      DBOX1000 IF RIGHT            * right arrow
+.
+          MATCH     ANSX,D2                      * exit selected ?
+          GOTO      DBOX9500 IF EQUAL            * yes
+.
+          MATCH     SP1,D2                       * enter pressed on selection ?
+          GOTO      DBOX9000 IF EQUAL            * yes
+          GOTO      DBOX9000 IF EOS              * yes
+.
+          BEEP                                   * invalid
+          GOTO      DBOX1000
+.
+.         A number was input so set the option
+.
+DBOX6000  MOVE      D2,BOXOPT
+.
+.         Validate number selected is ok
+.
+          IF        (BOXOPT < 1 | BOXOPT > 13)
+            GOTO      DBOX1000                   * invalid selection
+          ENDIF
+          GOTO      DBOX9000
+.
+.         Down arrow selected
+.
+DBOX7000  COMPARE   TEN3,BOXOPT                  * ok to go down one option ?
+          GOTO      DBOX1000 IF NOT LESS         * no
+.
+          ASSIGN    (BOXOPT+8),CVERT          * yes - redisplay current item
+          DISPLAY   *P29:CVERT,*V2LON,BOXOPT
+          ADD       ONE,BOXOPT                   * increment option
+          ASSIGN    (BOXOPT+8),CVERT
+          DISPLAY   *P29:CVERT,*HON,BOXOPT       * display new option
+          GOTO      DBOX1000
+.
+.         Up arrow selected
+.
+DBOX8000  COMPARE   TWO,BOXOPT                   * ok to go up one option
+          GOTO      DBOX1000 IF LESS             * no
+.
+          ASSIGN    (BOXOPT+8),CVERT          * yes - redisplay current item
+          DISPLAY   *P29:CVERT,*V2LON,BOXOPT
+          SUB       ONE,BOXOPT                   * increment option
+          ASSIGN    (BOXOPT+8),CVERT
+          DISPLAY   *P29:CVERT,*HON,BOXOPT       * display new option
+          GOTO      DBOX1000
+.
+.         Valid option selected, so assign the correct coption value
+.
+DBOX9000  MOVE      BOXOPT,PROGTYPE
+          LOAD      PROGCODE,PROGTYPE,PROCCOD1:
+                                      PROCCOD2:
+                                      PROCCOD3:
+                                      PROCCOD4:
+                                      PROCCOD5:
+                                      PROCCOD6:
+                                      PROCCOD7:
+                                      PROCCOD8:
+                                      PROCCOD9:
+                                      PROCCD10:
+                                      PROCCD11:
+                                      PROCCD12:
+                                      PROCCD13
+          MOVE      ZERO,EXIT
+          CALL      PUTSCR00                     * restore screen
+          LOAD      PROGDESC,PROGTYPE,PRGDES01:
+                                      PRGDES02:
+                                      PRGDES03:
+                                      PRGDES04:
+                                      PRGDES05:
+                                      PRGDES06:
+                                      PRGDES07:
+                                      PRGDES08:
+                                      PRGDES09:
+                                      PRGDES10:
+                                      PRGDES11:
+                                      PRGDES12:
+                                      PRGDES13
+          DISPLAY   *P21:10,*V2LON,PROGCODE,*HOFF,*P30:10,PROGDESC
+          MOVE      SP1,REFLTYPE
+          GOTO      DBOX9999
+.
+DBOX9500  MOVE      ONE,EXIT                     * exit selected
+          CALL      FRESCR00
+          GOTO      DBOX9999
+.
+DBOX9999  RETURN
++
+.*****************************************************************************
+.*                                CVIN0000         Called by: PROC0000       *
+.*        Check if we are using Cat zG to determine VINAH referrals          *
+.* Requires: Read of ALCNDEVP parameter                                      *
+.*           Valid read of episode referral record                           *
+.* Returns:  EXIT    0 = Ok to continue using Cat CG                         *
+.*                   1 = Not a VINAH referral                                *
+.*****************************************************************************
+.
+CVIN0000  MATCH     "1",ALCNDEVP                 * using Cat zG ?
+          GOTO      CVIN9000 IF NOT EQUAL        * no - use Cat CG
+.
+          MATCH     SP3,ALREEVPR                 * blank event program ?
+          GOTO      CVIN9000 IF EQUAL            * yes - use Cat CG
+.
+          PACK      KEY5,CATZG,ALREEVPR
+          CALL      RDCODE1                      * event program code on file ?
+          BRANCH    OVRCD,CVIN9000               * no - use Cat CG
+.
+          MATCH     SP1,TCINDC8                  * indicator 8 populated ?
+          GOTO      CVIN9000 IF EQUAL            * no - use Cat CG
+.
+          MOVE      TCINDC8,ANS
+          TYPE      ANS                          * indicator 8 numeric ?
+          GOTO      CVIN9000 IF EQUAL            * yes - use Cat CG
+.
+          MATCH     "E",ANS
+          IF        @EQUAL
+            MOVE      "10",FORM2                 * HEN
+            GOTO      CVIN2000
+          ENDIF
+.
+          MATCH     "L",ANS
+          IF        @EQUAL
+            MOVE      "11",FORM2                 * TPN
+            GOTO      CVIN2000
+          ENDIF
+.
+          MATCH     "D",ANS
+          IF        @EQUAL
+            MOVE      "12",FORM2                 * HBD
+            GOTO      CVIN2000
+          ENDIF
+.
+          MATCH     "V",ANS
+          IF        @EQUAL
+            MOVE      "13",FORM2                 * VALP
+            GOTO      CVIN2000
+          ENDIF
+.
+          MOVE      ZERO,FORM2
+          REP       "A5H2S7O8M3P4R6T9I1",ANS
+          MOVE      ANS,FORM2
+          COMPARE   ZERO,FORM2                   * valid VINAH program type ?
+          GOTO      CVIN9100 IF EQUAL            * no - ignore record
+.
+CVIN2000  COMPARE   FORM2,PROGTYPE             * same program type as selected ?
+          GOTO      CVIN9100 IF NOT EQUAL        * no - ignore record
+.
+CVIN9000  MOVE      ZERO,EXIT
+          GOTO      CVIN9999
+.
+CVIN9100  MOVE      ONE,EXIT
+.
+CVIN9999  RETURN
++
+.*****************************************************************************
+.*                               CLSE0000          Called by: PROC0000       *
+.*                Process the closing of an inactive episode referral        *
+.* Requires: Valid read of allrefaf record                                   *
+.*           Valid read of PMI records                                       *
+.*           CLREASON - Episode Closure Reason (Cat LL)                      *
+.*****************************************************************************
+.
+.         We need to see if DHS have this record as accepted and open
+.
+CLSE0000  MOVE      ONE,REFLFLAG                 * set flag for episode
+          MOVE      SAVKEY8E,VISITNUM
+          CALL      AUDR0000                     * audit record required ?
+          BRANCH    TRIGFLAG,CLSE1000            * no
+.
+.         Write a before audit record (allaudre)
+.
+          MOVE      TWO,AUDTTYPE
+          CALL      WAALRE00
+.
+.         Update the relevant fields for closing the episode
+.         and update the record
+.
+CLSE1000  MOVE      "2",ALRESTAT                 * set status to closed
+          CALL      IBACLOCK
+          MOVE      CLREASON,ALRERCLO            * set close related fields
+          MOVE      COMPREAS,ALREUC33
+          PACK      ALREDCLO,CCC,CYY,CMM,CDD
+          REP       " 0",ALREDCLO
+          MOVE      CTIMEIS,ALRETCLO
+          MOVE      "iba       ",ALREUCLO
+          PACK      ALREUDAT,CCC,CYY,CMM,CDD     * set update related fields
+          REP       " 0",ALREUDAT
+          MOVE      CTIMEIS,ALREUTIM
+          MOVE      "iba       ",ALREUUID
+          CALL      UPALREF6
+          CALL      UUALREF6
+.
+.         Broadcast an update referral HL7 message (REF^I13) if required
+.
+          CALL      PMIGTNID                     * get national id for HL7
+          MOVE      NMPNUMB,PTNINMPI
+.
+          MOVE      ONE,HL7TRGID
+          MOVE      SP8,HL7INCLD
+          CALL      DGCLII13
+.
+          BRANCH    TRIGFLAG,CLSE2000            * no audit required
+.
+.         Write an after audit record (allaudre)
+.
+          MOVE      THREE,AUDTTYPE
+          CALL      WAALRE00
+.
+.         Write a referral history record (allstsaf)
+.
+CLSE2000  MOVE      ALREDCLO,ALSTSDAT
+          CALL      WSTS0000
+.
+.         Write a record to the referral audit table (allaudaf)
+.
+          CALL      WAUD0000
+.
+CLSE9999  RETURN
++
+.*****************************************************************************
+.*                               CLSR0000          Called by: PROC0000       *
+.*                Process the closing of an inactive referral-in             *
+.* Requires: Valid read of allrefaf record                                   *
+.*           Valid read of PMI records                                       *
+.*           CLREASON - Episode Closure Reason (Cat LL)                      *
+.*           SAVKEY8R - Referral-In visit number                             *
+.*           LINKFLAG - referral closing flag                                *
+.*                0 = closing both episode and linked referral-in            *
+.*                1 = only closing episode referral                          *
+.*****************************************************************************
+.
+CLSR0000  BRANCH    LINKFLAG,CLSR9999            * only closing episode
+.
+          MOVE      SAVKEY8R,KEY8
+          CALL      RLALREF1                     * record on file ?
+          BRANCH    OVRCD,CLSR9100:              * no
+                          CLSR9200               * yes - already locked
+.
+.         We need to see if DHS have this record as accepted and open
+.
+          MOVE      ZERO,REFLFLAG                * set flag for referral-in
+          MOVE      SAVKEY8R,VISITNUM
+          CALL      AUDR0000                     * audit record required ?
+          BRANCH    TRIGFLAG,CLSR1000            * no
+.
+.         Write a before audit record (allaudre)
+.
+          MOVE      TWO,AUDTTYPE
+          CALL      WAALRE00
+.
+.         Update the relevant fields for closing the episode
+.         and update the record
+.
+CLSR1000  MOVE      "2",ALRESTAT                 * set status to closed
+          CALL      IBACLOCK
+          MOVE      CLREASON,ALRERCLO            * set close related fields
+          MOVE      COMPREAS,ALREUC33
+          PACK      ALREDCLO,CCC,CYY,CMM,CDD
+          REP       " 0",ALREDCLO
+          MOVE      CTIMEIS,ALRETCLO
+          MOVE      "iba       ",ALREUCLO
+          PACK      ALREUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",ALREUDAT
+          MOVE      CTIMEIS,ALREUTIM
+          MOVE      "iba       ",ALREUUID
+          CALL      UPALREF1
+          CALL      UUALREF1
+.
+.         Broadcast an update referral HL7 message (REF^I13) if required
+.
+          CALL      PMIGTNID                     * get national id for HL7
+          MOVE      NMPNUMB,PTNINMPI
+.
+          MOVE      TWO,HL7TRGID
+          MOVE      SP8,HL7INCLD
+          CALL      DGCLII13
+.
+.         Write an after audit record (allaudre)
+.
+          BRANCH    TRIGFLAG,CLSR2000            * no audit required
+.
+          MOVE      THREE,AUDTTYPE
+          CALL      WAALRE00
+.
+.         Write a referral history record (allstsaf)
+.
+CLSR2000  MOVE      ALREDCLO,ALSTSDAT
+          CALL      WSTS0000
+.
+.         Write a record to the referral audit table (allaudaf)
+.
+          CALL      WAUD0000
+          GOTO      CLSR9999
+.
+.         Error Handling
+.
+CLSR9100  PRINT     *1,"Program referral record ",SAVKEY8R," not found"
+          GOTO      CLSR9999
+.
+CLSR9200  PRINT     *1,"Unable to lock program referral ",SAVKEY8R
+.
+CLSR9999  RETURN
++
+.*****************************************************************************
+.*                         WAUD0000                Called by: CLSE0000       *
+.*          Write a record to the Referral Audit Table        CLSR0000       *
+.* Requires: Valid read on allrefaf record                                   *
+.*****************************************************************************
+.
+WAUD0000  MOVE      ALREVISN,ALAUVISN            * load database variables
+          PACK      ALAUADAT,CCC,CYY,CMM,CDD
+          REP       " 0",ALAUADAT
+          MOVE      CTIMEIS,ALAUATIM
+          REP       " 0",ALAUATIM
+          MOVE      "iba       ",ALAUAUID
+.
+          MOVE      "C ",ALAUUPDT                * set update type to "close"
+          PACK      ALAUCOMM,CLOSCMNT,SP70
+          MOVE      SP70,ALAUSPAR
+.
+          PACK      KEY24,ALAUVISN,ALAUADAT,ALAUATIM
+          CALL      RDALAUD1
+          IF        OVRCD = 1
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRALAUD1                   * write the record
+            TRAPCLR   IO
+            BRANCH    OVRCD,WAUD9999
+          ENDIF
+.
+WAUD9999  RETURN
++
+.*****************************************************************************
+.*                            WSTS0000             Called by: CLSE0000       *
+.*     Write a record to the Referral Status History Table    CLSR0000       *
+.* Requires: Valid read on allrefaf record                                   *
+.*****************************************************************************
+.
+WSTS0000  MOVE      ALREVISN,ALSTVISN            * load database variables
+          MOVE      ALRESTAT,ALSTSTAT
+          PACK      ALSTCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",ALSTCDAT
+          MOVE      CTIMEIS,ALSTCTIM
+          REP       " 0",ALSTCTIM
+          MOVE      "iba       ",ALSTCUID
+.
+          PACK      KEY17,ALSTVISN,ALSTSTAT,ALSTSDAT
+          CALL      RAALSTS1
+          IF        OVRCD = 0
+            CALL      UPALSTS1                   * update the record
+          ELSE
+            CALL      WRALSTS1                   * write the record
+          ENDIF
+.
+WSTS9999  RETURN
++
+.*****************************************************************************
+.*                              AUDR0000           Called by: CLSE0000       *
+.*                                                            CLSR0000       *
+.*          Check if this referral has been sent to DHS in a VINAH           *
+.*          submission where it is currently active and if so, then we       *
+.*          need to trigger an audit record so that a subsquent close        *
+.*          submission will be made at a later date                          *
+.* Requires: VISITNUM - Visit number                                         *
+.*           REFLFLAG - Referral Flag                                        *
+.*              0 = Referral-In record being processed                       *
+.*              1 = Episode record being processed                           *
+.* Returns:  TRIGFLAG - audit trigger flag                                   *
+.*              0 = trigger an audit record                                  *
+.*              1 = no need to trigger an audit record                       *
+.*****************************************************************************
+.
+AUDR0000  PACK      KEY42,TEN,VISITNUM,SP8,TILDA42
+          CALL      RSALHDT7                     * pos'n after last accepted vis
+AUDR0500  CALL      RPALHDT7                     * read previous visit
+          BRANCH    OVRCD,AUDR9100               * eof - finished
+.
+          MATCH     "10",ALHDSTAT                * same status still ?
+          GOTO      AUDR9100 IF NOT EQUAL        * no - finished
+.
+          MATCH     VISITNUM,ALHDVISN            * same visit still ?
+          GOTO      AUDR9100 IF NOT EQUAL        * no - finished
+.
+          MATCH     SP8,ALHDCONT                 * blank contact still ?
+          GOTO      AUDR9100 IF NOT EQUAL        * no - finished
+.
+.         Given that other record types (eg A04 & A08) may also have
+.         the visit number, we need to check that we have the right
+.         record type
+.
+          IF        REFLFLAG = 0
+            MATCH     "0",ALHDRTYP               * referral-in record ?
+            GOTO      AUDR0500 IF NOT EQUAL      * no - skip record
+          ELSE
+            MATCH     "1",ALHDRTYP               * episode record ?
+            GOTO      AUDR0500 IF NOT EQUAL      * no - skip record
+          ENDIF
+.
+          MOVE      ALHDSTAT,FORM1
+          BRANCH    FORM1,AUDR9000:              * active
+                          AUDR9100:              * closed
+                          AUDR9100:              * inactive (shouldn't happen)
+                          AUDR9100:              * cancelled
+                          AUDR9100               * rejected
+.
+AUDR9000  MOVE      ZERO,TRIGFLAG
+          GOTO      AUDR9999
+.
+AUDR9100  MOVE      ONE,TRIGFLAG
+.
+AUDR9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       BRHLCOMN
+          INC       CLPATMAS
+          INC       DGCLII13
+          INC       PATCODKY
+          INC       PMIGTNID
+.
+          INC       ALLAUDIO/INC
+          INC       ALLENCIO/INC
+          INC       ALLHDTIO/INC
+          INC       ALLLNKIO/INC
+          INC       ALLQUEIO/INC
+          INC       ALLREFIO/INC
+          INC       ALLRLNIO/INC
+          INC       ALLSTSIO/INC
+          INC       HL7CISIO/INC
+          INC       HL7INBIO/INC
+          INC       NHIMASIO/INC
+          INC       PATCODIO/INC
+          INC       PATMA1IO/INC
+          INC       PATNIDIO/INC
+          INC       PMSPX2IO/INC
+          INC       PMSQPTIO/INC
+          INC       WEBSECIO/INC

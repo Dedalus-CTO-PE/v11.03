@@ -1,0 +1,158 @@
+.
+RSPT15D1  RESET     KEY9
+          READ      PATI15D1,KEY9;;
+          RETURN
+.
+RAPT15D1  MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      PATI15D1,KEY9;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPT15D1  MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      PATI15D1,KEY9;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                                  DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                                  PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA:
+                                  PT0DCPRA:
+                                  PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                                  PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                                  DPT0DV5C,PT0DSPR3
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          RETURN
+.
+RKPT15D1  MOVE      ZERO,OVRCD
+          READKS    PATI15D1;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,PT0DSPR3
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          RETURN
+.
+RPPT15D1  MOVE      ZERO,OVRCD
+          READKP    PATI15D1;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,PT0DSPR3
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          RETURN
+.
+UPPT15D1  MOVE      PT0DCMFT,DPT0DCMF
+          MOVE      PT0DV1CD,DPT0DV1C
+          MOVE      PT0DV2CD,DPT0DV2C
+          MOVE      PT0DV3CD,DPT0DV3C
+          MOVE      PT0DV4CD,DPT0DV4C
+          MOVE      PT0DV5CD,DPT0DV5C
+          UPDATE    PATI15D1;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,PT0DSPR3
+          RETURN
+.
+WRPT15D1  RESET     KEY9
+          MOVE      PT0DCMFT,DPT0DCMF
+          MOVE      PT0DV1CD,DPT0DV1C
+          MOVE      PT0DV2CD,DPT0DV2C
+          MOVE      PT0DV3CD,DPT0DV3C
+          MOVE      PT0DV4CD,DPT0DV4C
+          MOVE      PT0DV5CD,DPT0DV5C
+          WRITE     PATI15D1,KEY9;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                                  DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                                  PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA:
+                                  PT0DCPRA:
+                                  PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                                  PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                                  DPT0DV5C,PT0DSPR3
+          RETURN
+.
+DEPT15D1  RESET     KEY9
+          DELETE    PATI15D1,KEY9
+          RETURN
+.
+.
+RSPT15D2  RESET     KEY79
+          READ      PATI15D2,KEY79;;
+          RETURN
+.
+RAPT15D2  MOVE      ZERO,OVRCD
+          RESET     KEY79
+          READ      PATI15D2,KEY79;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPT15D2  MOVE      ZERO,OVRCD
+          RESET     KEY79
+          READ      PATI15D2,KEY79;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                                   DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                                   PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA:
+                                   PT0DCPRA:
+                                   PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                                   PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                                   DPT0DV5C,PT0DSPR3
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          RETURN
+.
+RKPT15D2  MOVE      ZERO,OVRCD
+          READKS    PATI15D2;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,PT0DSPR3
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          RETURN
+.
+RPPT15D2  MOVE      ZERO,OVRCD
+          READKP    PATI15D2;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,PT0DSPR3
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          RETURN
++
+.
+

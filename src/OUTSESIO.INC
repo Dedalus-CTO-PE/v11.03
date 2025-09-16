@@ -1,0 +1,427 @@
+.
+.         INC       OUTSESIO.INC
+.
+.         FILE  I/O REQUESTS FOR CLINIC OPEN SESSIONS FILE
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY25    DIM           25            KEY FOR OUTSESA1 & OUTSESA2
+.KEY26    DIM           26            KEY FOR OUTSESA3
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE PATAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+.
+RDASESA1 MOVE      ZERO,OVRCD
+         RESET     KEY25
+         READ      OUTSESA1,KEY25;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDSESA1  MOVE      ZERO,OVRCD
+         RESET     KEY25
+         READ      OUTSESA1,KEY25;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                                  OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                                  OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                                  OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                                  OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                                  OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN  
+.
+RLOTSES1 MOVE      ZERO,OVRCD
+         RESET     KEY25
+         READL     OUTSESA1,KEY25;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                                  OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                                  OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                                  OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                                  OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                                  OSESPARE
+         GOTO      OVERCOND IF OVER
+         GOTO      OVERLOCK IF LOCKED
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN  
+.
+UUOTSES1 RESET     KEY25
+         UNLOCK    OUTSESA1
+         RETURN  
+.
+RDKSESA1 MOVE      ZERO,OVRCD
+         READKS    OUTSESA1;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN  
+.
+RDPSESA1 MOVE      ZERO,OVRCD
+         READKP    OUTSESA1;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN  
+.
+RDSSESA1 RESET     KEY25
+         READ      OUTSESA1,KEY25;;
+         RETURN  
+.
+WRSESA1  RESET     KEY25
+         MOVE      OSEDAY,DOSEDAY
+         UNPACK    KEY25 INTO OSESITE,OSECLIN,OSEDATE,OSESTRT
+         WRITE     OUTSESA1,KEY25;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                                  OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                                  OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                                  OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                                  OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                                  OSESPARE
+         RETURN  
+.
+UPSESA1
+         MOVE      OSEDAY,DOSEDAY
+         UPDATE    OUTSESA1;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+.
+         RETURN  
+.
+DESESA1  MOVE      ZERO,OVRCD
+         RESET     KEY25
+         DELETE    OUTSESA1,KEY25
+.
+         RETURN  
+.
+.        SECOND KEY I/O  - only reads; no writes/updates/deletes allowed
+.
+RDSESA2  MOVE      ZERO,OVRCD
+         RESET     KEY25
+         READ      OUTSESA2,KEY25;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                                  OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                                  OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                                  OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                                  OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                                  OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN  
+.
+RDKSESA2 MOVE      ZERO,OVRCD
+         READKS    OUTSESA2;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN  
+.
+RDSSESA2 RESET     KEY25
+         READ      OUTSESA2,KEY25;;
+         RETURN
+.
+.        THIRD KEY I/O - only reads; no writes/updates/deletes allowed 
+.
+RDSESA3  MOVE      ZERO,OVRCD
+         RESET     KEY26
+         READ      OUTSESA3,KEY26;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                                  OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                                  OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                                  OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                                  OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                                  OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN  
+.
+RDKSESA3 MOVE      ZERO,OVRCD
+         READKS    OUTSESA3;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN  
+.
+RDPSESA3 MOVE      ZERO,OVRCD
+         READKP    OUTSESA3;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN  
+.
+RDSSESA3 RESET     KEY26
+         READ      OUTSESA3,KEY26;;
+         RETURN
+.
+.
+.        FOURTH KEY I/O - only reads; no writes/updates/deletes allowed
+.
+RDSESA4  MOVE      ZERO,OVRCD
+         RESET     KEY31
+         READ      OUTSESA4,KEY31;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                                  OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                                  OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                                  OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                                  OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                                  OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDKSESA4 MOVE      ZERO,OVRCD
+         READKS    OUTSESA4;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDPSESA4 MOVE      ZERO,OVRCD
+         READKP    OUTSESA4;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDSSESA4 RESET     KEY31
+         READ      OUTSESA4,KEY31;;
+         RETURN
+.
+.
+.        FIFTH KEY I/O - only reads; no writes/updates/deletes allowed
+.
+RDSESA5  MOVE      ZERO,OVRCD
+         RESET     KEY36
+         READ      OUTSESA5,KEY36;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                                  OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                                  OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                                  OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                                  OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                                  OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDKSESA5 MOVE      ZERO,OVRCD
+         READKS    OUTSESA5;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDPSESA5 MOVE      ZERO,OVRCD
+         READKP    OUTSESA5;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDSSESA5 RESET     KEY36
+         READ      OUTSESA5,KEY36;;
+         RETURN
+.
+.        SIXTH KEY I/O  - only reads; no writes/updates/deletes allowed
+.
+RDSESA6  MOVE      ZERO,OVRCD
+         RESET     KEY25
+         READ      OUTSESA6,KEY25;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                                  OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                                  OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                                  OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                                  OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                                  OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDKSESA6 MOVE      ZERO,OVRCD
+         READKS    OUTSESA6;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDSSESA6 RESET     KEY25
+         READ      OUTSESA6,KEY25;;
+         RETURN
+.
+.        SEVENTH KEY I/O - only reads; no writes/updates/deletes allowed
+.
+RDSESA7  MOVE      ZERO,OVRCD
+         RESET     KEY31
+         READ      OUTSESA7,KEY31;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                                  OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                                  OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                                  OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                                  OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                                  OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDKSESA7 MOVE      ZERO,OVRCD
+         READKS    OUTSESA7;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDPSESA7 MOVE      ZERO,OVRCD
+         READKP    OUTSESA7;OSESITE,OSECLIN,OSEDATE,OSESTRT,DOSEDAY:
+                            OSESLOTS,OSESLOTB,OSETIMES,OSETIMEU:
+                            OSEBNEW,OSEBRV,OSEBSPC,OSEANEW,OSEARV:
+                            OSEASPC,OSESSLTR,OSESSLTN,OSESSLTS,OSESCSTT:
+                            OSESCOMM,OSESCTYP,OSESSHNO,OSESSDAT,OSESGHCP:
+                            OSESPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOSEDAY,OSEDAY
+         MOVE      OSESITE TO SOSESITE
+         MOVE      OSECLIN TO SOSECLIN
+         MOVE      OSEDATE TO SOSEDATE
+         MOVE      OSEDAY TO SOSEDAY
+         MOVE      OSESTRT TO SOSESTRT
+         RETURN
+.
+RDSSESA7 RESET     KEY31
+         READ      OUTSESA7,KEY31;;
+         RETURN
+.

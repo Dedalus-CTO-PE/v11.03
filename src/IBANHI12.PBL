@@ -1,0 +1,978 @@
+.*******************************************************************************
+.* System         : Patient System                                             *
+.* Program        : IBANHI12                                                   *
+.* Description    : Load NMDS Acknowledgement                                  *
+.*******************************************************************************
+.* Date           : 11/06/2015                                                 *
+.* Author         : Don Nguyen                                                 *
+.* Function       : Loads the NMDS Acknowledgement (comma delimited files      *
+.*                  with either ".ndr" or ".err" extensions).                  *
+.*                  The corresponding records are written/updated in 'pmsnmhaf'*
+.*                  & 'pmsnmdaf'.                                              *
+.*                                                                             *
+.*                  N.B. It uses the user script 'ibanhi12.us1' to convert the *
+.*                  input file (comma separated) to a pipe delimited file      *
+.*                  before any records are read from it.                       *
+.*                  This user script uses 'csv2pipe.awk' for the conversion.   *
+.*                                                                             *
+.*******************************************************************************
+.* Modifications  :                                                            *
+.*                                                                             *
+.*      V10.08.02   14/04/2016  Don Nguyen       TSK 0303887                   *
+.*                  Modified PROC0000 to use ACAKSYSI as PMNDDIAG              *
+.*      V10.08.01   23/03/2016  Don Nguyen       TSK 0303887                   *
+.*                  Modified PROC0000 for changes to PMSNMDFD.                 *
+.*                  Rolled back last change; use ACAHNREC instead of ACAHNUMP. *
+.*      V10.07.02   08/03/2016  Don Nguyen       TSK 0303887                   *
+.*                  Modified PROC0000 to use ACAHNUMP for num records compare. *
+.*                  Fixed update in PROC0000 to use corresponding read index.  *
+.*                  Added RECFNDFL flag.                                       *
+.*      V10.07.01   02/03/2016  Don Nguyen       TSK 0303887                   *
+.*                  Changed the way we locate our record in pmsnmdaf.          *
+.*                  Used PTCNNMED instead for default load file path.          *
+.*      V10.06.00   11/06/2015  Don Nguyen       CAR 303887                    *
+.*                  Created program                                            *
+.*******************************************************************************
+.
+          INC       STD001FD           * Standard Include
+.
+          INC       PATCONFD/INC       * Patient Control File
+          INC       PMSNMDFD/INC       * NMDS Extract Records
+          INC       PMSNMHFD/INC       * NMDS Transmission File Batches
+.
+.*******************************************************************************
+.*                  NMDS Acknowledgement Files                                 *
+.*******************************************************************************
+.
+INPTFILE  FILE      HL7, FIXED=4065    * Pipe delimited input source file
+.
+.          Acknowledgement (Header) file fields
+.
+.Name      Type    Size      Start Loc   Description
+.----      ----    ----      ---------   -----------
+ACAHRTYP   DIM        2              1   Record Type (AA) e.g. 'FH'
+ACAHACOD   DIM        4              3   Agency Code (XXXX)
+ACAHFILE   DIM       12              7   Input file name (AAANNNNN.AAA)
+.                                          acronym (AAA)
+.                                          batch number (NNNNN)
+.                                          extension (.AAA) e.g. '.ndm'
+.
+ACAHNREC   DIM        5             19   Number of records (NNNNN)
+ACAHSDAT   DIM        8             24   Date sent (CCYYMMDD)
+ACAHENVT   DIM        4             32   MOH Processing Environment (AAAA)
+.                                          'PROD' or 'COMP'
+.
+ACAHLVER   DIM        6             36   File layout version
+ACAHNUMP   DIM        5             42   Number of transactions processed
+ACAHNUMD   DIM        5             47   Number of transactions deleted
+ACAHNUMI   DIM        5             52   Number of transactions inserted
+ACAHNUMR   DIM        5             57   Number of transactions rejected
+ACAHLDAT   DIM        8             62   Date file loaded to NMDS (CCYYMMDD)
+.
+.End of record                      71
+.
+.
+.          Acknowledgement (Details) file fields
+.
+.Name      Type    Size      Start Loc   Description
+.----      ----    ----      ---------   -----------
+ACAKRTYP   DIM        2              1   Record Type (AA) e.g. 'FH'
+ACAKNHIN   DIM        7              3   NHI Number (AAANNNN)
+ACAKEVNT   DIM        2             10   Event Type Code (AA)
+ACAKDTIM   DIM       12             12   Event start date time (CCYYMMDD hhmm)
+ACAKFCOD   DIM        4             24   Facility Code
+ACAKLOCI   DIM        1             28   Event Local Identifier
+ACAKREFN   DIM       14             29   File Control Reference Number
+ACAKUNIQ   DIM       14             43   PMS Unqiue Identifier
+ACAKSYSI   DIM       14             57   Client System Identifier
+ACAKENUM   DIM        8             71   Error Number
+ACAKETXT   DIM       70             79   Error Text
+ACAKDNUM   DIM        2            149   Diagnosis Number
+ACAKLDAT   DIM        8            151   Legal Status Date
+ACAKLCOD   DIM        2            159   Legal Status Code
+.
+.End of record                     162
+.
+.
+.
+.          Error (Header) file fields
+.
+.Name      Type    Size      Start Loc   Description
+.----      ----    ----      ---------   -----------
+ACEHRTYP   DIM        2              1   Record Type (AA) e.g. 'FH'
+ACEHACOD   DIM        4              3   Agency Code (XXXX)
+ACEHFILE   DIM       12              7   Input file name (AAANNNNN.AAA)
+.                                          acronym (AAA)
+.                                          batch number (NNNNN)
+.                                          extension (.AAA) e.g. '.ndm'
+.
+ACEHNUMR   DIM        5             19   Number of records (NNNNN)
+ACEHSDAT   DIM        8             24   Date sent (CCYYMMDD)
+ACEHPENV   DIM        4             32   MOH processing environment (AAAA)
+.                                          "PROD" or "COMP"
+.
+.End of record                      37
+.
+.
+.          Error (Failure) file fields
+.
+.Name      Type    Size      Start Loc   Description
+.----      ----    ----      ---------   -----------
+ACERRTYP   DIM        2              1   Record Type (AA) e.g. 'FF'
+ACERENUM   DIM        8              3   Error Number (AAANNNNA)
+ACERETXT   DIM       70             11   Error Text (message returned by NMDS)
+.
+.End of record                      82
+.
+.
+.
+.*******************************************************************************
+.*                  Program Variables                                          *
+.*******************************************************************************
+CMDLINE   DIM       200                * Command Line
+ADMISSNO  DIM       8
+ACKCOUNT  FORM      5                  * Ack record count (including header)
+DIM14     DIM       14                 * For PMS unique identifier
+DIM70     DIM       70
+ERRCOUNT  FORM      5                  * Error record count (including header)
+ERRINDEX  FORM      2                  * Error count index
+ERRMESSG  DIM       100                * Error message
+ERRSTART  FORM      1                  * Flag for first error chunk read
+ERRPROCS  FORM      1                  * Flag for error processing
+FILENAME  DIM       12                 * Input filename (with extension)
+FILEPATH  DIM       60                 * Input file path
+FILETYPE  FORM      1                  * Acknowledgement file type
+.                                          1 - ".err"
+.                                          2 - ".ndr"
+FULLFPTH  DIM       100                * Input file path (full)
+INFILNAM  DIM       8                  * Input filename (without extension)
+NUMBRECS  FORM      5                  * Error record count (including header)
+.
+TEMPADMN  DIM       8                  * Admission Number
+TEMPPNHI  DIM       8                  * Patient NHI number
+TEMPEDAT  DIM       8                  * Event Admission Date
+TEMPETIM  DIM       8                  * Event Admission Time
+TEMPFACI  DIM       4                  * Event Facility Code
+TEMPXDAT  DIM       8                  * Extract Date      
+TEMPBTCH  DIM       5                  * Batch Number
+TEMPDIAG  DIM       2                  * Diag. No. (01.99) for Rec Type=HD
+.                                        or Msg Func (D1,A1,A2,etc) for 
+.                                        Rec Type=HE
+TEMPECNT  DIM       2                  * Error Count Index
+TEMPELID  DIM       1                  * Event Local Identifier (9,8,7...)
+TEMPENUM  DIM       8                  * Error Number
+TEMPETXT  DIM       70                 * Error Text
+TEMPETYP  DIM       2                  * NMDS Event Type (IP, BT, IM etc)
+TEMPLDAT  DIM       8                  * Legal Status Date
+TEMPLCOD  DIM       2                  * Legal Status Code
+TEMPSTAT  DIM       1                  * Processing Status
+TEMPRDET  DIM       500                * Extract record HE detail text
+.
+CURRDATE  DIM       8
+USERID    DIM       10
+DHBCODEV  DIM       3                  * DHB Code
+BATCHNUM  DIM       5                  * Batch Number
+RECFNDFL  FORM      1                  * record ('pmsnmdaf') found
+SAVRCDKY  DIM       19                 * Saved pmsnmdaf recrd key (last updated)
+.
+.*******************************************************************************
+.*                  Program Constants                                          *
+.*******************************************************************************
+ENDOFRPT  INIT      "***  END OF REPORT  ***"
+.
+.*******************************************************************************
+.*                  Program Version Information                                *
+.*******************************************************************************
+SP100     INIT      "                                                  ":
+                    "                                                  "
+PRGID     INIT      "IBANHI12"
+PRGNAM    INIT      "Load NMDS Acknowledgement                         "
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                  MAIN0000                                  *
+.*                               Main Procedure                               *
+.******************************************************************************
+MAIN0000  CALL      INIT0000           * Initialise variables & files
+          BRANCH    EXIT,MAIN9999
+.
+MAIN1000  CALL      OPTN0000           * Get run option
+          BRANCH    COPTION,MAIN1100
+          GOTO      MAIN9999
+.   
+MAIN1100  CALL      KEYDIR00           * Keyin input file path
+          BRANCH    EXIT,MAIN9100
+.
+          MOVE      "DHBXXXXX",INFILNAM
+MAIN1200  CALL      KEYFIL00           * Keyin input filename
+          BRANCH    EXIT,MAIN9200
+.
+          CALL      CHKFIL00           * Check input file exists (.err / .ndr)
+          BRANCH    EXIT,MAIN9300
+.
+          CALL      KEYUID00           * Keyin user ID
+          BRANCH    EXIT,MAIN1000
+.
+          CALL      CONTQST            * Ok to continue ?
+          BRANCH    CEXIT,MAIN3000:    * yes
+                          MAIN1000:    * no
+                          MAIN1000     * cancel
+.
+MAIN3000  CALL      REFRMF00           * Reformat input file to pipe delimited
+          BRANCH    OVRCD,MAIN9400
+.
+          CALL      OPNFIL00           * Open input file
+          BRANCH    EXIT,MAIN9500
+.
+          CALL      PROC0000           * Process ack / error records
+          BRANCH    EXIT,MAIN9600
+.
+          CALL      PRREP000           * Print Report
+          CALL      KILL0000           * Close and delete temp input file
+          GOTO      MAIN9999
+.
+MAIN9100  CALL      PRHEAD00
+          PRINT     *N,"Invalid input file path - ",ERRMESSG
+          PRINT     *N,*N,ENDOFRPT          * Print End of Report
+          GOTO      MAIN9999
+.
+MAIN9200  CALL      PRHEAD00
+          PRINT     *N,"Invalid input file name - ",ERRMESSG
+          PRINT     *N,*N,ENDOFRPT          * Print End of Report
+          GOTO      MAIN9999
+.
+MAIN9300  CALL      PRHEAD00
+          PRINT     *N,"No matching files found!"
+          PRINT     *N,*N,ENDOFRPT          * Print End of Report
+          GOTO      MAIN9999
+.
+MAIN9400  CALL      PRHEAD00
+          PRINT     *N,"Error converting comma separated file - ",FILENAME
+          PRINT     *N,*N,ENDOFRPT          * Print End of Report
+          GOTO      MAIN9999
+.
+MAIN9500  CALL      PRHEAD00
+          PRINT     *N,"Failed to open input file - ",FILENAME
+          PRINT     *N,*N,ENDOFRPT          * Print End of Report
+          GOTO      MAIN9999
+.
+MAIN9600  CALL      PRHEAD00
+          PRINT     *N,"Error reading input file - ",ERRMESSG
+          PRINT     *N,*N,ENDOFRPT          * Print End of Report
+          GOTO      MAIN9999
+.
+MAIN9999  CHAIN     PGM
++
+.******************************************************************************
+.*                                 INIT0000                                   *
+.*                  Initialize Variables & Open Files                         *
+.******************************************************************************
+INIT0000  CALL      DISPHEAD                * Display screen heading
+.
+          OPEN      CONTROLF,"controlf"     * Inpatient CONTROL File
+.
+          DISPLAY   *P64:24,"pmsnmhaf";
+          OPEN      PMSNMHA1,"pmsnmhaf"     * NMDS Transmission File Batches
+.
+          DISPLAY   *P64:24,"pmsnmdaf";
+          OPEN      PMSNMDA1,"pmsnmdaf"     * NMDS Extract Records
+.
+          DISPLAY   *P64:24,"pmsnmdaf";
+          OPEN      PMSNMDA4,"pmsnmdaf"     * NMDS Extract Records
+.
+          MOVE      ZERO,ACKCOUNT
+          MOVE      ZERO,ERRCOUNT
+          MOVE      SP70,FILEPATH
+          MOVE      SP70,FILENAME
+          MOVE      SP70,INFILNAM
+          MOVE      ZERO,NUMBRECS
+.
+          MOVE      SP100,ERRMESSG
+          MOVE      ZERO,CPAGENO            * Init Page Count
+.
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                 KILL0000                                   *
+.*                  Close HL7 input file and remove it from the filesystem    *
+.******************************************************************************
+KILL0000  MOVE      ZERO,EXIT
+          CLOSE     INPTFILE                * close HL7 input file
+.
+          CLEAR     CMDLINE
+          APPEND    "rm -f ",CMDLINE        * remove it (forcefully)
+          APPEND    FULLFPTH,CMDLINE
+          APPEND    " ",CMDLINE
+          APPEND    FILEPATH,CMDLINE
+          APPEND    INFILNAM,CMDLINE
+          APPEND    ".hl7",CMDLINE
+          APPEND    " 2> /dev/null",CMDLINE * log output, hide errors
+          APPEND    SP70,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID          * execute conversion script
+.
+          CMATCH    "0",TASKID
+          GOTO      KILL9100 IF NOT EQUAL
+.
+          GOTO      KILL9999
+.
+KILL9100  MOVE      ONE,EXIT
+KILL9999  RETURN
++
+.******************************************************************************
+.*                           OPTN0000                     Called by: MAIN0000 *
+.*                  Get user options or exit                                  *
+.*    Returns:  EXIT    = FALSE (0)  Ok to proceed                            *
+.*                        TRUE  (1)  Exit option selected                     *
+.*              COPTION - option selected                                     *
+.******************************************************************************
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Load NMDS Acknowledgement files"
+.
+OPTN0500  KEYIN     *P1:8,*EL,"Select Option : ":
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * Exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.******************************************************************************
+.*                           KEYDIR00                     Called by: MAIN0000 *
+.*                  Keyin directory paths to save original file               *
+.******************************************************************************
+KEYDIR00  READ      CONTROLF,HUND24;*1,PTCNNMED
+          PACK      FILEPATH,PTCNNMED,SP70
+          MOVE      SP100,ERRMESSG
+.
+KEYDIR10  KEYIN     *P1:10,*EF,"Keyin input source path: ":
+                    *P10:11,*EL,*DV,*RV,FILEPATH:
+                    *P10:11,*V2LON,FILEPATH;
+.
+          ENDSET    FILEPATH  
+          APPEND    SP70,FILEPATH
+          RESET     FILEPATH
+.
+          MATCH     SP70,FILEPATH
+          GOTO      KEYDIR20 IF NOT EQUAL
+          MOVE      "Empty file path",ERRMESSG
+          DISPLAY   *P1:24,*EL,*B,"Empty file path. ";
+          CALL      HITENTER
+          GOTO      KEYDIR91                * exit on empty input
+.
+KEYDIR20  SQUEEZE   FILEPATH
+          CMATCH    EXITCHAR,FILEPATH       * exit on slash (\) input
+          GOTO      KEYDIR30 IF NOT EQUAL
+          MOVE      "\ character detected",ERRMESSG
+          DISPLAY   *P1:24,*EL,*B,"\ character detected. ";
+          CALL      HITENTER
+          GOTO      KEYDIR91                * exit on empty input
+.
+KEYDIR30  PACK      DIM70,FILEPATH,SP70
+          CALL      VALD0000                * check if it's a valid directory
+          BRANCH    EXIT,KEYDIR91
+.
+          MOVE      ZERO,EXIT
+          GOTO      KEYDIR9999
+.
+KEYDIR91  MOVE      ONE,EXIT
+.
+KEYDIR99  DISPLAY   *P1:24,*EL;
+          RETURN
++
+.******************************************************************************
+.*                           VALD0000                     Called by: KEYDIR00 *
+.*                  Check if it's a valid directory                           *
+.******************************************************************************
+VALD0000  MOVE      ZERO,EXIT
+          MOVE      SP100,ERRMESSG
+.
+          SQUEEZE   DIM70
+          ENDSET    DIM70
+          CMATCH    SLASH,DIM70
+          IF        !@EQUAL
+            MOVE      "Path must end with a slash (/) ",ERRMESSG
+            DISPLAY   *P1:24,*EL,*B,"Path must end with a slash (/) ";
+            CALL      HITENTER
+            GOTO      VALD9100
+          ENDIF
+          RESET     DIM70
+.
+          PACK      CMDLINE,SP70,SP70
+          CLEAR     CMDLINE
+          APPEND    "cd ",CMDLINE
+          APPEND    DIM70,CMDLINE
+          APPEND    " 2> /dev/null",CMDLINE      * log output, hide errors
+          APPEND    SP70,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID               * check if exists
+.
+          CMATCH    "0",TASKID
+          IF        !@EQUAL
+            MOVE      "Path does not exist ",ERRMESSG
+            DISPLAY   *P1:24,*EL,*B,"Path does not exist. ";
+            CALL      HITENTER
+            GOTO      VALD9100
+          ENDIF
+          GOTO      VALD9999
+.
+VALD9100  MOVE      ONE,EXIT            * Not valid
+          GOTO      VALD9999
+.
+VALD9999  RETURN
++
+.******************************************************************************
+.*                               KEYFIL00                 Called by: MAIN0000 *
+.*                  Key in input source filename                              *
+.******************************************************************************
+KEYFIL00  MOVE      ZERO,EXIT
+          MOVE      SP100,ERRMESSG
+.
+KEYFIL10  KEYIN     *P1:13,*EL,"Keyin input filename: ":
+                    *P23:13,*EL,*DV,*RV,INFILNAM:
+                    *P23:13,INFILNAM;
+.
+          MOVE      ZERO,F2
+          MOVELPTR  INFILNAM,F2
+          COMPARE   ZERO,F2            * empty input?
+          GOTO      KEYFIL91 IF EQUAL
+.
+          ENDSET    INFILNAM
+          APPEND    SP70,INFILNAM
+          RESET     INFILNAM
+          STRIP     INFILNAM
+.
+KEYFIL90  MOVE      ZERO,EXIT
+          GOTO      KEYFIL99
+.
+KEYFIL91  MOVE      "Empty filename",ERRMESSG
+          DISPLAY   *P1:24,*EL,*B,"Empty filename. ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+KEYFIL99  RETURN
++
+.******************************************************************************
+.*                               KEYUID00                 Called by: MAIN0000 *
+.*                  Key in user ID                                            *
+.******************************************************************************
+KEYUID00  MOVE      ZERO,EXIT
+          MOVE      SP70,USERID
+          KEYIN     *P1:15,*EL,"Keyin user ID: ":
+                    *P16:15,*EL,*DV,*RV,USERID:
+                    *P16:15,USERID;
+.
+          MATCH     SP70,USERID
+          GOTO      KEYUID91 IF EQUAL
+.
+          GOTO      KEYUID99
+.
+KEYUID91  MOVE      ONE,EXIT
+KEYUID99  RETURN
++
+.******************************************************************************
+.*                               CHKFIL00                 Called by: MAIN0000 *
+.*                  Checks input source filename exists (as ".err" or ".ndr") *
+.******************************************************************************
+CHKFIL00  MOVE      ZERO,OVRCD
+.
+.         Error file type?
+.
+          CLEAR     FILENAME
+          APPEND    INFILNAM,FILENAME
+          APPEND    ".err",FILENAME
+          RESET     FILENAME
+.
+          CLEAR     FULLFPTH
+          APPEND    FILEPATH,FULLFPTH
+          APPEND    FILENAME,FULLFPTH
+          RESET     FULLFPTH
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      INPTFILE,FULLFPTH
+          TRAPCLR   IO
+          BRANCH    OVRCD,CHKFIL10
+.
+          MOVE      ONE,FILETYPE       * Error file type
+          GOTO      CHKFIL90         
+.
+.         Acknowledgement file type?
+.
+CHKFIL10  CLEAR     FILENAME
+          APPEND    INFILNAM,FILENAME
+          APPEND    ".ndr",FILENAME
+          RESET     FILENAME
+.
+          CLEAR     FULLFPTH
+          APPEND    FILEPATH,FULLFPTH
+          APPEND    FILENAME,FULLFPTH
+          RESET     FULLFPTH
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      INPTFILE,FULLFPTH
+          TRAPCLR   IO
+          BRANCH    OVRCD,CHKFIL91
+.
+          MOVE      TWO,FILETYPE       * Acknowledgement file type
+          GOTO      CHKFIL90
+.
+CHKFIL90  CLOSE     INPTFILE
+          MOVE      ZERO,EXIT
+          GOTO      CHKFIL99
+.
+CHKFIL91  DISPLAY   *P1:24,*EL,*B,"Input file(s) - '",*+,INFILNAM,*-,"'":
+                    " not found.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+CHKFIL99  RETURN
++
+.******************************************************************************
+.*                               OPNFIL00                 Called by: MAIN0000 *
+.*                  Open input source file (HL7)                              *
+.******************************************************************************
+OPNFIL00  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      INPTFILE,FULLFPTH
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPNFIL91
+.
+          GOTO      OPNFIL99
+.
+OPNFIL91  MOVE      ONE,EXIT
+OPNFIL99  RETURN
++
+.******************************************************************************
+.*                           REFRMF00                     Called by: GFIL0000 *
+.*        Reformat comma delimited input file to HL7 (pipe delimited)         *
+.******************************************************************************
+REFRMF00  MOVE      ZERO,EXIT
+          CLEAR     CMDLINE
+          APPEND    "ibanhi12.us1 ",CMDLINE
+          APPEND    FULLFPTH,CMDLINE
+          APPEND    " ",CMDLINE
+          APPEND    FILEPATH,CMDLINE
+          APPEND    INFILNAM,CMDLINE
+          APPEND    ".hl7",CMDLINE
+          APPEND    " 2> /dev/null",CMDLINE * log output, hide errors
+          APPEND    SP70,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID          * execute conversion script
+.
+          DISPLAY   *P1:24,*EL,"Converting comma separated file..."
+          DISPLAY   *W2                     * Wait 2 seconds
+.
+          CMATCH    "0",TASKID
+          GOTO      REFRMF91 IF NOT EQUAL
+.
+          CLEAR     FULLFPTH
+          APPEND    FILEPATH,FULLFPTH
+          APPEND    INFILNAM,FULLFPTH
+          APPEND    ".hl7",FULLFPTH
+.
+          GOTO      REFRMF99
+.
+REFRMF91  MOVE      ONE,EXIT
+.
+REFRMF99  RETURN
++
+.******************************************************************************
+.*                                  PROC0000             Called by : MAIN0000 *
+.*        Process error / acknowledgement records in the input source file    *
+.*                                                                            *
+.******************************************************************************
+PROC0000  MOVE      ZERO,ACKCOUNT
+          MOVE      ZERO,ERRCOUNT
+          DISPLAY   *P1:24,*EL,"Processing input source file..."
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          CLOCK     TIME,CTIMEIS
+.
+          BRANCH    FILETYPE,PROC1000,PROC2000
+          GOTO      PROC9000
+.
+.         Process Error File (".err")...
+.
+PROC1000  READ      INPTFILE,SEQ;ACEHRTYP,ACEHACOD,ACEHFILE,ACEHNUMR,ACEHSDAT:
+                                 ACEHPENV
+          GOTO      PROC9000 IF OVER
+.
+.         Read NMDS Transmission header record for a 'Sent' batch
+.
+          UNPACK    ACEHFILE,DHBCODEV,BATCHNUM
+          PACK      KEY17,ACEHSDAT,DHBCODEV,BATCHNUM,ONE,SP70
+          CALL      RDPMNMH1                * read pmsnmhaf record
+          BRANCH    OVRCD,PROC9300
+.
+          MOVE      FIVE,PMNHSTAT           * File Failure
+          MOVE      USERID,PMNHUSRS         * User ID
+          MOVE      CURRDATE,PMNHUDAT       * Current date
+          MOVE      CTIMEIS,PMNHUTIM        * Current time
+.
+          CALL      UPPMNMH1
+          MOVE      ONE,ERRCOUNT            * include header in count
+.
+PROC1100  READ      INPTFILE,SEQ;ACERRTYP,ACERENUM,ACERETXT
+          GOTO      PROC9000 IF OVER
+.
+.         Update the status of all matching (batch no.) 'pmsnmdaf' records 
+.         to 'File Failure'.
+.
+          PACK      KEY20,BATCHNUM,SP70
+          CALL      RSPMNMD4
+PROC1200  CALL      RKPMNMD4
+          BRANCH    OVRCD,PROC9000
+.
+          MATCH     PMNDBTCH,BATCHNUM       * we still on the same batch?
+          GOTO      PROC9000 IF NOT EQUAL
+.
+          MOVE      FIVE,PMNDSTAT           * File Failure
+          MOVE      ACERENUM,PMNDERRN       * Error Number
+          MOVE      ACERETXT,PMNDERRT       * Error Text
+          MOVE      USERID,PMNDUSRS         * User ID
+          MOVE      CURRDATE,PMNDUDAT       * Current date
+          MOVE      CTIMEIS,PMNDUTIM        * Current time
+.
+          CALL      UPPMNMD4
+          ADD       ONE,ERRCOUNT
+.
+          GOTO      PROC1200
+.
+.
+.         Process Acknowledgement File (".ndr")...
+.
+PROC2000  READ      INPTFILE,SEQ;ACAHRTYP,ACAHACOD,ACAHFILE,ACAHNREC,ACAHSDAT:
+                                 ACAHENVT,ACAHLVER,ACAHNUMP,ACAHNUMD,ACAHNUMI:
+                                 ACAHNUMR,ACAHLDAT
+          GOTO      PROC9000 IF OVER
+.
+.         Read NMDS Transmission header record
+.
+          UNPACK    ACAHFILE,DHBCODEV,BATCHNUM
+          PACK      KEY17,ACAHSDAT,DHBCODEV,BATCHNUM,ONE,SP70
+          CALL      RDPMNMH1                * read pmsnmhaf record
+          BRANCH    OVRCD,PROC9300
+.
+          MOVE      ZERO,NUMBRECS
+          MOVE      PMNHRECS,NUMBRECS
+.
+          MOVE      ZERO,F5
+          MOVE      ACAHNREC,F5
+          COMPARE   F5,NUMBRECS             * number of records sent match?
+          GOTO      PROC9200 IF NOT EQUAL         
+. 
+          MOVE      TWO,PMNHSTAT            * Ack File Loaded
+          MOVE      ACAHLDAT,PMNHLDAT       * Date file loaded at MOH
+.
+          MOVE      ACAHNUMP,PMNHPROC       * no. records processed
+          RJUSTIFY  PMNHPROC
+          REP       " 0",PMNHPROC
+.
+          MOVE      ACAHNUMD,PMNHRDEL       * no. records deleted
+          RJUSTIFY  PMNHRDEL
+          REP       " 0",PMNHRDEL
+.
+          MOVE      ACAHNUMI,PMNHRINS       * no. records inserted
+          RJUSTIFY  PMNHRINS
+          REP       " 0",PMNHRINS
+.
+          MOVE      ACAHNUMR,PMNHRREJ       * no. records rejected
+          RJUSTIFY  PMNHRREJ
+          REP       " 0",PMNHRREJ
+.
+          MOVE      USERID,PMNHUSRS         * User ID
+          MOVE      CURRDATE,PMNHUDAT       * Current date
+          MOVE      CTIMEIS,PMNHUTIM        * Current time
+.
+          CALL      UPPMNMH1
+          MOVE      ONE,ACKCOUNT            * include header in count
+.
+.
+.         Read NMDS Acknowledgement records...
+.
+PROC2100  READ      INPTFILE,SEQ;ACAKRTYP,ACAKNHIN,ACAKEVNT,ACAKDTIM,ACAKFCOD:
+                                 ACAKLOCI,ACAKREFN,ACAKUNIQ,ACAKSYSI;
+          GOTO      PROC9000 IF OVER
+.
+          MOVE      ZERO,ERRPROCS
+          MOVE      ONE,ERRSTART
+          MOVE      ZERO,RECFNDFL
+.
+          MOVE      ACAKUNIQ,F8
+          MOVE      F8,ADMISSNO
+          RJUSTIFY  ADMISSNO
+.
+          MOVE      "00",PMNDERRC
+          PACK      KEY19,ADMISSNO,ACAKEVNT,ACAKSYSI,BATCHNUM,PMNDERRC,SP70
+          CALL      RDPMNMD1
+          BRANCH    OVRCD,PROC2200
+.
+          MOVE      ONE,RECFNDFL
+.
+PROC2200  READ      INPTFILE,SEQ;ACAKENUM,ACAKETXT,ACAKDNUM,ACAKLDAT,ACAKLCOD;
+.
+          MOVE      ZERO,F1
+          MOVELPTR  ACAKENUM,F1
+          COMPARE   ZERO,F1
+          GOTO      PROC2100 IF EQUAL  * No more error fields; read next line
+.
+          COMPARE   ONE,ERRPROCS            * Are we processing error chunks?
+          GOTO      PROC2210 IF EQUAL       * Yes
+.
+          IF        RECFNDFL=1
+            CALL      UPDRCD00              * Update existing record
+          ENDIF
+.
+          MATCH     "0",ACAKENUM            * '0' Error Number?
+          IF        @EQUAL
+            READ      INPTFILE,SEQ;ACERETXT * read to EOL
+            GOTO      PROC2100              * Read next Ack record (line)
+          ENDIF
+.
+.
+.         Process error chunks...
+.
+          MOVE      ONE,ERRPROCS
+PROC2210  COMPARE   ONE,ERRSTART            * Is it First error chunk?
+          GOTO      PROC2300 IF NOT EQUAL   * No
+.
+          COMPARE   ONE,RECFNDFL
+          GOTO      PROC2250 IF NOT EQUAL
+.
+          MOVE      "00",PMNDERRC
+          PACK      KEY19,PMNDADMN,PMNDETYP,PMNDDIAG,PMNDBTCH,PMNDERRC,SP70
+          CALL      RDPMNMD1
+          IF        OVRCD=0
+            CALL      MOVERR00              * Move (first) error fields
+            CALL      UPPMNMD1
+          ELSE
+            CALL      MOVERR00              * Move (first) error fields
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRPMNMD1
+            TRAPCLR   IO
+            BRANCH    OVRCD,PROC2100
+          ENDIF
+.
+          ADD       ONE,ACKCOUNT
+          CALL      SAVTMP00                * Save pmsnmdaf values to temp vars
+.
+PROC2250  MOVE      ZERO,ERRSTART           * Reset flag for first error
+          GOTO      PROC2200                * Read next error chunk (if exists)
+.
+.
+.         Write new pmsnmdaf records for each subsequent error;
+.         We clone existing (previouly read) record fields and set the new 
+.         error field values.
+.
+PROC2300  CALL      CLPMSNMD
+          CALL      MOVTMP00
+.
+          ADD       ONE,ERRINDEX            * Get next error count index
+          MOVE      ERRINDEX,PMNDERRC
+          REP       " 0",PMNDERRC
+.
+          PACK      KEY19,PMNDADMN,PMNDETYP,PMNDDIAG,PMNDBTCH,PMNDERRC,SP70
+          CALL      RDPMNMD1
+          IF        OVRCD=0
+            CALL      MOVNMD00
+            CALL      UPPMNMD1
+          ELSE
+            CALL      MOVNMD00
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRPMNMD1
+            TRAPCLR   IO
+            BRANCH    OVRCD,PROC2200
+          ENDIF
+.
+          GOTO      PROC2200                * Read next error chunk (if exists)
+.
+PROC9000  DISPLAY   *P1:24,*EL,"Processing complete!"
+          MOVE      ZERO,EXIT
+          GOTO      PROC9999
+.
+PROC9100  MOVE      ONE,EXIT
+          GOTO      PROC9999
+.
+PROC9200  MOVE      "Number of records returned mismatch",ERRMESSG
+          MOVE      ONE,EXIT
+          GOTO      PROC9999
+.
+PROC9300  MOVE      "No matching NMDS Transmission Header ('pmsnmhaf') record found with a status of 'Sent'.",ERRMESSG
+          MOVE      ONE,EXIT
+          GOTO      PROC9999
+.
+PROC9999  RETURN
++
+.******************************************************************************
+.*                  MOVNMD00                             Called by : PROC0000 *
+.*                                                                            *
+.*        Move add/update pmsnmdaf values to file vars                        *
+.******************************************************************************
+MOVNMD00  MOVE      ERRINDEX,PMNDERRC
+          REP       " 0",PMNDERRC
+.
+          MOVE      "2",PMNDSTAT            * Error status
+          MOVE      ACAKENUM,PMNDERRN       * Error number
+          MOVE      ACAKETXT,PMNDERRT       * Error text
+          MOVE      ACAKLDAT,PMNDLSDT       * Legal Status Date
+          MOVE      ACAKLCOD,PMNDLSCD       * Legal Status Code
+          MOVE      USERID,PMNDUSRS         * User ID
+          MOVE      CURRDATE,PMNDUDAT       * Current date
+          MOVE      CTIMEIS,PMNDUTIM        * Current time
+.
+MOVNMD99  RETURN
++
+.******************************************************************************
+.*                  UPDRCD00                             Called by : PROC0000 *
+.*                                                                            *
+.*        Updates the existing record in pmsnmdaf that we've just read        *
+.******************************************************************************
+UPDRCD00  MATCH     "0",ACAKENUM            * '0' Error Number?
+          IF        @EQUAL
+            MOVE      "3",PMNDSTAT          * Status - Accepted
+            MOVE      SP70,PMNDERRN         * Error Number - blank
+            MOVE      ACAKETXT,PMNDERRT     * Error/Status Text
+          ELSE
+            MOVE      "2",PMNDSTAT          * Error Status
+            MOVE      ACAKENUM,PMNDERRN     * Error Number - blank
+            MOVE      ACAKETXT,PMNDERRT     * Error/Status Text - blank
+          ENDIF
+.
+          MOVE      ACAKLDAT,PMNDLSDT       * Legal Status Date
+          MOVE      ACAKLCOD,PMNDLSCD       * Legal Status Code 
+          MOVE      USERID,PMNDUSRS         * User ID
+          MOVE      CURRDATE,PMNDUDAT       * Current date
+          MOVE      CTIMEIS,PMNDUTIM        * Current time
+.
+          CALL      UPPMNMD1
+          ADD       ONE,ACKCOUNT
+          PACK      SAVRCDKY,PMNDADMN,PMNDETYP,PMNDDIAG,PMNDBTCH,PMNDERRC,SP70
+.
+UPDRCD90  MOVE      ZERO,EXIT
+          GOTO      UPDRCD99
+.
+UPDRCD91  MOVE      ONE,EXIT
+.
+UPDRCD99  RETURN
++
+.******************************************************************************
+.*                  MOVERR00                             Called by : PROC0000 *
+.*                                                                            *
+.*        Move data for First error record into file vars                     *
+.******************************************************************************
+MOVERR00  MOVE      "2",PMNDSTAT            * Error Status
+          MOVE      PMNDERRC,ERRINDEX       * Error Count Index
+          MOVE      ACAKENUM,PMNDERRN       * Error Number
+          MOVE      ACAKETXT,PMNDERRT       * Error Text
+.
+          MOVE      ACAKLDAT,PMNDLSDT       * Legal Status Date
+          MOVE      ACAKLCOD,PMNDLSCD       * Legal Status Code
+.
+          MOVE      USERID,PMNDUSRS         * User ID
+          MOVE      CURRDATE,PMNDUDAT       * Current date
+          MOVE      CTIMEIS,PMNDUTIM        * Current time
+.
+MOVERR99  RETURN
++
+.******************************************************************************
+.*                                  SAVTMP00             Called by : PROC0000 *
+.*                                                                            *
+.*        Save pmsnmdaf record values to temp vars                            *
+.******************************************************************************
+SAVTMP00  MOVE      PMNDADMN,TEMPADMN
+          MOVE      PMNDPNHI,TEMPPNHI
+          MOVE      PMNDEDAT,TEMPEDAT
+          MOVE      PMNDETIM,TEMPETIM
+          MOVE      PMNDFACI,TEMPFACI
+          MOVE      PMNDXDAT,TEMPXDAT
+          MOVE      PMNDBTCH,TEMPBTCH
+          MOVE      PMNDETYP,TEMPETYP
+          MOVE      PMNDELID,TEMPELID
+          MOVE      PMNDSTAT,TEMPSTAT
+          MOVE      PMNDREDT,TEMPRDET
+          MOVE      PMNDDIAG,TEMPDIAG
+.
+SAVTMP99  RETURN
++
+.******************************************************************************
+.*                                  MOVTMP00             Called by : PRERR000 *
+.*                                                                            *
+.*        Move temp vars to pmsnmdaf file fields                              *
+.******************************************************************************
+MOVTMP00  MOVE      TEMPADMN,PMNDADMN
+          MOVE      TEMPPNHI,PMNDPNHI
+          MOVE      TEMPEDAT,PMNDEDAT
+          MOVE      TEMPETIM,PMNDETIM
+          MOVE      TEMPFACI,PMNDFACI
+          MOVE      TEMPXDAT,PMNDXDAT
+          MOVE      TEMPBTCH,PMNDBTCH
+          MOVE      TEMPETYP,PMNDETYP
+          MOVE      TEMPELID,PMNDELID
+          MOVE      TEMPSTAT,PMNDSTAT
+          MOVE      TEMPRDET,PMNDREDT
+          MOVE      TEMPDIAG,PMNDDIAG
+.
+MOVTMP99  RETURN
++
+.******************************************************************************
+.*                                  PRHEAD00             Called by : MAIN0000 *
+.*                                                                   PRREP000 *
+.*        Print report header lines                                           *
+.******************************************************************************
+PRHEAD00  CALL      IBACLOCK
+          CLOCK     TIME,CTIMEIS
+          CALL      HEAD132                      * Print New Page Header
+.
+          PRINT     *N,"File path entered: ",FILEPATH
+          PRINT     *N,"File name entered: ",INFILNAM,*N
+.
+PRHEAD99  RETURN
++
+.******************************************************************************
+.*                                  PRREP000             Called by : MAIN0000 *
+.*        Print report totals (acknowledgement / error)                       *
+.******************************************************************************
+PRREP000  CALL      PRHEAD00           * Print report header
+.
+          PRINT     *N,"File found: ",FILENAME,*N
+          COMPARE   ONE,FILETYPE       * Error input file? (".err")
+          GOTO      PRREP200 IF EQUAL
+.
+PRREP100  PRINT     *N,"NMDS header record status set to '2' - ":
+                    "Acknowledgement File Loaded.",*N
+          PRINT     *N,"Number of NMDS records (including header) updated: ":
+                    ACKCOUNT,*N
+.
+          GOTO      PRREP900
+          
+PRREP200  PRINT     *N,"NMDS header record status set to '5' - File Failure.",*N
+          PRINT     *N,"Number of NMDS records (including header) updated: ":
+                    ERRCOUNT,*N
+.
+PRREP900  PRINT     *N,*N,ENDOFRPT          * Print End of Report
+.
+PRREP999  RETURN
++
+*******************************************************************************
+          INC       STD001IO           * Standard Include
+          INC       CLPMSNMH           * Clear file vars for pmsnmhaf
+          INC       CLPMSNMD           * Clear file vars for pmsnmdaf
+.
+          INC       PMSNMDIO/INC       * NMDS Extract Records
+          INC       PMSNMHIO/INC       * NMDS Transmission File Batches

@@ -1,0 +1,58 @@
+.
+. Include   :  PATSMWIO.INC
+.
+. File      :  patsmwaf.dat
+. Keys      :  KEY14
+.
+RSPTSMW1  RESET     KEY14
+          READ      PATSMWA1,KEY14;;
+          RETURN
+.
+RAPTSMW1  RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      PATSMWA1,KEY14;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPTSMW1  RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      PATSMWA1,KEY14;PTMWURNO,PTMWCLSS,DPTMWCNT,PTMWDATE:
+                                  PTMWTEXT,PTMWMARC,PTMWHOSP,PTMWDOCT,PTMWSYS:
+                                  PTMWCODE,PTMWLUPD,PTMWSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMWCNT,PTMWCNT
+          RETURN
+.
+RKPTSMW1  MOVE      ZERO,OVRCD
+          READKS    PATSMWA1;PTMWURNO,PTMWCLSS,DPTMWCNT,PTMWDATE:
+                                  PTMWTEXT,PTMWMARC,PTMWHOSP,PTMWDOCT,PTMWSYS:
+                                  PTMWCODE,PTMWLUPD,PTMWSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMWCNT,PTMWCNT
+          RETURN
+.
+RPPTSMW1  MOVE      ZERO,OVRCD
+          READKP    PATSMWA1;PTMWURNO,PTMWCLSS,DPTMWCNT,PTMWDATE:
+                                  PTMWTEXT,PTMWMARC,PTMWHOSP,PTMWDOCT,PTMWSYS:
+                                  PTMWCODE,PTMWLUPD,PTMWSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTMWCNT,PTMWCNT
+          RETURN
+.
+UPPTSMW1  MOVE      PTMWCNT,DPTMWCNT
+          UPDATE    PATSMWA1;PTMWURNO,PTMWCLSS,DPTMWCNT,PTMWDATE:
+                                  PTMWTEXT,PTMWMARC,PTMWHOSP,PTMWDOCT,PTMWSYS:
+                                  PTMWCODE,PTMWLUPD,PTMWSPAR
+          RETURN
+.
+WRPTSMW1  RESET     KEY14
+          MOVE      PTMWCNT,DPTMWCNT
+          WRITE     PATSMWA1,KEY14;PTMWURNO,PTMWCLSS,DPTMWCNT,PTMWDATE:
+                                  PTMWTEXT,PTMWMARC,PTMWHOSP,PTMWDOCT,PTMWSYS:
+                                  PTMWCODE,PTMWLUPD,PTMWSPAR
+          RETURN
+.
+DEPTSMW1  RESET     KEY14
+          DELETE    PATSMWA1,KEY14
+          RETURN
+.

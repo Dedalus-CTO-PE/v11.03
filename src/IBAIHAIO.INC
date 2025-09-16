@@ -1,0 +1,100 @@
+.
+.         INCLUDE NAME : IBAIOIHA.PBL
+.
+.         FILE  I/O REQUESTS FOR OPERATOR PASSCODE NAME
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY4   DIM             4             KEY FOR IHAPASS1
+.KEY39  DIM             39            KEY FOR IHAPASS2
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE INVAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+RDAPASS1 MOVE      ZERO,OVRCD
+         RESET     KEY4
+         READ      IHAPASS1,KEY4;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSPASS1 RESET     KEY4
+         READ      IHAPASS1,KEY4;;
+         RETURN  
+.
+RDPASS1  MOVE      ZERO,OVRCD
+         RESET     KEY4
+         READ      IHAPASS1,KEY4;SECODE,SECNUMB,SECUSER,SECACCT:
+                                 SECNUMB1,SECNUMB2,SECDIRCT,SECMENU:
+                                 SECPRINT,SECDEPT,SECMNNUM,SECMAIL,SECSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDKPASS1 MOVE      ZERO,OVRCD
+         READKS    IHAPASS1;SECODE,SECNUMB,SECUSER,SECACCT:
+                            SECNUMB1,SECNUMB2,SECDIRCT,SECMENU:
+                            SECPRINT,SECDEPT,SECMNNUM,SECMAIL,SECSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDPPASS1 MOVE      ZERO,OVRCD
+         READKP    IHAPASS1;SECODE,SECNUMB,SECUSER,SECACCT:
+                            SECNUMB1,SECNUMB2,SECDIRCT,SECMENU:
+                            SECPRINT,SECDEPT,SECMNNUM,SECMAIL,SECSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+WRPASS1  RESET     KEY4
+         MOVE      ZERO,OVRCD
+         WRITE     IHAPASS1,KEY4;KEY4,SECNUMB,SECUSER,SECACCT:
+                                 SECNUMB1,SECNUMB2,SECDIRCT,SECMENU:
+                                 SECPRINT,SECDEPT,SECMNNUM,SECMAIL,SECSPARE
+         RETURN  
+.
+UPPASS1  UPDATE    IHAPASS1;SECODE,SECNUMB,SECUSER,SECACCT:
+                            SECNUMB1,SECNUMB2,SECDIRCT,SECMENU:
+                            SECPRINT,SECDEPT,SECMNNUM,SECMAIL,SECSPARE
+         RETURN
+.
+DEPASS1  RESET     KEY4
+         DELETE    IHAPASS1,KEY4
+         RETURN  
+.
+RDLPASS1 RESET     KEY4                                                        
+         MOVE      ZERO,OVRCD
+         READL     IHAPASS1,KEY4;SECODE,SECNUMB,SECUSER,SECACCT:
+                                 SECNUMB1,SECNUMB2,SECDIRCT,SECMENU:
+                                 SECPRINT,SECDEPT,SECMNNUM,SECMAIL,SECSPARE
+.
+         GOTO      OVERCOND IF OVER
+         GOTO      OVERLOCK IF LOCKED
+         RETURN
+.
+UUPASS1   RESET     KEY4
+          UNLOCK    IHAPASS1
+          RETURN
+.
+.
+.
+RDSPASS2 RESET     KEY39
+         READ      IHAPASS2,KEY39;;
+         RETURN
+.
+RDPASS2  MOVE      ZERO,OVRCD
+         RESET     KEY39
+         READ      IHAPASS2,KEY39;SECODE,SECNUMB,SECUSER,SECACCT:
+                                  SECNUMB1,SECNUMB2,SECDIRCT,SECMENU:
+                                  SECPRINT,SECDEPT,SECMNNUM,SECMAIL,SECSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDKPASS2 MOVE      ZERO,OVRCD
+         READKS    IHAPASS2;SECODE,SECNUMB,SECUSER,SECACCT:
+                            SECNUMB1,SECNUMB2,SECDIRCT,SECMENU:
+                            SECPRINT,SECDEPT,SECMNNUM,SECMAIL,SECSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.

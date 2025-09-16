@@ -1,0 +1,367 @@
+.******************************************************************************
+.* System         : WEB                                                       *
+.*                                                                            *
+.* Include Name   : MRGURWEB.PBL                                              *
+.*                                                                            *
+.* Function       : Merge a U/R for all WEB files                             *
+.*                  files which contain a U/R Number.                         *
+.*                                                                            *
+.* Author         : J.Tan    01/11/2000                                       *
+.*                                                                            *
+.* Parameters     : OLDURNO            the old urnumber                       *
+.*                  NEWURNO            the new urnumber                       *
+.*                                                                            *
+.* Modifications  :                                                           *
+.*        V11.02.01 07/07/2022 Jacob Jackson    TSK 0918332                   *
+.*                  Check if WROBPC1 & WROBAUD1 indexes exist before writing  *
+.*                  new records                                               *
+.*        V10.06.01 06/07/2015 Peter Vela       CAR 316928                    *
+.*                  Added update of patmx1af.ptmxsin4                         *
+.*                  if clinical documents are copied across in OBSPCO00       *
+.*        V10.05.01 14/10/2014 Peter Vela       CAR 301518                    *
+.*                  Added Clinical Documents audit functionality OBSAUDFD     *
+.*        V10.03.02 09/07/2013  Jill Parkinson CAR 288188                     *
+.*                  Changed OBSECO00 to open index 2                          *
+.*        V10.03.01 28/06/2013  Patrick Adair CAR 286757                      *
+.*                  Added OBSECOAF for eAdmissions processing                 *
+.*        V9.04.00  26/09/2005  Ebon Clements CAR 56868                       *
+.*                  Added web user id to death polling                        *
+.*        V9.03.02  24/07/2003  CAR 37193   Mike Laming                       *
+.*                  Change Unix Command "cp" to "mv", comment out error msgs. *
+.*        V9.03.01  15/07/2003  CAR 37193   Mike Laming                       *
+.*                  Port V5.10 changes for PMS05 -                            *
+.*                  - Changed OBSPAL00 and OBSPCO00 routines to create new    *
+.*                    Unique identifier if a NewUR record found               *
+.*                  - Add logic to rename the correspondence.txt files (with  *
+.*                    UR no. embedded) to new name.                           *
+.*       V9.02.01  Tonii CAR 36005                                            *
+.*                 Removed RESCLN00 from here and placed into new include     *
+.*                 MRGURRES along with other Clincal result files             *
+.******************************************************************************
+.
+          DEFPROC   MRGURWEB
+.
+          INC       PATDTHFD/INC
+          INC       OBSAUDFD/INC
+          INC       OBSPALFD/INC
+          INC       OBSECOFD/INC
+          INC       OBSPCOFD/INC
+          INC       OBSPCTFD/INC                                       *I-90301
+.
+CLNDOCIN  DIM       1
+FILENEW   DIM       20                                                 *I-90301
+FILEOLD   DIM       20                                                 *I-90301
+SAVKY20O  DIM       20                                                 *I-90301
+CMDLINE   DIM       127                                                *I-90301
+CMDCOPY   INIT      "cp "                                              *I-90301
+CMDMOVE   INIT      "mv "                                              *I-90302
+DASH      INIT      "-"                                                *I-90301
+.
+          DISPLAY   *P1:24,*EL,"Fixing WEB Files."
+.
+          CALL      PATDTH00         * Patient death polling table
+          CALL      OBSPAL00         * Observation Patient Alerts Table
+          CALL      OBSPCO00         * Observation Patient Correspondence
+          CALL      OBSECO00         * Observ. Pat. Corr. eAdmissions
+          CALL      OBSAUD00         * Clinical Documents Audit
+          GOTO      MRGWEB99
+.
+.*********************************************************************
+.         Change U/R for PATDTHFD
+.*********************************************************************
+PATDTH00  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      PATDTHA1,"patdthaf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,PATDTH99
+.
+          DISPLAY   *P71:24,*V2LON,"patdthaf"
+.
+PATDTH10  PACK      KEY8,OLDURNO,SP20
+          CALL      RDPTDH1 
+          BRANCH    OVRCD,PATDTH90
+          CALL      DEPTDH1               * delete old U/R
+.
+          MOVE      NEWURNO,KEY8          * check if new U/R exists
+          MOVE      NEWURNO,PTDHURNO
+          MOVE      USERID,PTDHWEBU
+          MOVE      SP70,PTDHSPAR
+          CALL      RAPTDH1
+          COMPARE   ZERO,OVRCD
+          GOTO      PATDTH90 IF EQUAL
+          CALL      WRPTDH1
+          
+PATDTH90  CLOSE     PATDTHA1
+PATDTH99  RETURN
++
+.*********************************************************************
+.         Change U/R for OBSPALFD
+.*********************************************************************
+OBSPAL00  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OBSPALA1,"obspalaf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OBSPAL99
+.
+          DISPLAY   *P71:24,*V2LON,"obspalaf"
+          MOVE      ZERO,FORM4                                         *I-90301
+.
+OBSPAL10  PACK      KEY12,OLDURNO,SP20
+          CALL      RSOBPA1
+          CALL      RKOBPA1
+          BRANCH    OVRCD,OBSPAL90
+.
+          MATCH     OLDURNO,OBPAURN           * Same U/R number ?
+          GOTO      OBSPAL90 IF NOT EQUAL     * no.
+.
+.....     MOVE      NEWURNO,OBPAURN           * update new U/R number   D-90301
+.....     CALL      UPOBPA1                   *                         D-90301
+.
+. ******************************************* Start of additional code *I-90301
+          PACK      KEY13,OBPAURN,OBPAUNI,SP15 * sneaky save of key12
+.
+          PACK      KEY12,NEWURNO,OBPAUNI
+          CALL      RAOBPA1
+.                                             * No record for NEWURNO
+          IF        OVRCD=1
+            PACK      KEY12,OBPAURN,OBPAUNI
+            CALL      DEOBPA1
+.
+            MOVE      NEWURNO,OBPAURN         * write new U/R number
+            PACK      KEY12,OBPAURN,OBPAUNI
+            CALL      WROBPA1
+          ELSE
+.                                           * A NEWURNO/Unique key was found -
+.                                           * need to generate another unique id
+            MOVE      OBPAUNI,FORM4
+.
+OBSPAL30    ADD       ONE,FORM4
+            MOVE      FORM4,KEY4            * move new unique id
+            PACK      KEY12,NEWURNO,KEY4,SP15
+            CALL      RAOBPA1               * see if this unique Id exists
+            COMPARE   ZERO,OVRCD
+            GOTO      OBSPAL30 IF EQUAL
+.                                           * this unique Id is unique
+            UNPACK    KEY13,KEY12,DIM1      * re-read Old UR record
+            CALL      RAOBPA1
+            CALL      DEOBPA1               * delete Old UR record
+.
+            MOVE      NEWURNO,OBPAURN       * move new U/R number
+            MOVE      KEY4,OBPAUNI          * move new unique id
+            PACK      KEY12,OBPAURN,OBPAUNI
+            CALL      WROBPA1               * write new UR record
+          ENDIF
+. ******************************************* End of additional code   *I-90301
+.
+          GOTO      OBSPAL10
+.
+OBSPAL90  CLOSE     OBSPALA1
+OBSPAL99  RETURN
++
+.*********************************************************************
+.         Change U/R for OBSPCOFD
+.*********************************************************************
+OBSPCO00  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OBSPCOA1,"obspcoaf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OBSPCO99
+.
+          DISPLAY   *P71:24,*V2LON,"obspcoaf"
+.
+          OPEN      OBSPCTA1,"obspctaf"                                *I-90301
+          MOVE      ZERO,FORM4                                         *I-90301
+          MOVE      SP70,CLNDOCIN
+.
+OBSPCO10  PACK      KEY20,OLDURNO,SP20
+          CALL      RSOBPC1
+          CALL      RKOBPC1
+          BRANCH    OVRCD,OBSPCO90
+.
+          MATCH     OLDURNO,OBPCURNO          * Same U/R number ?
+          GOTO      OBSPCO90 IF NOT EQUAL     * no.
+.
+.....     MOVE      NEWURNO,OBPCURNO          * update new U/R number   D-90301
+.....     CALL      UPOBPC1                                             D-90301
+.
+. ******************************************* Start of additional code *I-90301
+          PACK      SAVKY20O,OBPCURNO,OBPCCVIS,OBPCCPID,SP20
+.
+          PACK      KEY20,NEWURNO,OBPCCVIS,OBPCCPID
+          CALL      RDOBPC1
+          IF        OVRCD=1
+.                                             * No New UR record found
+            PACK      KEY20,OBPCURNO,OBPCCVIS,OBPCCPID
+            CALL      DEOBPC1                 * delete the Old UR
+.
+            MOVE      NEWURNO,OBPCURNO        * write new U/R number
+            PACK      KEY20,OBPCURNO,OBPCCVIS,OBPCCPID
+.
+            CALL      RAOBPC1
+            IF        OVRCD = 1
+              CALL      WROBPC1
+              MOVE      ONE,CLNDOCIN
+            ENDIF
+          ELSE
+.                                           * A NEWURNO/Unique key was found -
+.                                           * need to generate another unique id
+            MOVE      OBPCCPID,FORM4
+.
+OBSPCO30    ADD       ONE,FORM4
+            MOVE      FORM4,KEY4            * move new unique id
+            PACK      KEY20,NEWURNO,OBPCCVIS,KEY4,SP20
+            CALL      RAOBPC1               * see if this unique Id exists
+            COMPARE   ZERO,OVRCD            * Yes - try again
+            GOTO      OBSPCO30 IF EQUAL
+.                                           * KEY4 now contains a unique ID
+            MOVE      SAVKY20O,KEY20        * re-read Old UR record
+            CALL      RDOBPC1
+            CALL      DEOBPC1               * delete Old UR record
+.
+            MOVE      NEWURNO,OBPCURNO      * move new U/R number
+            MOVE      KEY4,OBPCCPID         * move new unique id
+            PACK      KEY20,OBPCURNO,OBPCCVIS,OBPCCPID
+            CALL      RAOBPC1
+            IF        OVRCD = 1
+              CALL      WROBPC1               * write new UR record
+              MOVE      ONE,CLNDOCIN
+            ENDIF
+          ENDIF
+.
+.                                           * This routine will rename the
+.                                           * attached files (which have UR in
+.                                           * file name) to the new UR
+.
+.                                           * added for testing purposes
+          MOVE      "UR-",KEY3
+          MOVE      "MRGURWEB",XXFILE
+          PACK      XXDESC,KEY3,SAVKY20O,SP2,KEY3,KEY20
+.....     CALL      WERR0000                * write message to TEMP3
+.
+OBSPCO40  MATCH     "00000000",OBPCCVIS
+          GOTO      OBSPCO10 IF NOT EQUAL   * no action required for a Visit
+.
+          MOVE      OBPCSLID,KEY4           * setup location ID key
+          CALL      RDOBPT1                 * read Obs. Storage Location
+          STRIP     OBPTSDIR
+.
+          MOVE      "UR",KEY2               * create the 2 file names
+          PACK      FILENEW,KEY2,OBPCURNO,DASH,OBPCCPID,OBPCFEXT
+          STRIP     FILENEW
+          REP       " 0",FILENEW
+          UNPACK    SAVKY20O,OBPCURNO,OBPCCVIS,OBPCCPID   * restore old key
+          PACK      FILEOLD,KEY2,OBPCURNO,DASH,OBPCCPID,OBPCFEXT
+          STRIP     FILEOLD
+          REP       " 0",FILEOLD
+.
+.                                           * construct "cp" command   *C-90302
+.....     PACK      CMDLINE,CMDCOPY,OBPTSDIR,FILEOLD,SP1,OBPTSDIR,FILENEW
+          PACK      CMDLINE,CMDMOVE,OBPTSDIR,FILEOLD,SP1,OBPTSDIR,FILENEW
+          EXECUTE   CMDLINE,TASKID
+.
+.                                           * added for testing purposes
+          MOVE      "command",XXFILE
+          MOVE      CMDLINE,XXDESC
+.....     CALL      WERR0000                * write message to TEMP3
+.
+. ******************************************* End of additional code   *I-90301
+.
+          GOTO      OBSPCO10
+.
+OBSPCO90  MATCH     "1",CLNDOCIN
+          IF        @EQUAL
+            PACK      KEY8,NEWURNO,SP70
+            CALL      RDMAST1
+            IF        OVRCD=ZERO
+              MOVE      ONE,PTMXSIN4
+              CALL      UPMAST1
+            ENDIF
+          ENDIF 
+.
+          CLOSE     OBSPCOA1
+          CLOSE     OBSPCTA1                                           *I-90301
+OBSPCO99  RETURN
++
+.*******************************************************************************
+.*         Change U/R for obsecoaf                                             *
+.*******************************************************************************
+OBSECO00  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OBSECOA2,"obsecoaf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OBSECO99
+.
+          DISPLAY   *P71:24,*V2LON,"obsecoaf"
+.
+OBSECO10  PACK      KEY32,OLDURNO,SP70
+          CALL      RSOBECO2
+          CALL      RKOBECO2
+          BRANCH    OVRCD,OBSECO90
+.
+          MATCH     OLDURNO,OBECURNO          * Same U/R number ?
+          GOTO      OBSECO90 IF NOT EQUAL     * no.
+.
+          PACK      KEY32,OBECURNO,OBECEAID,OBECCPID
+          CALL      DEOBECO2
+.
+          PACK      OBECURNO,NEWURNO
+          PACK      KEY32,OBECURNO,OBECEAID,OBECCPID
+          CALL      WROBECO2
+.
+          GOTO      OBSECO10
+.
+OBSECO90  CLOSE     OBSECOA1
+.
+OBSECO99  RETURN
++
+.------------------------------------------------------------
+. Clinical Documents Audit: Add, Update, View and Delete
+. Input - OBAUTYPE (A,U,V,D)
+.------------------------------------------------------------
+OBSAUD00  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OBSAUDA1,"obsaudaf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OBSAUD99
+.
+          DISPLAY   *P71:24,*V2LON,"obsaudaf"
+.
+OBSAUD10  PACK      KEY47,OLDURNO,SP70
+          CALL      RSOBAUD1
+          CALL      RKOBAUD1
+          BRANCH    OVRCD,OBSAUD90
+.
+          MATCH     OLDURNO,OBAUURNO
+          GOTO      OBSECO90 IF NOT EQUAL
+.
+          PACK      KEY47,OBAUURNO,OBAUVISN,OBAUCORR,OBAUDATE,OBAUTIME,OBAUWEBU:
+                          OBAUTYPE,SP70
+          CALL      DEOBAUD1
+.
+          PACK      OBAUURNO,NEWURNO,SP70
+          PACK      KEY47,OBAUURNO,OBAUVISN,OBAUCORR,OBAUDATE,OBAUTIME,OBAUWEBU:
+                          OBAUTYPE,SP70
+          CALL      RAOBAUD1
+          IF        OVRCD = 1
+            CALL      WROBAUD1
+          ENDIF
+.
+          GOTO      OBSAUD10
+.
+OBSAUD90  CLOSE     OBSAUDA1
+.
+OBSAUD99  RETURN
++
+
+. ******************************************************************************
+.
+          INC       IBAOVRIO/INC
+          INC       PATDTHIO/INC
+          INC       OBSAUDIO/INC
+          INC       OBSPALIO/INC
+          INC       OBSECOIO/INC
+          INC       OBSPCOIO/INC
+          INC       OBSPCTIO/INC                                       *I-90301
+
+MRGWEB99  ENDPROC
+............................................................................

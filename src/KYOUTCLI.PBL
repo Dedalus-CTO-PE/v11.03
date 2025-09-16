@@ -1,0 +1,210 @@
+.******************************************************************************
+.* Include Name   : KYOUTCLI.PBL                                              *
+.* Description    : Keyin of an Outpatient Clinic Id from OUTCLIFD            *
+.* Author         : Justin Coates           27/04/1992                        *
+.*                                                                            *
+.* Parameters     : ECOL     - column of keyin                                *
+.*                  EVERT    - row of keyin                                   *
+.*                  CKYIDEF6 - default value (blank if no default)            *
+.*                  CKYIMAND - is keyin mandatory (0=No  1=Yes)               *
+.*                                                                            *
+.* Returns        : OCACLIN  - Keyed in code                                  *
+.*                  OCADESC  - Description                                    *
+.*                  EXIT = 0   Everything Ok.                                 *
+.*                       = 1   Spaces Input                                   *
+.*                       = 2   EXITCHAR input                                 *
+.*                       = 3   Nothing  input                                 *
+.*                                                                            *
+.* On return      : You must display the description yourself.                *
+.*                                                                            *
+.******************************************************************************
+.* Mods           : Clear OCLCLIN if no default value and not mandatory       *
+.*                                                                            *
+.*        V10.07.01 30/10/2015  Ebon Clements      CAR 268970                 *
+.*                  Change to use OUTCLIFD index 1 instead of index 2         *
+.*        V9.09.01  04/02/2008  Peter Vela         CAR 162914                 *
+.*                  Mods to search for Clinic Id with future effective date   *
+.*                  if direct read and previous reads fail                    *
+.*        V5.08.02  20/09/2000  Steve Armstrong    SRF 647263                 *
+.*                  Added check on site prefix when validating clinic on      *
+.*                  outcliaf index 2.                                         *
+.*        V5.08.01  16/03/2000  Steve Armstrong    5.08 Mods                  *
+.*                  Mods for changes to OUTCLIFD (effective date)             *
+.******************************************************************************
+.*                  24/06/1994  bez          acc rehab mods 
+.*                  Rename "Clinic Id" if parameter set
+.******************************************************************************
+.
+.-------- Rename "Clinic Id" if parameter set
+.
+KYOUTCLI  OPEN      CONTROLF,"controlf"          
+          READ      CONTROLF,THIRTY2;*2,OTCNRCLI:
+                                     *16,OTCNCLIN
+          IF        OTCNRCLI=0
+            MOVE      "Clinic Id   ",OTCNCLIN    * parameter not set
+          ENDIF
+          STRIP     OTCNCLIN
+.
+KOTCI000  MOVE      ONE,FORM1               * set ? as not entered
+          MOVE      ECOL,CCOL
+          MOVE      EVERT,CVERT
+.
+KOTCI100  MATCH     SP6,CKYIDEF6
+          GOTO      KOTCI120 IF EQUAL       * no default
+.
+          MOVE      CKYIDEF6,OCACLIN
+          KEYIN     *PCCOL:CVERT,*DV,OCACLIN:
+                    *PCCOL:CVERT,*V2LON,*RV,OCACLIN:
+                    *PCCOL:CVERT,*DV,OCACLIN
+          GOTO      KOTCI150
+.
+KOTCI120  MOVE      SP6,OCACLIN
+          KEYIN     *PCCOL:CVERT,*DV,UNDLN6:
+                    *PCCOL:CVERT,*V2LON,OCACLIN:
+                    *PCCOL:CVERT,*DV,OCACLIN
+.
+          RESET     OCACLIN
+          GOTO      KOTCI780 IF EOS         * return hit
+.
+KOTCI150  PACK      OCACLIN,OCACLIN,SP6
+          MATCH     SP6,OCACLIN
+          GOTO      KOTCI790 IF EQUAL       * spaces entered
+          MATCH     EXITCHAR,OCACLIN
+          GOTO      KOTCI820 IF EQUAL       * exitchar entered
+          MATCH     QUEST,OCACLIN
+          GOTO      KOTCI200 IF NOT EQUAL   * ? not entered
+.
+.         ? entered
+.
+          IF        FORM1=1
+            MOVE      "0",HLEF                * save all of the screen
+            CALL      GETSCR00                * save screen
+            MOVE      ZERO,FORM1              * set as ? performed
+          ENDIF
+.
+          CALL      OUTDSCLN                * display valid entries
+.
+          IF        CNEWDS = 0
+            CALL      PUTSCR00                * redisplay screen
+            MOVE      ONE,FORM1               * set as ? not performed
+            MOVE      ECOL,CCOL               * reset column
+            MOVE      EVERT,CVERT             * reset row
+          ELSE
+            DISPLAY   *P1:24,*+,OTCNCLIN," : ",*EL;
+            MOVE      "24",CVERT
+            MOVE      "15",CCOL
+            MOVE      ZERO,FORM1              * set ? as entered
+          ENDIF
+          GOTO      KOTCI100
+.
+.         validate what was entered
+.
+KOTCI200  PACK      KEY8,CCC,CYY,CMM,CDD
+          REP       " 0",KEY8
+          MOVE      OCACLIN,KEY6
+.
+          PACK      KEY20,IDDD,KEY6,KEY8
+          CALL      RDCLIA1
+          COMPARE   ONE,OVRCD                    * Valid Clinic Found
+          GOTO      KOTCI390 IF NOT EQUAL
+.
+          CALL      RDPCLIA1                     * Check earlier clinic date
+          BRANCH    OVRCD,KOTCI350
+.
+          MATCH     IDDD,OCASITE                 * same site ?
+          GOTO      KOTCI350 IF NOT EQUAL        * no
+.
+          MATCH     KEY6,OCACLIN                 * Valid clinic found
+          GOTO      KOTCI390 IF EQUAL
+.
+KOTCI350  PACK      KEY20,IDDD,KEY6,Z70
+          CALL      RDSCLIA1
+          CALL      RDPCLIA1                     * Check later clinic date
+          BRANCH    OVRCD,KOTCI500
+.
+          MATCH     IDDD,OCASITE                 * same site ?
+          GOTO      KOTCI500 IF NOT EQUAL        * no
+.
+          MATCH     KEY6,OCACLIN                 * Not a valid clinic
+          GOTO      KOTCI500 IF NOT EQUAL
+.
+KOTCI390  MOVE      ZERO,EXIT               * set as valid code
+          MATCH     SP6,OCADOCT
+          GOTO      KOTCI800 IF EQUAL       * valid code
+.
+.         have a doctor code for the clinic so use this for description
+.
+          MOVE      OCADOCT,KEY6
+          CALL      RDDOCT1
+          BRANCH    OVRCD,KOTCI400          * invalid doctor code
+.
+          MOVE      DSNAME,PACSNAME
+          MOVE      DGNAME,PACGNAME
+          MOVE      DTITL,PACTITLE
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,OCADESC
+          GOTO      KOTCI800
+.
+KOTCI400  PACK      KEY10,OCADOCT,SP10
+          CALL      RDPMHCP1
+          BRANCH    OVRCD,KOTCI500
+.
+          MOVE      PMHCTITL,PACTITLE
+          MOVE      PMHCSNAM,PACSNAME 
+          MOVE      PMHCGNAM,PACGNAME
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,OCADESC
+          GOTO      KOTCI800
+.
+KOTCI500  DISPLAY   *P1:24,*B,"Invalid ",*+,OTCNCLIN,".  ",*EL;
+          CALL      HITENTER
+          BRANCH    FORM1,KOTCI100
+          DISPLAY   *P1:24,*+,OTCNCLIN," : ",*EL;
+          GOTO      KOTCI100
+.
+.         nothing entered
+.
+KOTCI780  MOVE      SP30,OCADESC            * clear desc
+          MOVE      "3",EXIT                * set exit flag
+          COMPARE   ZERO,CKYIMAND
+          GOTO      KOTCI800 IF EQUAL       * valid entry
+.
+          DISPLAY   *P1:24,*B,"Field is mandatory.  ",*EL;
+          CALL      HITENTER
+          BRANCH    FORM1,KOTCI100
+          DISPLAY   *P1:24,*+,OTCNCLIN," : ",*EL;
+          GOTO      KOTCI100
+.
+.         spaces entered
+.
+KOTCI790  MOVE      SP30,OCADESC            * clear desc
+          MOVE      ONE,EXIT                * set exit flag
+          COMPARE   ZERO,CKYIMAND
+          GOTO      KOTCI800 IF EQUAL       * valid entry
+.
+          DISPLAY   *P1:24,*B,"Field is mandatory.  ",*EL;
+          CALL      HITENTER
+          BRANCH    FORM1,KOTCI100
+          DISPLAY   *P1:24,*+,OTCNCLIN," : ",*EL;
+          GOTO      KOTCI100
+.
+.         valid entry
+.
+KOTCI800  IF        FORM1=0
+            CALL      PUTSCR00                * redisplay screen
+            MOVE      ONE,FORM1               * set as ? not entered
+          ENDIF
+          DISPLAY   *PECOL:EVERT,*V2LON,OCACLIN
+          GOTO      KOTCI999 
+.
+.         exitchar entered
+.
+KOTCI820  MOVE      TWO,EXIT                * EXITCHAR entered
+          IF        FORM1=0
+            CALL      FRESCR00                * free the screen
+          ENDIF
+.
+KOTCI999  RETURN
++

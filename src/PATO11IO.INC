@@ -1,0 +1,380 @@
+. V10.14.00 14/03/2019  Don Nguyen TSK 0869412 - Created ICD10 Ed.11 Oper. IO 
+.
+RSPO11A1  RESET     KEY9
+          READ      PATO11A1,KEY9;;
+          RETURN
+.
+RAPO11A1  MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      PATO11A1,KEY9;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPO11A1  MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      PATO11A1,KEY9;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                                  PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                                  OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                                  PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                                  DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                                  PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                                  DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0OCMF,PT0OCMFT
+          MOVE      DPT0OV1C,PT0OV1CD
+          MOVE      DPT0OV2C,PT0OV2CD
+          MOVE      ZERO,PT0OV3CD
+          MOVE      DPT0OV3C,PT0OV3CD
+          MOVE      ZERO,PT0OV4CD
+          MOVE      DPT0OV4C,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      DPT0OV5C,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          MOVE      DPT0OV6C,PT0OV6CD
+          MOVE      ZERO,PT0OV7CD
+          MOVE      DPT0OV7C,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      DPT0OV8C,PT0OV8CD
+          MOVE      PT0ODSC2,PT0ODESC            * 100 char description
+          MOVE      ZERO,PT0OV9CD
+          MOVE      DPT0OV9C,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      DPT0OVXC,PT0OVXCD
+          MOVE      ZERO,PT0OVX1C
+          MOVE      DPT0OVX1,PT0OVX1C
+          RETURN
+.
+RKPO11A1  MOVE      ZERO,OVRCD
+          READKS    PATO11A1;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                             PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                             OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                             PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                             DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                             PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                             DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0OCMF,PT0OCMFT
+          MOVE      DPT0OV1C,PT0OV1CD
+          MOVE      DPT0OV2C,PT0OV2CD
+          MOVE      ZERO,PT0OV3CD
+          MOVE      DPT0OV3C,PT0OV3CD
+          MOVE      ZERO,PT0OV4CD
+          MOVE      DPT0OV4C,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      DPT0OV5C,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          MOVE      DPT0OV6C,PT0OV6CD
+          MOVE      ZERO,PT0OV7CD
+          MOVE      DPT0OV7C,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      DPT0OV8C,PT0OV8CD
+          MOVE      PT0ODSC2,PT0ODESC            * 100 char description
+          MOVE      ZERO,PT0OV9CD
+          MOVE      DPT0OV9C,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      DPT0OVXC,PT0OVXCD
+          MOVE      ZERO,PT0OVX1C
+          MOVE      DPT0OVX1,PT0OVX1C
+          RETURN
+.
+RPPO11A1  MOVE      ZERO,OVRCD
+          READKP    PATO11A1;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                             PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                             OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                             PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                             DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                             PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                             DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0OCMF,PT0OCMFT
+          MOVE      DPT0OV1C,PT0OV1CD
+          MOVE      DPT0OV2C,PT0OV2CD
+          MOVE      ZERO,PT0OV3CD
+          MOVE      DPT0OV3C,PT0OV3CD
+          MOVE      ZERO,PT0OV4CD
+          MOVE      DPT0OV4C,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      DPT0OV5C,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          MOVE      DPT0OV6C,PT0OV6CD
+          MOVE      ZERO,PT0OV7CD
+          MOVE      DPT0OV7C,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      DPT0OV8C,PT0OV8CD
+          MOVE      PT0ODSC2,PT0ODESC            * 100 char description
+          MOVE      ZERO,PT0OV9CD
+          MOVE      DPT0OV9C,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      DPT0OVXC,PT0OVXCD
+          MOVE      ZERO,PT0OVX1C
+          MOVE      DPT0OVX1,PT0OVX1C
+          RETURN
+.
+UPPO11A1  MOVE      PT0OCMFT,DPT0OCMF
+          MOVE      PT0OV1CD,DPT0OV1C
+          MOVE      PT0OV2CD,DPT0OV2C
+          MOVE      PT0OV3CD,DPT0OV3C
+          MOVE      PT0OV4CD,DPT0OV4C
+          MOVE      PT0OV5CD,DPT0OV5C
+          MOVE      PT0OV6CD,DPT0OV6C
+          MOVE      PT0OV7CD,DPT0OV7C
+          MOVE      PT0OV8CD,DPT0OV8C
+          MOVE      PT0OV9CD,DPT0OV9C
+          MOVE      PT0OVXCD,DPT0OVXC
+          MOVE      PT0OVX1C,DPT0OVX1
+          UPDATE    PATO11A1;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                             PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                             OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                             PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                             DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                             PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                             DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          RETURN
+.
+WRPO11A1  RESET     KEY9
+          MOVE      PT0OCMFT,DPT0OCMF
+          MOVE      PT0OV1CD,DPT0OV1C
+          MOVE      PT0OV2CD,DPT0OV2C
+          MOVE      PT0OV3CD,DPT0OV3C
+          MOVE      PT0OV4CD,DPT0OV4C
+          MOVE      PT0OV5CD,DPT0OV5C
+          MOVE      PT0OV6CD,DPT0OV6C
+          MOVE      PT0OV7CD,DPT0OV7C
+          MOVE      PT0OV8CD,DPT0OV8C
+          MOVE      PT0OV9CD,DPT0OV9C
+          MOVE      PT0OVXCD,DPT0OVXC
+          MOVE      PT0OVX1C,DPT0OVX1
+          WRITE     PATO11A1,KEY9;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                                  PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                                  OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                                  PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                                  DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                                  PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                                  DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          RETURN
+.
+DEPO11A1  RESET     KEY9
+          DELETE    PATO11A1,KEY9
+          RETURN
+.
+.
+RSPO11A2  RESET     KEY79
+          READ      PATO11A2,KEY79;;
+          RETURN
+.
+RAPO11A2  MOVE      ZERO,OVRCD
+          RESET     KEY79
+          READ      PATO11A2,KEY79;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPO11A2  MOVE      ZERO,OVRCD
+          RESET     KEY79
+          READ      PATO11A2,KEY79;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                                   PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                                   OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                                   PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                                   DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                                   PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                                   DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0OCMF,PT0OCMFT
+          MOVE      DPT0OV1C,PT0OV1CD
+          MOVE      DPT0OV2C,PT0OV2CD
+          MOVE      ZERO,PT0OV3CD
+          MOVE      DPT0OV3C,PT0OV3CD
+          MOVE      ZERO,PT0OV4CD
+          MOVE      DPT0OV4C,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      DPT0OV5C,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          MOVE      DPT0OV6C,PT0OV6CD
+          MOVE      ZERO,PT0OV7CD
+          MOVE      DPT0OV7C,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      DPT0OV8C,PT0OV8CD
+          MOVE      PT0ODSC2,PT0ODESC            * 100 char description
+          MOVE      ZERO,PT0OV9CD
+          MOVE      DPT0OV9C,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      DPT0OVXC,PT0OVXCD
+          MOVE      ZERO,PT0OVX1C
+          MOVE      DPT0OVX1,PT0OVX1C
+          RETURN
+.
+RKPO11A2  MOVE      ZERO,OVRCD
+          READKS    PATO11A2;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                             PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                             OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                             PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                             DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                             PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                             DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0OCMF,PT0OCMFT
+          MOVE      DPT0OV1C,PT0OV1CD
+          MOVE      DPT0OV2C,PT0OV2CD
+          MOVE      ZERO,PT0OV3CD
+          MOVE      DPT0OV3C,PT0OV3CD
+          MOVE      ZERO,PT0OV4CD
+          MOVE      DPT0OV4C,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      DPT0OV5C,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          MOVE      DPT0OV6C,PT0OV6CD
+          MOVE      ZERO,PT0OV7CD
+          MOVE      DPT0OV7C,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      DPT0OV8C,PT0OV8CD
+          MOVE      PT0ODSC2,PT0ODESC            * 100 char description
+          MOVE      ZERO,PT0OV9CD
+          MOVE      DPT0OV9C,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      DPT0OVXC,PT0OVXCD
+          MOVE      ZERO,PT0OVX1C
+          MOVE      DPT0OVX1,PT0OVX1C
+          RETURN
+.
+RPPO11A2  MOVE      ZERO,OVRCD
+          READKP    PATO11A2;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                             PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                             OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                             PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                             DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                             PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                             DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0OCMF,PT0OCMFT
+          MOVE      DPT0OV1C,PT0OV1CD
+          MOVE      DPT0OV2C,PT0OV2CD
+          MOVE      ZERO,PT0OV3CD
+          MOVE      DPT0OV3C,PT0OV3CD
+          MOVE      ZERO,PT0OV4CD
+          MOVE      DPT0OV4C,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      DPT0OV5C,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          MOVE      DPT0OV6C,PT0OV6CD
+          MOVE      ZERO,PT0OV7CD
+          MOVE      DPT0OV7C,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      DPT0OV8C,PT0OV8CD
+          MOVE      PT0ODSC2,PT0ODESC            * 100 char description
+          MOVE      ZERO,PT0OV9CD
+          MOVE      DPT0OV9C,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      DPT0OVXC,PT0OVXCD
+          MOVE      ZERO,PT0OVX1C
+          MOVE      DPT0OVX1,PT0OVX1C
+          RETURN
+.
+.
+RSPO11A3  RESET     KEY13
+          READ      PATO11A3,KEY13;;
+          RETURN
+.
+RAPO11A3  MOVE      ZERO,OVRCD
+          RESET     KEY13
+          READ      PATO11A3,KEY13;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPO11A3  MOVE      ZERO,OVRCD
+          RESET     KEY13
+          READ      PATO11A3,KEY13;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                                   PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                                   OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                                   PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                                   DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                                   PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                                   DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0OCMF,PT0OCMFT
+          MOVE      DPT0OV1C,PT0OV1CD
+          MOVE      DPT0OV2C,PT0OV2CD
+          MOVE      ZERO,PT0OV3CD
+          MOVE      DPT0OV3C,PT0OV3CD
+          MOVE      ZERO,PT0OV4CD
+          MOVE      DPT0OV4C,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      DPT0OV5C,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          MOVE      DPT0OV6C,PT0OV6CD
+          MOVE      ZERO,PT0OV7CD
+          MOVE      DPT0OV7C,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      DPT0OV8C,PT0OV8CD
+          MOVE      PT0ODSC2,PT0ODESC            * 100 char description
+          MOVE      ZERO,PT0OV9CD
+          MOVE      DPT0OV9C,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      DPT0OVXC,PT0OVXCD
+          MOVE      ZERO,PT0OVX1C
+          MOVE      DPT0OVX1,PT0OVX1C
+          RETURN
+.
+RKPO11A3  MOVE      ZERO,OVRCD
+          READKS    PATO11A3;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                             PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                             OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                             PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                             DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                             PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                             DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0OCMF,PT0OCMFT
+          MOVE      DPT0OV1C,PT0OV1CD
+          MOVE      ZERO,PT0OV3CD
+          MOVE      DPT0OV3C,PT0OV3CD
+          MOVE      ZERO,PT0OV4CD
+          MOVE      DPT0OV4C,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      DPT0OV5C,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          MOVE      DPT0OV6C,PT0OV6CD
+          MOVE      ZERO,PT0OV7CD
+          MOVE      DPT0OV7C,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      DPT0OV8C,PT0OV8CD
+          MOVE      PT0ODSC2,PT0ODESC            * 100 char description
+          MOVE      ZERO,PT0OV9CD
+          MOVE      DPT0OV9C,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      DPT0OVXC,PT0OVXCD
+          MOVE      ZERO,PT0OVX1C
+          MOVE      DPT0OVX1,PT0OVX1C
+          RETURN
+.
+RPPO11A3  MOVE      ZERO,OVRCD
+          READKP    PATO11A3;OPCODE,ODESC,OFLAG,PT0OBLKN,OAGEGP:
+                             PTXOALL1,PTXOAHL1,PT0O2AGP,PTXOALL2,PTXOAHL2:
+                             OSEX,PT0OADTP,PT0OSACD,ODAGGER,OAREA:
+                             PT0OMI9C,DPT0OCMF,DPT0OV1C,DPT0OV2C,PT0OV1MP:
+                             DPT0OV3C,PT0OV2MP,PT0OSLVL,DPT0OV4C,DPT0OV5C:
+                             PT0ODTMN,DPT0OV6C,PT0ODSC2,DPT0OV7C,DPT0OV8C:
+                             DPT0OV9C,DPT0OVXC,DPT0OVX1,PTOSPR11
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0OCMF,PT0OCMFT
+          MOVE      DPT0OV1C,PT0OV1CD
+          MOVE      ZERO,PT0OV3CD
+          MOVE      DPT0OV3C,PT0OV3CD
+          MOVE      ZERO,PT0OV4CD
+          MOVE      DPT0OV4C,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      DPT0OV5C,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          MOVE      DPT0OV6C,PT0OV6CD
+          MOVE      ZERO,PT0OV7CD
+          MOVE      DPT0OV7C,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      DPT0OV8C,PT0OV8CD
+          MOVE      PT0ODSC2,PT0ODESC            * 100 char description
+          MOVE      ZERO,PT0OV9CD
+          MOVE      DPT0OV9C,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      DPT0OVXC,PT0OVXCD
+          MOVE      DPT0OVX1,PT0OVX1C
+          RETURN
++
+.
+

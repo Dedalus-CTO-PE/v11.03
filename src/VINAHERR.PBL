@@ -1,0 +1,384 @@
+.*****************************************************************************
+.* System    :   Allied Health                                               *
+.* Program   :   VINAHERR                                                    *
+.* Desc      :   Fixit to process E052 & E061 error messages from the DoH    *
+.*               VINAH XML Response file. (CAR 305679)                       *
+.*****************************************************************************
+.* Date      :   10/09/2014                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through the allvreaf file and        *
+.*               process any waiting E052 or E061 error records, which have  *
+.*               been returned via the VINAH XML response file from DoH.     *
+.*               These errors are the results of sites manually accepting    *
+.*               DoH rejected messages in webPAS, which results in           *
+.*               subsequent related messages sent from webPAS, also being    *
+.*               rejected by DoH.                                            *
+.*               For example, where a Referral In has previously been        *
+.*               rejected by DoH, but manually accepted in webPAS, sending   *
+.*               a subsequent episode which is related to the rejected       *
+.*               Referral In, will result in the Episode also being rejected,*
+.*               given that the Referral In linked visit number doesn't      *
+.*               exist on the DoH database.                                  *
+.*               By updating the status of the incorrectly accepted records, *
+.*               to an invalid value, the correct messages will then be      *
+.*               forced through in the next extract file.  In the example    *
+.*               above, the re-extraction of the episode will result in a    *
+.*               Referral In record also being sent with the Episode.        *
+.* Mods      :                                                               *
+.*        V10.14.01 17/04/2019  Steve Armstrong  TSK 0868837                 *
+.*                  Recompiled for changes to ALLHDTFD.                      *
+.*****************************************************************************
+.*        V10.11.02 30/11/2017 Steve Armstrong  TSK 0844404                  *
+.*                  Mods to handle ADT-A13 contact E061 errors               *
+.*        V10.11.01 29/11/2017 Steve Armstrong  TSK 0844404                  *
+.*                  Recompiled for changes ALLVREFD.                         *
+.*****************************************************************************
+.*        V10.05.04 18/11/2014 Steve Armstrong  CAR 308346                   *
+.*                  Fixed end prompt to be after UBAT0000 instead of PROC0000*
+.*                  and also fixed program to return to menu option when     *
+.*                  finished processing.                                     *
+.*        V10.05.03 18/11/2014 Steve Armstrong  CAR 308346                   *
+.*                  Fixed I*C on ALLHDTA2                                    *
+.*        V10.05.02 17/11/2014 Steve Armstrong  CAR 308346                   *
+.*                  Fixed setting of KEY20 prior to RATEMP1                  *
+.*        V10.05.01 12/11/2014 Steve Armstrong  CAR 308346                   *
+.*                  Added update of allvreaf status                          *
+.*        V10.05.00 21/10/2014 Steve Armstrong  CAR 305679                   *
+.*                  Created Program.                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       ALLHBTFD/INC
+          INC       ALLHDTFD/INC
+          INC       ALLVREFD/INC
+          INC       IBASEQFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+.
+.         Temporary File Definition
+.         -------------------------
+.
+BATTEMP1  IFILE SQL, FIXED=21, KEY="U1-20"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+BATCHNUM  DIM     20           20           1       Batch number
+.
+.End of Record                             21
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CMDLINE   DIM       80
+RECCOUNT  FORM      5
+TEMPFILE  DIM       8
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+ERASE     INIT      "iserase "
+ISBUILD   INIT      "isbuild "
+UKEY      INIT      " 21 U1-20"
+.
+.
+.
+PRGID     INIT      "VINAHERR"
+PRGNAM    INIT      "Fixit for E052 & E061 VINAH Errors"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+          CALL      CREA0000               * create temp file
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9000          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with fixit
+.
+MAIN1000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN1000:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      CLER0000               * clear temp file
+          CALL      PROC0000               * process waiting allvreaf records
+          CALL      UBAT0000               * update batch status
+          GOTO      MAIN0100
+.
+MAIN9000  CALL      KILL0000               * remove temp file
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"allhdtaf";
+          OPEN      ALLHDTA2,"allhdtaf"
+          OPEN      ALLHDTA3,"allhdtaf"
+.
+          DISPLAY   *P64:24,"allhbtaf";
+          OPEN      ALLHBTA1,"allhbtaf"
+          OPEN      ALLHBTA2,"allhbtaf"
+.
+          DISPLAY   *P64:24,"allvreaf";
+          OPEN      ALLVREA1,"allvreaf"
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run fixit                               *
+.*                        TRUE  (1)  Exit option selected                    *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Fixit"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run fixit
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*      Loop through allvreaf and reset the status of any accepted records   *
+.*      from "10" (Accepted) to "99" (not valid)                             *
+.*****************************************************************************
+.
+PROC0000  DISPLAY   *P1:24,*EL,"Processing:";
+          MOVE      ZERO,RECCOUNT                * initialise record counter
+.
+PROC0500  PACK      KEY17,ZERO,SP20
+          CALL      RSALVRE1                     * position at start of file
+          CALL      RKALVRE1                     * read next record
+          BRANCH    OVRCD,PROC9999               * eof - finished
+.
+          MATCH     "0",ALVRSTAT                 * waiting for processing ?
+          GOTO      PROC9999 IF NOT EQUAL        * no - finished
+.
+          PACK      KEY42,ALVRURNO,TEN,ALVRVISN,SP70
+          CALL      RSALHDT3                     * position for batch
+PROC1000  CALL      RKALHDT3                     * read next record
+          BRANCH    OVRCD,PROC5000               * eof - finished visit
+.
+          MATCH     ALVRURNO,ALHDURNO            * same U/R still ?
+          GOTO      PROC5000 IF NOT EQUAL        * no - finished visit
+.
+          MATCH     "10",ALHDSTAT                * accepted ?
+          GOTO      PROC5000 IF NOT EQUAL        * no - finished visit
+.
+          MATCH     SP8,ALVRVISN                 * visit only ?
+          IF        !@EQUAL
+            MATCH     ALVRVISN,ALHDVISN          * yes - same visit still ?
+            GOTO      PROC5000 IF NOT EQUAL      * no - finished visit
+          ENDIF
+.
+          MATCH     SP8,ALVRCONT                 * contact (TSK 0844404)?
+          IF        !@EQUAL
+            MATCH     ALVRCONT,ALHDCONT          * yes - same contact number ?
+            GOTO      PROC1000 IF NOT EQUAL      * no - get next visit
+          ENDIF
+.
+          DISPLAY   *P13:24,*EL,*V2LON,ALHDMESI;
+.
+          MOVE      "99",ALHDSTAT                * update status
+          CALL      UPALHDT3
+          ADD       ONE,RECCOUNT                 * increment record counter
+.
+          MOVE      ALHDBNUM,BATCHNUM
+          MOVE      BATCHNUM,KEY20
+          CALL      RATEMP1
+          IF        OVRCD = 1
+            CALL      WRTEMP1                    * write batch to temp file
+          ENDIF
+          GOTO      PROC1000                     * get next record
+.
+.         Update the status of the allvreaf record
+.
+PROC5000  PACK      KEY17,ALVRSTAT,ALVRURNO,ALVRVISN  * save current key
+.
+          MOVE      ONE,ALVRSTAT                 * update status to processed
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          CALL      UPALVRE1                     * update record
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            CALL      DEALVRE1                   * delete record
+          ENDIF
+          GOTO      PROC0500
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                              UBAT0000               Called by: MAIN0000   *
+.*         Update all the status of the batches processed, from "accepted"   *
+.*         to "rejected"                                                     *
+.*****************************************************************************
+.
+.         Loop through the temp file records
+.
+UBAT0000  DISPLAY   *P1:24,*EL,"Updating Batches:";
+.
+          MOVE      SP20,KEY20
+          CALL      RSTEMP1                      * position at start of file
+UBAT0500  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,UBAT9000               * eof - finished
+.
+          DISPLAY   *P19:24,*EL,*V2LON,BATCHNUM;
+.
+.         Reset all the allhdtaf records for the batch to a status
+.         if "99", which is invalid and will therefore be ignored when
+.         extracting new records.
+.
+UBAT1000  PACK      KEY62,BATCHNUM,SP70
+          CALL      RSALHDT2                     * position on batch number
+          CALL      RKALHDT2                     * read next record
+          BRANCH    OVRCD,UBAT2000               * eof - finished
+.
+          MATCH     BATCHNUM,ALHDBNUM            * same batch still ?
+          GOTO      UBAT2000 IF NOT EQUAL        * no - finished
+.
+          MATCH     "99",ALHDSTAT                * status "99" ?
+          GOTO      UBAT2000 IF EQUAL            * no - finished
+.
+          ADD       ONE,RECCOUNT                 * increment record counter
+.
+          MOVE      "99",ALHDSTAT                * update status
+          CALL      UPALHDT2
+          GOTO      UBAT1000
+.
+.         Each batch number should be unique, so update the status
+.         of that batch record to "rejected"
+.
+UBAT2000  PACK      KEY40,BATCHNUM,SP70
+          CALL      RSALHBT2                     * position before batch number
+          CALL      RKALHBT2                     * read next record
+          BRANCH    OVRCD,UBAT0500               * eof - finished
+.
+          MATCH     BATCHNUM,ALHBBNUM            * same batch number still ?
+          GOTO      UBAT0500 IF NOT EQUAL        * no - finished
+.
+          PACK      KEY40,ALHBFNAM,ALHBBNUM
+          CALL      RDALHBT1
+          IF        OVRCD = 0
+            MOVE      TWO,ALHBSTAT               * set status to rejected
+            CALL      UPALHBT1                   * update batch record
+          ENDIF
+          GOTO      UBAT0500                     * get next record
+.
+UBAT9000  DISPLAY   *P1:24,*EL,*V2LON,RECCOUNT,*HOFF," records updated.  ";
+          CALL      HITENTER
+.
+UBAT9999  RETURN
++
+.*****************************************************************************
+.*                              CREA0000               Called by: MAIN0000   *
+.*             Create a new temporary file                                   *
+.*****************************************************************************
+.
+CREA0000  CALL      TFILENAM                     * get new tempfile name
+          MOVE      TFILNAME,TEMPFILE
+.
+          CALL      KILL0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      BATTEMP1,TEMPFILE            * open temp index file
+.
+CREA9999  RETURN
++
+.****************************************************************************
+.*                              KILL0000               Called by: MAIN0000  *
+.*               Close and erase the temporary file                         *
+.****************************************************************************
+.
+KILL0000  CLOSE     BATTEMP1                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILE       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILL9999 RETURN
++
+.****************************************************************************
+.*                              CLER0000               Called by: MAIN0000  *
+.*               Clear all records from the temporary table                 *
+.****************************************************************************
+.
+CLER0000  MOVE      SP20,KEY20
+          CALL      RSTEMP1                      * position at start of file
+          CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,CLER9999               * eof - finished
+.
+          MOVE      BATCHNUM,KEY20
+          CALL      DETEMP1                      * delete current record
+          GOTO      CLER0000                     * get next record
+.
+CLER9999  RETURN
++
+.****************************************************************************
+.*        IO ROUTINES FOR TEMPORARY FILE                                    *
+.****************************************************************************
+.
+RATEMP1   MOVE      ZERO,OVRCD
+          READ      BATTEMP1,KEY20;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP1   READ      BATTEMP1,KEY20;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    BATTEMP1;BATCHNUM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     BATTEMP1,KEY20;BATCHNUM
+          RETURN
+.
+DETEMP1   DELETE    BATTEMP1,KEY20
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       TFILENAM
+.
+          INC       ALLHBTIO/INC
+          INC       ALLHDTIO/INC
+          INC       ALLVREIO/INC
+          INC       IBASEQIO/INC
+          INC       WEBERRIO/INC
+.

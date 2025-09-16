@@ -1,0 +1,643 @@
+.******************************************************************************
+.* System         : Patient Billing                                           *
+.* Include Name   : ABFAEDET.PBL                                              *
+.* Author         : J.Tan/Peter Vela                                          *
+.* Date           : 03/07/2019  Task 0857392                                  *
+.* Modification   :                                                           *
+.******************************************************************************
+.*       V11.03.03  03/10/2023  J.Tan     TSK 0938230                         *
+.*                  Mod display TCINDC11 of Cat ED for Episode End Status     *
+.*       V11.03.02  20/07/2023  Thanh T   TSK 0914385                         *
+.*                  Added EMVCMNCD and indicator 1 for EMVIUC13 EMVIMODE      *
+.*                  EMVIDSTA and EMVITRIG                                     *
+.*       V11.03.01  30/05/2023  J.Tan   TSK 0923703                           *
+.*                  Mod to 6 decimal places in NWAU calculations              *
+.*       V11.02.01  27/05/2022 J.Tan    TSK 0906596                           *
+.*                  Mod for NWAU calculations Acute                           *
+.*       V11.01.02  13/10/2021 J.Tan    TSK 0905305                           *
+.*                  Mod to write Adjustment type 068 & 069                    *
+.*       V11.01.01  31/08/2021  J.Tan           TSK 0905305                   *
+.*                  Mod for AECC Class (2021/2022 changes)                    *
+.*       V10.15.01  10/06/2020  J.Tan           TSK 0886178                   *
+.*                  Mod to display ABF Calculations                           *
+.*       V10.14.01  24/09/2091 J.Tan       Task 0857392                       *
+.*                  Mod to check if ABF invoice raised                        *
+.*       V10.15.01  31/12/2019  J.Tan      TSK 0886176                        *
+.*                  Mod checking for INVOICNO variable                        *
+.*                                                                            *
+.******************************************************************************
+ABFAEDET  MOVE      ZERO,PWAMOUNT
+          MOVE      ZERO,AINDAMNT
+          MOVE      ZERO,ARESAMNT
+          MOVE      ZERO,AECAAMNT
+          MOVE      ZERO,NEPAMNTS
+          MOVE      ZERO,ABFCHRGE
+          MOVE      ZERO,NWAUAMNT
+.
+          READ      CONTROLF,HUND28;*105,PTCNUABF
+          READ      CONTROLF,SEVENTY8;*66,AECNAECC
+          REP       " 0",AECNAECC
+.
+          MATCH     "1",PTCNUABF
+          GOTO      ABFA9000 IF NOT EQUAL   * Not using ABF
+.
+          PACK      KEY5,ANSC,ANSL,EMVICOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD,ABFA9000
+.
+          BRANCH    NWAUFLAG,ABFA0100      * NWAU Calculations
+.
+          MATCH     "A",TCINDC2
+          GOTO      ABFA9000 IF NOT EQUAL  * Not an ABF Funding
+          GOTO      ABFA0200
+.
+ABFA0100  MATCH     "N",TCINDC2            * Check for NWAU Calculations
+          GOTO      ABFA9000 IF NOT EQUAL  * Not an ABF Funding
+.
+          MATCH     SP70,EMVICCLS
+          IF        !@EQUAL
+            PACK      KEY5,ANSC,ANSC,EMVICCLS
+            CALL      RDCODE1
+            IF        OVRCD=0
+              MATCH     "X",TCINDC17
+              GOTO      ABFA9000 IF EQUAL   * Excluded from NWAU
+            ENDIF
+          ENDIF
+.
+ABFA0200  MOVE      ZERO,CALCFLAG
+          MOVE      EMVIDATE,KEY8             * default to admission date
+          MATCH     SP70,EMVIDDAT
+          IF        !@EQUAL
+            MOVE      EMVIDDAT,KEY8           * Use discharge date
+          ENDIF
+.
+          MATCH     "20210101",KEY8
+          IF        !@LESS
+            MOVE     ONE,CALCFLAG             * New ABF calculation
+            MATCH    "00000000",AECNAECC
+            IF       !@EQUAL
+              MATCH    AECNAECC,KEY8
+              IF       !@LESS
+                MOVE     TWO,CALCFLAG           * for 2021/2022
+              ENDIF
+            ENDIF
+          ENDIF
+.
+.         Check if an Invoice number was selected
+.
+          PACK      INVOICNO,INVOICNO,SP70
+          MATCH     SP70,INVOICNO
+          GOTO      ABFA1300 IF NOT EQUAL
+.
+.         Check if ABF Invoice raised already
+.
+          OPEN      PATINVR3,"patinvrf"
+          PACK      KEY16,EMVIADMN,Z70
+          CALL      RSPTINV3
+ABFA1000  CALL      RPPTINV3
+          BRANCH    OVRCD,ABFA1200
+.
+          COMPARE   PINVADM,EMVIADMN
+          GOTO      ABFA1200 IF NOT EQUAL
+.
+          REP       " 0",PTINCRST
+          MATCH     "0",PTINCRST
+          GOTO      ABFA1000 IF NOT EQUAL  * Credit note
+.
+          COMPARE   THREE,PTINCMIX
+          GOTO      ABFA1000 IF NOT EQUAL
+.
+          MOVE      PINVNO,INVOICNO
+          GOTO      ABFA1300          * found an ABF Invoice - do not calc.ABF
+.
+ABFA1200  MOVE      ZERO,PROGFLAG
+          PROC      ABFAECCL          * Emergency ABF Care Class
+          MOVE      ZERO,NWAUAMNT
+          PROC      ABFAEINV          * Calculate ABF Invoice
+          MOVE      SP70,INVOICNO
+.
+ABFA1300  OPEN      PMSABFA3,"pmsabfaf"
+          OPEN      PMSVMTA1,"pmsvmtaf"
+.
+          UNPACK    EMVIDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                 * Format the admin date
+          REP       " 0",CPCDATE
+          PACK      KEY16,CPCDATE,SP20
+.
+          WRITE     HTMLFILE;"<table border=1 width=100%>":
+                             "<tr><td width=50%>Attended On:</td>":
+                             "<td width=50%><b>&nbsp;",KEY16,"</b></td>":
+                             "</tr>";
+.
+          MOVE      SP70,TDESC
+          MATCH     SP70,EMVICOMP
+          IF        !@EQUAL & !@EOS
+            PACK      KEY5,ANSC,ANSL,EMVICOMP,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TDESC
+            ENDIF
+          ENDIF
+.
+          WRITE     HTMLFILE;"<tr><td>Claim Code:</td>":
+                               "<td><b>&nbsp;",EMVICOMP,"</b>":
+                               " - <b>",TDESC,"</b></td>":
+                             "</tr>";
+.
+          PACK      DIM13,SP1,LBRACK,RBRACK 
+          MOVE      "005",DIM3              * Diagnosis coding type
+          PACK      KEY14,DEMVIADM,DIM3,SP70
+          CALL      RSEMVCD1
+ABFA1320  CALL      RKEMVCD1
+          BRANCH    OVRCD,ABFA1330
+.
+          MATCH     DEMVIADM,EMVCVIST
+          GOTO      ABFA1330 IF NOT EQUAL
+.
+          MATCH     DIM3,EMVCTYPE           * Diagnosis type ?
+          GOTO      ABFA1330 IF NOT EQUAL
+.
+          MATCH     "1",EMVCDELE            * Deleted ?
+          GOTO      ABFA1320 IF EQUAL
+.
+          MATCH     "000",EMVCSEQU          * Primary diagnosis
+          GOTO      ABFA1320 IF NOT EQUAL
+.
+          MOVE      EMVCMNCD,DIM10
+          STRIP     DIM10
+          PACK      DIM13,SP1,LBRACK,DIM10,RBRACK
+.
+ABFA1330  PACK      KEY19,EMVIADMN,ZERO,SIXTY,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ENDIF
+          STRIP     PMABCDES  
+          IF        CALCFLAG=2
+            WRITE     HTMLFILE;"<tr><td width=30%>AECC Class:</td>":
+                             "<td width=70%><b>&nbsp;",PMABCDES,"</b>",DIM13:
+                             "</td>":
+                             "</tr>";
+          ELSE
+            WRITE     HTMLFILE;"<tr><td width=30%>URG Code:</td>":
+                             "<td width=70%><b>&nbsp;",PMABCDES,"</b>",DIM13:
+                             "</td>":
+                             "</tr>";
+          ENDIF
+.
+          MOVE      SP70,DIM4 
+          MATCH     SP70,EMVIUC13
+          IF        !@EQUAL & !@EOS
+            MOVE      "ee",KEY2 
+            PACK      KEY5,KEY2,EMVIUC13,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TCINDC1
+            ENDIF 
+            PACK      DIM4,SP1,LBRACK,TCINDC1,RBRACK
+          ENDIF
+.
+          PACK      KEY19,EMVIADMN,ZERO,FIFTY5,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ENDIF
+          STRIP     PMABCDES
+          WRITE     HTMLFILE;"<tr><td width=30%>&nbsp;&nbsp;&nbsp;&nbsp;":
+                             "Type of Visit:</td>":
+                             "<td width=70%><b>&nbsp;&nbsp;&nbsp;&nbsp;":
+                             PMABCDES,"</b>",DIM4,"</td>":
+                             "</tr>";
+.
+          MOVE      EMVIMODE,DIM3
+          STRIP     DIM3
+          MOVE      SP70,DIM6 
+          MOVE      SP70,TDESC
+          MATCH     SP70,EMVIMODE
+          IF        !@EQUAL & !@EOS
+            PACK      DIM6,SP1,LBRACK,DIM3,RBRACK
+            MOVE      "EA",KEY2
+            PACK      KEY5,KEY2,EMVIMODE,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TDESC
+            ENDIF 
+          ENDIF
+.
+          WRITE     HTMLFILE;"<tr><td width=30%>&nbsp;&nbsp;&nbsp;&nbsp;":
+                             "Arrival Transport:</td>":
+                             "<td width=70%><b>&nbsp;&nbsp;&nbsp;&nbsp;":
+                             TDESC,"</b>",DIM6,"</td>":
+                             "</tr>";
+.
+          MOVE      SP70,DIM4 
+          MATCH     SP70,EMVIDSTA
+          IF        !@EQUAL & !@EOS
+            MOVE      "ED",KEY2
+            PACK      KEY5,KEY2,EMVIDSTA,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TCINDC11
+            ENDIF 
+            PACK      DIM4,SP1,LBRACK,TCINDC11,RBRACK
+          ENDIF
+.
+          PACK      KEY19,EMVIADMN,ZERO,FIFTY6,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ENDIF
+          STRIP     PMABCDES
+          WRITE     HTMLFILE;"<tr><td width=30%>&nbsp;&nbsp;&nbsp;&nbsp;":
+                             "Episode End Status:</td>":
+                             "<td width=70%><b>&nbsp;&nbsp;&nbsp;&nbsp;":
+                             PMABCDES,"</b>",DIM4,"</td>":
+                             "</tr>";
+.
+          MOVE      SP70,DIM4 
+          MATCH     SP70,EMVITRIG
+          IF        !@EQUAL & !@EOS
+            MOVE      "AA",KEY2
+            PACK      KEY5,KEY2,EMVITRIG,SP70
+            CALL      RDCODE1
+            IF        OVRCD=1
+              MOVE      SP70,TCINDC1
+            ENDIF 
+            PACK      DIM4,SP1,LBRACK,TCINDC1,RBRACK
+          ENDIF
+.
+          PACK      KEY19,EMVIADMN,ZERO,FIFTY7,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ENDIF
+          STRIP     PMABCDES
+          WRITE     HTMLFILE;"<tr><td width=30%>&nbsp;&nbsp;&nbsp;&nbsp;":
+                             "Triage Category:</td>":
+                             "<td width=70%><b>&nbsp;&nbsp;&nbsp;&nbsp;":
+                             PMABCDES,"</b>",DIM4,"</td>":
+                             "</tr>";
+.
+          PACK      KEY19,EMVIADMN,ZERO,SIXTY5,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ENDIF
+.
+          IF        CALCFLAG=2
+            WRITE     HTMLFILE;"<tr><td width=30%>&nbsp;&nbsp;&nbsp;&nbsp;ECDG Subcode/Code:</td>";
+.
+            STRIP     PMABCDES
+            WRITE     HTMLFILE;"<td width=70%><b>&nbsp;&nbsp;&nbsp;&nbsp;",PMABCDES;
+            PACK      KEY19,EMVIADMN,ZERO,SIXTY7,INVOICNO,SP70  * ECDG Code
+            CALL      RDPMABF3
+            IF        OVRCD=ONE
+              CALL      CLPMSABF
+              WRITE     HTMLFILE;"</b></td>";
+            ELSE
+              WRITE     HTMLFILE;" / ",PMABCDES,"</b></td>";
+            ENDIF
+            WRITE     HTMLFILE;"</tr>";
+.
+            PACK      KEY19,EMVIADMN,ZERO,SIXTY8,INVOICNO,SP70
+            CALL      RDPMABF3
+            IF        OVRCD=ONE
+              CALL      CLPMSABF
+            ENDIF
+.
+            WRITE     HTMLFILE;"<tr><td width=30%>&nbsp;&nbsp;&nbsp;&nbsp;Predicted Value/Scaled Complexity:</td>";
+.
+            STRIP     PMABCDES
+            MOVE      ZERO,F4P3
+            MOVE      PMABCDES,F4P3
+            WRITE     HTMLFILE;"<td width=70%><b>&nbsp;&nbsp;&nbsp;&nbsp;",F4P3;
+            PACK      KEY19,EMVIADMN,ZERO,SIXTY9,INVOICNO,SP70  * ECDG Code
+            CALL      RDPMABF3
+            IF        OVRCD=ONE
+              CALL      CLPMSABF
+              WRITE     HTMLFILE;"</b></td>";
+            ELSE
+              STRIP     PMABCDES
+              MOVE      ZERO,F4P3
+              MOVE      PMABCDES,F4P3
+              WRITE     HTMLFILE;" / ",F4P3,"</b></td>";
+            ENDIF
+            WRITE     HTMLFILE;"</tr>";
+.
+          ELSE
+            WRITE     HTMLFILE;"<tr><td width=30%>&nbsp;&nbsp;&nbsp;&nbsp;Major Diagnostic Block:</td>";
+            WRITE     HTMLFILE;"<td width=70%><b>&nbsp;&nbsp;&nbsp;&nbsp;",PMABCDES,"</b></td>";
+            WRITE     HTMLFILE;"</tr>";
+          ENDIF
+.
+.
+          PACK      KEY19,EMVIADMN,ZERO,TWENTY1,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ENDIF
+          MOVE      PMABADJV,FORM10P4
+          MOVE      PMABADJV,AINDAMNT
+.
+          WRITE     HTMLFILE;"<tr><td width=30%>Indigenous Status Adjustment:</td>":
+                             "<td width=70%><b>&nbsp;",FORM10P4,"</b></td>":
+                     "</tr>";
+.
+          MOVE      SP70,DIM3
+          MOVE      ZERO,FORM10P4
+          PACK      KEY19,EMVIADMN,ZERO,TEN8,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ELSE
+            MOVE      PMABADJV,FORM10P4
+            MOVE      PMABADJV,ARESAMNT
+            MOVE      "RA3",DIM3
+          ENDIF
+          IF        PMABADJV = ZERO
+            PACK      KEY19,EMVIADMN,ZERO,TWENTY,INVOICNO,SP70
+            CALL      RDPMABF3
+            IF        OVRCD=ONE
+              CALL      CLPMSABF
+            ELSE
+              MOVE      PMABADJV,FORM10P4
+              MOVE      PMABADJV,ARESAMNT
+              MOVE      "RA4",DIM3
+            ENDIF
+          ENDIF
+.
+          WRITE     HTMLFILE;"<tr><td width=30%>":
+                             "Residential Remoteness Area Adjustment:</td>";
+.
+          MATCH     SP70,DIM3
+          IF        @EQUAL
+            WRITE     HTMLFILE;"<td width=70%><b>&nbsp;",FORM10P4,"</b></td>";
+          ELSE
+            WRITE     HTMLFILE;"<td width=70%><b>&nbsp;":
+                                               FORM10P4,"(",DIM3,")</b></td>";
+          ENDIF
+.
+          WRITE      HTMLFILE;"</tr>";
+.
+          COMPARE   TWO,CALCFLAG
+          GOTO      ABFA5000 IF EQUAL     * No Care Age Adjustment
+.
+.         Care Age adjustment
+.
+          MOVE      ZERO,FORM10P4
+          MOVE      SP70,KEY20
+          COMPARE   "65",PSAGE
+          GOTO      ABFA3000 IF LESS
+          COMPARE   "80",PSAGE
+          GOTO      ABFA2000 IF NOT LESS
+.
+          PACK      KEY19,EMVIADMN,ZERO,THIRTY4,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ELSE
+            MOVE      PMABADJV,FORM10P4
+            MOVE      PMABADJV,AECAAMNT
+            MOVE      "(65-79 years old)",KEY20
+          ENDIF
+          GOTO      ABFA4000
+.
+ABFA2000  PACK      KEY19,EMVIADMN,ZERO,THIRTY5,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ELSE
+            MOVE      PMABADJV,FORM10P4
+            MOVE      PMABADJV,AECAAMNT
+            MOVE      "(Over 79 years old)",KEY20
+          ENDIF
+          GOTO      ABFA4000
+.
+ABFA3000  MOVE      "(< 65 years old)",KEY20
+.
+ABFA4000  WRITE     HTMLFILE;"<tr><td width=30%>Emergency Care Age Adjustment:</td>":
+                             "<td width=70%><b>&nbsp;",FORM10P4," ",KEY20:
+                             "</b></td>":
+                     "</tr>";
+          GOTO      ABFA6000
+.
+.         Hospital Remoteness Area adjustment
+.
+ABFA5000  MOVE      SP70,DIM3
+          MOVE      ZERO,FORM10P4
+          PACK      KEY19,EMVIADMN,ZERO,THIRTY6,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ELSE
+            MOVE      PMABADJV,FORM10P4
+            MOVE      PMABADJV,ATAAMNTS
+            MOVE      "RA3",DIM3
+          ENDIF
+          IF        PMABADJV = ZERO
+            PACK      KEY19,EMVIADMN,ZERO,THIRTY7,INVOICNO,SP70
+            CALL      RDPMABF3
+            IF        OVRCD=ONE
+              CALL      CLPMSABF
+            ELSE
+              MOVE      PMABADJV,FORM10P4
+              MOVE      PMABADJV,ATAAMNTS
+              MOVE      "RA4",DIM3
+            ENDIF
+          ENDIF
+.
+          WRITE     HTMLFILE;"<tr><td width=30%>":
+                             "Hospital Remoteness Area Adjustment:</td>";
+.
+          MATCH     SP70,DIM3
+          IF        @EQUAL
+            WRITE     HTMLFILE;"<td width=70%><b>&nbsp;",FORM10P4,"</b></td>";
+          ELSE
+            WRITE     HTMLFILE;"<td width=70%><b>&nbsp;":
+                                               FORM10P4,"(",DIM3,")</b></td>";
+          ENDIF
+          WRITE     HTMLFILE;"</tr>";
+.
+          GOTO      ABFA6000
+.
+.         NWAU 
+.
+ABFA6000  PACK      KEY19,EMVIADMN,ZERO,FIFTY3,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ELSE
+            MATCH     SP70,INVOICNO
+            IF        !@EQUAL
+              MOVE      SP70,KEY19
+              UNPACK    PMABCDES,KEY19      * get NWAU amount with 6 decimal
+              SQUEEZE   KEY19
+              MOVE      KEY19,NWAUAMNT
+            ENDIF
+          ENDIF
+          MOVE      PMABADJV,FORM10P4
+.
+          WRITE     HTMLFILE;"<tr><td width=30%>NWAU:</td>":
+                             "<td width=70%><b>&nbsp;",FORM10P4,"</b></td>":
+                     "</tr>";
+.
+          PACK      KEY19,EMVIADMN,ZERO,SIXTY2,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ENDIF
+          MOVE      PMABADJV,FORM10P4
+          MOVE      PMABADJV,PWAMOUNT
+          WRITE     HTMLFILE;"<tr><td width=30%>Price Weight:</td>":
+                             "<td width=70%><b>&nbsp;",FORM10P4,"</b></td>":
+                     "</tr>";
+.
+          PACK      KEY19,EMVIADMN,ZERO,SIXTY1,INVOICNO,SP70
+          CALL      RDPMABF3
+          IF        OVRCD=ONE
+            CALL      CLPMSABF
+          ENDIF
+          MOVE      PMABADJV,FORM10P4
+          MOVE      PMABADJV,NEPAMNTS
+          WRITE     HTMLFILE;"<tr><td width=30%>NEP:</td>":
+                             "<td width=70%><b>&nbsp;",FORM10P4,"</b></td>":
+                     "</tr>";
+.
+          CALL      ECAL00000                 * Display ABF calculation
+          GOTO      ABFA9999
+.
+ABFA9000  WRITE     HTMLFILE;"<tr><center><b>ABF/NWAU Details ":
+                             "are not applicable to this event</b></td>":
+                             "</center></tr>";
+          GOTO      ABFA9999
+.
+ABFA9999  RETURN
++
+.*******************************************************************************
+.         Display ABF Calculation
+.*******************************************************************************
+ECAL0000  CALL      AEBF0000               * Calculate ABF amount
+          MOVE      ABFCHRGE,FORM12P2
+.
+          BRANCH    CALCFLAG,ECAL6000:
+                             ECAL7000      * calculation after 2021/2022
+.
+.         {PW x (1 + AInd + ARes) x (1 + AECA)} x NEP
+.
+          WRITE     HTMLFILE;"<table border=1 width=100%>":
+                             "<tr>&nbsp;</tr><tr><td>":
+                      "ABF Calculation:</td></tr>":
+                      "<tr><td>":
+                      "= {PW x (1 + Aind + ARes) x ":
+                      "(1 + AECA)} x ":
+                      "NEP</td></tr>";
+.
+          WRITE     HTMLFILE;"<tr><td>":
+                      "= { ",PWAMOUNT," x ":
+                      "(1 + ",AINDAMNT," + ",ARESAMNT," ) x ":
+                      "(1 + ",AECAAMNT," )} x ":
+                      "$",NEPAMNTS," </td></tr>";
+.
+          GOTO      ECAL8000
+.
+.         {PW x (1 + AInd + ARes + AECA)} x NEP
+.
+ECAL6000  WRITE     HTMLFILE;"<table border=1 width=100%>":
+                             "<tr>&nbsp;</tr><tr><td>":
+                      "ABF Calculation:</td></tr>":
+                      "<tr><td>":
+                      "= {PW x ":
+                      "(1 + Aind + ARes + AECA)} x ":
+                      "NEP</td></tr>";
+.
+          WRITE     HTMLFILE;"<tr><td>":
+                      "= { ",PWAMOUNT," x ":
+                      "(1 + ",AINDAMNT," + ":
+                      ARESAMNT," + ",AECAAMNT," )} x ":
+                      "$",NEPAMNTS,"</td></tr>";
+          GOTO      ECAL8000
+.
+.        ABF Calculation 2021/2022
+.        {PW X (1 + ARes + AInd) x (1 + ATreat)} x NEP
+.
+ECAL7000  WRITE     HTMLFILE;"<table border=1 width=100%>":
+                             "<tr>&nbsp;</tr><tr><td>":
+                      "ABF Calculation:</td></tr>":
+                      "<tr><td>":
+                      "= {PW x ":
+                      "(1 + ARes + AInd) x (1 + ATreat)} x ":
+                      "NEP</td></tr>";
+.
+          WRITE     HTMLFILE;"<tr><td>":
+                      "= { ",PWAMOUNT," x ":
+                      "(1 + ",ARESAMNT," + ":
+                      AINDAMNT," ) x (1 + ",ATAAMNTS,")} x ":
+                      "$",NEPAMNTS,"</td></tr>";
+          GOTO      ECAL8000
+.
+ECAL8000  WRITE    HTMLFILE;"<tr><td>":
+                      "= $",FORM12P2,"</td></tr><table>"
+.
+ECAL9999  RETURN
++
+.*******************************************************************************
+.         Calculate ABF amount
+.*******************************************************************************
+AEBF0000  BRANCH    CALCFLAG,AEBF6000:
+                             AEBF7000
+.
+.         {PW x (1 + AInd + ARes) x (1 + AECA)} x NEP
+.
+          MOVE      ONE,F106A
+          ADD       AINDAMNT,F106A           * A_Ind
+          ADD       ARESAMNT,F106A           * A_Res
+.
+          MOVE      ONE,F106B
+          ADD       AECAAMNT,F106B           * + A_ECA
+.
+          MOVE      PWAMOUNT,FORM106         * PW
+          MULT      F106A,FORM106            * x (1+A_Ind+A_res)
+          MULT      F106B,FORM106            * x (1+A_ECA)
+.
+          GOTO      AEBF8000
+.
+.         {PW x (1 + AInd + ARes + AECA)} x  NEP
+.
+AEBF6000  MOVE      ONE,F106A
+          ADD       AINDAMNT,F106A           * A_Ind
+          ADD       ARESAMNT,F106A           * A_Res
+          ADD       AECAAMNT,F106A           * + A_ECA
+.
+          MOVE      PWAMOUNT,FORM106         * PW
+          MULT      F106A,FORM106            * x (1+A_Ind+A_res+A_ECA)
+.
+          GOTO      AEBF8000
+.
+.         ABF calculation 2021/2022
+.        {PW X (1 + AInd + ARes) x (1 + ATreat)} x NEP
+.
+AEBF7000  MATCH     SP70,INVOICNO
+          IF        !@EQUAL
+            MOVE      NWAUAMNT,FORM106       * NWAU amount in 6 decimal places
+            GOTO      AEBF8000
+          ENDIF
+.
+          MOVE      ONE,F106A
+          ADD       AINDAMNT,F106A           * A_Ind
+          ADD       ARESAMNT,F106A           * A_Res
+.
+          MOVE      ONE,F106B
+          ADD       ATAAMNTS,F106B           * + A_Treat
+.
+          MOVE      PWAMOUNT,FORM106         * PW
+          MULT      F106A,FORM106            * x (1+A_Ind+A_res+A_ECA)
+          MULT      F106B,FORM106            * x (1+A_Treat)
+.
+AEBF8000  IF        FORM106<0
+            MOVE      ZERO,FORM106
+          ENDIF
+          MULT      NEPAMNTS,FORM106       * NWAU x NEP
+          MOVE      FORM106,ABFCHRGE       * ABF Charge
+.
+AEBF9999  RETURN
+

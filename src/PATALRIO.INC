@@ -1,0 +1,443 @@
+.
+. PATALRIO    
+. --------
+. Filename     : patalraf.dat
+.
+RSPTALR1  RESET     KEY16                                                       
+          READ      PATALRT1,KEY16;;                                            
+          RETURN
+.
+RAPTALR1  RESET     KEY16                                                       
+          MOVE      ZERO,OVRCD
+          READ      PATALRT1,KEY16;ANS                                          
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPTALR1  RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READ      PATALRT1,KEY16;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                                   PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                                   PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                                   PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                                   PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                                   PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPTALR1  MOVE      ZERO,OVRCD
+          READKS    PATALRT1;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPTALR1  MOVE      ZERO,OVRCD
+          READKP    PATALRT1;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPTALR1  MOVE      ZERO,OVRCD
+          UPDATE    PATALRT1;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      UPDFLOCK IF LOCKED
+          RETURN
+.
+WRPTALR1  RESET     KEY16
+          WRITE     PATALRT1,KEY16;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                                   PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                                   PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                                   PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                                   PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                                   PTALSPAR
+          RETURN
+.
+DEPTALR1  RESET     KEY16                                                       
+          DELETE    PATALRT1,KEY16                                              
+          RETURN
+.
+RLPTALR1  RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READL     PATALRT1,KEY16;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                                   PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                                   PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                                   PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                                   PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                                   PTALSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+KLPTALR1  MOVE      ZERO,OVRCD
+          READLKS   PATALRT1;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+PLPTALR1  MOVE      ZERO,OVRCD
+          READLKP   PATALRT1;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+UUPTALR1  RESET     KEY16                                                       
+          UNLOCK    PATALRT1                                                    
+          RETURN
+.
+RSPTALR2  RESET     KEY24
+          READ      PATALRT2,KEY24;;
+          RETURN
+.
+RAPTALR2  RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READ      PATALRT2,KEY24;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPTALR2  RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READ      PATALRT2,KEY24;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                                   PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                                   PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                                   PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                                   PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                                   PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPTALR2  MOVE      ZERO,OVRCD
+          READKS    PATALRT2;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPTALR2  MOVE      ZERO,OVRCD
+          READKP    PATALRT2;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPTALR2  MOVE      ZERO,OVRCD
+          UPDATE    PATALRT2;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      UPDFLOCK IF LOCKED
+          RETURN
+.
+WRPTALR2  RESET     KEY24
+          WRITE     PATALRT2,KEY24;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                                   PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                                   PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                                   PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                                   PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                                   PTALSPAR
+          RETURN
+.
+DEPTALR2  RESET     KEY24
+          DELETE    PATALRT2,KEY24
+          RETURN
+.
+RLPTALR2  RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READL     PATALRT2,KEY24;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                                   PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                                   PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                                   PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                                   PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                                   PTALSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+KLPTALR2  MOVE      ZERO,OVRCD
+          READLKS   PATALRT2;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+PLPTALR2  MOVE      ZERO,OVRCD
+          READLKP   PATALRT2;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+UUPTALR2  RESET     KEY24
+          UNLOCK    PATALRT2
+          RETURN
+.
+RSPTALR3  RESET     KEY24
+          READ      PATALRT3,KEY24;;
+          RETURN
+.
+RAPTALR3  RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READ      PATALRT3,KEY24;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPTALR3  RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READ      PATALRT3,KEY24;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                                   PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                                   PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                                   PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                                   PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                                   PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPTALR3  MOVE      ZERO,OVRCD
+          READKS    PATALRT3;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPTALR3  MOVE      ZERO,OVRCD
+          READKP    PATALRT3;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPTALR3  MOVE      ZERO,OVRCD
+          UPDATE    PATALRT3;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      UPDFLOCK IF LOCKED
+          RETURN
+.
+WRPTALR3  RESET     KEY24
+          WRITE     PATALRT3,KEY24;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                                   PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                                   PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                                   PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                                   PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                                   PTALSPAR
+          RETURN
+.
+DEPTALR3  RESET     KEY24
+          DELETE    PATALRT3,KEY24
+          RETURN
+.
+RLPTALR3  RESET     KEY24
+          MOVE      ZERO,OVRCD
+          READL     PATALRT3,KEY24;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                                   PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                                   PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                                   PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                                   PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                                   PTALSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+KLPTALR3  MOVE      ZERO,OVRCD
+          READLKS   PATALRT3;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+PLPTALR3  MOVE      ZERO,OVRCD
+          READLKP   PATALRT3;PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                             PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV:
+                             PTALRCOM,PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT:
+                             PTALRQBY,PTALHOSP,PTALCTIM,PTALUDAT,PTALUTIM:
+                             PTALUUID,PTALTPID,PTALCPAC,PTALUCPF,PTALDCPU:
+                             PTALSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+UUPTALR3  RESET     KEY24
+          UNLOCK    PATALRT3
+          RETURN
+.
+.**************************************
+. WAssff - Write Audit Record           
+. Requires - AUDTTYPE 1=write 
+.                     2=before change
+.                     3=after change
+.                     4=delete
+.**************************************
+.
+WAPTAL00  MOVE      "   10",AUDTSECT
+          MOVE      "250",AUDTPOST
+          READ      CONTROLF,AUDTSECT;*AUDTPOST,AUDTFLAG
+          COMPARE   ONE,AUDTFLAG
+          GOTO      WAPTAL99 IF EQUAL
+.
+          PACK     PTALAUDD,CCC,CYY,CMM,CDD
+          REP       " 0",PTALAUDD
+          CLOCK     TIME,PTALAUDT
+          MOVE      PORT,PTALAUDP
+          LOAD      PTALAUDR,AUDTTYPE,ANSA,ANSB,ANSC,ANSD
+          MOVE      ONE,PTALAUDS
+          MOVE      PASSCODE,PTALAUDO
+          PACK      KEY19,PTALAUDD,PTALAUDT,PTALAUDP,PTALAUDR
+          MOVE      KEY19,AUDTSKEY
+          CALL      AWPTALR1
+.
+WAPTAL99  RETURN
++
+.**************************************
+. DAssff - Delete Before Change Audit 
+.**************************************
+.
+DAPTAL00  MOVE      "   10",AUDTSECT
+          MOVE      "250",AUDTPOST
+          READ      CONTROLF,AUDTSECT;*AUDTPOST,AUDTFLAG
+          COMPARE   ONE,AUDTFLAG
+          GOTO      DAPTAL99 IF EQUAL
+.
+          MOVE      AUDTSKEY,KEY19
+          CALL      ADPTALR1
+.
+DAPTAL99  RETURN
++
+ASPTALR1  RESET     KEY19                                                       
+          READ      PATAUDAL,KEY19;;                                            
+          RETURN
+.
+AKPTALR1  MOVE      ZERO,OVRCD
+          READKS    PATAUDAL;PTALAUDD,PTALAUDT,PTALAUDP,PTALAUDR,PTALAUDS:      
+                    PTALAUDO,PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:      
+                        PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV,PTALRCOM:  
+                        PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT,PTALRQBY,PTALHOSP:  
+                        PTALCTIM,PTALUDAT,PTALUTIM,PTALUUID,PTALTPID,PTALCPAC:  
+                        PTALUCPF,PTALDCPU,PTALSPAR                              
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+AUPTALR1  PACK      PTALSPAR,SP30
+          UPDATE    PATAUDAL;PTALAUDD,PTALAUDT,PTALAUDP,PTALAUDR,PTALAUDS:      
+                    PTALAUDO,PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:      
+                        PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV,PTALRCOM:  
+                        PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT,PTALRQBY,PTALHOSP:  
+                        PTALCTIM,PTALUDAT,PTALUTIM,PTALUUID,PTALTPID,PTALCPAC:  
+                        PTALUCPF,PTALDCPU,PTALSPAR                              
+          RETURN
+.
+AWPTALR1  RESET     KEY19                                                       
+          PACK      PTALSPAR,SP30
+          WRITE     PATAUDAL,KEY19;PTALAUDD,PTALAUDT,PTALAUDP,PTALAUDR,PTALAUDS:
+                    PTALAUDO,PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:      
+                        PTALCDTE,PTALLIFE,PTALREAC,PTALUSID,PTALLSEV,PTALRCOM:  
+                        PTALRDTE,PTALICDC,PTALDTIN,PTALEDAT,PTALRQBY,PTALHOSP:  
+                        PTALCTIM,PTALUDAT,PTALUTIM,PTALUUID,PTALTPID,PTALCPAC:  
+                        PTALUCPF,PTALDCPU,PTALSPAR                              
+          RETURN
+.
+ADPTALR1  RESET     KEY19                                                       
+          DELETE    PATAUDAL,KEY19;                                             
+          RETURN
+.
+ASPTALR2  RESET     KEY27
+          READ      PATAUDA2,KEY27;;
+          RETURN
+.
+APPTALR2  MOVE      ZERO,OVRCD
+          READKP    PATAUDA2;PTALAUDD,PTALAUDT,PTALAUDP,PTALAUDR,PTALAUDS:
+                    PTALAUDO,PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                        PTALCDTE:
+                        PTALLIFE,PTALREAC,PTALUSID,PTALLSEV,PTALRCOM,PTALRDTE:
+                        PTALICDC,PTALDTIN,PTALEDAT,PTALRQBY,PTALHOSP,PTALCTIM:
+                        PTALUDAT,PTALUTIM,PTALUUID,PTALTPID,PTALCPAC:
+                        PTALUCPF,PTALDCPU,PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+AKPTALR2  MOVE      ZERO,OVRCD
+          READKS    PATAUDA2;PTALAUDD,PTALAUDT,PTALAUDP,PTALAUDR,PTALAUDS:
+                    PTALAUDO,PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                        PTALCDTE:
+                        PTALLIFE,PTALREAC,PTALUSID,PTALLSEV,PTALRCOM,PTALRDTE:
+                        PTALICDC,PTALDTIN,PTALEDAT,PTALRQBY,PTALHOSP,PTALCTIM:
+                        PTALUDAT,PTALUTIM,PTALUUID,PTALTPID,PTALCPAC:
+                        PTALUCPF,PTALDCPU,PTALSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+AUPTALR2  PACK      PTALSPAR,SP30
+          UPDATE    PATAUDA2;PTALAUDD,PTALAUDT,PTALAUDP,PTALAUDR,PTALAUDS:
+                    PTALAUDO,PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                        PTALCDTE:
+                        PTALLIFE,PTALREAC,PTALUSID,PTALLSEV,PTALRCOM,PTALRDTE:
+                        PTALICDC,PTALDTIN,PTALEDAT,PTALRQBY,PTALHOSP,PTALCTIM:
+                        PTALUDAT,PTALUTIM,PTALUUID,PTALTPID,PTALCPAC:
+                        PTALUCPF,PTALDCPU,PTALSPAR
+          RETURN
+.
+AWPTALR2  RESET     KEY27
+          PACK      PTALSPAR,SP30
+          WRITE     PATAUDA2,KEY27;PTALAUDD,PTALAUDT,PTALAUDP,PTALAUDR,PTALAUDS:
+                    PTALAUDO,PTALURNO,PTALCATG,PTALCODE,PTALCNTR,PTALDATE:
+                        PTALCDTE:
+                        PTALLIFE,PTALREAC,PTALUSID,PTALLSEV,PTALRCOM,PTALRDTE:
+                        PTALICDC,PTALDTIN,PTALEDAT,PTALRQBY,PTALHOSP,PTALCTIM:
+                        PTALUDAT,PTALUTIM,PTALUUID,PTALTPID,PTALCPAC:
+                        PTALUCPF,PTALDCPU,PTALSPAR
+          RETURN
+.
+ADPTALR2  RESET     KEY27
+          DELETE    PATAUDA2,KEY27;
+          RETURN
+.
+          INC      PATALTIO/INC               * Alerts save file
+          INC      PATMWSIO/INC

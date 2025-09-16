@@ -1,0 +1,448 @@
+.*********************************************************************
+.*  OPRCLASH  :  check if new session clashes with an existing       *
+.*               session of the same theatre.                        *
+.*               if it does, check if overlap time of old session    *
+.*               contains bookings. if it doesnt ask user if to      *
+.*               allocate overlap time of old session to new session *
+.*   Returns  :  EXIT = 0      contine with session creation         *
+.*               EXIT = 1      Cancel the new session                *
+.*      Mods  :  V11.03.00 28/02/2023 Ebon Clements TSK 0909393      *
+.*               Added hospital to oprsesaf and oprdetaf index       *
+.*               V9.07.01 15/09/2006 Peter Vela CAR 118228           *
+.*               Ported over the V9.07                               *
+.*               V6.06.08 17/05/99 Andrew Peel  SRF 631475           *
+.*               Fixed Expected End Date of Session.                 *
+.*               V6.03.01 25/01/96 J.Tan    SRF 613661               *
+.*               Fixed to remove reallocation file for the old       *
+.*               theatre if any.                                     *
+.*               29/04/97  ROD        SRF 616927                     *
+.*               added warning when check for clashes                *
+.*********************************************************************
+OPRCLASH  MOVE      ZERO,EXIT
+          PACK      SAVKEY30,SP20,SP20
+.
+          COMPARE   ONE,OPCNCLSH            * using this feature?
+          GOTO      OCLSH999 IF EQUAL       * dont check for clash
+.
+          MOVE      SESNTIME,EXPSTART       * save session start time
+          MOVE      OPSEENDT,EXPEND         * save expected end time
+          MOVE      OPSETHET,SAVTHET        * save theatre code
+          PACK      CDESC40A,OPSEDURA,OPSEENDT,OPSEBRKT,OPSEPREP,OPSEANAE,SP20
+          PACK      CDESC40B,OPSETPER,OPSETYPE,OPSETHET,OPSECORD,OPSEENDD,SP20
+.
+          MATCH     SP6,OPSETHET
+          GOTO      OCLSH720 IF EQUAL       * no theatre code so dont validate
+.
+          OPEN      OPRRALA1,"oprralaf"     * reallocation file
+.
+. --------------------------------------------------------------
+. ------- check if new session clashes with next session -------
+. --------------------------------------------------------------
+.
+          PACK      KEY22,SESNHOSP,SESNDATE,SESNTIME,SESNCODE
+          CALL      RSOPSES1
+.
+OCLSH100  CALL      RKOPSES1
+          BRANCH    OVRCD,OCLSH500          * no next session
+.
+          MATCH     OPSEHOSP,SESNHOSP
+          GOTO      OCLSH500 IF NOT EQUAL   * different date
+.
+          MATCH     OPSEDATE,SESNDATE
+          GOTO      OCLSH500 IF NOT EQUAL   * different date
+.
+          MATCH     EXPEND,OPSETIME
+          GOTO      OCLSH500 IF NOT LESS    * start of next >= end of extra
+.
+          COMPARE   ZERO,OPSESTAT
+          GOTO      OCLSH100 IF EQUAL       * session cancelled
+.
+          MATCH     SESNCODE,OPSECLIN       * same clinic/surgeon ?
+          GOTO      OCLSH100 IF EQUAL
+.
+          MATCH     SAVTHET,OPSETHET        * different theatre ?
+          GOTO      OCLSH100 IF NOT EQUAL
+.
+          MOVE      OPSEENDT,OVERLAPE       * overlap end time
+          MATCH     OPSEENDT,EXPEND
+          IF        @LESS
+            MOVE      EXPEND,OVERLAPE
+          ENDIF
+.
+          IF        OPCNCLSH=0 
+            MOVE      "Extra Session's End Time Clashes",WEBTITLE
+            CALL      WEBRSP00
+            MOVE      ONE,EXIT 
+            GOTO      OCLSH999
+          ENDIF
+.
+. check if overlap period contains bookings (original session)
+.
+          PACK      KEY22,OPSEHOSP,OPSEDATE,OPSETIME,OPSECLIN
+          PACK      KEY26,KEY22,ZERO,SP20
+          CALL      RSOPDEA1
+OCLSH150  CALL      RKOPDEA1
+          BRANCH    OVRCD,OCLSH170                * no bookings
+.
+          PACK      KEY23,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN
+          MATCH     KEY22,KEY23                   * still same session?
+          GOTO      OCLSH170 IF NOT EQUAL         * no
+.
+          COMPARE   ZERO,OPDASTAT                 * cancelled?
+          GOTO      OCLSH170 IF NOT EQUAL 
+.
+          MATCH     SP6,OPDATHET
+          IF        !@EQUAL
+            MATCH     OPDATHET,OPSETHET             * same theatre
+            GOTO      OCLSH150 IF NOT EQUAL
+          ENDIF
+.
+.     we have a booking so check if in overlap period
+.
+          MOVE      OPDAEXPS,STARTIM1
+          MOVE      OPDAEXPD,DURATION
+. calc end time (returns ENDTIME)
+          PROC      CENDTIME
+.
+          MATCH     OPDAEXPS,OPSETIME        * booking after start of overlap
+          IF        @LESS
+            MOVE      OPSEENDT,OVERLAPE      * assume overlap end of orig sess
+            MATCH     OPDAEXPS,EXPEND        * booking after end of overlap
+            IF        @LESS 
+              MOVE      EXPEND,OVERLAPE      * overlap = end of new session
+            ENDIF
+.
+            MATCH     OPDAEXPS,OVERLAPE      * booking after end of overlap
+            GOTO      OCLSH170 IF LESS       * if yes, no more cases to check
+            GOTO      OCLSH170 IF EQUAL      * if yes, no more cases to check
+            GOTO      OCLSH900               * booking exists in overlap
+          ELSE
+            MATCH     ENDTIME,OPSETIME       * end of booking before sess start
+            GOTO      OCLSH900 IF LESS
+            GOTO      OCLSH150               * this booking Ok. Check next case
+          ENDIF
+.
+. there are no bookings in the overlap time
+.
+OCLSH170   IF         OVERRID1 <> 1
+             UNPACK     OPSEDATE,CCENT,CYEAR,CMON,CDAY
+             MOVE       "Session overlaps ",WEBTITLE
+             ENDSET     WEBTITLE
+             APPEND     CDAY,WEBTITLE
+             APPEND     "/",WEBTITLE
+             APPEND     CMON,WEBTITLE
+             APPEND     SP1,WEBTITLE
+             APPEND     OPSETIME,WEBTITLE
+             APPEND     SP1,WEBTITLE
+             APPEND     OPSECLIN,WEBTITLE
+             APPEND     ". Do you want to Continue?",WEBTITLE
+.
+             CALL       WEBOV100
+             MOVE       ONE,EXIT
+             GOTO       OCLSH999
+           ENDIF
+.
+OCLSH171   IF         OVERRID2 <> 1
+             MOVE       "Allocate overlap time to new session?",WEBTITLE
+             CALL       WEBOV200
+             MOVE       ONE,EXIT
+             GOTO       OCLSH999
+           ENDIF
+.
+OCLSH172   IF        OVERRID3 <> 1
+             GOTO      OCLSH800
+           ENDIF
+.
+.OCLSH170  UNPACK     OPSEDATE,CCENT,CYEAR,CMON,CDAY
+.          DISPLAY    *P1:24,*EL,*B,"Session overlaps (",*V2LON,CDAY,"/",CMON:
+.                     SP1,OPSETIME,SP1,OPSECLIN,*HOFF,"). ":
+.                     "Allocate overlap time to new session ? "
+.
+.          KEYIN     *P79:24,*DV,UNDLN1:
+.                    *P79:24,*V2LON,ANS
+.          REP       UPPLOW,ANS
+.          MATCH     ANSY,ANS
+.          GOTO      OCLSH180 IF EQUAL
+.          MOVE      ZERO,EXIT               * continue
+.          MATCH     ANSN,ANS
+.          GOTO      OCLSH800 IF EQUAL
+.          BEEP
+.          GOTO      OCLSH170
+.
+. allocate session overlap time to new session
+.
+OCLSH180  MOVE      SESNDATE,OPRLDATE             * session date
+          MOVE      OPSETIME,OPRLSTOR             * start time of orignal sess
+          MOVE      OPSECLIN,OPRLSUOR             * surgeon of orignal sess
+          MOVE      SESNTIME,OPRLSTNW             * start time of new session
+          MOVE      SESNCODE,OPRLSUNW             * surgeon of new session
+          MOVE      OPSETIME,SOVLAPS              * overlap start time
+          MOVE      OVERLAPE,SOVLAPE              * overlap end time
+.
+          PACK      KEY30,OPRLDATE,OPRLSTOR,OPRLSUOR,OPRLSTNW,OPRLSUNW
+          MOVE      KEY30,SAVKEY30                * save key
+          MOVE      ZERO,EXIT
+.
+. ------------------------------------------------------------------
+. ------- check if new session clashes with previous session -------
+. ------------------------------------------------------------------
+.
+OCLSH500  MOVE      ZERO,EXIT               * continue
+          PACK      KEY22,SESNHOSP,SESNDATE,SESNTIME,SESNCODE
+          CALL      RSOPSES1
+.
+OCLSH510  CALL      RPOPSES1
+          BRANCH    OVRCD,OCLSH720          * no previous session
+.
+          MATCH     OPSEHOSP,SESNHOSP
+          GOTO      OCLSH720 IF NOT EQUAL   * different date
+.
+          MATCH     OPSEDATE,SESNDATE
+          GOTO      OCLSH720 IF NOT EQUAL   * different date
+.
+          COMPARE   ZERO,OPSESTAT
+          GOTO      OCLSH510 IF EQUAL       * session cancelled
+.
+          MATCH     SESNCODE,OPSECLIN       * same clinic/surgeon ?
+          GOTO      OCLSH510 IF EQUAL
+.
+          MATCH     SAVTHET,OPSETHET        * different theatre ?
+          GOTO      OCLSH510 IF NOT EQUAL
+.
+          MATCH     OPSEENDT,EXPSTART
+          GOTO      OCLSH510 IF NOT LESS    * start of extra >= end of prev
+.
+          MOVE      OPSEENDT,OVERLAPE       * overlap end time
+          MATCH     OPSEENDT,EXPEND
+          IF        @LESS
+            MOVE      EXPEND,OVERLAPE
+          ENDIF
+.
+          IF        OPCNCLSH=0
+            MOVE      "Extra Session's Start Time Clashes",WEBTITLE
+            CALL      WEBRSP00
+            MOVE      ONE,EXIT
+            GOTO      OCLSH999
+          ENDIF
+.
+. check if overlap period contains bookings (original session)
+.
+          PACK      KEY22,OPSEHOSP,OPSEDATE,OPSETIME,OPSECLIN
+          PACK      KEY26,KEY22,ZERO,SP20
+          CALL      RSOPDEA1
+OCLSH610  CALL      RKOPDEA1
+          BRANCH    OVRCD,OCLSH670                * no bookings
+.
+          PACK      KEY23,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN
+          MATCH     KEY22,KEY23                   * still same session?
+          GOTO      OCLSH670 IF NOT EQUAL         * no
+.
+          COMPARE   ZERO,OPDASTAT                 * cancelled?
+          GOTO      OCLSH670 IF NOT EQUAL 
+.
+          MATCH     SP6,OPDATHET
+          IF        !@EQUAL
+            MATCH     OPDATHET,OPSETHET             * same theatre
+            GOTO      OCLSH610 IF NOT EQUAL
+          ENDIF
+.
+.     we have a booking so check if in overlap period
+.
+          MOVE      OPDAEXPS,STARTIM1
+          MOVE      OPDAEXPD,DURATION
+. calc end time (returns ENDTIME)
+          PROC      CENDTIME
+.
+          MATCH     OPDAEXPS,SESNTIME        * booking after start of overlap
+          IF        @LESS
+            MOVE      OPSEENDT,OVERLAPE      * assume overlap end of orig sess
+            MATCH     OPDAEXPS,EXPEND        * booking after end of overlap
+            IF        @LESS 
+              MOVE      EXPEND,OVERLAPE      * overlap = end of new session
+            ENDIF
+.
+            MATCH     OPDAEXPS,OVERLAPE      * booking after end of overlap
+            GOTO      OCLSH670 IF LESS       * if yes, no more cases to check
+            GOTO      OCLSH670 IF EQUAL      * if yes, no more cases to check
+            GOTO      OCLSH900               * booking exists in overlap
+          ELSE
+            MATCH     ENDTIME,SESNTIME       * end of booking before sess start
+            GOTO      OCLSH900 IF LESS
+            GOTO      OCLSH610               * this booking Ok. Check next case
+          ENDIF
+.
+. there are no bookings in the overlap time
+.
+OCLSH670   IF         OVERRID4 <> 1
+             UNPACK     OPSEDATE,CCENT,CYEAR,CMON,CDAY 
+             MOVE       "Session overlaps ",WEBTITLE
+             ENDSET     WEBTITLE
+             APPEND     CDAY,WEBTITLE
+             APPEND     "/",WEBTITLE
+             APPEND     CMON,WEBTITLE
+             APPEND     SP1,WEBTITLE
+             APPEND     OPSETIME,WEBTITLE
+             APPEND     SP1,WEBTITLE
+             APPEND     OPSECLIN,WEBTITLE    
+             APPEND     ". Do you want to Continue?",WEBTITLE
+.           
+             CALL       WEBOV400             
+             MOVE       ONE,EXIT
+             GOTO       OCLSH999
+           ENDIF      
+.           
+           IF         OVERRID5 <> 1
+             MOVE       "Allocate overlap time to new session?",WEBTITLE
+             CALL       WEBOV500
+             MOVE       ONE,EXIT
+             GOTO       OCLSH999
+           ENDIF
+.
+           IF        OVERRID6 <> 1
+             GOTO      OCLSH800
+           ENDIF
+.
+.OCLSH670  UNPACK     OPSEDATE,CCENT,CYEAR,CMON,CDAY
+.          DISPLAY    *P1:24,*EL,*B,"Session overlaps (",*V2LON,CDAY,"/",CMON:
+.                     SP1,OPSETIME,SP1,OPSECLIN,*HOFF,"). ":
+.                     "Allocate overlap time to new session ? "
+.          KEYIN     *P79:24,*DV,UNDLN1:
+.                    *P79:24,*V2LON,ANS
+.          REP       UPPLOW,ANS
+.          MATCH     ANSY,ANS
+.          GOTO      OCLSH680 IF EQUAL
+.          MOVE      ZERO,EXIT               * continue
+.          MATCH     ANSN,ANS
+.          GOTO      OCLSH800 IF EQUAL
+.          BEEP
+.          GOTO      OCLSH670
+.
+. allocate session overlap time to new session
+.
+OCLSH680  MOVE      OPSETIME,DIM5                 * save the original start time
+          MOVE      OPSECLIN,DIM6                 * save the original session
+.
+          MOVE      SESNDATE,OPSEDATE
+          MOVE      SESNTIME,OPSETIME
+          MOVE      SESNCODE,OPSECLIN
+          CALL      CNRAL000                      * cancel previous realloc.
+          OPEN      OPRRALA1,"oprralaf"           * reallocation file
+          MOVE      ZERO,EXIT
+.
+          MOVE      SESNDATE,OPRLDATE             * session date
+          MOVE      DIM5,OPRLSTOR                 * start time of orignal sess
+          MOVE      DIM6,OPRLSUOR                 * surgeon of orignal sess
+          MOVE      SESNTIME,OPRLSTNW             * start time of new session
+          MOVE      SESNCODE,OPRLSUNW             * surgeon of new session
+          MOVE      SESNTIME,OPRLOVST             * overlap start time
+          MOVE      OVERLAPE,OPRLOVEN             * overlap end time
+.
+.         session overlap with previous session
+.
+          PACK      KEY30,OPRLDATE,OPRLSTOR,OPRLSUOR,OPRLSTNW,OPRLSUNW
+          CALL      RAOPRAL1
+.         PERFORM   OVRCD,WOPRAL00
+          IF        OVRCD=1
+            CALL      WOPRAL00
+          ELSE
+            CALL      UPOPRAL1
+          ENDIF
+          GOTO      OCLSH740
+.
+OCLSH720  MOVE      SESNDATE,OPSEDATE
+          MOVE      SESNTIME,OPSETIME
+          MOVE      SESNCODE,OPSECLIN
+          CALL      CNRAL000                      * cancel previous realloc.
+.
+          OPEN      OPRRALA1,"oprralaf"           * reallocation file
+          MOVE      ZERO,EXIT
+.
+.         check if session overlap with next session
+.
+OCLSH740  MATCH     SP30,SAVKEY30
+          GOTO      OCLSH800 IF EQUAL
+.
+          UNPACK    SAVKEY30,OPRLDATE,OPRLSTOR,OPRLSUOR,OPRLSTNW,OPRLSUNW
+          MOVE      SOVLAPS,OPRLOVST              * overlap start time
+          MOVE      SOVLAPE,OPRLOVEN              * overlap end time
+.
+          MOVE      SAVKEY30,KEY30
+          CALL      RAOPRAL1
+.         PERFORM   OVRCD,WOPRAL00
+          IF        OVRCD=1
+            CALL      WOPRAL00
+          ELSE
+            CALL      UPOPRAL1
+          ENDIF
+.
+.         restore the session values entered
+.
+OCLSH800  UNPACK    CDESC40A,KEY4,OPSEENDT,KEY3,TCODE,OPSEANAE
+          UNPACK    CDESC40B,OPSETPER,OPSETYPE,OPSETHET,OPSECORD,OPSEENDD
+          MOVE      KEY4,OPSEDURA
+          MOVE      KEY3,OPSEBRKT
+          MOVE      TCODE,OPSEPREP
+          GOTO      OCLSH999
+.
+. cannot create new session since a booking exists in overlap period
+.
+.OCLSH850  COMPARE   ONE,OPCNCLSH                  * fatal error or warning ?
+.          GOTO      OCLSH900 IF EQUAL
+.
+.          CALL      DWARN000                      * warn & ask continue?
+.          BRANCH    EXIT,OCLSH910                 * dont continue
+.          GOTO      OCLSH180                      * continue
+.
+.OCLSH870  COMPARE   ONE,OPCNCLSH                  * fatal error or warning ?
+.          GOTO      OCLSH900 IF EQUAL
+.
+.          CALL      DWARN000                      * warn & ask continue?
+.          BRANCH    EXIT,OCLSH910                 * dont continue
+.          GOTO      OCLSH680                      * continue
+.
+.OCLSH900  DISPLAY   *P1:24,*EL,*B,"Booking exists in session overlap period. ":
+.                    "No update. ";
+.          CALL      HITENTER
+.
+OCLSH900  MOVE      "Booking exists in session overlap period. No update",WEBTITLE        
+          CALL      WEBRSP00
+.
+OCLSH910  MOVE      ONE,EXIT                * CANCEL
+          GOTO      OCLSH999
+.
+OCLSH999  CLOSE     OPRRALA1
+          RETURN
+
++
+.*************************************************************************
+.*  WOPRAL00   :  Write to oprralaf with Created By User ID Date and Time*
+.*************************************************************************
+WOPRAL00   MOVE      USERID,OPRLCUID
+           PACK      OPRLCDAT,CCC,CYY,CMM,CDD
+           REP       " 0",OPRLCDAT
+           MOVE      CTIMEIS,OPRLCTIM
+.
+           CALL      WROPRAL1
+.
+WOPRAL99   RETURN
+.
+.*************************************************************************
+.*  DWARN0000  :  Display Warning message                                *
+.*************************************************************************
+.DWARN000  DISPLAY   *P1:24,*EL,*B,"WARNING: Booking exists in session ":
+.                    "overlap period. Continue (Y/N)? "
+.DWARN100  KEYIN     *P68:24,*DV,UNDLN1:
+.                    *P68:24,*V2LON,ANS
+.          REP       UPPLOW,ANS
+.
+.          MOVE      ZERO,EXIT                    * assume continue
+.          MATCH     ANSY,ANS
+.          GOTO      DWARN999 IF EQUAL
+.
+.          MOVE      ONE,EXIT                     * assume continue
+.          MATCH     ANSN,ANS
+.          GOTO      DWARN999 IF EQUAL
+.          BEEP
+.          GOTO      DWARN100
+.
+.DWARN999  RETURN

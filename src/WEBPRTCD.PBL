@@ -1,0 +1,560 @@
+.
+. Change to not use ihapassf for department use websecaf
+.
+. Modifications :
+.
+. V11.03.01 15/11/2023  Don Nguyen     TSK 0917199
+.           Added ability to call the "EP" (EpiSoft Print) script for the "@"
+.           printer selection; modified CLSPRINT 
+. V11.02.01 05/04/2022  Ebon Clements  Task 0911828
+.           Added WBSCCDAT and WBSCCTIM to file clear -  CLRSCH00
+. V11.01.01 26/04/2021  Ebon Clements  Task 0899288
+.           Added WBSCHOSP and WBSCSITE to file clear -  CLRSCH00
+. V11.00.01 24/03/2020  Jill Parkinson Task 0292638
+.           Added call to DR if printing to PDF
+. V10.04.03 24/06/2014  Ebon Clements  CAR 275582    
+.           Fixed key pack on IBAPDDA4 to have SP70 instead of SP5
+. V10.04.02 05/05/2014  Ebon Clements  CAR 300644    
+.           Fixed key pack on IBAPDDA4 read in SELPRT00
+. V10.04.01 26/02/2014  Patrick Adair  CAR 287247    
+.           Changed SELPRT00 to use IBAPDDA4 to read ibapddaf    
+. V10.02.01 06/04/2011  Jill Parkinson CAR 239574    
+.           Changed keys for ibaprtaf,re-wrote spooling functions
+. V9.11.02  02/04/2009  Jill Habasque  CAR    193772
+.           Added trap around WRWBSCH1
+. V9.11.01  15/01/2009  Ebon Clements  CAR 175204
+.           Clear ibpdnum before reading ibapdfaf (retdef00)
+. V9.09.01  24/01/2008  Davin      CAR 153384
+.           Clear ibpdcop & ibpddoc before reading ibapdfaf (retdef00)
+. V9.04.01  09/02/2005  Lina Vo    CAR 56406
+.           Changed CLSPRINT not to REP " 0",SELPRINT when spooled
+.
+.
+.----------------------------------------------------------------------
+          INC       IBAPRNIO/INC
+.------------------------------------------------------------
+. Web Printer Functions
+.------------------------------------------------------------
+. Select Printer from a Options List
+.------------------------------------------------------------
+SELPRT00  OPEN      IBAPRTA1,"ibaprtaf"     * For Printer Selection
+          OPEN      IBACODE1,"ibacodef"     * For Printer Selection
+          OPEN      IHAPASS1,"ihapassf"     * For Printer Selection
+          OPEN      IBAPDFA1,"ibapdfaf"     * For default printer selection
+          CALL      RETDEF00                * Retrieve default printer 
+.
+          MATCH     "S     ",CDEFPRT           * Check if Default Printer
+          IF        @EQUAL
+            WRITE     HTMLFILE;"<option value=#"S     #" selected>":
+                               "Spool Report</option>"
+          ELSE
+            WRITE     HTMLFILE;"<option value=#"S     #">Spool Report</option>"
+          ENDIF
+.
+          OPEN      IBAPDDA4,"ibapddaf"
+          PACK      KEY32,WBSEDEPT,SP70       * Position at start of Depa
+          CALL      RSIBPDD4
+SELPRT10  CALL      RKIBPDD4
+          BRANCH    OVRCD,SELPRT99
+          MATCH     WBSEDEPT,IBPDDEPT        * Check if in the same Depa
+          GOTO      SELPRT99 IF NOT EQUAL
+          PACK      KEY6,IBPDPRTR,SP70      * Read the printer file
+          CALL      RDPRTA1
+          BRANCH    OVRCD,SELPRT10
+          REP       " 0",QPRTCODE
+          PACK      KEY8,QUOTE,QPRTCODE,QUOTE
+          MATCH     CDEFPRT,QPRTCODE        * Check if Default Printer
+          IF        @EQUAL
+            WRITE     HTMLFILE;"<option value=",KEY8," selected>":
+                               PRTDESC,"</option>"
+          ELSE
+            WRITE     HTMLFILE;"<option value=",KEY8,">",PRTDESC,"</option>"
+          ENDIF
+          GOTO      SELPRT10
+.
+SELPRT99  RETURN
+.********************************************************************** 
+.*        Retrieve default printer 
+.********************************************************************** 
+RETDEF00  MOVE      SP70,LINKPRG
+          UNPACK    DIM127,D1,LINKPRG,DIM127
+          UNPACK    DIM127,D1,LINKREP,DIM127
+          PACK      LINKPRG,LINKPRG,SP70
+          MATCH     SP70,LINKPRG
+          GOTO      RETDEF99 IF EQUAL
+.
+          MOVE      SP70,CDEFPRT
+          MOVE      SP70,IBPDCOP
+          MOVE      SP70,IBPDDOC
+          MOVE      SP70,IBPDNUM
+          PACK      KEY20,LINKPRG,LINKREP,WBSEUID,SP70
+          CALL      RDIBPD1              
+          BRANCH    OVRCD,RETDEF99
+.
+          MOVE      IBPDPRT,CDEFPRT
+.
+RETDEF99  RETURN                
+.********************************************************************** 
+.*                            OPNPRINT                                *
+.*                        Web Open a Print File                       *
+.*                                                                    *
+.* This function will get the next sequence number to use for spool   *
+.* file, convert it to a base62 number (to change a 9 character number*
+.* to a 5 character Alpha numeric).                                   *
+.* It then checks if the file already exists in the TBSPOOL directory *
+.* before returning a valid filename to use.                          *
+.********************************************************************** 
+OPNPRINT  MOVE      ZERO,F2
+          OPEN      IBASEQA1,"ibaseqaf"
+.
+OPNPRN10  COMPARE   TWENTY,F2                * loop 20 times if ibaseqaf is 
+          GOTO      OPNPRN95 IF NOT LESS     * locked - then error
+.
+          ADD       ONE,F2
+.
+          MOVE      "SPOOL",KEY8             * read ibaseqaf for the next
+          PACK      KEY8,KEY8,SP70           * SPOOL sequential number
+          CALL      RLIBSEQ1
+          BRANCH    OVRCD,OPNPRN90,OPNPRN10
+.
+          ADD       ONE,IBSQNEXT
+          CALL      UPIBSEQ1
+          CALL      UUIBSEQ1
+.
+          COMPARE   IBSQMAXM,IBSQNEXT        * check it's not > maximum allowed
+          IF        !@LESS
+            MOVE      ZERO,IBSQNEXT          * go back to zero if max reached
+            CALL      UPIBSEQ1
+            CALL      UUIBSEQ1
+            GOTO      OPNPRN10
+          ENDIF
+.
+          PACK      B10NUMB,IBSQNEXT,SP70  * Convert to base 62 number
+          MOVE      SIXTY2,NEWBASE
+          CALL      TOBASE
+.
+.   ***** create the new spool file name as <hospital id><5 char base62 number>
+.
+          UNPACK    NEWBNUMB,KEY5,D5
+          MATCH     SP70,WBSEHOSP
+          IF        @EQUAL
+            PACK      SPLFILE,ANSI,ANSB,ANSA,D5,SP70
+          ELSE
+            PACK      SPLFILE,WBSEHOSP,D5,SP70
+          ENDIF
+          REP       " 0",SPLFILE
+          RESET     SPLFILE
+          PACK      KEY20,SPLFILE,PRT
+.
+.   ***** check that this file doesn't exist
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      SPLTEMP,KEY20
+          TRAPCLR   IO
+.
+          IF        OVRCD<>1
+            GOTO      OPNPRINT           * file exists, get next spool number
+          ENDIF
+.
+          SPLOPEN   SPLFILE              * open spool file for writing to
+          GOTO      OPNPRN99
+.
+OPNPRN90  MOVE      "SPOOL",IBSQTYPE  * if no record on ibaseqaf for SPOOL
+          PACK      KEY8,IBSQTYPE,SP70 * create one with a max of 916132832
+          MOVE      ZERO,IBSQNEXT
+          MOVE      "916132832",IBSQMAXM
+          CALL      RAIBSEQ1
+          IF        OVRCD=1
+            CALL      WRIBSEQ1
+          ENDIF
+          GOTO      OPNPRINT
+.
+OPNPRN95  DISPLAY   *W1,"ibaseqaf spool record locked."
+          MOVE      "ibaseqaf spool record locked.",WBERERR
+          CALL      OPNERR00
+          MOVE      ZERO,F2
+          GOTO      OPNPRINT
+.
+OPNPRN99  RETURN
++
+.------------------------------------------------------------
+. Log Error to Web Error Log
+.------------------------------------------------------------
+OPNERR00  OPEN      WEBERRA1,"weberraf"
+          CLOCK     TIME,CTIMEIS
+          PACK      KEY24,PRGID,CCC,CYY,CMM,CDD,CTIMEIS,SP70
+          REP       " 0",KEY24
+          CALL      RDWBER1
+          IF        OVRCD=0
+            GOTO      OPNERR99
+          ENDIF
+          UNPACK    KEY24,WBERPID,WBERDAT,WBERTIM
+          PACK      WBERUID,SP70
+          PACK      WBERREP,SP70
+          PACK      WBERTMP,SP70
+          PACK      WBERURN,SP70
+          PACK      WBERVIS,SP70
+          MOVE      "1",WBERCNT
+          MOVE      SP70,WBERSPA
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          CALL      WRWBER1
+          TRAPCLR   IO
+.
+OPNERR99  RETURN
+.********************************************************************** 
+.*                            OPNPRINT                                *
+.*                        Web Open a Print File                       *
+.*                    Generate a unique file name                     *
+.* File - OPEN        IBASPOL1,"ibaspolf"                             *
+.********************************************************************** 
+.OPNPRINT  MOVE        PORT,KEY2
+.          MOVE        PORT,CPORTNO
+.          CALL        RDPRNT1
+.          IF          OVRCD=1
+.            CALL        WRITE000              * Write a Print File Record
+.            GOTO        OPNPRINT
+.          ENDIF
+..
+.  Pack up unique file name, and increment spool id (for next file)
+.
+.OPENP100  PACK        SPLFILE,FILEHDR,PORT,CSPOOLID
+.          IF          CSPOOLID=999
+.            MOVE        ZERO,CSPOOLID
+.          ELSE
+.            ADD         ONE,CSPOOLID
+.          ENDIF
+..
+.          RESET       SPLFILE
+.          REP         " 0",SPLFILE
+..
+..         Check if this filename is currently spooled
+.          PACK        KEY8,SPLFILE
+.          CALL        RDSPOL1
+.          IF          OVRCD = 0
+.            GOTO        OPENP100             * currently spooled, don't use
+.          ENDIF
+..
+..         Open spool file and update next id.
+..
+.          SPLOPEN     SPLFILE
+.          CALL        UPPRNT1
+..
+.OPENP999  RETURN
+.********************************************************************** 
+.*                            WRITE000                                *
+.*                    Write a Print File Record                       *
+.********************************************************************** 
+.WRITE000  MOVE        KEY2,CPORTNO
+.         MOVE        "  0",CPRT1
+.         MOVE        "  0",CPRT2
+.         MOVE        "  0",CPRT3
+.         MOVE        "  0",CPRT4
+.         MOVE        "  0",CPRT5
+.         MOVE        "  0",CPRT6
+.         MOVE        "  0",CPRT7
+.         MOVE        "  0",CPRT8
+.         MOVE        "  0",CPRT9
+.         MOVE        "  0",CPRT10
+.         MOVE        "  0",CPRT11
+.         MOVE        "  0",CPRT12
+.         MOVE        "  0",CPRT13
+.         MOVE        "  0",CPRT14
+.         MOVE        "  0",CPRT15
+.         MOVE        "  0",CPRT16
+.         MOVE        "  0",CPRT17
+.         MOVE        "  0",CPRT18
+.         MOVE        "  0",CPRT19
+.         MOVE        "  0",CPRT20
+.         MOVE        "  0",CPRT21
+.         MOVE        "  0",CPRT22
+.         MOVE        "  0",CPRT23
+.         MOVE        "  0",CPRT24
+.         MOVE        "  0",CPRT25
+.         MOVE        "  0",CPRT26
+.         MOVE        "  0",CPRT27
+.         MOVE        "  0",CPRT28
+.         MOVE        "  0",CPRT29
+.         MOVE        "  0",CPRT30
+.         MOVE        ZERO,CSPOOLID
+.
+.         MOVE        "  0",NCURPRT
+.         CALL        WRPRNT1
+.         RETURN
+.********************************************************************** 
+.*                            CLSPRINT                                *
+.*                       Close a Print File                           *
+.********************************************************************** 
+CLSPRINT  CALL      SPLEMPTY     * Check if file is of non-zero size
+          BRANCH    OVRCD,CLSPR900,CLSPR900
+.
+          COMPARE   ZERO,NOCOPIES           * no number of copies entered
+          GOTO      CLSPR050 IF NOT EQUAL * print number of copies
+          MOVE      ONE,NOCOPIES           * set number of copies to one
+.
+.          Get print command
+.
+CLSPR050  MATCH     "S",SELPRINT
+          IF        !@EQUAL
+            REPLACE   " 0",SELPRINT  * pass 01 to PR not  1
+          ENDIF
+.
+          PACK      COMMAND,IBPRPR,SELPRINT,SP1,SPLFILE,SP1,NOCOPIES:
+                                           SP1,PASSCODE,SP30
+          MATCH     "~",SELPRINT  * print to pdf - no printer, exec DR instead
+          IF        @EQUAL
+            PACK      COMMAND,ANSD,ANSR,SP1,SELPRINT,SP1,SPLFILE,SP1,NOCOPIES:
+                                             SP1,PASSCODE,SP30
+          ENDIF
+.
+          MATCH     "@",SELPRINT  * call EpiSoft Print (EP) script for IFC .xml 
+          IF        @EQUAL
+.           KEY20 - Spool filename
+.           KEY3 - Hospital Code
+.           KEY8 - Admission No.
+            PACK      COMMAND,ANSE,ANSP,SP1,KEY20,SP1,KEY3,SP1,KEY8,SP30
+          ENDIF
+.
+          EXECUTE   COMMAND,TASKID
+.
+          MATCH     "~~~~~~",SELPRINT
+          IF        @EQUAL
+            GOTO      CLSPR999  * print to pdf - skip clspr900 so splfile saved
+          ENDIF
+.
+          MATCH     "@",SELPRINT
+          IF        @EQUAL
+            GOTO      CLSPR999  * Episoft print - skip clspr900 so splfile saved
+          ENDIF
+.
+          MATCH     "S",SELPRINT
+          IF        @EQUAL
+            CALL      SPLSCH00
+          ENDIF
+          MOVE      SP70,SCHEDDSC
+.
+          GOTO      CLSPR900
+.
+CLSPR900  MOVE      SP8,SPLFILE
+          CALL      UPDFPT00                * Update default printer file
+CLSPR999  RETURN
+.********************************************************************** 
+.         Update Default Printer File for User
+.********************************************************************** 
+UPDFPT00  MOVE      REPORTNO,F2
+          MOVE      F2,KEY2
+          REP       " 0",KEY2
+          PACK      KEY20,PRGID,KEY2,WBSEUID,SP70
+          UNPACK    KEY20,IBPDPID,IBPDREP,IBPDUID
+          MOVE      SELPRINT,IBPDPRT
+          MOVE      SP70,IBPDSPA
+          CALL      RAIBPD1
+          IF        OVRCD=0
+            CALL      UPIBPD1
+          ELSE
+            CALL      WRIBPD1
+          ENDIF
+UPDFPT99  RETURN
+.********************************************************************** 
+.*                            SPLEMPTY                                *
+.*                Determine Status of the Spool File                  *
+.*                                                                    *
+.*                               OVRCD = 0 means file is not empty    *
+.*                                       1 means file is empty        *
+.*                                       2 means file does not exist  *
+.********************************************************************** 
+SPLEMPTY  SPLCLOSE
+          MATCH     SP8,SPLFILE
+          GOTO      SPLEM950 IF EQUAL
+.
+          PACK      FILENAME,SPLFILE,IBPREXTN
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      SPLTFILE,FILENAME
+          TRAPCLR   IO
+          BRANCH    OVRCD,SPLEM950
+.
+.         File exists : Check if it contains anything
+.
+          READ      SPLTFILE,ZERO;*1,ANS
+          GOTO      SPLEM900 IF OVER
+.
+SPLEM800  MOVE      ZERO,OVRCD              * File Not Empty
+          CLOSE     SPLTFILE
+          GOTO      SPLEM999
+.
+SPLEM900  CLOSE     SPLTFILE,DELETE
+          MOVE      SPLFILE,KEY8
+          CALL      RDSPOL1              * delete from files spooled
+          IF        OVRCD=0
+            CALL      DESPOL1              * delete from files spooled
+          ENDIF
+          MOVE      ONE,OVRCD               * File is Empty
+          GOTO      SPLEM999
+.
+SPLEM950  MOVE      TWO,OVRCD               * File Does Not Exist
+          GOTO      SPLEM999
+.
+SPLEM999  RETURN
+.
+.------------------------------------------------------------
+. * Spool Schedule Record
+.------------------------------------------------------------
+SPLSCH00  CALL      IBACLOCK
+.
+          CALL      NXTSNO00         * Get Next Report Schedule Number
+          MOVE      "8",WBSCSTAT     * Status 8 = Awaiting Processing
+.
+          MATCH     SP70,SCHEDDSC
+          IF        @EOS
+            MOVE      PRGNAM,WBSCDSRP         * Default Description
+            GOTO      SPLSCH10
+          ENDIF
+          IF        @EQUAL
+            MOVE      PRGNAM,WBSCDSRP         * Default Description
+          ELSE
+            MOVE      SCHEDDSC,WBSCDSRP       * Label/Form/Letter Description
+          ENDIF
+.
+SPLSCH10  MOVE      PRGID,WBSCRPID            * Report Program ID
+          MOVE      WBSEUID,WBSCUSER          * User ID
+.
+          CLOCK     TIME,CTIMEIS
+
+          PACK      WBSCRDTE,CCC,CYY,CMM,CDD  * Request Date
+          REP       " 0",WBSCRDTE
+          MOVE      CTIMEIS,WBSCRTIM    * Request Time
+
+          PACK      WBSCSCDT,CCC,CYY,CMM,CDD  * Sch Date
+          REP       " 0",WBSCSCDT
+          MOVE      CTIMEIS,WBSCSCTM    * Sch Time
+
+          PACK      WBSCSDAT,CCC,CYY,CMM,CDD  * Start Date
+          REP       " 0",WBSCSDAT
+          MOVE      CTIMEIS,WBSCSTIM    * Start Time
+
+          MOVE      ZERO,WBSCSFLG       * Start Flag
+          MOVE      ZERO,WBSCOTYP       * Output Type 0=Text 1=Html
+          MOVE      ZERO,WBSCNREC       * Expected no of records
+          MOVE      ZERO,WBSCRPRO       * Records Processed
+          MOVE      "S  ",WBSCPRIN      * Printer
+          PACK      WBSCSPOO,SPLFILE,IBPREXTN,SP70
+          MOVE      NOCOPIES,WBSCNCOP   * No of Copies
+.
+          CALL      IBACLOCK
+          PACK      WBSCCDAT,CCC,CYY,CMM,CDD  * Completed Date
+          REP       " 0",WBSCCDAT
+          CLOCK     TIME,WBSCCTIM             * Completed Time
+.
+          CALL      UPWBSC1             * Update Schedule
+          CALL      UUWBSC1             * Unlock record
+.
+SPLSCH99  RETURN
+.------------------------------------------------------------
+. Get Next Report Schedule Number
+.------------------------------------------------------------
+NXTSNO00  PACK      KEY8,Z70
+          CALL      RSWBSC1
+NXTSNO10  CALL      RPWBSC1
+          BRANCH    OVRCD,NXTSNO90
+          MOVE      WBSCSCHD,SCHEDNUM
+          ADD       ONE,SCHEDNUM
+          GOTO      NXTSNO95
+.
+NXTSNO90  MOVE      ONE,SCHEDNUM
+.
+NXTSNO95  CALL      CLRSCH00    * Clear All Fields
+          MOVE      SCHEDNUM,WBSCSCHD
+          REP       " 0",WBSCSCHD
+          MOVE      WBSCSCHD,KEY8
+          CALL      RAWBSC1
+          IF        OVRCD=1
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRWBSC1
+            TRAPCLR   IO
+            BRANCH    OVRCD,NXTSNO98
+            CALL      RLWBSC1
+          ELSE
+            GOTO      NXTSNO98
+          ENDIF
+          GOTO      NXTSNO99
+.
+NXTSNO98  ADD       ONE,SCHEDNUM
+          GOTO      NXTSNO95
+.
+NXTSNO99  RETURN
+.
+.------------------------------------------------------------
+. Clear Server Schedule Table Variables
+.------------------------------------------------------------
+CLRSCH00  MOVE      SP70,WBSCSCHD   * Schedule No
+          MOVE      SP70,WBSCSTAT   * Status
+          MOVE      SP70,WBSCSCDT   * Schedule Date
+          MOVE      SP70,WBSCSCTM   * Schedule Time
+          MOVE      SP70,WBSCACTV   * Active Process ID
+          MOVE      SP70,WBSCUNIX   * Unix Command
+          MOVE      SP70,WBSCDSRP   * Description of report
+          MOVE      SP70,WBSCRPID   * Report Program ID
+          MOVE      SP70,WBSCUSER   * Web User
+          MOVE      SP70,WBSCRDTE   * Request Date
+          MOVE      SP70,WBSCRTIM   * Request Time
+          MOVE      SP70,WBSCSDAT   * Started Date
+          MOVE      SP70,WBSCSTIM   * Started Time
+          MOVE      ZERO,WBSCSFLG   * Start Flag :Set to 1 by Report Program
+          MOVE      ZERO,WBSCOTYP   * Output Type : 0=Text 1=HTML
+          MOVE      ZERO,WBSCNREC   * Expected No. of records
+          MOVE      ZERO,WBSCNREC   * Expected No. of records
+          MOVE      ZERO,WBSCRPRO   * Records Processed
+          MOVE      SP70,WBSCUTIM   * Last Update Time
+          MOVE      SP70,WBSCPRIN   * Printer
+          MOVE      SP70,WBSCPRIN   * Printer
+          MOVE      ZERO,WBSCNCOP   * No of Copies
+          MOVE      SP70,WBSCPREP   * Print Report 0=No 1=Yes
+          MOVE      SP70,WBSCRDAT   * Re-Schedule Encoded Date String
+          MOVE      SP70,WBSCREND   * Re-Schedule End Date
+          MOVE      SP70,WBSCPERM   * Save as Permanent Spool File 1=Yes
+          MOVE      SP70,WBSCEXCP   * Exclusion Flags - Hols, Mon-Sun
+          MOVE      SP70,WBSCHOSP   * Hospital ID (pathspaf)
+          MOVE      SP70,WBSCSITE   * Outpatient Site (outsitaf)
+          MOVE      SP70,WBSCCDAT   * Completed Date (CCYYMMDD)
+          MOVE      SP70,WBSCCTIM   * Completed Time (HH:MM:SS)
+          MOVE      SP70,WBSCSPAR   * Spare
+.
+CLRSCH99  RETURN
+.
+.
+.******************************************************************************
+.*                  Convert from base 10 to base NEWBASE                      *
+.*                                                                            *
+.* Parameters     : B10NUMB   FORM      ??   Define the size as required      *
+.*                  NEWBASE   FORM      2    Initialise to the new base       *
+.*                  BASEDGTS  INIT      ??   Initialise to the digits for the *
+.*                                           new base, starting from zero.    *
+.*                                                                            *
+.*                  Example: Converting to base 16                            *
+.*                  NEWBASE   FORM      "16"                                  *
+.*                  BASEDGTS  INIT      "0123456789ABCDEF"                    *
+.*                                                                            *
+.* Returns        : NEWBNUMB  DIM       ??   B10NUMB in new base              *
+.******************************************************************************
+.
+TOBASE    PACK      NEWBNUMB,SP30,SP30,SP30,SP30
+          MOVELPTR  NEWBNUMB,INDEXT          * position being updated
+.
+          MOVE      B10NUMB,OLDNUMB
+          WHILE     OLDNUMB > 0 & INDEXT > 0
+            ASSIGN    (OLDNUMB % NEWBASE)+1,INDEXF
+            RESET     BASEDGTS,INDEXF
+            RESET     NEWBNUMB,INDEXT
+            CMOVE     BASEDGTS,NEWBNUMB
+            ASSIGN    (OLDNUMB / NEWBASE),OLDNUMB
+            SUB       ONE,INDEXT
+          DO
+          RESET     NEWBNUMB
+          RESET     BASEDGTS
+.
+          RETURN
++ 

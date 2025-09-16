@@ -1,0 +1,79 @@
+.*****************************************************************************
+.*        HICRCCIO.INC                                                       *
+.*****************************************************************************
+.
+.         Index 1
+.
+RSHCRCC1  RESET     KEY13
+          READ      HICRCCA1,KEY13;;
+          RETURN
+.
+RAHCRCC1  RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      HICRCCA1,KEY13;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDHCRCC1  RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      HICRCCA1,KEY13;HCRCBTCH,HCRCRNUM,HCRCCNTR,HCRCDATE,HCRCPYEE:
+                                  HCRCSPRV,HCRCBENA,HCRCBENP,HCRCEXCN,HCRCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKHCRCC1  MOVE      ZERO,OVRCD
+          READKS    HICRCCA1;HCRCBTCH,HCRCRNUM,HCRCCNTR,HCRCDATE,HCRCPYEE:
+                             HCRCSPRV,HCRCBENA,HCRCBENP,HCRCEXCN,HCRCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPHCRCC1  MOVE      ZERO,OVRCD
+          READKP    HICRCCA1;HCRCBTCH,HCRCRNUM,HCRCCNTR,HCRCDATE,HCRCPYEE:
+                             HCRCSPRV,HCRCBENA,HCRCBENP,HCRCEXCN,HCRCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPHCRCC1  UPDATE    HICRCCA1;HCRCBTCH,HCRCRNUM,HCRCCNTR,HCRCDATE,HCRCPYEE:
+                             HCRCSPRV,HCRCBENA,HCRCBENP,HCRCEXCN,HCRCSPAR
+          RETURN
+.
+WRHCRCC1  RESET     KEY13
+          WRITE     HICRCCA1,KEY13;HCRCBTCH,HCRCRNUM,HCRCCNTR,HCRCDATE,HCRCPYEE:
+                                  HCRCSPRV,HCRCBENA,HCRCBENP,HCRCEXCN,HCRCSPAR
+          RETURN
+.
+DEHCRCC1  RESET     KEY13
+          DELETE    HICRCCA1,KEY13
+          RETURN
+.
+.         Index 2
+.
+RSHCRCC2  RESET     KEY13
+          READ      HICRCCA2,KEY13;;
+          RETURN
+.
+RAHCRCC2  RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      HICRCCA2,KEY13;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDHCRCC2  RESET     KEY13
+          MOVE      ZERO,OVRCD
+          READ      HICRCCA2,KEY13;HCRCBTCH,HCRCRNUM,HCRCCNTR,HCRCDATE,HCRCPYEE:
+                                  HCRCSPRV,HCRCBENA,HCRCBENP,HCRCEXCN,HCRCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKHCRCC2  MOVE      ZERO,OVRCD
+          READKS    HICRCCA2;HCRCBTCH,HCRCRNUM,HCRCCNTR,HCRCDATE,HCRCPYEE:
+                             HCRCSPRV,HCRCBENA,HCRCBENP,HCRCEXCN,HCRCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPHCRCC2  MOVE      ZERO,OVRCD
+          READKP    HICRCCA2;HCRCBTCH,HCRCRNUM,HCRCCNTR,HCRCDATE,HCRCPYEE:
+                             HCRCSPRV,HCRCBENA,HCRCBENP,HCRCEXCN,HCRCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.

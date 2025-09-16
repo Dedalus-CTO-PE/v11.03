@@ -1,0 +1,811 @@
+.*******************************************************************************
+.* System    :   Inpatient                                                     *
+.* Program   :   EPAYMXML                                                      *
+.* Desc      :   Process an ePayment XML File                                  *
+.*******************************************************************************
+.* Date      :   24/10/2023                                                    *
+.* Author    :   J.Tan                                                         *
+.* Function  :   This program will open an ePayment XML File and               *
+.*               load the details into receipting files                        *
+.*                                                                             *
+.* Modification :                                                              *
+.*                                                                             *
+.* V11.03.00  15/11/2023  Don Nguyen   TSK 0917199                             *
+.*            Modified code to work with 'epaymxml.us1' script                 *
+.*            24/10/2023  J.Tan        TSK 0917199                             *
+.*            Created new program                                              *
+.*******************************************************************************
+          INC       STD002FD            * command line
+          INC       PATCONFD/INC
+          INC       PMSEERFD/INC        *ePayment pending error table
+          INC       PMSEHBFD/INC        *ePayment pending header table
+.
+          INC       PATCODFD/INC
+          INC       PATMA1FD/INC
+          INC       PMSVX1FD/INC
+          INC       PATMI1FD/INC
+          INC       PATMRGFD/INC
+          INC       WEBSECFD/INC
+          INC       COMPARFD/INC
+.
+          INC       BOKRC1FD/INC            * Booking File
+          INC       RCPREGFD/INC
+          INC       RCPCIDFD/INC
+          INC       RCPBDTFD/INC
+          INC       RCPBNKFD/INC
+          INC       RCPDTEFD/INC
+          INC       TMPBNKFD/INC
+.
+          INC       TFILEVAR/INC 
+          INC       WEBERRFD/INC 
+          INC       PMSXMLFD/INC
+.
+. ePayment file
+. ------------------------------------------------------------------------------
+EPAYMTXT  FILE      HL7,FIXED=2000
+.
+.Name     Type      Size      Start
+XMRCEPID  DIM       20      * Episoft ID
+XMRCURNO  DIM       8       * U/R number
+XMRCADMN  DIM       8       * Admission Number
+XMRCSNAM  DIM       40      * Patient Surname
+XMRCGNAM  DIM       40      * Patient Given name
+XMRCAMNT  DIM       15      * Deposit amount
+XMRCPAID  DIM       50      * Who paid the amount (Reference)
+XMRCSREF  DIM       50      * Correspondence ID (Statement Reference)
+.
+. Program variables
+. ------------------------------------------------------------------------------
+.
+CASHDRWR  DIM       6      * from parameter
+.
+CURDATE   DIM       8
+CURTIME   DIM       8
+.
+CMDLINE   DIM       200
+DIM8      DIM       8
+F20       FORM      20
+FORM3     FORM      3
+FORM20    FORM      20
+HRECPT    FORM      12 
+RCPNUMBR  DIM       12
+SUSREGIS  DIM       3
+.
+FNAMEI    DIM       150
+PAYMCODE  DIM       3
+DEPOTYPE  DIM       3
+TRANNUMB  FORM      5
+SUSALLOC  FORM      1
+.
+XMLFLNAM  DIM       200
+DETAILFN  DIM       8     * Detail Temp File Name
+.
+. Program constants
+. ------------------------------------------------------------------------------
+PRGID     INIT      "EPAYMXML"
+PRGNAM    INIT      "ePaymentXML load"
+VERSION   INIT      "V11.03.00"
++
+.*******************************************************************************
+.*                              MAIN0000                                       *
+.*                      Controlling Logic (Mainline code)                      *
+.*******************************************************************************
+.
+MAIN0000  CALL      SETX0000
+          CALL      INIT0000               * initialisation and open files
+.
+MAIN0500  CALL      GFIL0000               * get filename 
+          BRANCH    EXIT,MAIN9999          * nothing input
+.
+          CALL      CFIL0000               * copy file
+          BRANCH    EXIT,MAIN9999          * unable to copy
+.
+          CALL      OPEN0000               * open text file
+          BRANCH    EXIT,MAIN9999          * unable to open .txt file
+.
+          CALL      PROC0000               * process
+.
+MAIN9999  STOP                             * chain back to program
++
+.*******************************************************************************
+.*                                INIT0000               Called by: MAIN0000   *
+.*  Initialisation routine                                                     *
+.*******************************************************************************
+INIT0000  CALL      DISPHEAD                     * display heading
+.
+.
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+          OPEN      PATMRGG1,"patmrgaf"
+          OPEN      PATMI1A1,"patmi1af"
+.
+          OPEN      RCPREGA1,"rcpregaf"
+          OPEN      RCPREGA3,"rcpregaf"
+          OPEN      RCPCIDA1,"rcpcidaf"
+          OPEN      RCPBNKA1,"rcpbnkaf"
+          OPEN      RCPBDTA1,"rcpbdtaf"
+          OPEN      RCPDTEA1,"rcpdteaf"
+          OPEN      TMPBNKA1,"tmpbnkaf"
+.
+          OPEN      PATCODE1,"patcodes"
+          OPEN      WEBSECA1,"websecaf"
+          OPEN      BOKRC1A1,"bokrc1af"
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          READ      CONTROLF,HUND19;*182,PTCNEPIS
+.
+          OPEN      PMSXMLA1,"pmsxmlaf"
+          OPEN      PMSEHBA1,"pmsehbaf"
+          OPEN      COMPARA1,"comparaf"
+.
+          CALL      RCPR0000                     * read common parameter
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,DETAILFN
+          REP       " 0",DETAILFN
+.
+INIT9999  RETURN
++
+.*******************************************************************************
+.         Common parameter for Drawer
+.*******************************************************************************
+RCPR0000  MOVE      "PTCNPCDR",D8
+          PACK      KEY11,SP3,D8,SP70
+          CALL      RDCMPAR1                     * Read default system parameter
+          BRANCH    OVRCD,RCPR9999
+.
+          MATCH     "0",CMPAACTV
+          GOTO      RCPR9999 IF NOT EQUAL
+.
+RCPR8000  MOVE      CMPAVALU,CASHDRWR
+.
+RCPR9999  RETURN
++
+.*******************************************************************************
+.*                               OPEN0000                Called by: MAIN0000   *
+.* Open the ePayment temporary files for processing                            *
+.*******************************************************************************
+OPEN0000  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      EPAYMTXT,DETAILFN           * open text file
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Payment Details file not found.  ";
+            CALL      HITENTER
+            GOTO      OPEN9100
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  MOVE      ONE,EXIT
+          GOTO      OPEN9999
+.
+OPEN9999  RETURN
++
+.*******************************************************************************
+.*                               PROC0000                Called by: MAIN0000   *
+.* Loop through the ePayment temporary files and store data in tables          *
+.*******************************************************************************
+PROC0000  CALL      IBACLOCK
+          PACK      CURDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURDATE             * set current date
+          MOVE      CTIMEIS,CURTIME
+          REP       " 0",CURTIME             * set current time
+.
+          UNPACK    SP70,RCCIDEPR,SUSREGIS
+          MOVE      SP70,PAYMCODE            * Payment code
+          MOVE      SP70,DEPOTYPE            * Deposit type
+.
+          MATCH     SP70,CASHDRWR
+          GOTO      PROC8000 IF EQUAL
+.
+          MOVE      CASHDRWR,KEY6
+          CALL      RDCIDA1
+          BRANCH    OVRCD,PROC8000           * invalid cash drawer
+.
+          MATCH     SP70,RCCIDEPR
+          GOTO      PROC8200 IF EQUAL        * Deposit register not set
+.
+          PACK      KEY3,RCCIDEPR
+          CALL      RDREGA1
+          BRANCH    OVRCD,PROC8200           * invalid Deposit register
+.
+.         Check if Payment code and Deposit type have been setup
+.
+          CALL      PCOD0000               * payment code for PatientPortal
+          BRANCH    OVRCD,PROC8300
+.
+          CALL      DTYP0000               * deposit type for an External source
+          BRANCH    OVRCD,PROC8400
+.
+.         Processing the receipt
+.
+          CALL      WRCP0000
+.
+          CLOSE     EPAYMTXT,DELETE        * Delete Temporary File
+.
+          GOTO      PROC9999
+.
+PROC8000  DISPLAY   *P1:24,"Cash Drawer parameter is not Setup"
+          GOTO      PROC9999
+.
+PROC8200  DISPLAY   *P1:24:
+                    "Deposit Register for Cash Drawer parameter ":
+                    CASHDRWR," is not Setup"
+          GOTO      PROC9999
+.
+PROC8300  DISPLAY   *P1:24,"Payment code for Patient Portar not Setup"
+          GOTO      PROC9999
+.
+PROC8400  DISPLAY   *P1:24,"Deposit type for External Source not Setup"
+          GOTO      PROC9999
+.
+PROC9999  RETURN
++
+.*******************************************************************************
+.*                                WRCP0000               Called by: PROC0000   *
+.* Read the XML file and write to receipting tables                            *
+.*******************************************************************************
+WRCP0000  READ      EPAYMTXT,SEQ;XMRCEPID,XMRCURNO,XMRCADMN,XMRCSNAM:
+                                 XMRCGNAM,XMRCAMNT,XMRCPAID,XMRCSREF
+.
+          PACK      XMRCEPID,XMRCEPID,SP70
+          MATCH     SP70,XMRCEPID
+          GOTO      WRCP9999 IF EQUAL
+.
+          MOVE      ZERO,SUSALLOC
+          CALL      VALD0000
+          BRANCH    EXIT,WRCP9999
+.
+.         Processing the receipts
+.
+          CALL      WBNK0000               *  write to bank header file
+          CALL      WBDT0000               *  write to bank details file
+          CALL      WDTE0000               *  write to receipt details file
+.
+WRCP9999  RETURN
++
+.------------------------------------------------------------------------------
+. Validate patient
+.------------------------------------------------------------------------------
+VALD0000  MOVE      ZERO,EXIT
+.
+.         Check for valid admission number
+.
+          SQUEEZE   XMRCADMN
+          MOVE      ZERO,F8
+          MOVE      XMRCADMN,F8              * right justified
+          MOVE      F8,XMRCADMN
+.
+          SQUEEZE   XMRCEPID
+          MOVE      ZERO,F20
+          MOVE      XMRCEPID,F20             * right justified
+          MOVE      F20,XMRCEPID
+.
+          MOVE      XMRCURNO,D8
+          CALL      RJUS0000                 * right justified
+          PACK      XMRCURNO,KEY8
+.
+          MOVE      SP70,PADD1
+          MOVE      SP70,PADD2
+          MOVE      SP70,PSUBRB
+          MOVE      SP70,PADD4
+          MOVE      SP70,PPOST
+          MOVE      SP70,PMVXMHOS
+.
+.         Check for valid U/R number
+.
+          MOVE      XMRCURNO,KEY8
+          CALL      RDMAST1
+          COMPARE   ZERO,OVRCD
+          GOTO      VALD2000 IF EQUAL
+.
+.         Check for Merge U/R
+.
+          PACK      KEY17,TWO,KEY8,SP70    * Merge fully accepted
+          CALL      RDPTMRG1
+          COMPARE   ZERO,OVRCD
+          GOTO      VALD1000 IF EQUAL
+.
+          PACK      KEY17,THREE,KEY8,SP70 * Merge Processed
+          CALL      RDPTMRG1
+          BRANCH    OVRCD,VALD6100
+.
+VALD1000  MOVE      PTMRNWUR,XMRCURNO       * New U/R number
+.
+.         Check for valid Admission number
+.
+VALD2000  PACK      KEY8,XMRCADMN,SP70
+          CALL      RDMISS1
+          IF        OVRCD=1
+            CALL      RDBKREC1
+            BRANCH    OVRCD,VALD6300         * invalid visit number
+          ELSE
+            COMPARE   FIVE,ASTAT
+            GOTO      VALD6300 IF EQUAL      * Cancelled admission
+            COMPARE   ONE,ASTAT
+            GOTO      VALD6400 IF NOT EQUAL  * Not preadmission
+          ENDIF
+          MATCH     AURNO,XMRCURNO
+          GOTO      VALD6100 IF NOT EQUAL  * Invalid UR for the admission
+.
+          CALL      RDPMVX11
+          BRANCH    OVRCD,VALD6300           * invalid visit number
+.
+          PACK      KEY20,XMRCEPID,SP70      * Episoft Unique ID
+          CALL      RDPMEHB1
+          BRANCH    OVRCD,VALD6000
+.
+          MATCH     SP70,PMHBVISN
+          IF        !@EQUAL
+            MATCH     PMHBVISN,XMRCADMN
+            GOTO      VALD6000 IF NOT EQUAL  * different visit
+          ENDIF
+.
+.         Check Surname/Given name
+.
+          MATCH     XMRCSNAM,PSNAME        * Patient Surname
+          GOTO      VALD6200 IF NOT EQUAL
+.        
+          MATCH     XMRCGNAM,PGNAME        * Patient Given name
+          GOTO      VALD6200 IF NOT EQUAL
+.
+          MOVE      ZERO,EXIT
+          GOTO      VALD9999
+.
+VALD6000  DISPLAY   *P1:24,"Invalid EpiSoft ID for the visit number"
+          GOTO      VALD7000
+.
+VALD6100  DISPLAY   *P1:24,"Invalid U/R No.",XMRCURNO
+          GOTO      VALD9000
+.
+VALD6200  DISPLAY   *P1:24:
+                    "Given name/Surname NOT same as Master record",XMRCURNO
+          GOTO      VALD9000
+.
+VALD6300  DISPLAY   *P1:24,"Invalid Visit No.",XMRCADMN
+          GOTO      VALD9000
+.
+VALD6400  DISPLAY   *P1:24,"Not a preadmission patient.",XMRCADMN
+          GOTO      VALD9000
+.
+.         Check if Suspense register is setup
+.
+VALD7000  MOVE      "99",FORM2
+          PACK      KEY5,FORM2,SP70
+          CALL      RDSREGA3
+VALD7200  CALL      RDKREGA3
+          BRANCH    OVRCD,VALD8000
+.
+          COMPARE   REGIBACD,FORM2
+          GOTO      VALD8000 IF NOT EQUAL  * not a suspense regist
+.
+          MATCH     "1",REGACTIV
+          GOTO      VALD7200 IF EQUAL      * not active
+.
+          MOVE      REGCODE,SUSREGIS       * Suspense register
+          MOVE      ONE,SUSALLOC            * Suspense register
+.
+          DISPLAY   *P1:24,"Receipt will be allocated to Suspense Register: ":
+                    SUSREGIS
+.
+          MOVE      ZERO,EXIT
+          GOTO      VALD9999
+.
+VALD8000  DISPLAY   *P1:24,"Suspense register is not setup"
+.
+VALD9000  MOVE      ONE,EXIT
+VALD9999  RETURN
++
+.******************************************************************************
+.*                                  RJUS0000                                  *
+.*                         Right Justify a field                              *
+.******************************************************************************
+RJUS0000  MOVE      SP70,KEY8
+          MOVE      ZERO,F3
+          SQUEEZE   D8
+          IF        @EOS
+            MOVE      "0",D8
+          ENDIF
+          MOVELPTR  D8,F3
+          MOVE      "8",FORM3
+          COMPARE   F3,FORM3
+          IF        @EQUAL
+            MOVE      D8,KEY8
+            GOTO      RJUS9999
+          ENDIF
+.
+          SUB       F3,FORM3
+          SUB       ONE,FORM3
+          BUMP      KEY8,FORM3
+          APPEND    D8,KEY8
+          RESET     KEY8
+.
+RJUS9999  RETURN
++
+.------------------------------------------------------------------------------
+. Write to Bank header file
+.------------------------------------------------------------------------------
+WBNK0000  READ      CONTROLF,THIRTY6;*193,HRECPT
+          ADD       ONE,HRECPT
+          WRITAB    CONTROLF,THIRTY6;*193,HRECPT
+          SUB       ONE,HRECPT
+.
+          MOVE      HRECPT,KEY12
+          CALL      RDRCBNK1
+          COMPARE   ZERO,OVRCD
+          GOTO      WBNK0000 IF EQUAL
+.
+          MOVE      HRECPT,KEY12
+          CALL      RDTMBNK1
+          COMPARE   ZERO,OVRCD
+          GOTO      WBNK0000 IF EQUAL
+.
+          CALL      CLRPBK00          * Clear banking file
+.
+          MOVE      HRECPT,RCBNRECN            * Receipt number
+          MOVE      CURDATE,RCBNTDAT
+          MOVE      XMRCAMNT,RCBNTOTP
+          MOVE      CASHDRWR,RCBNCDRW          * from parameter
+          MOVE      RCCICHQA,RCBNCHQA          * Chq Account from Cash drawer
+          MOVE      REGHOSP,RCBNMHOS
+.
+          MOVE      "0",RCBNTTYP               * default to 0 = Patient
+          MOVE      "0",RCBNSTAT               * status
+.
+          MOVE      CURDATE,RCBNCDAT
+          MOVE      CURTIME,RCBNCTIM
+          MOVE      "EPAYMXML",RCBNCUID
+          MOVE      SP70,RCBNUDAT
+          MOVE      SP70,RCBNUTIM
+          MOVE      SP70,RCBNUUID
+.
+WBNK6000  MOVE      HRECPT,KEY12
+          CALL      WRRCBNK1
+.
+WBNK9999  RETURN
++
+.------------------------------------------------------------------------------
+. Write to Bank details file
+.------------------------------------------------------------------------------
+WBDT0000  MOVE      ZERO,F3
+          PACK      KEY15,RCBNRECN,Z70
+          CALL      RSRCBDT1
+          CALL      RPRCBDT1
+          BRANCH    OVRCD,WBDT1000
+.
+          MATCH     RCBDRECN,RCBNRECN
+          GOTO      WBDT1000 IF NOT EQUAL
+.
+          MOVE      RCBDUNIQ,F3        * additional bank detail record
+          ADD       ONE,F3
+          GOTO      WBDT1200
+.
+WBDT1000  MOVE      ONE,F3             * first bank detail record
+.
+WBDT1200  CALL      CLRPBT00              * Clear Real RCPBDT fields first
+.
+          MOVE      CURDATE,RCBDTDAT
+          MOVE      RCBNRECN,RCBDRECN
+          MOVE      F3,RCBDUNIQ
+.
+          MOVE      "1",RCBDEFTT           * EFT Type
+          PACK      RCBDPAYD,XMRCPAID,SP70 * Who paid the amount (Reference)
+          PACK      RCBDSTRF,XMRCSREF,SP70 * Statement Reference
+.
+          MOVE      "5",RCBDPTYP           * Payment type from Patient Portal
+          MOVE      PAYMCODE,RCBDPCOD      * Payment Code
+          MOVE      XMRCAMNT,RCBDPAMT      * Payment amount
+          MOVE      REGHOSP,RCBDMHOS
+.
+          MOVE      CURDATE,RCBDCDAT
+          MOVE      CURTIME,RCBDCTIM
+          MOVE      "EPAYMXML",RCBDCUID
+          UNPACK    SP70,RCBDUDAT,RCBDUTIM,RCBDUUID
+.
+          PACK      KEY15,RCBDRECN,RCBDUNIQ,SP70
+          CALL      WRRCBDT1
+.
+WBDT9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Write to rcpdteaf
+.------------------------------------------------------------------------------
+WDTE0000  MOVE      HRECPT,KEY12
+          PACK      KEY17,KEY12,Z70
+          CALL      RSRCDTE1
+          CALL      RPRCDTE1
+          BRANCH    OVRCD,WDTE1000
+.
+          MATCH     RCDTRECN,KEY12
+          GOTO      WDTE1000 IF NOT EQUAL
+.
+          MOVE      RCDTTCNT,TRANNUMB     * additional detail record
+          ADD       ONE,TRANNUMB
+          GOTO      WDTE1200
+.
+WDTE1000  MOVE      ONE,TRANNUMB          * first detail record
+.
+WDTE1200  CALL      CLRPDE00              * Clear fields
+.
+          MOVE      CURDATE,RCDTTDAT
+          MOVE      KEY12,RCDTRECN        * Receipt number
+          MOVE      TRANNUMB,RCDTTCNT
+.
+          MOVE      CURDATE,RCDTCDAT
+          MOVE      CURTIME,RCDTCTIM
+          MOVE      "EPAYMXML",RCDTCUID
+.
+          MOVE      XMRCSNAM,PSNAME        * Patient Surname
+          MOVE      XMRCGNAM,PGNAME        * Patient Given name
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME
+.
+          IF        SUSALLOC=1
+            MOVE      PACFNAME,RCDTNAME
+            MOVE      SUSREGIS,RCDTREGI      * Deposit Register
+            PACK      KEY3,SUSREGIS
+          ELSE
+            MOVE      PACFNAME,RCDTREFR
+            MOVE      XMRCADMN,RCDTVIST
+            MOVE      XMRCURNO,RCDTURNO
+.
+            MOVE      DEPOTYPE,RCDTDPTY      * Deposit type
+            MOVE      RCCIDEPR,RCDTREGI      * Deposit Register
+            PACK      KEY3,RCCIDEPR
+          ENDIF
+.
+          MOVE      REGGENDB,RCDTINCA       * Debtors Control account as Crd.Acc
+          MOVE      REGGENBK,RCDTBNKA       * Debit account
+          MOVE      REGGST,RCDTGSTC
+          MOVE      REGHOSP,RCDTMHOS
+.
+          MOVE      PADD1,RCDTADD1
+          MOVE      PADD2,RCDTADD2
+          MOVE      PSUBRB,RCDTADD3
+          MOVE      PADD4,RCDTADD4
+          MOVE      PPOST,RCDTPOST
+          MOVE      PMHBEAID,RCDTEADN           * eAdmission ID
+.
+          SQUEEZE   XMRCAMNT
+          MOVE      XMRCAMNT,RCDTAMNT
+.
+          IF        SUSALLOC=1
+            MOVE      "2",RCDTALLO              * suspense reg. not allocated
+          ENDIF
+          PACK      KEY17,RCDTRECN,TRANNUMB,SP70
+          CALL      WRRCDTE1
+.
+WDTE9999  RETURN
++
+.*******************************************************************************
+. Get payment code with Payment type =5 for Patient Portal
+.*******************************************************************************
+PCOD0000  MOVE      "Py",KEY2
+          PACK      KEY5,KEY2,SP70
+          CALL      RDSCODE1
+PCOD1000  CALL      RDKCODE1
+          BRANCH    OVRCD,PCOD9000
+.
+          MATCH     KEY2,TCODE                * Cat Py
+          GOTO      PCOD9000 IF NOT EQUAL
+.
+          MATCH     "5",PTCDNHCP              * Patient Portal ?
+          GOTO      PCOD1000 IF NOT EQUAL
+.
+          MOVE      ACODE,PAYMCODE            * Payment code
+          MOVE      ZERO,OVRCD
+          GOTO      PCOD9999
+.
+PCOD9000  MOVE      ONE,OVRCD
+PCOD9999  RETURN
++
+.*******************************************************************************
+. Get Deposit type with Indicator 2 = x for Deposits from an external source
+.*******************************************************************************
+DTYP0000  MOVE      "DP",KEY2
+          PACK      KEY5,KEY2,SP70
+          CALL      RDSCODE1
+DTYP1000  CALL      RDKCODE1
+          BRANCH    OVRCD,DTYP9000
+.
+          MATCH     KEY2,TCODE                * Cat DP
+          GOTO      DTYP9000 IF NOT EQUAL
+.
+          MATCH     "x",TCINDC2               * External source ?
+          GOTO      DTYP1000 IF NOT EQUAL
+.
+          MOVE      ACODE,DEPOTYPE            * Deposit code
+          MOVE      ZERO,OVRCD
+          GOTO      DTYP9999
+.
+DTYP9000  MOVE      ONE,OVRCD
+DTYP9999  RETURN
++
++
+.*******************************************************************************
+.*                          GFIL0000                 Called by: MAIN0000       *
+.* Keyin the ePayment XML file name                                            *
+.*******************************************************************************
+GFIL0000  KEYIN     *P1:10,*EL,"Filename (including path): ":
+                    *P28:10,XMLFLNAM
+.
+          PACK      XMLFLNAM,XMLFLNAM,SP30
+          MATCH     SP70,XMLFLNAM
+          GOTO      GFIL9100 IF EQUAL
+.
+          MOVE      ZERO,EXIT
+          GOTO      GFIL9999
+.
+GFIL9100  MOVE      ONE,EXIT
+.
+GFIL9999  RETURN
++
+.*******************************************************************************
+.*                          CFIL0000                   Called by: MAIN0000     *
+.* Copy the XML file to a ".txt" file so TBL can open it                       *
+.*                                                                             *
+.* Requires: XMLFLNAM - ePayment XML file path                                 *
+.* Returns : TEMPFILE - temporary ".txt" filename                              *
+.*           EXIT  0 = file successfully copied                                *
+.*                 1 = unable to copy file
+.*******************************************************************************
+CFIL0000  STRIP     XMLFLNAM
+          CLEAR     CMDLINE
+          APPEND    "epaymxml.us1 ",CMDLINE
+          APPEND    XMLFLNAM,CMDLINE
+          APPEND    " ",CMDLINE
+          APPEND    DETAILFN,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          MATCH     "0       ",TASKID
+          IF        @EQUAL
+            MOVE      ZERO,EXIT
+          ELSE
+            DISPLAY   *P1:24,*EL,*B,"Unable to convert XML file.  ";
+            CALL      HITENTER
+            MOVE      ONE,EXIT
+          ENDIF
+.
+CFIL9999  RETURN
++
+.------------------------------------------------------------
+.  Clear bank header file
+.------------------------------------------------------------
+CLRPBK00  MOVE      SP70,RCBNRECN
+          MOVE      SP70,RCBNTDAT
+          MOVE      ZERO,RCBNTOTP
+          MOVE      SP70,RCBNCDRW
+          MOVE      SP70,RCBNMHOS
+          MOVE      SP70,RCBNMDHS
+.lllllllllll
+          MOVE      SP70,RCBNTTYP
+          MOVE      SP70,RCBNRCOD
+          MOVE      SP70,RCBNSTAT
+          MOVE      SP70,RCBNBDAT
+          MOVE      SP70,RCBNBTIM
+          MOVE      SP70,RCBNRDAT
+          MOVE      SP70,RCBNRTIM
+          MOVE      SP70,RCBNCHQA
+          MOVE      SP70,RCBNCDAT
+          MOVE      SP70,RCBNCTIM
+          MOVE      SP70,RCBNCUID
+          MOVE      SP70,RCBNUDAT
+          MOVE      SP70,RCBNUTIM
+          MOVE      SP70,RCBNUUID
+          MOVE      SP70,RCBNSPAR
+.
+CLRPBK99  RETURN
++
+.------------------------------------------------------------
+.  Clear bank details file
+.------------------------------------------------------------
+CLRPBT00  MOVE      SP70,RCBDTDAT
+          MOVE      SP70,RCBDRECN
+          MOVE      SP70,RCBDUNIQ
+          MOVE      SP70,RCBDMHOS
+          MOVE      SP70,RCBDMDHS
+          MOVE      SP70,RCBDPTYP
+          MOVE      ZERO,RCBDPAMT
+          MOVE      SP70,RCBDPAYD
+          MOVE      SP70,RCBDCHQN
+          MOVE      SP70,RCBDDRAW
+          MOVE      SP70,RCBDBANK
+          MOVE      SP70,RCBDBRCH
+          MOVE      SP70,RCBDCRDT
+          MOVE      SP70,RCBDSTRF
+          MOVE      SP70,RCBDEFTT
+          MOVE      SP70,RCBDCDAT
+          MOVE      SP70,RCBDCTIM
+          MOVE      SP70,RCBDCUID
+          MOVE      SP70,RCBDUDAT
+          MOVE      SP70,RCBDUTIM
+          MOVE      SP70,RCBDUUID
+          MOVE      SP70,RCBDPCOD
+          MOVE      SP70,RCBDSPAR
+.
+CLRCBT99  RETURN
++
+.------------------------------------------------------------
+.  Clear receipt details file
+.------------------------------------------------------------
+CLRPDE00  MOVE      SP70,RCDTTDAT
+          MOVE      SP70,RCDTRECN
+          MOVE      SP70,RCDTTCNT
+          MOVE      SP70,RCDTREGI
+          MOVE      SP70,RCDTINVN
+          MOVE      SP70,RCDTVIST
+          MOVE      SP70,RCDTURNO
+          MOVE      SP70,RCDTNAME
+          MOVE      SP70,RCDTADD1
+          MOVE      SP70,RCDTADD2
+          MOVE      SP70,RCDTADD3
+          MOVE      SP70,RCDTADD4
+          MOVE      SP70,RCDTPOST
+          MOVE      SP70,RCDTSFLG
+          MOVE      SP70,RCDTREFR
+          MOVE      SP70,RCDTINCA
+          MOVE      SP70,RCDTBNKA
+          MOVE      ZERO,RCDTAMNT
+          MOVE      ZERO,RCDTDISC
+          MOVE      SP70,RCDTMHOS
+          MOVE      SP70,RCDTMDHS
+          MOVE      SP70,RCDTGSTC
+          MOVE      SP70,RCDTGSTA
+          MOVE      SP70,RCDTALLO
+          MOVE      SP70,RCDTRELD
+          MOVE      SP70,RCDTRELT
+          MOVE      SP70,RCDTCDAT
+          MOVE      SP70,RCDTPRAC
+          MOVE      SP70,RCDTCTIM
+          MOVE      SP70,RCDTCUID
+          MOVE      SP70,RCDTUDAT
+          MOVE      SP70,RCDTUTIM
+          MOVE      SP70,RCDTUUID
+          MOVE      SP70,RCDTDPTY
+          MOVE      SP70,RCDTGLEX
+          MOVE      SP70,RCDTBATN
+          MOVE      SP70,RCDTRELU
+          MOVE      SP70,RCDTSPUI
+          MOVE      SP70,RCDTSPDT
+          MOVE      SP70,RCDTSPTM
+          MOVE      SP70,RCDTSDOC
+          MOVE      SP70,RCDTEADN
+          MOVE      SP70,RCDTSPAR
+.
+CLRPDE99  RETURN
++
+.*******************************************************************************
+.* I/O Includes                                                                *
+.*******************************************************************************
+          INC       STD002IO
+          INC       TFILENAM     
+          INC       PMSEERIO/INC        *ePayment pending error table
+          INC       WEBERRIO/INC
+          INC       PMSXMLIO/INC
+          INC       PMSEHBIO/INC
+          INC       COMPARIO/INC
+.
+          INC       PATCODIO/INC
+          INC       PATMA1IO/INC
+          INC       PMSVX1IO/INC
+          INC       PATMI1IO/INC
+          INC       PATMRGIO/INC
+          INC       WEBSECIO/INC
+.
+          INC       BOKRC1IO/INC
+          INC       RCPREGIO/INC
+          INC       RCPCIDIO/INC
+          INC       RCPBDTIO/INC
+          INC       RCPBNKIO/INC
+          INC       RCPDTEIO/INC
+          INC       TMPBNKIO/INC
+.

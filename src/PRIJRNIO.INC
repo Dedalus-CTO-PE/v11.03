@@ -1,0 +1,94 @@
+.
+.  Mods : 08/10/92  Steve Armstrong
+.         Modified PRJRDEBT for change from FORM to DIM in FD
+.--------------------------------------------------------------
+RSPRJR1   RESET     KEY35
+          READ      PRIJRNL1,KEY35;;
+          RETURN
+.
+RAPRJR1   RESET     KEY35
+          MOVE      ZERO,OVRCD
+          READ      PRIJRNL1,KEY35;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRJR1   RESET     KEY35
+          MOVE      ZERO,OVRCD
+          READ      PRIJRNL1,KEY35;PRJRCODE,PRJRDATE,PRJRDEBT,DPRJRSCN:
+                                   DPRJRTRN,PRJRINVN,PRJRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRJRSCN,PRJRSCAN
+          MOVE      DPRJRTRN,PRJRTRAN
+          RETURN
+.
+RKPRJR1   MOVE      ZERO,OVRCD
+          READKS    PRIJRNL1;PRJRCODE,PRJRDATE,PRJRDEBT,DPRJRSCN:
+                             DPRJRTRN,PRJRINVN,PRJRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRJRSCN,PRJRSCAN
+          MOVE      DPRJRTRN,PRJRTRAN
+          RETURN
+.
+RPPRJR1   MOVE      ZERO,OVRCD
+          READKP    PRIJRNL1;PRJRCODE,PRJRDATE,PRJRDEBT,DPRJRSCN:
+                             DPRJRTRN,PRJRINVN,PRJRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRJRSCN,PRJRSCAN
+          MOVE      DPRJRTRN,PRJRTRAN
+          RETURN
+.
+UPPRJR1   MOVE      PRJRSCAN,DPRJRSCN
+          MOVE      PRJRTRAN,DPRJRTRN
+          UPDATE    PRIJRNL1;PRJRCODE,PRJRDATE,PRJRDEBT,DPRJRSCN:
+                             DPRJRTRN,PRJRINVN,PRJRSPAR
+          RETURN
+.
+WRPRJR1   RESET     KEY35
+          WRITE     PRIJRNL1,KEY35;KEY35,PRJRSPAR
+          RETURN
+.
+DEPRJR1   RESET     KEY35
+          DELETE    PRIJRNL1,KEY35
+          RETURN
+.
+RSPRJR2   RESET     KEY35
+          READ      PRIJRNL2,KEY35;;
+          RETURN
+.
+RAPRJR2   RESET     KEY35
+          MOVE      ZERO,OVRCD
+          READ      PRIJRNL2,KEY35;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRJR2   RESET     KEY35
+          MOVE      ZERO,OVRCD
+          READ      PRIJRNL2,KEY35;PRJRCODE,PRJRDATE,PRJRDEBT,DPRJRSCN:
+                                   DPRJRTRN,PRJRINVN,PRJRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRJRSCN,PRJRSCAN
+          MOVE      DPRJRTRN,PRJRTRAN
+          RETURN
+.
+RKPRJR2   MOVE      ZERO,OVRCD
+          READKS    PRIJRNL2;PRJRCODE,PRJRDATE,PRJRDEBT,DPRJRSCN:
+                             DPRJRTRN,PRJRINVN,PRJRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRJRSCN,PRJRSCAN
+          MOVE      DPRJRTRN,PRJRTRAN
+          RETURN
+.
+RPPRJR2   MOVE      ZERO,OVRCD
+          READKP    PRIJRNL2;PRJRCODE,PRJRDATE,PRJRDEBT,DPRJRSCN:
+                             DPRJRTRN,PRJRINVN,PRJRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRJRSCN,PRJRSCAN
+          MOVE      DPRJRTRN,PRJRTRAN
+          RETURN
+.
+UPPRJR2   MOVE      PRJRSCAN,DPRJRSCN
+          MOVE      PRJRTRAN,DPRJRTRN
+          UPDATE    PRIJRNL2;PRJRCODE,PRJRDATE,PRJRDEBT,DPRJRSCN:
+                             DPRJRTRN,PRJRINVN,PRJRSPAR
+          RETURN
+.

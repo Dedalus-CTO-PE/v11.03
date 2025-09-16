@@ -1,0 +1,143 @@
+.
+. MRTSTFIO.INC
+. ------------
+. Filename       :  mrtstfaf
+. Description    :  Medical Records Tracking  - File I/O Subroutines
+. Variables      :  OVRCD     FORM      1
+.                   KEY6      DIM       6 
+.                   KEY9      DIM       9
+.                   KEY26     DIM       26
+.
+RAMRSTF1  MOVE      ZERO,OVRCD
+          RESET     KEY6
+          READ      MRTSTFA1,KEY6;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSMRSTF1  MOVE      ZERO,OVRCD
+          RESET     KEY6
+          READ      MRTSTFA1,KEY6;;
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RDMRSTF1  MOVE      ZERO,OVRCD
+          RESET     KEY6
+          READ      MRTSTFA1,KEY6;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RLMRSTF1  MOVE      ZERO,OVRCD
+          RESET     KEY6
+          READL     MRTSTFA1,KEY6;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERLOCK IF LOCKED
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RKMRSTF1  MOVE      ZERO,OVRCD
+          READKS    MRTSTFA1;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RPMRSTF1  MOVE      ZERO,OVRCD
+          READKP    MRTSTFA1;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.  
+UPMRSTF1  UPDATE    MRTSTFA1;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          RETURN
+.
+WRSTAF1   RESET     KEY6
+          WRITE     MRTSTFA1,KEY6;KEY6,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          RETURN  
+.
+ULSTAF1   UNLOCK    MRTSTFA1
+          RETURN
+.
+DESTAF1   RESET     KEY6
+          DELETE    MRTSTFA1,KEY6
+          RETURN
+.
+.
+RAMRSTF2  MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      MRTSTFA2,KEY9;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSMRSTF2  MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      MRTSTFA2,KEY9;;
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RDMRSTF2  MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      MRTSTFA2,KEY9;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RKMRSTF2  MOVE      ZERO,OVRCD
+          READKS    MRTSTFA2;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RPMRSTF2  MOVE      ZERO,OVRCD
+          READKP    MRTSTFA2;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.  
+.
+RAMRSTF3  MOVE      ZERO,OVRCD
+          RESET     KEY26
+          READ      MRTSTFA3,KEY26;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RSMRSTF3  MOVE      ZERO,OVRCD
+          RESET     KEY26
+          READ      MRTSTFA3,KEY26;;
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RDMRSTF3  MOVE      ZERO,OVRCD
+          RESET     KEY26
+          READ      MRTSTFA3,KEY26;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RKMRSTF3  MOVE      ZERO,OVRCD
+          READKS    MRTSTFA3;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RPMRSTF3  MOVE      ZERO,OVRCD
+          READKP    MRTSTFA3;MRSTCODE,MRSTTITL,MRSTSNAM,MRSTGNAM,MRSTDEPT:
+                                   MRSTCONT,MRSTIEPH,MRSTBHPH,MRSTAHPH,MRSTPAGR:
+                                   MRSTBCOD,MRSTSTAT,MRSTUSAG,MRSTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN  
++
+.
+

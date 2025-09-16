@@ -1,0 +1,59 @@
+.
+.         FILE  I/O REQUESTS FOR ALL CHANGE U/R AUDIT FILES
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.
+.         NOTE:-
+.                  UPAAAX  IS THE WRITE CALL
+.                  RDAAAX  IS THE READ CALL
+.                  RDSAAAX  IS THE READ SECTOR 0 CALL
+.                  WRSAAAX  IS THE WRITE ONE TO SECTOR 0 CALL
+.
+RDAUDZ    READ      PATAZ1A1,SECTOR;AZURNO,AZURNN,AZDATE,AZTIME:
+                             AZSNAM,AZGNAM,AZADD1,AZADD2,AZSUBR:
+                             AZPOST,AZMEDI,AZTELP,AZSEX
+          ADD       ONE,SECTOR
+          READ      PATAZ1A1,SECTOR;AZBDAT,AZTITL,AZOPID,AZOPER
+          RETURN
+.
+RDSAUDZ   READ      PATAZ1A1,ZERO;SECTOR,AZSTAT
+          RETURN
+.
+WRSAUDZ   WRITE     PATAZ1A1,ZERO;SEC1,AZSTAT
+          WEOF      PATAZ1A1,SEC1
+          RETURN
+.
+WRSAUDZX  WRITAB    PATAZ1A1,ZERO;*6,AZSTAT
+          RETURN
+.
+UPAUDZ    READ      PATAZ1A1,ZERO;SECTOR,AZSTAT
+          WRITE     PATAZ1A1,SECTOR;AZURNO,AZURNN,AZDATE,AZTIME:
+                             AZSNAM,AZGNAM,AZADD1,AZADD2,AZSUBR,AZADD4:
+                             AZPOST,AZMEDI,AZTELP,AZSEX
+          ADD       ONE,SECTOR
+          WRITE     PATAZ1A1,SECTOR;AZBDAT,AZTITL,AZOPID,AZOPER
+          ADD       ONE,SECTOR
+          WEOF      PATAZ1A1,SECTOR
+          WRITE     PATAZ1A1,ZERO;SECTOR,AZSTAT
+          RETURN
+.
+OPPTAUZ1  CLEAR     CFNAME
+          APPEND    "pataz1",CFNAME
+          APPEND    PORT,CFNAME
+          RESET     CFNAME
+          REP       " 0",CFNAME
+.
+          TRAP      OPPTAZ30 IF IO
+          OPEN      PATAZ1A1,CFNAME
+          TRAPCLR   IO
+          GOTO      OPPTAZ99
+.
+OPPTAZ30  NORETURN
+          PREP      PATAZ1A1,CFNAME
+          MOVE      ONE,AZSTAT
+          CALL      WRSAUDZ
+OPPTAZ99  RETURN
++
+.
+

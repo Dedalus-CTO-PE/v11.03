@@ -1,0 +1,1548 @@
+.******************************************************************************
+.* System         : HIC Claims                                                *
+.* Program        : IBAHIC05.PBL                                              *
+.* Name           : Health Insurance Commission Claims Reconciliation         *
+.******************************************************************************
+.* Date           : 11/05/2005                                                *
+.* Author         : Steve Armstrong                                           *
+.* Function       : Process Exception & EFT payment statements from HIC.      *
+.*                                                                            *
+.*                                                                            *
+.*   Note:     HIC      |  PAS                                                *
+.*             ------   |  ------                                             *
+.*             Claim    |  Batch                                              *
+.*             Voucher  |  Patient/Claim Details                              *
+.*             Item     |  Item                                               *
+.*                                                                            *
+.* Modifications  :                                                           *
+.*        V9.04.11 05/12/2005  J.Tan            CAR 77215                     *
+.*                 Fixed problem with card and item errors                    *
+.*        V9.04.10 15/11/2005  J.Tan            CAR 77215                     *
+.*                 Mods batch status (EFT payment received prior Action)      *
+.*        V9.04.09 24/10/2005  J.Tan            CAR 77215                     *
+.*                 Mods to update date fund received when EFT Paym. Received  *
+.*        V9.04.08 05/10/2005  J.Tan            CAR 77215                     *
+.*                 Mods to write rec to hicefxaf file for exception & EFT pay.*
+.*        V9.04.07 29/09/2005  J.Tan            CAR 77215                     *
+.*                 Mods to write rec to error file for rejection record       *
+.*        V9.04.06 22/09/2005  J.Tan            CAR 77215                     *
+.*                 Mods to update batch status to 'Payment Received' only if  *
+.*                 current batch status is greater than or equal to 'Action'  *
+.*                 Added Counter field to HIC files                           *
+.*        V9.04.05 16/09/2005  Steve Armstrong  CAR 75995                     *
+.*                 Mods to execute hicscript2 from within program.            *
+.*        V9.04.04 13/09/2005  Steve Armstrong  CAR 75995                     *
+.*                 Recompiled for changes to HICEFPFD.                        *
+.*        V9.04.03 01/08/2005  Steve Armstrong  CAR 70276                     *
+.*                 Mods to write data to HIC holding tables instead of        *
+.*                 updating the normal HIC tables.                            *
+.*                 Also added code to handle EFT Payment report segments.     *
+.*                 13/07/2005  Steve Armstrong  CAR 64270                     *
+.*                 Mods to process HIC segments as individual records as per  *
+.*                 IBAHIC15 after script has separated out the segments from  *
+.*                 the original file received from HIC.                       *
+.*        V9.04.02 22/06/2005  Steve Armstrong  CAR 64270                     *
+.*                 Mods to only process batches where the status is not       *
+.*                 "Received".                                                *
+.*        V9.04.01 15/06/2005  Steve Armstrong  CAR 56699                     *
+.*                 Mods to write hichisaf record.                             *
+.******************************************************************************
+.
+          INC       STD002FD
+.
+          INC       HICBTCFD/INC
+          INC       HICCLMFD/INC
+          INC       HICRCCFD/INC
+          INC       HICCITFD/INC
+          INC       HICEFCFD/INC
+          INC       HICEFAFD/INC
+          INC       HICEFPFD/INC
+          INC       HICEFXFD/INC
+          INC       HICEMSFD/INC
+          INC       HICERRFD/INC
+          INC       HICRCIFD/INC
+          INC       HICHISFD/INC
+          INC       HICMCIFD/INC
+          INC       HICRCHFD/INC
+          INC       PATCONFD/INC
+          INC       PATMA1FD/INC
+.
+MEDCLAIM  FILE      ASCII,FIXED=100
+.
+.
+. EXCEPTION REPORT FIELDS
+. ------------------------
+.
+. Statement Header Segment
+. ------------------------
+.HEDSEG01  DIM       1      1      * Segment start flag
+.HEDSEG02  DIM       1      2      * Segment identifier (S - statement header)
+HEDSEG03  DIM       3       3     * No. of Claims in Statement
+HEDSEG04  DIM       2       6     * Customer Class
+HEDSEG05  DIM       8       8     * Customer ID
+HEDSEG06  DIM       8      16     * Filler 1
+HEDSEG07  DIM       1      24     * Function ID
+HEDSEG08  DIM       8      25     * Statement Amount
+HEDSEG09  DIM       3      33     * Run Number
+HEDSEG10  DIM       3      36     * Version Number
+HEDSEG11  DIM       62     39     * Filler 2
+.                         101
+.
+.
+. Claim Statement Segment
+. -----------------------
+.CLMSEG01  DIM       1      1      * Segment start flag
+.CLMSEG02  DIM       1      2      * Segment identifier (X - claim statement)
+CLMSEG03  DIM       4       3     * Number of exceptions
+CLMSEG04  DIM       5       7     * Claim ID - Prefix/Number
+CLMSEG05  DIM       1      12     * Claim ID - Suffix
+CLMSEG06  DIM       6      13     * Date of Claim Transmission (ddmmyy)
+CLMSEG07  DIM       8      19     * Payee Provider
+CLMSEG08  DIM       8      27     * Servicing Provider
+CLMSEG09  DIM       8      35     * Benefit Assigned (cents)
+CLMSEG10  DIM       8      43     * Benefit Paid (cents)
+CLMSEG11  DIM       10     51     * Filler
+.                          61
+.
+.
+. Claim Exception Segment
+. -----------------------
+.EXCSEG01  DIM       1      1      * Segment start flag
+.EXCSEG02  DIM       1      2      * Segment identifier (E -statement exception)
+EXCSEG03  DIM       2       3     * Voucher position
+EXCSEG04  DIM       2       5     * Item position
+EXCSEG05  DIM       9       7     * Medicare Number
+EXCSEG06  DIM       1      16     * Last digit of medicare number
+EXCSEG07  DIM       1      17     * Card Flag
+.                                         I = Medicare Issue Number
+.                                         C = Medicare Number Changed
+.                                         N = Medicare Number Obtained from 
+.                                             Personal Details
+.                                         A = Identification Ammended
+.                                         W = Card used will expire shortly
+.                                         S = Card Expired.  Future services
+.                                             may be rejected
+.                                         X = Old Medicare issue Number
+.                                         Space = No Change
+EXCSEG08  DIM       12     18     * First name
+EXCSEG09  DIM       5      30     * Item Number (right justified, zero filled)
+EXCSEG10  DIM       6      35     * Date of Service (ddmmyy)
+EXCSEG11  DIM       7      41     * Benefit Assigned (cents)
+EXCSEG12  DIM       7      48     * Benefit Paid (cents)
+EXCSEG13  DIM       3      55     * Explanation Code (Cat HD)
+EXCSEG14  DIM       2      58     * Number of Patients (not used)
+EXCSEG15  DIM       18     60     * Surname
+EXCSEG16  DIM       6      78     * Filler
+.                          84
+.
+.
+. EFT PAYMENT REPORT FIELDS
+. ------------------------
+.
+. Transmission Header Segment
+. ------------------------
+.EFTSEG01  DIM       1      1      * Segment start flag
+.EFTSEG02  DIM       1      2      * Segment identifier (A -transmission header)
+EFTSEG03  DIM       3       3     * No. of Payment Statements
+EFTSEG04  DIM       2       6     * Customer Class
+EFTSEG05  DIM       8       8     * Customer ID
+EFTSEG06  DIM       8      16     * Filler 1
+EFTSEG07  DIM       1      24     * Function ID
+EFTSEG08  DIM       9      25     * Total Deposit Amount (cents)
+EFTSEG09  DIM       3      34     * Run Number
+EFTSEG10  DIM       8      37     * Payment Date (ddmmccyy)
+EFTSEG11  DIM       56     45     * Filler 2
+.                         101
+.
+.
+. Payment Segment
+. ---------------
+.PAYSEG01  DIM       1      1      * Segment start flag
+.PAYSEG02  DIM       1      2      * Segment identifier (P - payment statement)
+PAYSEG03  DIM       2       3     * No. of Claim Id's
+PAYSEG04  DIM       8       5     * Payee Provider
+PAYSEG05  DIM       6      13     * BSB Number
+PAYSEG06  DIM       9      19     * Account Number
+PAYSEG07  DIM       32     28     * Account Name
+PAYSEG08  DIM       9      60     * Provider Deposit Amount (cents)
+PAYSEG09  DIM       32     69     * Filler
+.                         101
+.
+.
+. Deposit Segment
+. ---------------
+.DEPSEG01  DIM       1      1      * Segment start flag
+.DEPSEG02  DIM       1      2      * Segment identifier (C - deposit details)
+DEPSEG03  DIM       5       3     * Claim ID - Prefix/Number
+DEPSEG04  DIM       1       8     * Claim ID - Suffix
+DEPSEG05  DIM       8       9     * Date of Transmission (ddmmccyy)
+DEPSEG06  DIM       9      17     * Deposit Amount (cents)
+DEPSEG07  DIM      15      26     * Filler
+.                          41
+.
+.
+. LOCAL VARIABLES
+. ---------------
+ASSNTOTL  FORM      6.2
+.
+BATCHNUM  DIM       5
+.
+CLMASSGN  FORM      6.2
+CLMBENFT  FORM      6.2
+CMDLINE   DIM       80
+CURRDATE  DIM       8
+CURRTIME  DIM       8
+.
+DIM20     DIM       20
+.
+ERRCOUNT  FORM      3             * batch error count (for hicerraf.hcerlcnt)
+ERORFLAG  FORM      1             * batch error flag
+.                                     0 = no errors in batch
+.                                     1 = errors occurred in batch
+ERORNUMB  FORM      2             * error number
+EXCCOUNT  FORM      3             * batch exception line count
+EXCFIELD  DIM       4090
+EXCPNAME  DIM       60
+EXCTOTAL  FORM      3
+.
+FORM3     FORM      3
+FORM5     FORM      5
+FORM7     FORM      7
+.
+HICFILNM  DIM       30
+.
+ITMFOUND  FORM      1             * Item found flag
+.                                    1 = Matching Item not found
+.                                    0 = Matching Item found
+.
+ITMNUMBR  DIM       9
+ITMFORM7  FORM      7
+ITMFORM8  FORM      8
+ITMFORM9  FORM      9
+ITMASSGN  FORM      5.2
+ITMBENFT  FORM      5.2
+.
+PAIDTOTL  FORM      6.2
+.
+SAVCLAIM  DIM       8
+SAVASTAT  DIM       2
+SAVBSTAT  DIM       2
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+ASTERIXA  INIT      "*A"
+ASTERIXC  INIT      "*C"
+ASTERIXE  INIT      "*E"
+ASTERIXP  INIT      "*P"
+ASTERIXS  INIT      "*S"
+ASTERIXX  INIT      "*X"
+ASTERIXZ  INIT      "*Z"
+.
+CARDDESA  INIT      "Identification ammended"
+CARDDESC  INIT      "Medicare number changed"
+CARDDESI  INIT      "Medicare issue number"
+CARDDESN  INIT      "Medicare Number obtained from personal details"
+CARDDESS  INIT      "Card expired.  Future services may be rejected"
+CARDDESW  INIT      "Card used will expire shortly"
+CARDDESX  INIT      "Old issue number.  Future services may be rejected"
+CARDDESZ  INIT      "Unknown medicare card flag"
+.
+FILEEXTN  INIT      ".txt"
+.
+GRETTHAN  INIT      ">"
+.
+PATHNAME  INIT      "/tmp/"
+.
+SCRIPTNAM INIT      "hicscript2 "
+SP60      INIT      "                              ":
+                    "                              "
+TILDA8    INIT      "~~~~~~~~"
+.
+.
+PRGID     INIT      "IBAHIC05"
+PRGNAM    INIT      "HIC Claims Reconciliation"
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                  MAIN0000                                  *
+.*                                 Main Module                                *
+.******************************************************************************
+.
+MAIN0000  CALL      SETX0000                * set up common variables
+          CALL      GFIL0000                * get exception file name
+          BRANCH    EXIT,MAIN9999           * nothing entered or error with file
+.
+          CALL      INIT0000                * Initialise variables & open files
+          BRANCH    EXIT,MAIN9999           * not using medclaims
+.
+          CALL      PROC0000                * process files
+.
+MAIN9999  STOP
++
+.*****************************************************************************
+.*                                  INIT0000       Called by: MAIN0000       *
+.*                       Initialise Variable & Open Files                    *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                * Display screen heading
+.
+          DISPLAY   *P56:24,"Opening controlf"
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"hicbtcaf"
+          OPEN      HICBTCA1,"hicbtcaf"
+          OPEN      HICBTCA5,"hicbtcaf"
+.
+          DISPLAY   *P64:24,"hicclmaf"
+          OPEN      HICCLMA7,"hicclmaf"
+.
+          DISPLAY   *P64:24,"hicrccaf"
+          OPEN      HICRCCA1,"hicrccaf"
+.
+          DISPLAY   *P64:24,"hiccitaf"
+          OPEN      HICCITA1,"hiccitaf"
+.
+          DISPLAY   *P64:24,"hicefcaf"
+          OPEN      HICEFCA1,"hicefcaf"
+.
+          DISPLAY   *P64:24,"hicefaaf"
+          OPEN      HICEFAA1,"hicefaaf"
+.
+          DISPLAY   *P64:24,"hicefpaf"
+          OPEN      HICEFPA1,"hicefpaf"
+.
+          DISPLAY   *P64:24,"hicefxaf"
+          OPEN      HICEFXA1,"hicefxaf"
+.
+          DISPLAY   *P64:24,"hicemsaf"
+          OPEN      HICEMSA1,"hicemsaf"
+.
+          DISPLAY   *P64:24,"hicerraf"
+          OPEN      HICERRA1,"hicerraf"
+.
+          DISPLAY   *P64:24,"hicrciaf"
+          OPEN      HICRCIA1,"hicrciaf"
+.
+          DISPLAY   *P64:24,"hichisaf"
+          OPEN      HICHISA1,"hichisaf"
+.
+          DISPLAY   *P64:24,"hicmciaf"
+          OPEN      HICMCIA1,"hicmciaf"
+.
+          DISPLAY   *P64:24,"hicrchaf"
+          OPEN      HICRCHA1,"hicrchaf"
+.
+          DISPLAY   *P64:24,"patma1af"
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          READ      CONTROLF,ZERO;*132,IBCNUMCI
+          READ      CONTROLF,HUND03;*123,PTCNHICI
+          STRIP     PTCNHICI
+.
+          MATCH     "1",IBCNUMCI
+          GOTO      INIT9100 IF NOT EQUAL
+.
+.         Get the current date
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          MOVE      CTIMEIS,CURRTIME
+          REP       " 0",CURRTIME
+.
+          MOVE      ZERO,EXIT
+          GOTO      INIT9999
+.
+INIT9100  MOVE      ONE,EXIT
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                           GFIL0000              Called by: MAIN0000       *
+.*            Get the file name to be processed                              *
+.*****************************************************************************
+.
+GFIL0000  MOVE      PTCNHICI,EXCPNAME
+          KEYIN     *P1:12,*EF,"Exception Filename:":
+                    *P21:12,*RV,*V2LON,EXCPNAME
+.
+          PACK      EXCPNAME,EXCPNAME,SP30,SP30
+          MATCH     SP60,EXCPNAME                * anything entered ?
+          GOTO      GFIL9100 IF EQUAL            * no - finished
+.
+.         Get the filename portion of the entry (without the path)
+.
+          MOVE      SP30,HICFILNM
+          STRIP     EXCPNAME
+          ENDSET    EXCPNAME                     * set FP to LL
+GFIL5000  BUMP      EXCPNAME,-1                  * move FP back one character
+          GOTO      GFIL9000 IF EOS              * eos - finished
+.
+          MATCH     SLASH,EXCPNAME               * last "/" found
+          GOTO      GFIL5000 IF NOT EQUAL        * no - get previous character
+          BUMP      EXCPNAME                     * move to next character
+          MOVE      EXCPNAME,HICFILNM            * load filename
+          PACK      HICFILNM,HICFILNM,SP30
+.
+GFIL9000  MOVE      EXCPNAME,DIM20
+          RESET     EXCPNAME
+.
+          SCAN      DOT,DIM20
+          GOTO      GFIL9100 IF NOT EQUAL
+.
+          TRAP      OVERCOND IF IO
+          OPEN      MEDCLAIM,EXCPNAME            * open exception file
+          TRAPCLR   IO
+          BRANCH    OVRCD,GFIL9100
+.
+          MOVE      SP20,FILENAME
+          CLEAR     FILENAME
+          MOVEFPTR  DIM20,FORM2
+          SUB       ONE,FORM2
+          RESET     DIM20
+          SETLPTR   DIM20,FORM2
+          MOVE      DIM20,FILENAME
+.
+          DISPLAY   *P1:24,*EL,"Coverting file...";
+.
+          PACK      CMDLINE,SP30,SP30,SP20
+          CLEAR     CMDLINE
+          PACK      CMDLINE,SCRIPTNAM,EXCPNAME,SP1,GRETTHAN,SP1,PATHNAME,FILENAME,FILEEXTN
+          EXECUTE   CMDLINE,TASKID
+          MATCH     "0       ",TASKID
+          IF        !@EQUAL
+            CLOSE     MEDCLAIM
+            GOTO      GFIL9100
+          ENDIF
+.
+          CLOSE     MEDCLAIM
+.
+          PACK      EXCPNAME,SP30,SP30
+          CLEAR     EXCPNAME
+          PACK      EXCPNAME,PATHNAME,FILENAME,FILEEXTN
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      MEDCLAIM,EXCPNAME
+          TRAPCLR   IO
+          BRANCH    OVRCD,GFIL9100
+.
+          MOVE      ZERO,EXIT
+          GOTO      GFIL9999
+.
+GFIL9100  MOVE      ONE,EXIT
+.
+GFIL9999  RETURN
++
+.*****************************************************************************
+.*                           PROC0000              Called by: MAIN0000       *
+.*            Process the exception file from HIC                            *
+.*****************************************************************************
+.
+PROC0000  DISPLAY   *P1:24,*EL,"Processing Batch:";
+          MOVE      SP70,SAVASTAT
+          MOVE      SP70,SAVBSTAT
+.
+.         Read the next report line
+.         
+PROC0500  READ      MEDCLAIM,SEQ;EXCFIELD        * read a report record
+          GOTO      PROC9999 IF OVER             * end of file - finished
+.
+.         Look for a Header record (Type "S" or "A")
+.         
+PROC1000  MATCH     ASTERIXS,EXCFIELD            * exception header segment ?
+          IF        !@EQUAL
+            MATCH     ASTERIXA,EXCFIELD          * no - EFT header segment ?
+            GOTO      PROC0500 IF NOT EQUAL      * no - get next record
+            GOTO      PROC5000                   * yes
+          ENDIF
+.         
+.         A valid exception report header segment has been found,
+.         so check the segment length
+.
+          MOVELPTR  EXCFIELD,FORM3               * get segment length
+          COMPARE   HUNDRED,FORM3                * correct length ?
+          GOTO      PROC0500 IF NOT EQUAL        * no - ignore
+.
+.         Load the available statement header segment fields
+.
+          CALL      CLHD0000                     * clear header fields
+          CALL      HEDS0000                     * load header fields
+.
+.         The statement header has been processed, so now read the next
+.         record, which should be a claim statement (batch).  There may be
+.         one or more claim statements (batches) for a header.
+.
+PROC2000  READ      MEDCLAIM,SEQ;EXCFIELD        * read an exception record
+          GOTO      PROC9999 IF OVER             * end of file - finished
+.
+PROC3000  MATCH     ASTERIXX,EXCFIELD            * start of claim segment ?
+          GOTO      PROC1000 IF NOT EQUAL        * no - get next record
+.
+          MOVE      ZERO,ERORFLAG                * reset error flag for claim
+.
+          MOVELPTR  EXCFIELD,FORM3               * get segment length
+          COMPARE   SIXTY,FORM3                  * correct length ?
+          GOTO      PROC2000 IF NOT EQUAL        * no - get next segment
+.
+.         Load the available claim statement segment fields.
+.
+          CALL      CLCL0000                     * clear claim fields
+          CALL      CLAM0000                     * load claim fields
+          BRANCH    EXIT,PROC2000                * error - ignore batch
+.
+.         A valid claim has been found, so before processing any exceptions,
+.         load the batch details from PAS into the reconciliation tables
+.
+          CALL      LBAT0000                     * load batch details
+.
+.         Check if there are any exception records for this claim.
+.         For each exception file received from HIC, there can be one or
+.         more batches present.  For each batch, there should be one
+.         statement header segment and one claim statement segment.
+.         If a batch has no errors and is fully paid by HIC, then there 
+.         will be no exception segments.  If there are errors, then there
+.         will be one exception segment for each item error within the batch.
+.
+PROC4000  READ      MEDCLAIM,SEQ;EXCFIELD        * read next segment
+          IF        @OVER
+            CALL      CCNT0000                   * eof - check exception count
+            GOTO      PROC9999
+          ENDIF
+.
+          MATCH     ASTERIXE,EXCFIELD            * start of exception segment ?
+          IF        !@EQUAL
+            CALL      CCNT0000                   * no - check exception count
+            GOTO      PROC3000                   * get next claim statement
+          ENDIF
+.
+.         Exception segment found, so load the associated data
+.
+          MOVELPTR  EXCFIELD,FORM3               * get segment length
+          COMPARE   EIGHTY3,FORM3                * correct length ?
+          IF        !@EQUAL
+            MOVE      CLMSEG04,BATCHNUM          * load batch number
+            CALL      GERR0000                   * get error number
+            MOVE      "End of exception line encountered prematurely",HCERDESC
+            MOVE      FIVE,ERORNUMB
+            CALL      WERR0000
+            GOTO      PROC4000
+          ENDIF
+.
+.         Load the available claim exception line segment fields.
+.
+          CALL      CEXP0000                     * clear exception fields
+          CALL      EXCP0000                     * load exception fields
+          GOTO      PROC4000                     * get next exception record
+.         
+.         A valid EFT payment report header segment has been found,
+.         so check the segment length
+.
+PROC5000  MOVELPTR  EXCFIELD,FORM3               * get segment length
+          COMPARE   HUNDRED,FORM3                * correct length ?
+          GOTO      PROC0500 IF NOT EQUAL        * no - ignore
+.
+.         Load the available EFT header segment fields
+.
+          CALL      CEFT0000                     * clear header fields
+          CALL      HEDA0000                     * load header fields
+          CALL      WHED0000                     * write hicefaaf record
+.
+.         The EFT payment header has been processed, so now read the next
+.         record, which should be a provider payment statement
+.
+          READ      MEDCLAIM,SEQ;EXCFIELD        * read a provider paym't record
+          GOTO      PROC9999 IF OVER             * end of file - finished
+.
+PROC6000  MATCH     ASTERIXP,EXCFIELD            * start of pr. payment segment?
+          GOTO      PROC1000 IF NOT EQUAL        * no - get next record
+.
+.         Load the available provider payment segment fields.
+.
+          CALL      CPAY0000                     * clear payment fields
+          CALL      PAYM0000                     * load payment fields
+          CALL      WPAY0000                     * write hicefpaf record
+.
+.         The EFT provider payment segment has been processed, so now read
+.         the next record, which should be a deposit payment segment
+.
+PROC7000  READ      MEDCLAIM,SEQ;EXCFIELD        * read a deposit paym't record
+          GOTO      PROC9999 IF OVER             * end of file - finished
+.
+          MOVE      ZERO,ERORFLAG                * reset error flag for claim
+.
+          MATCH     ASTERIXC,EXCFIELD            * start of dep. paym't segment?
+          IF        !@EQUAL
+            MATCH     ASTERIXZ,EXCFIELD          * no - transmission end ?
+            GOTO      PROC0500 IF EQUAL          * yes - get next header
+            GOTO      PROC6000                   * get next payment record
+          ENDIF
+.
+          MOVELPTR  EXCFIELD,FORM3               * get segment length
+          COMPARE   FORTY,FORM3                  * correct length ?
+          IF        !@EQUAL
+            COMPARE   SEVEN,FORM3                * no - check if batch # present
+            IF        !@LESS
+              MOVE      DEPSEG03,BATCHNUM        * load batch number
+              CALL      GERR0000                 * get error number
+              MOVE     "End of deposit payment encountered prematurely",HCERDESC
+              MOVE      ONE,ERORNUMB
+              CALL      WERR0000
+            ENDIF
+            GOTO      PROC7000
+          ENDIF
+.
+          CALL      CDEP0000                     * clear dep. payment fields
+          CALL      DEPT0000                     * load deposit fields
+          GOTO      PROC7000                     * get next claim summary
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                            WHED0000              Called by: PROC0000      *
+.* Create a record for the EFT Payment Transmission Header table (hicefaaf)  *
+.*****************************************************************************
+.
+WHED0000  MOVE      ONE,FORM5
+          PACK      KEY8,EFTSEG09,Z70
+          CALL      RSHCEFA1
+          CALL      RPHCEFA1
+          BRANCH    OVRCD,WHED8000
+          MATCH     EFTSEG09,HCEARNUM            * Same run number
+          GOTO      WHED8000 IF NOT EQUAL
+          MOVE      HCEACNTR,FORM5
+.
+WHED6000  ADD       ONE,FORM5
+WHED8000  MOVE      FORM5,HCEACNTR
+          PACK      KEY8,EFTSEG09,HCEACNTR,SP70
+          CALL      RAHCEFA1
+          COMPARE   ZERO,OVRCD
+          GOTO      WHED6000 IF EQUAL
+.
+          MOVE      EFTSEG09,HCEARNUM
+          MOVE      EFTSEG03,HCEAPAYN
+          MOVE      EFTSEG05,HCEAPMCI
+.
+          MOVE      EFTSEG08,ITMFORM9            * format dep. amount
+          ASSIGN    (ITMFORM9/100),HCEATAMT
+.
+          UNPACK    EFTSEG10,CDAY,CMON,CCENT,CYEAR  * format payment date
+          PACK      HCEAPDAT,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",HCEAPDAT
+.
+          MOVE      HICFILNM,HCEAFNAM
+          MOVE      SP20,HCEASPAR
+          CALL      WRHCEFA1
+.
+WHED9999  RETURN
++
+.*****************************************************************************
+.*                            WPAY0000              Called by: PROC0000      *
+.* Create a record for the EFT Payment Statement table (hicefpaf)            *
+.*****************************************************************************
+.
+WPAY0000  MOVE      ONE,FORM5
+          PACK      KEY10,PAYSEG04,SP70
+          PACK      KEY18,KEY10,EFTSEG09,Z70
+          CALL      RSHCEFP1
+          CALL      RPHCEFP1
+          BRANCH    OVRCD,WPAY4000
+          MATCH     KEY10,HCEPPYEE               * Same payee provider?
+          GOTO      WPAY4000 IF NOT EQUAL
+          MATCH     EFTSEG09,HCEPPRUN            * Same run number?
+          GOTO      WPAY4000 IF NOT EQUAL
+          MOVE      HCEPCNTR,FORM5
+.
+WPAY2000  ADD       ONE,FORM5
+WPAY4000  MOVE      FORM5,HCEPCNTR
+          PACK      KEY18,KEY10,EFTSEG09,HCEPCNTR,SP70
+          CALL      RAHCEFP1
+          COMPARE   ZERO,OVRCD
+          GOTO      WPAY2000 IF EQUAL
+.
+          MOVE      EFTSEG09,HCEPPRUN
+          MOVE      KEY10,HCEPPYEE
+          MOVE      PAYSEG03,HCEPNCLM
+          MOVE      PAYSEG05,HCEPBSBN
+          MOVE      PAYSEG06,HCEPACCN
+          MOVE      PAYSEG07,HCEPANAM
+.
+          MOVE      PAYSEG08,ITMFORM9            * format dep. amount
+          ASSIGN    (ITMFORM9/100),HCEPDAMT
+.
+          MOVE      SP20,HCEPSPAR
+          CALL      WRHCEFP1
+.
+WPAY9999  RETURN
++
+.*****************************************************************************
+.*                          CCNT0000             Called by:  PROC0000        *
+.*             Check that the number of exceptions balances                  *
+.*****************************************************************************
+.
+.         The final exception record for the claim has been processed, so
+.         check to see if the exception count in the claim record is the
+.         same as the count of exception lines processed
+.
+CCNT0000  COMPARE   EXCTOTAL,EXCCOUNT
+          IF        !@EQUAL
+            MOVE      CLMSEG04,BATCHNUM          * load batch number
+            CALL      GERR0000                   * get error number
+            MOVE      "Exception count does not balance",HCERDESC
+            MOVE      TWO,ERORNUMB
+            CALL      WERR0000                   * write hicerraf error record
+          ENDIF
+.
+.         Now check that the amount assigned for the claim (from the claim
+.         statement - CLMSEG09) matches the total processed.
+.
+          COMPARE   ASSNTOTL,CLMASSGN
+          IF        !@EQUAL
+            MOVE      CLMSEG04,BATCHNUM          * load batch number
+            CALL      GERR0000                   * get error number
+            MOVE      "Claim assigned amount does not balance",HCERDESC
+            MOVE      THREE,ERORNUMB
+            CALL      WERR0000                   * write hicerraf error record
+          ENDIF
+.
+.         Now check that the amount paid for the claim (from the claim
+.         statement - CLMSEG10) matches the total processed.
+.
+          COMPARE   PAIDTOTL,CLMBENFT
+          IF        !@EQUAL
+            MOVE      CLMSEG04,BATCHNUM          * load batch number
+            CALL      GERR0000                   * get error number
+            MOVE      "Claim paid amount does not balance",HCERDESC
+            MOVE      FOUR,ERORNUMB
+            CALL      WERR0000                   * write hicerraf error record
+          ENDIF
+.
+.         The claim has been processed, so now update the status of the batch
+.
+          IF        ERORFLAG = 0
+            PACK      HCBTSTAT,SP1,FIVE
+          ELSE
+            PACK      HCBTSTAT,SP1,SIX
+          ENDIF
+.
+          MOVE      CURRDATE,HCBTUDAT              * load date record updated
+          MOVE      CURRTIME,HCBTUTIM              * load time record updated
+          PACK      HCBTUUID,PRGID,SP10            * load WEB user id updated
+          CALL      UPHCBTC1                       * update batch record
+.
+          MATCH     SAVASTAT,HCBTSTAT
+          IF        !@EQUAL
+            CALL      WRTHIS00                     * History Audit
+            MOVE      HCBTSTAT,SAVASTAT            * Save batch status
+          ENDIF
+.
+CCNT9999  RETURN
++
+.*****************************************************************************
+.*                          HEDS0000             Called by:  PROC0000        *
+.*             Load exception statement header variables                     *
+.*****************************************************************************
+.
+HEDS0000  UNPACK    EXCFIELD,DIM2,HEDSEG03:      * No. of Claims in Statement
+                                  HEDSEG04:      * customer class
+                                  HEDSEG05:      * customer id
+                                  HEDSEG06:      * filler 1
+                                  HEDSEG07:      * function id
+                                  HEDSEG08:      * statement amount
+                                  HEDSEG09:      * run number
+                                  HEDSEG10:      * version number
+                                  HEDSEG11       * filler 2
+.
+HEDS9999  RETURN
++
+.*****************************************************************************
+.*                          HEDA0000             Called by:  PROC0000        *
+.*             Load EFT payment header variables                             *
+.*****************************************************************************
+.
+HEDA0000  UNPACK    EXCFIELD,DIM2,EFTSEG03:      * No. of Payment Statements
+                                  EFTSEG04:      * Customer Class
+                                  EFTSEG05:      * Customer ID
+                                  EFTSEG06:      * Filler 1
+                                  EFTSEG07:      * Function ID
+                                  EFTSEG08:      * Total Deposit Amount (cents)
+                                  EFTSEG09:      * Run Number
+                                  EFTSEG10:      * Payment Date (ddmmccyy)
+                                  EFTSEG11       * Filler 2
+.
+HEDA9999  RETURN
++
+.*****************************************************************************
+.*                          CLAM0000             Called by:  PROC0000        *
+.*             Load Claim header variables                                   *
+.* Returns:   EXIT  0 = ok to continue (claim fields loaded successfully)    *
+.*                  1 = batch not found OR incorrect batch status            *
+.*****************************************************************************
+.
+CLAM0000  UNPACK    EXCFIELD,DIM2,CLMSEG03:      * no. of exceptions
+                                  CLMSEG04:      * claim id - prefix/number
+                                  CLMSEG05:      * claim id - suffix
+                                  CLMSEG06:      * date of claim transmission
+                                  CLMSEG07:      * payee provider
+                                  CLMSEG08:      * servicing provider
+                                  CLMSEG09:      * benefit assigned
+                                  CLMSEG10:      * benefit paid
+                                  CLMSEG11       * filler
+.
+          MOVE      CLMSEG03,EXCTOTAL            * load exc. total into FORM fld
+          MOVE      ZERO,EXCCOUNT                * initialise exception count
+.
+.         Load claim totals for paid and assigned amounts
+.
+          MOVE      CLMSEG09,ITMFORM8            * load assigned amt to FORM fld
+          ASSIGN    (ITMFORM8/100),ASSNTOTL
+          MOVE      CLMSEG10,ITMFORM8            * load paid amt to FORM fld
+          ASSIGN    (ITMFORM8/100),PAIDTOTL
+.
+.         Initialise running totals for paid and assigned amounts
+.
+          MOVE      ZERO,CLMASSGN                * initialise assigned amount
+          MOVE      ASSNTOTL,CLMBENFT            * initialise paid amount
+.
+.         Validate that the batch is on file
+.
+          PACK      KEY33,CLMSEG04,CLMSEG08,SP2,HEDSEG05,CLMSEG07,SP2
+          CALL      RDHCBTC1                     * batch on file ?
+          BRANCH    OVRCD,CLAM9100               * no - ignore batch
+.
+.         Ensure that the batch has not already been received
+.
+          MOVE      HCBTSTAT,FORM2
+          COMPARE   FORM2,FOUR                   * status < 5 ?
+          GOTO      CLAM9100 IF LESS             * no - ignore batch
+.
+          MOVE      ZERO,EXIT
+          GOTO      CLAM9999
+.
+CLAM9100  MOVE      ONE,EXIT
+.
+CLAM9999  RETURN
++
+.*****************************************************************************
+.*                          PAYM0000             Called by:  PROC0000        *
+.*             Load Provider Payment variables                               *
+.*****************************************************************************
+.
+PAYM0000  UNPACK    EXCFIELD,DIM2,PAYSEG03:      * No. of Claim Id's
+                                  PAYSEG04:      * Payee Provider
+                                  PAYSEG05:      * BSB Number
+                                  PAYSEG06:      * Account Number
+                                  PAYSEG07:      * Account Name
+                                  PAYSEG08:      * Provider Deposit Amt (cents)
+                                  PAYSEG09       * Filler
+.
+PAYM9999  RETURN
++
+.*****************************************************************************
+.*                          EXCP0000             Called by:  PROC0000        *
+.*             Load Exception line variable                                  *
+.*****************************************************************************
+.
+EXCP0000  UNPACK    EXCFIELD,DIM2,EXCSEG03:      * voucher position
+                                  EXCSEG04:      * item position
+                                  EXCSEG05:      * medicare no.
+                                  EXCSEG06:      * last digit medicare no.
+                                  EXCSEG07:      * card flag
+                                  EXCSEG08:      * first name
+                                  EXCSEG09:      * item number
+                                  EXCSEG10:      * date of service
+                                  EXCSEG11:      * benefit assigned
+                                  EXCSEG12:      * benefit paid
+                                  EXCSEG13:      * explanation code
+                                  EXCSEG14:      * no. of patients
+                                  EXCSEG15:      * surname
+                                  EXCSEG16       * filler
+.
+.
+.         All the exception segment fields have been loaded, so now we
+.         need to process the exception item.
+.
+EXCP0700  ADD       ONE,EXCCOUNT                 * increment exception count
+          CALL      PEXC0000                     * process item
+.
+EXCP9999  RETURN
++
+.*****************************************************************************
+.*                          DEPT0000             Called by:  PROC0000        *
+.*             Load deposit line variable                                    *
+.*****************************************************************************
+.
+DEPT0000  UNPACK    EXCFIELD,DIM2,DEPSEG03:      * Claim ID - Prefix/Number
+                                  DEPSEG04:      * Claim ID - Suffix
+                                  DEPSEG05:      * Date of Transmission
+                                  DEPSEG06:      * Deposit Amount (cents)
+                                  DEPSEG07       * Filler
+.
+.         Validate that the batch is on file
+.
+          PACK      KEY33,DEPSEG03,SP30
+          CALL      RSHCBTC1                     * position on batch
+          CALL      RKHCBTC1                     * read next record
+          BRANCH    OVRCD,DEPT9100               * eof - error
+.
+          MATCH     DEPSEG03,HCBTBTCH            * same batch still ?
+          GOTO      DEPT9100 IF NOT EQUAL        * no - error
+.
+.         Ensure that the batch has been received
+.
+          MOVE      HCBTSTAT,FORM2
+          COMPARE   FIVE,FORM2                   * status < 5 ?
+          IF        @LESS
+            MOVE      DEPSEG03,BATCHNUM          * load batch number
+            CALL      GERR0000                   * get error number
+            MOVE      "Batch status not valid for EFT payment",HCERDESC
+            MOVE      ONE,ERORNUMB
+            CALL      WERR0000
+            GOTO      DEPT9900
+          ENDIF
+.
+          PACK       HCBTSTAT,SP1,SEVEN
+          MOVE       CURRDATE,HCBTFNDR         * Received date
+          CALL       UPHCBTC1                  * update batch record
+.
+          MATCH      SAVBSTAT,HCBTSTAT
+          IF         !@EQUAL
+            CALL       WRTHIS00                * History Audit
+            MOVE       HCBTSTAT,SAVBSTAT       * Save batch status
+          ENDIF
+.
+.         Create a record for the EFT Payment Claim Summary table
+.
+          MOVE      ONE,FORM5
+          PACK      KEY13,DEPSEG03,EFTSEG09,Z70
+          CALL      RSHCEFC1
+          CALL      RPHCEFC1
+          BRANCH    OVRCD,DEPT3000
+.
+          MATCH     DEPSEG03,HCECBTCH           * Same batch number?
+          GOTO      DEPT3000 IF NOT EQUAL
+          MATCH     EFTSEG09,HCECRNUM           * Same run number?
+          GOTO      DEPT3000 IF NOT EQUAL
+          MOVE      HCECCNTR,FORM5
+.
+DEPT2000  ADD       ONE,FORM5
+DEPT3000  MOVE      FORM5,HCECCNTR
+          PACK      KEY13,DEPSEG03,EFTSEG09,HCECCNTR,SP70
+          CALL      RAHCEFC1
+          COMPARE   ZERO,OVRCD
+          GOTO      DEPT2000 IF EQUAL
+.
+          MOVE      DEPSEG03,HCECBTCH
+          MOVE      EFTSEG09,HCECRNUM
+          UNPACK    DEPSEG05,CDAY,CMON,CCENT,CYEAR  * format transmission date
+          PACK      HCECTDAT,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",HCECTDAT
+.
+          MOVE      DEPSEG06,ITMFORM9            * format dep. amount
+          ASSIGN    (ITMFORM9/100),HCECDAMT
+.
+          MOVE      SP20,HCECSPAR
+          CALL      WRHCEFC1
+.
+.         Write the batch number and the filename to hicefxaf so that
+.         the EFT payments for this batch can later be accessed from the
+.         "My HIC Batch" screen in webPAS.
+.
+          MOVE      DEPSEG03,HCEXBTCH          * Batch number
+          MOVE      "1",HCEXTYPE               * EFT Payment record
+          PACK      HCEXDATE,CCC,CYY,CMM,CDD   * Current date
+          REP       " 0",HCEXDATE
+          MOVE      HICFILNM,HCEXFNAM          * Filename
+          PACK      KEY44,HCEXBTCH,HCEXTYPE,HCEXDATE,HCEXFNAM
+          CALL      RDHCEFX1
+          IF        OVRCD=1
+            UNPACK    KEY44,HCEXBTCH,HCEXTYPE,HCEXDATE,HCEXFNAM
+            PACK      HCEXSPAR,SP70
+            CALL      WRHCEFX1
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      DEPT9999
+.
+DEPT9100  MOVE      DEPSEG03,BATCHNUM            * load batch number
+          CALL      GERR0000                     * get error number
+          MOVE      "Batch not valid for EFT payment",HCERDESC
+          MOVE      ONE,ERORNUMB
+          CALL      WERR0000
+.
+DEPT9900  MOVE      ONE,EXIT
+.
+DEPT9999  RETURN
++
+.------------------------------------------------------------
+. Write record to batch history audit file
+.------------------------------------------------------------
+WRTHIS00  MOVE      HCBTBTCH,HCHSBTCH            * Batch Number
+          MOVE      HCBTPMCI,HCHSPMCI            * MCI
+          MOVE      HCBTPYEE,HCHSPYEE            * Payee Provider No
+          MOVE      HCBTPSRV,HCHSPSRV            * Service Provider No
+.
+          PACK      HCHSTDAT,CCC,CYY,CMM,CDD     * Transaction Date
+          REP       " 0",HCHSTDAT
+          CLOCK     TIME,HCHSTTIM                * Transaction Time
+.
+          MOVE      "HIC       ",HCHSTUID        * Web user id
+          MOVE      HCBTSTAT,HCHSSTAT
+          MOVE      SP70,HCHSSPAR                * Spare
+.
+WRTHIS10  PACK      KEY49,HCHSBTCH,HCHSPSRV,HCHSPMCI,HCHSPYEE,HCHSTDAT:
+                          HCHSTTIM,SP70
+          CALL      RAHCHIS1
+          BRANCH    OVRCD,WRTHIS20
+          CLOCK     TIME,HCHSTTIM
+          GOTO      WRTHIS10
+.
+WRTHIS20  CALL      WRHCHIS1                   * Write History Record
+.
+WRTHIS99  RETURN
++
+.*****************************************************************************
+.*                              PEXC0000           Called by: EXCP0000       *
+.*              Process a single exception line item                         *
+.* Returns:   EXIT  0 = Matching item found and updated                      *
+.*                  1 = Matching item not found - not updated                *
+.*****************************************************************************
+.
+.         Get all the claims for this batch (CLMSEG04 - Claim ID)
+.
+PEXC0000  MOVE      ONE,ITMFOUND                 * initialise item found flag
+          MOVE      SP8,SAVCLAIM                 * initialise claim number
+.
+.         Left justify the item code from HIC and remove leading zeroes
+.
+          CALL      LITM0000                     * item code converted ?
+          BRANCH    EXIT,PEXC9000                * no - finish
+.
+          UNPACK    EXCSEG10,CDAY,CMON,CYEAR     * load service date as ccyymmdd
+          PACK      CPDATE,TWENTY,CYEAR,CMON,CDAY
+          REP       " 0",CPDATE
+.
+.         Loop through hicrciaf for a matching item.
+.
+          PACK      KEY26,CLMSEG04,EXCSEG03,ITMNUMBR,CPDATE,SP30
+          CALL      RSHCRCI1                     * position in table
+PEXC0500  CALL      RKHCRCI1                     * read next record
+          BRANCH    OVRCD,PEXC9000               * eof - finished
+.
+          MATCH     CLMSEG04,HCRIBTCH            * same batch number still ?
+          GOTO      PEXC9000 IF NOT EQUAL        * no - finished
+.
+          MATCH     EXCSEG03,HCRIVPOS            * same voucher position ?
+          GOTO      PEXC0500 IF NOT EQUAL        * no - finished
+.
+          MATCH     ITMNUMBR,HCRIITMN            * same item number ?
+          GOTO      PEXC0500 IF NOT EQUAL        * no - finished
+.
+          MATCH     CPDATE,HCRIIDAT              * same service date ?
+          GOTO      PEXC0500 IF NOT EQUAL        * no - finished
+.
+          MOVE      HCRICLMN,SAVCLAIM            * save claim number
+.
+.         A matching item for the voucher has been found, so make sure that
+.         it hasn't already been rejected (there could be more than one item
+.         of the same number in a batch).  If rejected, there should be a
+.         rejection reason code, a rejected amount and a rejected date.
+.
+          MATCH     SP3,HCRIREJR                 * rejection reason blank ?
+          GOTO      PEXC0500 IF NOT EQUAL        * no - get next item
+.
+          COMPARE   ZERO,HCRIBENR                * benefit rejected zero ?
+          GOTO      PEXC0500 IF NOT EQUAL        * no - get next item
+.
+          MATCH     SP8,HCRIREJD                 * rejection date blank ?
+          GOTO      PEXC0500 IF NOT EQUAL        * no - get next item
+.
+.         An unpaid matching item has been found, so update the HIC 
+.         reconciliation item table (hicrciaf).
+.
+          MOVE      ZERO,ITMFOUND                * set item found flag
+          MOVE      EXCSEG13,HCRIREJR            * load rejection reason
+.
+          MATCH     SP3,HCRIREJR                 * load rejection reason
+          IF        !@EQUAL
+            MOVE      CLMSEG04,BATCHNUM          * load batch number
+            CALL      GERR0000                   * get error number
+            MOVE      "Unknown Code",HCEMDESC
+            MOVE      HCRIREJR,KEY3
+            CALL      RDHCEMS1
+            MOVE      HCEMDESC,HCERDESC
+            MOVE      SEVEN,ERORNUMB
+            CALL      WERR0000                   * write hicerraf error record
+          ELSE
+.
+.         Set Card Flag
+.
+            MATCH     SP1,EXCSEG07                 * card flag blank ?
+            IF        !@EQUAL
+              MOVE      CLMSEG04,BATCHNUM          * load batch number
+              CALL      GERR0000                   * get error number
+.
+              MOVE      EXCSEG07,ANS
+              REP       "I1C2N3A4W5S6X7",ANS
+              MOVE      ANS,FORM1
+              MOVE      CARDDESZ,HCERDESC          * default to unknown flag
+              LOAD      HCERDESC,FORM1,CARDDESI,CARDDESC,CARDDESN,CARDDESA:
+                                       CARDDESW,CARDDESS,CARDDESX
+              MOVE      SIX,ERORNUMB
+              CALL      WERR0000                   * write hicerraf error record
+            ENDIF
+          ENDIF
+.
+.         Get the difference between the assigned benefit and the paid benefit
+.         and load this into the Amount Rejected
+.
+          MOVE      EXCSEG11,ITMFORM7
+          ASSIGN    (ITMFORM7/100),ITMASSGN
+.
+          COMPARE   ITMASSGN,HCRIBENA            * check assigned amount matches
+          IF        !@EQUAL
+            MOVE      CLMSEG04,BATCHNUM          * load batch number
+            CALL      GERR0000                   * get error number
+            MOVE      "Assigned Amount for item does not match",HCERDESC
+            MOVE      SEVEN,ERORNUMB
+            CALL      WERR0000                   * write hicerraf error record
+          ENDIF
+.
+          MOVE      EXCSEG12,ITMFORM7
+          ASSIGN    (ITMFORM7/100),ITMBENFT
+.
+          ASSIGN    (ITMASSGN-ITMBENFT),HCRIBENR * load amount rejected
+          SUB       HCRIBENR,CLMBENFT            * update amount paid
+.
+          MOVE      ITMBENFT,HCRIBENP            * load amount paid
+.
+          MOVE      CURRDATE,HCRIREJD            * load date rejected
+.
+          MOVE      EXCSEG15,HCRISURN            * load surname
+          MOVE      EXCSEG08,HCRIFNAM            * load given name
+          PACK      HCRIMEDI,EXCSEG05,EXCSEG06   * load medicare number
+          MOVE      EXCSEG07,HCRICARD            * load card flag
+.
+          CALL      UPHCRCI1                     * update item record
+.
+PEXC9000  IF        ITMFOUND = 1
+            MOVE      CLMSEG04,BATCHNUM          * load batch number
+            CALL      GERR0000                   * get error number
+            MOVE      "Unable to match an item for this claim",HCERDESC
+            MOVE      EIGHT,ERORNUMB
+            CALL      WERR0000                   * write hicerraf error record
+            GOTO      PEXC9100 
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      PEXC9999
+.
+PEXC9100  MOVE      ONE,EXIT
+.
+PEXC9999  RETURN
++
+.*****************************************************************************
+.*                         LITM0000                Called by: PEXC0000       *
+.*     Left justify the item code and remove leading zeroes                  *
+.* Requires: EXCSEG09 - item code (5 characters with leading zeroes)         *
+.* Returns:  ITMNUMBR - 9 char. item code (left justified, no leading zeroes)*
+.*           EXIT     0 = item number converted successfully                 *
+.*                    1 = error converting item number                       *
+.*****************************************************************************
+.
+LITM0000  MATCH     "0",EXCSEG09                 * current character "0" ?
+          GOTO      LITM5000 IF NOT EQUAL        * no - finished
+.
+          BUMP      EXCSEG09                     * yes - move to next character
+          GOTO      LITM0000 IF NOT EOS          * check if char, is "0"
+.
+          GOTO      LITM9100                     * error - finished
+.
+LITM5000  PACK      ITMNUMBR,EXCSEG09,SP9        * load 9 char. item code
+          RESET     EXCSEG09
+.
+          MOVE      ZERO,EXIT
+          GOTO      LITM9999
+.
+LITM9100  MOVE      ONE,EXIT
+.
+LITM9999  RETURN
++
+.*****************************************************************************
+.*                         WERR0000                Called by: CLAM0000       *
+.*            Write an hicerraf (error) record                EXCP0000       *
+.* Requires:  HCERDESC - error description                    PEXC0000       *
+.*            BATCHNUM - Batch number                                        *
+.*            ERORNUMB - Error number                                        *
+.* Returns:   ERORFLAG - Batch error flag (set to "1" - error in batch).     *
+.*****************************************************************************
+.
+WERR0000  CALL      CLER0000                     * clear all error fields
+.
+.         If an error has been generated, then we must have completed loading
+.         the claim id (at minimum), so set the error fields
+.
+          ADD       ONE,ERRCOUNT                 * increment batch error count
+          MOVE      BATCHNUM,HCERBTCH            * load batch number
+          MOVE      ERRCOUNT,HCERLCNT            * load error line count
+          MOVE      HEDSEG05,HCERPMCI            * load customer id (MCI)
+          PACK      HCERDESC,HCERDESC,SP30,SP20
+.
+.         See if we are only recording batch details
+.
+          COMPARE   TWO,ERORNUMB
+          GOTO      WERR9000 IF LESS
+.
+          MOVE      CLMSEG07,HCERPYEE            * load payee provider
+          MOVE      CLMSEG08,HCERPSRV            * load service provider
+.
+.         See if we are only recording batch and provider details
+.
+          COMPARE   SIX,ERORNUMB
+          GOTO      WERR9000 IF LESS
+.
+.         We are recording all data items
+.
+          MOVE      EXCSEG03,HCERVPOS            * load voucher position
+          PACK      HCERMEDI,EXCSEG05,EXCSEG06   * load medicare number
+          MOVE      EXCSEG08,HCERFNAM            * load first name
+          MOVE      EXCSEG09,HCERITMN            * load item number
+          MOVE      SP8,HCERIDAT
+          MOVELPTR  EXCSEG10,FORM3
+          IF        FORM3 <> 0
+            MATCH     SP6,EXCSEG10
+            IF        !@EQUAL
+              MOVE      TWENTY,CCENT
+              UNPACK    EXCSEG10,CDAY,CMON,CYEAR
+              PACK      HCERIDAT,CCENT,CYEAR,CMON,CDAY * load service date
+            ENDIF
+          ENDIF
+          MOVE      EXCSEG11,FORM7
+          ASSIGN    (FORM7/100),HCERBASS         * load benefit assigned
+          MOVE      EXCSEG12,FORM7
+          ASSIGN    (FORM7/100),HCERBPAD         * load benefit paid
+          MOVE      EXCSEG13,HCERECOD            * load explanation code
+          MOVE      EXCSEG15,HCERSURN            * load surname
+          MOVE      SAVCLAIM,HCERCLMN            * load claim number
+.
+WERR9000  CALL      WRHCERR1                     * write error record
+          MOVE      ONE,ERORFLAG                 * set batch error flag
+.
+WERR9999  RETURN
++
+.*****************************************************************************
+.*                          CLER0000               Called by: WERR0000       *
+.*                 Clear hicerraf fields                                     *
+.* (Clear all except HCERDESC which is already loaded when this routine is   *
+.* called).                                                                  *
+.*****************************************************************************
+.
+CLER0000  PACK      HCERLCNT,ZERO,ZERO,ZERO
+          MOVE      SP8,HCERPMCI
+          MOVE      SP10,HCERPYEE
+          MOVE      SP10,HCERPSRV
+          MOVE      SP8,HCERCLMN
+          PACK      HCERVPOS,ZERO,ZERO
+          MOVE      SP10,HCERMEDI
+          MOVE      SP20,HCERFNAM
+          MOVE      SP5,HCERITMN
+          MOVE      SP8,HCERIDAT
+          MOVE      ZERO,HCERBASS
+          MOVE      ZERO,HCERBPAD
+          MOVE      SP3,HCERECOD
+          MOVE      SP20,HCERSURN
+          PACK      HCERSPAR,SP30,SP20
+.
+CLER9999  RETURN
++
+.****************************************************************************
+.*                             CLHD0000            Called by: PROC0000      *
+.*                 Clear statement header fields                            *
+.****************************************************************************
+.
+CLHD0000  MOVE      SP3,HEDSEG03
+          MOVE      SP2,HEDSEG04
+          MOVE      SP8,HEDSEG05
+          MOVE      SP8,HEDSEG06
+          MOVE      SP1,HEDSEG07
+          MOVE      SP8,HEDSEG08
+          MOVE      SP3,HEDSEG09
+          MOVE      SP3,HEDSEG10
+          MOVE      SP70,HEDSEG11
+.
+CLHD9999  RETURN
++
+.****************************************************************************
+.*                             CEFT0000            Called by: PROC0000      *
+.*                 Clear statement header fields                            *
+.****************************************************************************
+.
+CEFT0000  MOVE      SP3,EFTSEG03
+          MOVE      SP2,EFTSEG04
+          MOVE      SP8,EFTSEG05
+          MOVE      SP8,EFTSEG06
+          MOVE      SP1,EFTSEG07
+          MOVE      SP9,EFTSEG08
+          MOVE      SP3,EFTSEG09
+          MOVE      SP8,EFTSEG10
+          MOVE      SP70,EFTSEG11
+.
+CEFT9999  RETURN
++
+.****************************************************************************
+.*                        CLCL0000                 Called by: PROC0000      *
+.*              Clear claim statement fields                                *
+.****************************************************************************
+.
+CLCL0000  MOVE      SP4,CLMSEG03
+          MOVE      SP5,CLMSEG04
+          MOVE      SP1,CLMSEG05
+          MOVE      SP6,CLMSEG06
+          MOVE      SP8,CLMSEG07
+          MOVE      SP8,CLMSEG08
+          MOVE      SP8,CLMSEG09
+          MOVE      SP8,CLMSEG10
+          MOVE      SP10,CLMSEG11
+.
+CLCL9999  RETURN
++
+.****************************************************************************
+.*                        CPAY0000                 Called by: PROC0000      *
+.*              Clear provider payment statement fields                     *
+.****************************************************************************
+.
+CPAY0000  MOVE      SP2,PAYSEG03
+          MOVE      SP8,PAYSEG04
+          MOVE      SP6,PAYSEG05
+          MOVE      SP9,PAYSEG06
+          PACK      PAYSEG07,SP30,SP2
+          MOVE      SP9,PAYSEG08
+          PACK      PAYSEG09,SP30,SP2
+.
+CPAY9999  RETURN
++
+.****************************************************************************
+.*                       CEXP0000                  Called by: PROC0000      *
+.*                Clear the exception fields                                *
+.****************************************************************************
+.
+CEXP0000  MOVE      SP2,EXCSEG03
+          MOVE      SP2,EXCSEG04
+          MOVE      SP9,EXCSEG05
+          MOVE      SP1,EXCSEG06
+          MOVE      SP1,EXCSEG07
+          MOVE      SP20,EXCSEG08
+          MOVE      SP5,EXCSEG09
+          MOVE      SP6,EXCSEG10
+          MOVE      SP7,EXCSEG11
+          MOVE      SP7,EXCSEG12
+          MOVE      SP3,EXCSEG13
+          MOVE      SP2,EXCSEG14
+          MOVE      SP20,EXCSEG15
+          MOVE      SP6,EXCSEG16
+.
+CEXP9999  RETURN
++
+.****************************************************************************
+.*                       CDEP0000                  Called by: PROC0000      *
+.*                Clear the deposit payment variables                       *
+.****************************************************************************
+.
+CDEP0000  MOVE      SP5,DEPSEG03
+          MOVE      SP1,DEPSEG04
+          MOVE      SP8,DEPSEG05
+          MOVE      SP9,DEPSEG06
+          MOVE      SP20,DEPSEG07
+.
+CDEP9999  RETURN
++
+.****************************************************************************
+.*                       LBAT0000                  Called by: PROC0000      *
+.*      Load all the batch details from PAS into the reconciliation tables  *
+.****************************************************************************
+.
+.         Loop through the claim records for the batch
+.
+LBAT0000  PACK      KEY15,CLMSEG04,SP20
+          CALL      RSHCCLM7                     * position in table
+LBAT0500  CALL      RKHCCLM7                     * read next record
+          BRANCH    OVRCD,LBAT9000               * eof - finished
+.
+          MATCH     CLMSEG04,HCCLBTCH            * same batch number still ?
+          GOTO      LBAT9000 IF NOT EQUAL        * no - finished
+.
+.         A valid claim for the batch has been found, so get all the items
+.         for the claim.
+.
+          PACK      KEY18,HCCLCLMN,SP20
+          CALL      RSHCCIT1                     * position in table
+LBAT1000  CALL      RKHCCIT1                     * read next record
+          BRANCH    OVRCD,LBAT0500               * eof - get next claim
+.
+          MATCH     HCCLCLMN,HCCICLMN            * same claim still ?
+          GOTO      LBAT0500 IF NOT EQUAL        * no - get next claim
+.
+.         A valid item for the batch has been found, so write a record to
+.         the reconciliation item table (hicrciaf)
+.
+          MOVE      HCCLBTCH,HCRIBTCH            * load hicrciaf fields
+          MOVE      HCCLVPOS,HCRIVPOS
+          MOVE      HCCIITMN,HCRIITMN
+          MOVE      HCCIIDAT,HCRIIDAT
+          MOVE      HCCITRAN,HCRIICNT
+          MOVE      SP1,HCRICARD
+.
+          MOVE      "Unknown",HCRISURN
+          MOVE      SP20,HCRIFNAM
+          MOVE      SP10,HCRIMEDI
+          MOVE      HCCLURNO,KEY8
+          CALL      RDMAST1
+          IF        OVRCD = 0
+            MOVE      PSNAME,HCRISURN
+            MOVE      PGNAME,HCRIFNAM
+            MOVE      PMEDI,HCRIMEDI
+          ENDIF
+.
+          MOVE      HCCICAMT,HCRIBENA
+          MOVE      HCCICAMT,HCRIBENP            * load assuming fully paid
+          MOVE      ZERO,HCRIBENR
+          MOVE      HCCLCLMN,HCRICLMN
+          MOVE      HCCLVISN,HCRIVISN
+          MOVE      SP3,HCRIREJR
+          MOVE      SP3,HCRIREJD
+          MOVE      SP20,HCRISPAR
+.
+          CALL      WRHCRCI1                     * write record
+.
+          ADD       HCCICAMT,CLMASSGN            * update assigned amount
+.
+          GOTO      LBAT1000                     * get next item
+.
+.         All the batch items have been loaded, so write a claim statement
+.         record to the corresponding reconciliation table (hicrccaf).
+.
+LBAT9000  MOVE      ONE,FORM5
+          PACK      KEY13,CLMSEG04,HEDSEG09,Z70
+          CALL      RSHCRCC1
+          CALL      RPHCRCC1
+          BRANCH    OVRCD,LBAT9200
+          MATCH     CLMSEG04,HCRCBTCH             * Same batch number?
+          GOTO      LBAT9200 IF NOT EQUAL
+          MATCH     HEDSEG09,HCRCRNUM             * Same run number?
+          GOTO      LBAT9200 IF NOT EQUAL
+          MOVE      HCRCCNTR,FORM5
+.
+LBAT9100  ADD       ONE,FORM5
+LBAT9200  MOVE      FORM5,HCRCCNTR
+          PACK      KEY13,CLMSEG04,HEDSEG09,HCRCCNTR,SP70
+          CALL      RAHCRCC1
+          COMPARE   ZERO,OVRCD
+          GOTO      LBAT9100 IF EQUAL
+.
+          MOVE      CLMSEG04,HCRCBTCH            * load hicrccaf fields
+          MOVE      HEDSEG09,HCRCRNUM
+          UNPACK    CLMSEG06,CDAY,CMON,CYEAR
+          PACK      HCRCDATE,TWENTY,CYEAR,CMON,CDAY
+          MOVE      CLMSEG07,HCRCPYEE
+          MOVE      CLMSEG08,HCRCSPRV
+          MOVE      ASSNTOTL,HCRCBENA
+          MOVE      PAIDTOTL,HCRCBENP
+          MOVE      CLMSEG03,HCRCEXCN
+          MOVE      SP70,HCRCSPAR
+          CALL      WRHCRCC1                     * write record
+.
+.         Write a statement header record if it is not already written (as one
+.         statement header may cover one or more batches).
+.
+          MOVE      ONE,FORM5
+          PACK      KEY8,HEDSEG09,Z70
+          CALL      RSHCRCH1
+          CALL      RPHCRCH1
+          BRANCH    OVRCD,LBAT9400
+          MATCH     HEDSEG09,HCEARNUM          * same run number?
+          GOTO      LBAT9400 IF NOT EQUAL
+          MOVE      HCRHCNTR,FORM5
+.
+LBAT9300  ADD       ONE,FORM5                  * Increment counter
+LBAT9400  MOVE      FORM5,HCRHCNTR
+          PACK      KEY8,HEDSEG09,HCRHCNTR,SP70
+          CALL      RAHCRCH1
+          COMPARE   ZERO,OVRCD
+          GOTO      LBAT9300 IF EQUAL          * already exist
+.
+          MOVE      HEDSEG09,HCRHRNUM          * load hicrchaf fields
+          MOVE      HEDSEG03,HCRHCNUM
+          MOVE      HEDSEG05,HCRHPMCI
+          MOVE      HEDSEG08,ITMFORM8
+          ASSIGN    (ITMFORM8/100),HCRHSAMT
+          MOVE      HICFILNM,HCRHFNAM
+          MOVE      SP70,HCRHSPAR
+.
+          CALL      WRHCRCH1                   * write record
+.
+.         Write the batch number and the filename to hicefxaf so that
+.         the exceptions for this batch can later be accessed from the
+.         "My HIC Batch" screen in webPAS.
+.
+          MOVE      CLMSEG04,HCEXBTCH          * Batch number
+          MOVE      "0",HCEXTYPE               * Exception record
+          PACK      HCEXDATE,CCC,CYY,CMM,CDD   * Current date
+          REP       " 0",HCEXDATE
+          MOVE      HICFILNM,HCEXFNAM          * Filename
+          PACK      KEY44,HCEXBTCH,HCEXTYPE,HCEXDATE,HCEXFNAM
+          CALL      RDHCEFX1
+          IF        OVRCD=1
+            UNPACK    KEY44,HCEXBTCH,HCEXTYPE,HCEXDATE,HCEXFNAM
+            PACK      HCEXSPAR,SP70
+            CALL      WRHCEFX1
+          ENDIF
+.
+LBAT9999  RETURN
++
+.*****************************************************************************
+.*                            GERR0000              Called by: PROC0000      *
+.*        Get the last record counter for the batch error      CCNT0000      *
+.* Requires: BATCHNUM - batch number                           EXCP0000      *
+.* Returns: ERRCOUNT - error counter                           DEPT0000      *
+.*                                                             PEXC0000      *
+.*****************************************************************************
+.
+GERR0000  PACK      KEY8,BATCHNUM,TILDA8
+          CALL      RSHCERR1                     * pos'n after last batch error
+          CALL      RPHCERR1                     * read previous record
+          BRANCH    OVRCD,GERR9100               * eof - no batch error found
+.
+          MATCH     BATCHNUM,HCERBTCH            * same batch still ?
+          GOTO      GERR9100 IF NOT EQUAL        * no - no batch error found
+.
+          MOVE      HCERLCNT,ERRCOUNT            * set last error count
+          GOTO      GERR9999
+.
+GERR9100  MOVE      ZERO,ERRCOUNT                * set for first error
+.
+GERR9999  RETURN
++
+.*****************************************************************************
+.*        I/O Includes                                                       *
+.*****************************************************************************
+.
+          INC       STD002IO
+.
+          INC       HICBTCIO/INC
+          INC       HICCLMIO/INC
+          INC       HICRCCIO/INC
+          INC       HICCITIO/INC
+          INC       HICEFCIO/INC
+          INC       HICEFAIO/INC
+          INC       HICEFPIO/INC
+          INC       HICEFXIO/INC
+          INC       HICEMSIO/INC
+          INC       HICERRIO/INC
+          INC       HICRCIIO/INC
+          INC       HICHISIO/INC
+          INC       HICMCIIO/INC
+          INC       HICRCHIO/INC
+          INC       PATMA1IO/INC
++

@@ -1,0 +1,1614 @@
++
+.******************************************************************************
+.*                                                                            *
+.* Prcodeure Name   : CHNADMTP.PBL                                            *
+.*                                                                            *
+.* Description      : Change the admission type                               *
+.*                                                                            *
+.* Warning          : This code is a cut of code from IBAHOS03, version       *
+.*                    V6.03.16.                                               *
+.*                                                                            *
+.* Author           : Mike Loser Tyson 08/11/1996                             *
+.*                                                                            *
+.* Parameters Req   : EFTADMIN - Effective admission number                   *
+.*                    EFTATYPE - Effective admission type                     *
+.*                    EFTDATE  - Effective date (ccyymmdd)                    *
+.*                    EFTTIME  - Effective time (hh:mm:ss)                    *
+.*                                                                            *
+.* Returns          : NOATYPUP - No admission type updated flag               *
+.*                                0 - No                                      *
+.*                                1 - Yes                                     *
+.*                                                                            *
+.* Modifications    :                                                         *
+.*       V10.03.02  05/09/2012  J.Tan          CAR 267784                     *
+.*                  Mods Checking for TCINDC19 Claim Code                     *
+.*       V10.03.01  09/01/2012  J.Tan  CAR 257430                             *
+.*                  Replaced RDPTHLFA1 with RDPTHLF1                          *
+.*       V10.00.01  27/10/2010  Davin  CAR 226831                             *
+.*                  Move passcode to operator id when writing/updating        *
+.*                  transfer file (wtrnf000 & utrnf000).                      *
+.*                  01/12/2010  J.Tan CAR 233034                              *
+.*                  Mods Bed fees file to use health fund table type          *
+.*                  01/12/2010  Peter Vela        CAR 233148                  *
+.*                  Initialised pattranf variables to spaces before write     *
+.*        V9.12.02  23/10/2008  J.Tan CAR 206764                              *
+.*                  Mods NOT to Update Adm.type in trans.file  with TCINDC7=X *
+.*        V9.12.01  03/09/2009  J.Tan CAR 205303                              *
+.*                  Added Contract ID                                         *
+.*        V9.11.01  06/10/2008  J.Tan CAR 180188                              *
+.*                  Mods to Inlier/Highlier/Additional charges to use claim   *
+.*                  code and health fund combination from lumpsum             *
+.*        V9.08.01  15/03/2007  J.Tan CAR 136149                              *
+.*                  Mods to use default claim code from system parameter      *
+.*        V9.03.04  16/07/2004  J.Tan CAR 51619                               *
+.*                  Removed locking and unlocking files                       *
+.*        V9.03.03  24/05/2004  J.Tan CAR 42846                               *
+.*                  Mods not to close C/P files                               *
+.*        V9.03.02  16/09/2003  J.Tan                                         *
+.*                  Mods for WEB                                              *
+.*        V9.03.01  03/06/2002  J.Tan                                         *
+.*                  Changed Admission audit file                              *
+.*        V9.02.03  10/08/2002  J.Tan                                         *
+.*                  Mods to recalculate charges                               *
+.*        V9.00.02  30/08/2002  J.Tan                                         *
+.*                  Mods to calculate rates for casepayment                   *
+.*                  Fixed gtrn0000-get last admission type changed routine    *
+.*                  Mods to get last admission type changed                   *
+.*        V9.00.01  15/08/2002  J.Tan                                         *
+.*                  Mods for specialty bed                                    *
+.*                  Mods to recalculate fees if casemix code is blank         *
+.*        V6.09.01  28/10/2001  J.Tan                                         *
+.*                  Removed Episode flag for casemix funding                  *
+.*        V6.07.01  21/02/2000  Steve Armstrong                               *
+.*                  Mods to use PATSTRYR instead of parameter CSTRTYR         *
+.******************************************************************************
+.*        V6.06.02  15/07/1999  Greg Horvat      99/00 PRS2 Mods              *
+.*                  Recompiled for PATASFKY - Changed to keyin contract vars  *
+.*        V6.06.01  25/02/1999  Steve Armstrong                               *
+.*                  Mods for Daycase error message to not be displayed        *
+.******************************************************************************
+.*        V6.04.02  14/03/1997  Greg Horvat                                   *
+.*                  Changed to use PTCNHDPS to work out which state for HDP   *
+.*                  extracts                                                  *
+.*        V6.04.01  04/02/1997  Greg Horvat                                   *
+.*                  Recompiled for PATASFKY                                   *
+.*                                                                            *
+.******************************************************************************
+.
+          DEFPROC   CHNADMTP
+.
+          INC       PATDINVS/INC            * Variables for printing invoices
+.
+          INC       PATAA1FD/INC            * Admission audit file
+          INC       PATASFFD/INC            * Admission SFA file
+          INC       PATBFEFD/INC            * Bed fee file
+          INC       PATCODFD/INC            * Codes file
+          INC       PATCMXFD/INC            * Casemix code file
+          INC       PATAFEFD/INC
+          INC       PATASDFD/INC
+          INC       PATHDFFD/INC
+          INC       PATLDFFD/INC
+          INC       PATHLFFD/INC
+          INC       PATLSDFD/INC
+          INC       PATCONFD/INC            * Control file
+          INC       PATDSCFD/INC            * Discharge file
+          INC       PATMA1FD/INC            * Master file
+.         INC       HL7BMTFD/INC
+          INC       PATMI1FD/INC            * Admission file
+          INC       PATSFAFD/INC            * SFA file
+          INC       PATSTAFD/INC            * Admission stats file
+          INC       PATTRNFD/INC            * Transfer file
+          INC       PATVADFD/INC            * Transfer source code file
+          INC       PATVISFD/INC            * Visit file
+          INC       PATWR1FD/INC            * Ward/bed file
+.
+. ----- Procedure variables -----
+.
+ACTION    DIM       1                       * Action for PATAA1FD
+ADD       DIM       2                       * Day for PATAA1FD
+ADMLCKFG  FORM      1                       * Admission lock flag
+AMM       DIM       2                       * Month for PATAA1FD
+AYY       DIM       2                       * Year for PATAA1FD
+ACC       DIM       2                       * Century for PATAA1FD
+ATYFLAG   DIM       1                       * Admission type flag
+.EFTADMIN  FORM      8                       * Effective admission number
+.
+CODEBT    INIT      "BT"
+CALDAYS   FORM      5                       * No of days for NHOSPDAY
+CDYSDAYS  FORM      5                       * No of days for CALCDAYS
+CDYSFDTE  DIM       8                       * From date for CALCDAYS
+CDYSTDTE  DIM       8                       * To date for CALCDAYS
+CDYSYEAR  FORM      2                       * Year for CALCDAYS
+.
+.DIM3      DIM       3
+DIM18     DIM       18
+DIM18A    DIM       18
+.
+FORM5     FORM      5
+OPERCODE  DIM       4                       * Operator code for PATAA1FD
+URLCKFG   FORM      1                       * U/R lock flag
+.
+WDATE1    DIM       8                       * To date for NHOSPDAY
+WDATE2    DIM       8                       * From date for NHOSPDAY
++
+.******************************************************************************
+.*                                  CADTP000                                  *
+.*                          Change The Admission Type                         *
+.******************************************************************************
+CADTP000  MOVE      ZERO,NOATYPUP           * No admin type updated flag - no
+          MOVE      ZERO,HLEF
+          CALL      INTAC000                * Initialise variables & open files
+          BRANCH    EXIT,CADTP100
+.
+          CALL      VALID000                * Validate the admin number & type
+          BRANCH    EXIT,CADTP100
+.
+          CALL      WTRNF000                * Write new transfer file
+          BRANCH    EXIT,CADTP100
+.
+          CALL      UTRNF000                * Update the transfer file
+          BRANCH    EXIT,CADTP100
+.
+          CALL      UASTF000                * Update the admission stats file
+          CALL      UADMF000                * Update the admission file
+          CALL      UVSTS000                * Update the visit status
+          MATCH     "PATWEB",PRGID
+          IF        !@EQUAL
+            CALL      USFAF000              * Update the SFA file
+          ENDIF
+          GOTO      CADTP900
+.
+CADTP100  MOVE      ONE,NOATYPUP            * No admin type updated flag - yes
+.
+CADTP900  MOVE      ZERO,EXIT
+CADTP999  GOTO      ENDCADTP
++
+.******************************************************************************
+.*                                  INTAC000              Called by: CADTP000 *
+.*                      Initialise Variables & Open Files                     *
+.******************************************************************************
+INTAC000  OPEN      CONTROLF,"controlf"
+          OPEN      PATASFA1,"patasfaf"
+          OPEN      PATBFEE1,"patbfeef"
+          OPEN      PATCODE1,"patcodes"
+          OPEN      PATDSCH1,"patdschf"
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PATSTAD1,"patstads"
+          OPEN      PATTRAN2,"pattranf"
+          OPEN      PATVADA1,"patvadaf"
+          OPEN      PATVADA2,"patvadaf"
+          OPEN      PATVISA1,"patvisaf"
+          OPEN      PATWR1A1,"patwr1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          READ      CONTROLF,TEN;*201,CAUDA
+          READ      CONTROLF,TEN3;*245,CHOSTYP
+          READ      CONTROLF,TEN9;*212,CFEETYP
+          READ      CONTROLF,TWENTY;*193,PTCNDCLM
+          READ      CONTROLF,EIGHTY;*250,PTCNHDPS
+.         READ      CONTROLF,EIGHTY;*1,HLBMDGUP,HLBMDGUA,HLBMDGMU,HLBMDGUU:
+.                                 *105,HLBMDGAD,HLBMDGDS,HLBMDGTR,HLBMDGRG:
+          IF        CAUDA<>1
+            OPEN      PATAUAA1,"pataa1af"
+          ENDIF
+.
+          MATCH     SP70,PTCNDCLM
+          IF        @EQUAL
+            MOVE      "0  ",PTCNDCLM        * use zero claim code
+          ENDIF     
+.         COMPARE   ZERO,CHOSTYP
+.         GOTO      INTAC100 IF NOT EQUAL   * Public hospital
+.
+          COMPARE   ZERO,CFEETYP
+          GOTO      INTAC200 IF NOT EQUAL   * Not using patbfeef
+.
+          MOVE      ZERO,ADMLCKFG           * Admission lock flag - no
+          MOVE      ZERO,URLCKFG            * U/R lock flag - no
+          GOTO      INTAC900
+.
+INTAC100  DISPLAY   *P1:24,*EL,*B,"Public hospital.  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      INTAC950
+.
+INTAC200  DISPLAY   *P1:24,*EL,*B,"Not using the bed file.  Adm type not ":
+                    "updated.  ";
+          CALL      HITENTER
+          GOTO      INTAC950
+.
+INTAC900  MOVE      ZERO,EXIT
+          GOTO      VALID999
+.
+INTAC950  MOVE      ONE,EXIT
+INTAC999  RETURN
++
+.******************************************************************************
+.*                                  VALID000              Called by: CADTP000 *
+.*             Validate The Admission Number & The Admission Type             *
+.******************************************************************************
+VALID000  MOVE      EFTADMIN,AADMNO
+          PACK      KEY8,AADMNO
+          CALL      RDPTMIS1                * Read & lock the admission file
+          BRANCH    OVRCD,VALID040,VALID080
+.
+          IF        CAUDA<>1
+            CALL      SADAV000              * Save admission audit variables
+          ENDIF
+.
+          PACK      KEY8,AURNO
+          CALL      RDMAST1                 * Read & lock the master file
+          BRANCH    OVRCD,VALID120,VALID160
+.
+          MOVE      AADMNO,PVIBILL
+          PACK      KEY8,PVIBILL
+          CALL      RDVISA1                 * Read the visit file
+          BRANCH    OVRCD,VALID200
+          CALL      RDPMVX11
+          BRANCH    OVRCD,VALID220
+.
+          COMPARE   THREE,PVITYPE
+          GOTO      VALID240 IF NOT EQUAL   * Not an inpatient
+.
+          IF        ASTAT=3
+            PACK      KEY8,AADMNO
+            CALL      RDDSCH1               * Read the discharge file
+            BRANCH    OVRCD,VALID280
+          ENDIF
+.
+          MATCH     SP3,ATYPE
+          GOTO      VALID320 IF EQUAL       * Blank admission type
+.
+          PACK      KEY5,ANSA,SP1,ATYPE
+          CALL      RDCODE1                 * Read the codes file
+          BRANCH    OVRCD,VALID360
+.
+          MATCH     ANSX,TCINDC7
+          GOTO      VALID400 IF EQUAL       * Exculde this admission type from
+.                                             automatic admission type update
+.
+          MATCH     SP3,EFTATYPE
+          GOTO      VALID440 IF EQUAL       * Blank suggested admission type
+.
+          PACK      KEY5,ANSA,SP1,EFTATYPE
+          CALL      RDCODE1                 * Read the codes file
+          BRANCH    OVRCD,VALID480
+.
+          MATCH     EFTATYPE,ATYPE
+          GOTO      VALID520 IF EQUAL       * Same admission type
+.
+          MOVE      ZERO,FORM1
+          MOVE      TCINDC6,FORM1
+.
+          PACK      KEY30,AADMNO,SP30
+          CALL      RDSTRAN2                * Position on & read the transfer
+          CALL      RDKTRAN2                  file
+          BRANCH    OVRCD,VALID560
+.
+          COMPARE   AADMNO,TADMN
+          GOTO      VALID560 IF NOT EQUAL   * Different admission number
+.
+          MATCH     ADATE,EFTDATE
+          GOTO      VALID720 IF LESS        * Effective date < admission date
+.
+          MATCH     ADATE,EFTDATE
+          IF        @EQUAL
+            MATCH     EFTTIME,ATIME
+            GOTO      VALID720 IF NOT LESS  * Admission time >= effective time
+          ENDIF
+.
+          IF        AINVPRT>0
+            MATCH     EFTDATE,ALACDTE
+            GOTO      VALID760 IF NOT LESS  * Last inv date >= effective date
+          ENDIF
+.
+          IF        ASTAT=3
+            MATCH     EFTDATE,DDATE
+            GOTO      VALID800 IF LESS      * Discharge date < effective date
+.
+            MATCH     EFTDATE,DDATE
+            IF        @EQUAL
+              MATCH     DTIME,EFTTIME
+              GOTO      VALID800 IF NOT LESS     * Effective time >= disch time
+            ENDIF
+          ENDIF
+.
+          GOTO      VALID900
+.
+VALID040  DISPLAY   *P1:24,*EL,*B,"Invalid admission number.  Adm type ":
+                    "not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID080  DISPLAY   *P1:24,*EL,*B,"Admission ",*V2LON,AADMNO,*HOFF," busy on ":
+                    "port ",*V2LON,APORT,*HOFF,".  Adm type not updated.  ";
+          CALL      HITENTER
+          MOVE      ONE,ADMLCKFG            * Admission lock flag - yes
+          GOTO      VALID950
+.
+VALID120  DISPLAY   *P1:24,*EL,*B,"Invalid U/R number for adm ":
+                    *V2LON,AADMNO,*HOFF,".  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID160  DISPLAY   *P1:24,*EL,*B,"U/R ",*V2LON,PURNO,*HOFF," busy on ":
+                    "port ",*V2LON,PPORT,*HOFF,".  Adm type not updated.  ";
+          CALL      HITENTER
+          MOVE      ONE,URLCKFG             * U/R lock flag - yes
+          GOTO      VALID950
+.
+VALID200  DISPLAY   *P1:24,*EL,*B,"Invalid visit record for adm ":
+                    *V2LON,AADMNO,*HOFF,".  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID220  DISPLAY   *P1:24,*EL,*B,"Invalid visit extension record for adm ":
+                    *V2LON,AADMNO,*HOFF,".  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID240  DISPLAY   *P1:24,*EL,*B,"Admission ",*V2LON,AADMNO,*HOFF," isnt an ":
+                    "inpatient.  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID280  DISPLAY   *P1:24,*EL,*B,"Invalid discharge record for adm ":
+                    *V2LON,AADMNO,*HOFF,".  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID320  DISPLAY   *P1:24,*EL,*B,"Blank adm type for admission ":
+                    *V2LON,AADMNO,*HOFF,".  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID360  DISPLAY   *P1:24,*EL,*B,"Invalid adm type ",*V2LON,ATYPE,*HOFF:
+                    " for adm ",*V2LON,AADMNO,*HOFF,".  Adm type not ":
+                    "updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID400  MATCH     "DGSRVADT",PRGID
+          IF        !@EQUAL
+            DISPLAY   *P1:23,*EL,*B,"Adm type ",*V2LON,ATYPE,*HOFF," for ":
+                      "admission ",*V2LON,AADMNO,*HOFF," is exlcuded from ":
+                      "auto adm type update.  ";
+            DISPLAY   *P1:24,*EL;
+            CALL      HITENTER
+          ENDIF
+          GOTO      VALID950
+.
+VALID440  DISPLAY   *P1:23,*EL,*B,"Blank suggested adm type for admission ":
+                    *V2LON,AADMNO,*HOFF,".";
+          DISPLAY   *P1:24,*EL,"Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID480  DISPLAY   *P1:23,*EL,*B,"Invalid suggested adm type ":
+                    *V2LON,EFTATYPE,*HOFF," for admission ":
+                    *V2LON,AADMNO,*HOFF,".";
+          DISPLAY   *P1:24,*EL,"Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID520  DISPLAY   *P1:23,*EL,*B,"Suggested adm type same as current ":
+                    "adm type for admission ",*V2LON,AADMNO,*HOFF,".";
+          DISPLAY   *P1:24,*EL,"Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID560  DISPLAY   *P1:24,*EL,*B,"Admission ",*V2LON,AADMNO,*HOFF," missing ":
+                    "transfer file records.  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID720  DISPLAY   *P1:23,*EL,*B,"Admission date > adm type change date ":
+                    "for admission ",*V2LON,AADMNO,*HOFF,".";
+          DISPLAY   *P1:24,*EL,"Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID760  DISPLAY   *P1:23,*EL,*B,"Last invoice date >= adm type change ":
+                    "date for admission ",*V2LON,AADMNO,*HOFF,".";
+          DISPLAY   *P1:24,*EL,"Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID800  DISPLAY   *P1:23,*EL,*B,"Adm type change date > discharge date ":
+                    "for admission ",*V2LON,AADMNO,*HOFF,".";
+          DISPLAY   *P1:24,*EL,"Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      VALID950
+.
+VALID900  MOVE      ZERO,EXIT
+          GOTO      VALID999
+.
+VALID950  MOVE      ONE,EXIT
+VALID999  RETURN
++
+.******************************************************************************
+.*                                  WTRNF000              Called by: CADTP000 *
+.*                           Write New Transfer File                          *
+.******************************************************************************
+WTRNF000  PACK      KEY30,EFTADMIN,EFTDATE,EFTTIME,ZED30
+          CALL      RDSTRAN2                * Position on & read the transfer
+WTRNF100  CALL      RDPTRAN2                  file
+          BRANCH    OVRCD,WTRNF200
+.
+          COMPARE   EFTADMIN,TADMN
+          GOTO      WTRNF200 IF NOT EQUAL   * Different admission number
+.
+          MOVE      EFTDATE,TDATE           * Change date
+          MOVE      EFTTIME,TTIME           * Change time
+          MOVE      "C",TMOVE               * Change record
+          MOVE      EFTATYPE,TATYPE         * Change admission type
+          MOVE      "A",PTTRAUAT            * Auto update of admission type
+          MOVE      PASSCODE,PTTROPER       * operator Id
+          MOVE      SP70,PTTRCUID
+          MOVE      SP70,PTTRLTSC
+          MOVE      ACLAIM,PTTRCLTY
+.
+          PACK      KEY30,TADMN,TDATE,TTIME,TWARD,TBED
+          CALL      RDATRAN2                * Position read on the transfer file
+          COMPARE   ONE,OVRCD
+          GOTO      WTRNF300 IF NOT EQUAL   * Record exists, error
+.
+          PACK      PTTRCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTTRCDAT
+          CLOCK     TIME,PTTRCTIM
+          MOVE      WBSEUID,PTTRUCID
+          UNPACK    SP70,TRCDATE,TRCTIME,PTTRUUID
+.
+          CALL      WRTRAN2                 * Write to the transfer file
+          CALL      UCNTF000                * Update the control file
+          GOTO      WTRNF900
+.
+WTRNF200  DISPLAY   *P1:24,*EL,*B,"Admission ",*V2LON,AADMNO,*HOFF," missing ":
+                    "transfer file records.  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      WTRNF950
+.
+WTRNF300  DISPLAY   *P1:24,*EL,*B,"Duplicate transfer record would be ":
+                    "created.  Adm type not updated.  ";
+          CALL      HITENTER
+          GOTO      WTRNF950
+.
+WTRNF900  MOVE      ZERO,EXIT
+          GOTO      WTRNF999
+.
+WTRNF950  MOVE      ONE,EXIT
+WTRNF999  RETURN
++
+.******************************************************************************
+.*                                  UTRNF000              Called by: CADTP000 *
+.*                          Update The Transfer File                          *
+.******************************************************************************
+UTRNF000  PACK      KEY9,ACLAIM,AFUNDH,SP70
+          CALL      GETCNEFF               * Get Contract Effective From
+.
+          MOVE      ZERO,SBFPAT
+          MOVE      ZERO,SBFHF
+          MOVE      SP3,SBFENDDY
+          PACK      KEY30,EFTADMIN,EFTDATE,SP30
+          CALL      RDSTRAN2                * Position on & read the transfer
+UTRNF100  CALL      RDKTRAN2                  file
+          BRANCH    OVRCD,UTRNF900
+.
+          COMPARE   EFTADMIN,TADMN
+          GOTO      UTRNF900 IF NOT EQUAL   * Different admission number
+.
+.         Check if admission type should be excluded
+.
+          PACK      TCODE,ANSA,SP70
+          PACK      KEY5,TCODE,TATYPE,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,UTRNF100
+          MATCH     ANSX,TCINDC7
+          GOTO      UTRNF100 IF EQUAL       * Exclude this admission type
+.
+          MATCH     ANSD,TMOVE
+          GOTO      UTRNF200 IF EQUAL       * Disch record, use last B/F vars
+.
+          PACK      SAVKEY30,TADMN,TDATE,TTIME,TWARD,TBED
+          MOVE      ZERO,TOTDAY
+          MATCH     ADATE,DDATE
+          IF        !@EQUAL
+            MOVE      ADATE,FROMDATE
+            MOVE      TDATE,TODATE
+            CALL      SPBD0000            * Check for speciality bed type
+            IF        EXIT=1
+              MOVE      SP10,SAVIND6
+              MOVE      TCINDC6,SAVIND6   * get no of days in the specialty bed
+              MOVE      ZERO,FORM1        * calculate beddays for a specialtybed
+              CALL      DBTP0000
+            ELSE
+              CALL      GTRN0000          * Get last date the adm.type changed
+              CALL      NHOSPDAY              * Calculate no of days in hospital
+            ENDIF
+            MOVE      NBRDAYS,TOTDAY
+            ADD       ONE,TOTDAY            * Want inclusive days
+          ENDIF
+.
+          MATCH     ANSY,PTMICMXP
+          GOTO      UTRNF120 IF NOT EQUAL
+          MATCH     SP9,PTMIPDRG          * check if casemix code is blank
+          GOTO      UTRNF120 IF EQUAL
+.
+          MOVE      SAVKEY30,KEY30
+          CALL      RDTRAN2           * Read the transfer file
+          CALL      CMIX0000          * recalculate rate for new bed type
+          MOVE      SAVKEY30,KEY30
+          CALL      RDTRAN2           * Read the transfer file
+          GOTO      UTRNF220
+.
+UTRNF120  ADD       ADYHOSP,TOTDAY          * no of days from admin to transfer
+          MOVE      SAVKEY30,KEY30
+          CALL      RDTRAN2                 * Read the transfer file
+.
+          CALL      GETBF000                * Get the bed fee
+          GOTO      UTRNF250
+.
+.         Discharge record must have same amount as previous trns record
+.
+UTRNF200  MATCH     ANSY,PTMICMXP
+          GOTO      UTRNF250 IF NOT EQUAL
+          MATCH     SP9,PTMIPDRG          * check if casemix code is blank
+          GOTO      UTRNF250 IF EQUAL
+.
+UTRNF220  MOVE      DAYEND,TRBEND
+          MOVE      ADDEND,PTTRAEND         * ending day for additional rate
+          MOVE      DAYPAT,TRATEF
+          MOVE      DAYHF,TRATEH
+          MOVE      ADDPAT,PTTRADPT
+          MOVE      ADDHF,PTTRADRB
+          GOTO      UTRNF300
+.
+UTRNF250  MOVE      SBFPAT,TRATEF           * Patient amount
+          MOVE      SBFHF,TRATEH            * H/F amount
+          MOVE      SBFENDDY,TRBEND         * End of day range for this rate
+.
+UTRNF300  MOVE      EFTATYPE,TATYPE         * Change admission type
+          MOVE      "A",PTTRAUAT            * Auto update of admission type
+          MOVE      PASSCODE,PTTROPER       * operator Id
+          PACK      TRCDATE,CCC,CYY,CMM,CDD
+          REP       " 0",TRCDATE
+          CLOCK     TIME,TRCTIME
+          MOVE      WBSEUID,PTTRUUID
+.
+          CALL      UPTRAN2                 * Update the transfer file
+          CALL      UCNTF000                * Update the control file
+          GOTO      UTRNF100
+.
+UTRNF900  MOVE      ZERO,EXIT
+          GOTO      UTRNF999
+.
+UTRNF950  MOVE      ONE,EXIT
+UTRNF999  RETURN
++
+.******************************************************************************
+.*                                  UASTF000              Called by: CADTP000 *
+.*                         Update Admission Stats File                        *
+.******************************************************************************
+UASTF000  MATCH     ADATE,EFTDATE
+          GOTO      UASTF900 IF NOT EQUAL   * Not the admission date
+.
+. ----- Update admission stats for old admission type if any -----
+.
+          CALL      CWMVU000                * Calc which month var to update
+          PACK      KEY8,SADYEAR,ANSA,ATYPE
+          CALL      RDSTAD1                 * Read the admission stats file
+          BRANCH    OVRCD,UASTF100
+.
+          MOVE      "-1",FORM2
+          LOAD      FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          ADD       FORM2,FORM5
+          STORE     FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          CALL      UPSTAD1                 * Update the admission stats file
+.
+. ----- Add admission stats for new admission type -----
+.
+UASTF100  CALL      CWMVU000                * Calc which month var to update
+          PACK      KEY8,SADYEAR,ANSA,EFTATYPE
+          CALL      RDSTAD1                 * Read the admission stats file
+          BRANCH    OVRCD,UASTF200
+.
+          MOVE      ONE,FORM2
+          LOAD      FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          ADD       FORM2,FORM5
+          STORE     FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          CALL      UPSTAD1                 * Update the admission stats file
+          GOTO      UASTF900
+.
+. ----- Write new admission status record -----
+.
+UASTF200  MOVE      ANSA,SADTYPE
+          MOVE      ATYPE,SADCODE
+          MOVE      ZERO,SADMTH1
+          MOVE      ZERO,SADMTH2
+          MOVE      ZERO,SADMTH3
+          MOVE      ZERO,SADMTH4
+          MOVE      ZERO,SADMTH5
+          MOVE      ZERO,SADMTH6
+          MOVE      ZERO,SADMTH7
+          MOVE      ZERO,SADMTH8
+          MOVE      ZERO,SADMTH9
+          MOVE      ZERO,SADMTH10
+          MOVE      ZERO,SADMTH11
+          MOVE      ZERO,SADMTH12
+          MOVE      ONE,FORM5
+          STORE     FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          CALL      WRSTAD1                 * Write to the admission stats file
+.
+UASTF900  MOVE      ZERO,EXIT
+UASTF999  RETURN
++
+.******************************************************************************
+.*                                  UADMF000              Called by: CADTP000 *
+.*                          Update The Admission File                         *
+.******************************************************************************
+UADMF000  PACK      KEY8,AADMNO
+          CALL      RDPTMIS1                * Read lock the admission file
+.
+          MOVE      EFTATYPE,ATYPE
+          CALL      UPLMISS1                * Update the admission file
+.
+. ----- Update the admission audit file -----
+.
+          IF        CAUDA<>1
+            MOVE      ANSB,ACTION           * Before changes
+            CALL      WRAAUD                * Write to the admission audit file
+            MOVE      ANSC,ACTION           * After changes
+            CALL      SADAV000              * Save admission audit variables
+            CALL      WRAAUD                * Write to the admission audit file
+          ENDIF
+.
+UADMF900  MOVE      ZERO,EXIT
+UADMF999  RETURN
++
+.******************************************************************************
+.*                                  UVSTS000              Called by: CADTP000 *
+.*                           Update The Visit Status                          *
+.******************************************************************************
+UVSTS000  MOVE      ONE,ATYFLAG             * Default to public patient
+          PACK      KEY5,ANSA,SP1,EFTATYPE
+          CALL      RDCODE1                 * Read the codes file
+          IF        OVRCD<>1
+            MATCH     SP1,TCINDC1
+            IF        !@EQUAL
+              MOVE      TCINDC1,ATYFLAG
+            ENDIF
+          ENDIF
+.
+          MOVE      AADMNO,PVIBILL
+          PACK      KEY8,PVIBILL
+          CALL      RDVISA1                 * Read the visit file
+          IF        OVRCD<>1
+            MOVE      TWO,FORM1             * Default public patient
+            MATCH     "1",ATYFLAG
+            IF        !@EQUAL
+              MOVE      ONE,FORM1           * Private patient
+            ENDIF
+            IF        FORM1<>PVISTAT
+              MOVE      FORM1,PVISTAT       * Change visit status
+            ENDIF
+            CALL      UPVISA1               * Update the visit file
+          ENDIF
+.
+UVSTS900  MOVE      ZERO,EXIT
+UVSTS999  RETURN
++
+.******************************************************************************
+.*                                  USFAF000              Called by: CADTP000 *
+.*                             Update The SFA File                            *
+.******************************************************************************
+USFAF000  COMPARE   THREE,PTCNHDPS
+          GOTO      USFAF900 IF NOT EQUAL   * Not using PRS2
+.
+. ----- Get the current admission SFA code -----
+.
+USFAF100  PACK      KEY25,AADMNO,ANSA,SP30
+          CALL      RDPTASF1                * Read an admin SFA file record
+          BRANCH    OVRCD,USFAF200
+.
+          COMPARE   AADMNO,PTAFADMN
+          GOTO      USFAF200 IF NOT EQUAL   * Different admin no
+.
+          MATCH     ANSA,PTAFTYPE
+          GOTO      USFAF300 IF EQUAL       * An admin SFA type
+.
+USFAF200  MOVE      ZERO,PTAFADMN
+          UNPACK    SP30,PTAFTYPE,PTAFDATE,PTAFTIME,PTAFCODE,PTAFCTYP
+          UNPACK    SP30,PTAFCROL,PTAFCSID,PTAFSPAR
+.
+USFAF300  MOVE      ZERO,ASFFLG             * Admin SFA flag - no
+.
+. ----- Keyin the admission SFA code -----
+.
+          MOVE      EFTATYPE,ACODE
+          PACK      TCODE,ANSA,SP1
+          CALL      PATASFKY                * Keyin the admission SFA code
+.
+. ----- Write to the admission SFA file -----
+.
+          COMPARE   ONE,ASFFLG
+          GOTO      USFAF900 IF EQUAL       * SFA stuff not changed
+.
+          MATCH     SP1,PTAFCODE
+          GOTO      USFAF400 IF EQUAL       * Blank SFA code, check old SFA code
+.
+          PACK      KEY5,ANSA,SP1,EFTATYPE
+          CALL      RDCODE1                 * Read the codes file
+          BRANCH    OVRCD,USFAF400
+.
+          MOVE      AADMNO,PTAFADMN
+          MOVE      "A",PTAFTYPE
+          MOVE      SP8,PTAFDATE
+          MOVE      SP8,PTAFTIME
+          MOVE      SP30,PTAFSPAR
+.
+          PACK      KEY25,PTAFADMN,PTAFTYPE,PTAFDATE,PTAFTIME
+          CALL      RAPTASF1                * Read the admission SFA file
+          IF        OVRCD=1
+            CALL      WRPTASF1              * Write to the admission SFA file
+          ELSE
+            CALL      UPPTASF1              * Update the admission SFA file
+          ENDIF
+          GOTO      USFAF900
+.
+USFAF400  PACK      KEY25,AADMNO,ANSA,SP30
+          CALL      RDPTASF1                * Read an admin SFA file record
+          COMPARE   ONE,OVRCD
+          CALL      DEPTASF1 IF NOT EQUAL   * Delete an admin SFA file record
+.
+USFAF900  MOVE      ZERO,EXIT
+USFAF999  RETURN
++
+.******************************************************************************
+.*                                  SADAV000              Called by: VALID000 *
+.*                      Save Admission Audit Variables             & UADMF000 *
+.******************************************************************************
+SADAV000  MOVE      AADMNO,SAADMNO
+          MOVE      AURNO,SAURNO
+          MOVE      ADATE,SADATE
+          MOVE      ATIME,SATIME
+          MOVE      AWARD,SAWARD
+          MOVE      ABED,SABED
+.
+          MOVE      ARDRNAM,SARDRNAM
+          MOVE      ADOCTR,SADOCTR
+          MOVE      ADOCTA,SADOCTA
+          MOVE      ACLAIM,SACLAIM
+.
+          MOVE      ASRCE,SASRCE
+          MOVE      ATYPE,SATYPE
+          MOVE      ACLSS,SACLSS
+          MOVE      ACARE,SACARE
+.
+          MOVE      AFUNDH,SAFUNDH
+          MOVE      AFNDTB,SAFNDTB
+          MOVE      AFNDMM,SAFNDMM
+.
+          MOVE      AVISIT,SAVISIT
+          MOVE      AALERG,SAALERG
+          MOVE      ADISC,SADISC
+          MOVE      AALLOW,SAALLOW
+.
+          MOVE      AILLN,SAILLN
+          MOVE      ASTAY,SASTAY
+.
+          MOVE      ADIET,SADIET
+          MOVE      ADOCTT,SADOCTT
+          MOVE      AUSR1,SAUSR1
+          MOVE      AUSR2,SAUSR2
+          MOVE      AUSR3,SAUSR3
+          MOVE      AUSR4,SAUSR4
+          MOVE      AUSR5,SAUSR5
+          MOVE      ACLSSFT,SACLSSFT
+          MOVE      AMEMB,SAMEMB
+          MOVE      AMEMBNO,SAMEMBNO
+          MOVE      ADYHOSP,SADYHOSP
+          MOVE      AMBS,SAMBS
+.
+SADAV900  MOVE      ZERO,EXIT
+SADAV999  RETURN
++
+.******************************************************************************
+.*                                  GETBF000              Called by: UTRNF000 *
+.*                               Get The Bed Fee                              *
+.******************************************************************************
+GETBF000  MOVE      TDATE,DIM8
+          MOVE      TOTDAY,TOTDAYS
+          MOVE      TATYPE,ATYPE
+.
+          COMPARE   NINE,CFEETYP
+          GOTO      GETBF100 IF EQUAL         * Johns Hopkins
+.
+          COMPARE   THREE,CNTRCEFR
+          GOTO      GETBF700 IF EQUAL       * Invalid Contract Eff.details
+          MOVE      TDATE,CEFFDATE
+          LOAD      CEFFDATE,CNTRCEFR,ADATE,DDATE
+.
+.         If Contract Effective From is 'For Discharges From', Discharged date
+.         is blank and TCINDC19=D, default Effective date to Current date
+.
+          IF        CNTRCEFR=2
+            PACK      DDATE,DDATE,SP70
+            MATCH     SP70,DDATE
+            IF        @EQUAL
+              PACK      KEY5,CODECL,ACLAIM
+              CALL      RDCODE1
+              IF        OVRCD=0
+                MATCH     "D",TCINDC19
+                IF        @EQUAL
+                  PACK      CEFFDATE,CCC,CYY,CMM,CDD,SP70
+                  REP       " 0",CEFFDATE
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+.
+GETBF100  PACK      KEY27,ACLAIM,AFUNDH,AFNDTB,ATYPE,TRBTYP,SP70
+          CALL      GETBFEES
+          COMPARE   ZERO,EXIT
+          GOTO      GETBF999 IF EQUAL
+.
+          UNPACK    KEY27,DIM3,DIM6,KEY3,DIM3A,DIM3B
+          CLEAR     WARNINGL
+          APPEND    "Warning:Default BedFee Not SetUp. CL[",WARNINGL
+          APPEND    DIM3,WARNINGL
+          APPEND    "] H/F[",WARNINGL
+          APPEND    DIM6,WARNINGL
+          APPEND    "/",WARNINGL
+          APPEND    KEY3,WARNINGL
+          APPEND    "] A[",WARNINGL
+          APPEND    DIM3A,WARNINGL
+          APPEND    "] BT[",WARNINGL
+          APPEND    DIM3B,WARNINGL
+          APPEND    "]",WARNINGL
+          RESET     WARNINGL
+          CALL      ADDWRN00    * Add Warning
+          GOTO      GETBF999
+.
+GETBF700  CLEAR     WARNINGL
+          APPEND    "Warning:BedFee Not SetUp. ",WARNINGL
+          APPEND    "Contract Effective Detail not Found.",WARNINGL
+          RESET     WARNINGL
+          CALL      ADDWRN00    * Add Warning
+          GOTO      GETBF999
+.
+GETBF999  RETURN
++
+.******************************************************************************
+.*                                  UCNTF000              Called by: WTRNF000 *
+.*                           Update The Control File               & UTRNF000 *
+.******************************************************************************
+UCNTF000  READ      CONTROLF,EIGHTY8;*148,CFRDTE
+          MATCH     CFRDTE,TDATE
+          IF        @LESS
+            MOVE      TDATE,CFRDTE
+            WRITAB    CONTROLF,EIGHTY8;*148,CFRDTE
+          ENDIF
+.
+          READ      CONTROLF,EIGHTY8;*154,CMMHDT
+          MATCH     CMMHDT,TDATE
+          IF        @LESS
+            MOVE      TDATE,CMMHDT
+            WRITAB    CONTROLF,EIGHTY8;*154,CMMHDT
+          ENDIF
+.
+UCNTF900  MOVE      ZERO,EXIT
+UCNTF999  RETURN
++
+.******************************************************************************
+.*                                  CWMVU000              Called by: UASTF000 *
+.*                  Calculate Which Month Variable To Update                  *
+.******************************************************************************
+CWMVU000  UNPACK    ADATE,XCENT,XYEAR,XMON,XDAY
+          OPEN      PATDRGA2,"patdrgaf"
+          CALL      PATSTRYR                     * get start of year date
+          BRANCH    EXIT,CWMVU000                * not set up in patdrgaf
+.                                                  loop until user fixes
+          UNPACK    CSTRTYR,CCENT,CYEAR,CMON,CDAY
+          MOVE      XYEAR,SADYEAR
+.
+. ----- Get the correct year -----
+.
+          MATCH     CMON,XMON
+          IF        @LESS
+            MOVE      SADYEAR,IYEAR
+            COMPARE   ZERO,IYEAR
+            IF        @EQUAL
+              MOVE      "99",SADYEAR
+            ELSE
+              SUB       ONE,IYEAR
+              MOVE      IYEAR,SADYEAR
+            ENDIF
+          ENDIF
+.
+. ----- Get the correct month -----
+.
+          MOVE      XMON,IMON
+          MOVE      CMON,FORM2
+          SUB       FORM2,IMON
+          ADD       ONE,IMON
+          COMPARE   ONE,IMON
+          IF        @LESS
+            ADD       TEN2,IMON
+          ENDIF
+.
+CWMVU900  MOVE      ZERO,EXIT
+CWMVU999  RETURN
++
+.==============================================================================
+.         SPBD0000 - Check for speciality bed type
+.==============================================================================
+SPBD0000  MOVE      ZERO,EXIT
+.
+          MATCH     ANSY,PTMICMXP                * casemix patient ?
+          GOTO      SPBD9999 IF EQUAL            * yes - finish
+          MATCH     SP9,CMDRG                    * drg entered ?
+          GOTO      SPBD9999 IF NOT EQUAL        * yes - casemix
+.
+          PACK      KEY6,TWARD,TBED
+          CALL      RDWARD1
+          BRANCH    OVRCD,SPBD9999
+.
+          MATCH     SP3,WEFRBT
+          GOTO      SPBD9999 IF EQUAL            * blank bed type
+          PACK      KEY5,ANSB,ANST,WEFRBT
+          CALL      RDCODE1
+          BRANCH    OVRCD,SPBD9999               * invalid bed type
+.
+          REP       " 0",TCINDC6
+          MOVE      ZERO,FORM1
+          MOVE      TCINDC6,FORM1                * check for specialty bedtype
+          COMPARE   ZERO,FORM1
+          GOTO      SPBD9999 IF EQUAL            * normal bed type
+          MOVE      ONE,EXIT
+.
+SPBD9999  RETURN
++
+.==============================================================================
+.         DBTP0000 - Calculate no of bed days for the specialty bed type
+.==============================================================================
+DBTP0000 MOVE       SP10,WDATE1             * initialise the start date
+         MOVE       SP10,WDATE2             * initialise the end date
+         MOVE       ZERO,NBRDAYS
+.
+         COMPARE    THREE,ASTAT             * discharged ?
+         GOTO       DBTP1000 IF NOT EQUAL   * no.
+.
+         MATCH      ADATE,DDATE             * day case patient ?
+         GOTO       DBTP1000 IF NOT EQUAL   * no.
+.
+         PACK       KEY30,AADMNO,Z70
+         CALL       RDSTRAN2
+         CALL       RDPTRAN2
+         BRANCH     OVRCD,DBTP9999
+         COMPARE    TADMN,AADMNO            * same admission ?
+         GOTO       DBTP9999 IF NOT EQUAL   * No.
+.
+         IF         FORM1=1
+           MATCH      SAVBTYP,TRBTYP
+           GOTO       DBTP9999 IF NOT EQUAL
+         ELSE
+           PACK       KEY5,ANSB,ANST,TRBTYP
+           CALL       RDCODE1
+           BRANCH     OVRCD,DBTP9999
+           MATCH      SAVIND6,TCINDC6         * same bed type indicator ?
+           GOTO       DBTP9999 IF NOT EQUAL
+         ENDIF
+.
+         MATCH      ADATE,TODATE
+         GOTO       DBTP9999 IF LESS
+.
+         MOVE       ONE,NBRDAYS             * no of bed days is one for daycase
+         GOTO       DBTP9999
+.
+DBTP1000 PACK       KEY30,AADMNO,SP20,SP10
+         CALL       RDSTRAN2
+DBTP1200 CALL       RDKTRAN2
+         BRANCH     OVRCD,DBTP4000
+.
+         COMPARE    TADMN,AADMNO            * same admission ?
+         GOTO       DBTP4000 IF NOT EQUAL
+.
+         REP        " 0",TDATE
+         MOVE       TDATE,STDATE
+         MATCH      ANSA,TMOVE              * Admission record ?
+         GOTO       DBTP2000 IF EQUAL
+.
+         MATCH      ANSR,TMOVE              * Return record ?
+         GOTO       DBTP2000 IF EQUAL
+.
+         CMATCH     ANSC,TMOVE              * Change record ?
+         GOTO       DBTP2200 IF EQUAL
+         GOTO       DBTP3000
+.
+.        Admission/Return record
+.
+DBTP2000 
+         MATCH      TDATE,TODATE
+         GOTO       DBTP9999 IF LESS
+         PACK       KEY5,ANSB,ANST,TRBTYP
+         CALL       RDCODE1
+         BRANCH     OVRCD,DBTP1200
+         IF         FORM1=1
+           MATCH      SAVBTYP,TRBTYP          * same bed type ?
+           GOTO       DBTP1200 IF NOT EQUAL
+         ELSE
+           MATCH      SAVIND6,TCINDC6         * same bed type indicator ?
+           GOTO       DBTP1200 IF NOT EQUAL
+         ENDIF
+         MOVE       TDATE,WDATE1            * set from date
+         GOTO       DBTP1200                * get next trans record
+.
+.        Change
+.
+DBTP2200 
+         MATCH      TDATE,TODATE
+         IF         @LESS
+           MATCH      SP6,WDATE1              * Check with the fromdate
+           GOTO       DBTP9999 IF EQUAL
+           MOVE       TODATE,WDATE2           * set to date
+           CALL       SBDY0000                * Calculate bed days
+           GOTO       DBTP9999
+         ENDIF
+.
+         PACK       KEY5,ANSB,ANST,TRBTYP
+         CALL       RDCODE1
+         BRANCH     OVRCD,DBTP2400
+         IF         FORM1=1
+           MATCH      SAVBTYP,TRBTYP
+           GOTO       DBTP2400 IF NOT EQUAL
+         ELSE
+           MATCH      SAVIND6,TCINDC6      * check if it's the selected bedtype
+           GOTO       DBTP2400 IF NOT EQUAL
+         ENDIF
+.
+.        Change to the selected bed type
+.
+         MATCH      SP8,WDATE1            * check if it was a real change of
+         GOTO       DBTP1200 IF NOT EQUAL   * bed type
+.
+         MOVE       TDATE,WDATE1          * set fromdate of the change bedtype
+         GOTO       DBTP1200
+.
+.        Change to a different bed type, check if it was from selected bedtype
+.
+DBTP2400 MATCH      SP8,WDATE1           
+         GOTO       DBTP1200 IF EQUAL
+.
+         MOVE       TDATE,WDATE2
+         CALL       SBDY0000                * Calculate bed days
+         GOTO       DBTP1200                * get next trans record
+.
+.        Discharge/Leave record always on the same bed type as previous record
+.
+DBTP3000 MATCH      SP8,WDATE1
+         GOTO       DBTP3200 IF EQUAL       * Was not on selected bed type
+.
+         MATCH      TDATE,TODATE
+         IF         @LESS
+           MOVE       TODATE,WDATE2         * set to end date
+         ELSE
+           MOVE       TDATE,WDATE2          * Set to date
+         ENDIF
+         REP        " 0",WDATE2
+         CALL       SBDY0000                * Calculate bed days
+.
+DBTP3200 CMATCH     "D",TMOVE
+         GOTO       DBTP1200 IF NOT EQUAL   * get next record
+         GOTO       DBTP9999
+.
+.        check the last record
+.
+DBTP4000 MATCH      SP8,WDATE1
+         GOTO       DBTP9999 IF EQUAL       * Was not on selected bed type
+.
+         MOVE       TODATE,WDATE2
+         REP        " 0",WDATE2
+         CALL       SBDY0000                * Calculate bed days
+         GOTO       DBTP9999
+.
+DBTP9999 RETURN
++
+.******************************************************************************
+.        SBDY0000 - Calculate dates difference
+.******************************************************************************
+SBDY0000 PACK       CDYSFDTE,WDATE1
+         PACK       CDYSTDTE,WDATE2
+         CALL       CALCDAYS
+         MOVE       CDYSDAYS,CALDAYS
+         SUB        ONE,CALDAYS
+         ADD        CALDAYS,NBRDAYS
+         MOVE       SP10,WDATE1
+         MOVE       SP10,WDATE2
+SBDY9999 RETURN
++
+.==============================================================================
+.         Get the last date change of admission type 
+.==============================================================================
+GTRN0000  MATCH     ANSY,PTMICMXP
+          GOTO      GTRN9999 IF EQUAL
+          MATCH     SP9,PTMIPDRG          * check if casemix code is blank
+          GOTO      GTRN9999 IF NOT EQUAL
+.
+          MOVE      ADATE,FROMDATE
+          MOVE      ADATE,DIM8
+          PACK      KEY30 WITH AADMNO,EFTDATE,ZED30
+          CALL      RDSTRAN2
+GTRN1000  CALL      RDPTRAN2
+          BRANCH    OVRCD OF GTRN9999
+.
+          COMPARE   TADMN,AADMNO            * same admission number ?
+          GOTO      GTRN9999 IF NOT EQUAL   * no
+.
+          MATCH     EFTATYPE,TATYPE            * check if adm type changed ?
+          GOTO      GTRN2000 IF EQUAL       * no
+          MOVE      DIM8,FROMDATE          * date adm type changed ?
+          GOTO      GTRN9999
+.
+GTRN2000  MOVE      TDATE,DIM8
+          GOTO      GTRN1000
+.
+GTRN9999  RETURN
++
+.==============================================================================
+.       Calculate the casemix funding rates
+.==============================================================================
+CMIX0000  MOVE      NBRDAYS,BDAYS     * set the bed days
+          MOVE      ZERO,ADMFLAG            * set No to admission flag
+          MOVE      ZERO,LOWFLAG            * to use high outliers
+          MOVE      ZERO,MSGFLAG            * display error message
+          PACK      CMDRG,PTMIPDRG,SP20     * Use provisional DRG
+          CALL      PATGNCMX                * generate casemix funding rates
+CMIX9999  RETURN
+.==============================================================================
+.
+.     This include will generate casemix funding rates if the patient is to be 
+.     funded by casemix funding.
+.
+PATGNCMX  MOVE      ZERO,DAYPAT
+          MOVE      ZERO,DAYHF
+          MOVE      ZERO,ADDPAT
+          MOVE      ZERO,ADDHF
+          MOVE      ZERO,LUMPAT
+          MOVE      ZERO,LUMHF
+          MOVE      ZERO,DAYEND
+          MOVE      ZERO,ADDEND
+          MOVE      SP70,CASMXKEY
+          PACK      SAVDES1,SP20,SP20
+          PACK      SAVDES2,SP20,SP20
+          MOVE      ZERO,NOFEE
+          MOVE      ZERO,DAYCOL             * column no for daily charge
+          MOVE      ZERO,ADDCOL             * Column no for additional charge
+.
+          MOVE      SP10,PTHFBCAT           * Initialise table type
+          MATCH     SP6,AFUNDH
+          IF        !@EQUAL
+            OPEN      PATFN1A1,"patfn1af"
+            PACK      KEY14,AFUNDH,AFNDTB
+            CALL      RDFUND1                 * read health fund file 
+          ENDIF
+.
+          PACK      KEY5,CODEBT,SAVBTYP
+          CALL      RDCODE1
+.         MOVE      TDESC,DANS7
+.
+.         Generate casemix funding rates
+.
+          IF        ASTAT=3
+            MOVE      ZERO,EXIT
+            MATCH     ADATE,DDATE
+            GOTO      CSMX2000 IF NOT EQUAL
+            CALL      DCAS0000
+            GOTO      CSMX9999
+          ENDIF
+.         MOVE      ONE,EXIT                * Set flag to daycse
+.
+.CSMX2000  IF        EPSFLAG=3
+.            CALL      DCAS0000              * generate day case rates
+.          ELSE
+.            CALL      IPAT0000              * generate overnight rates
+.          ENDIF
+.
+CSMX2000  CALL      IPAT0000       
+. 
+CSMX9999  RETURN
++
+.*******************************************************************************
+.         DCAS0000 - Generate rates for Day cases
+.*******************************************************************************
+.         Lumpsum amount for day case - only for admission program
+.
+DCAS0000  MOVE      ZERO,FORM2
+          IF        AINVPRT = 0
+            CALL      LUMD0000              * generate lumpsum for daycase
+            BRANCH    NOFEE,DCAS9999
+            ADD       NOFEE,FORM2
+          ENDIF
+.
+.         Additional charge for day case
+.
+          CALL      GADD0000                * generate addition charge
+          ADD       NOFEE,FORM2
+.
+.         Check if any of rates was setup
+.
+          MOVE      ZERO,NOFEE
+          IF        FORM2 = 2 
+            MOVE      ONE,NOFEE
+            BRANCH    MSGFLAG,DCAS9999        * no error message
+            DISPLAY   *P1:22,*B,*EL,*V2LON,"Sameday ",*HOFF:
+                      "Rates not Setup for: ":
+                      *P1:23,"Claim Code : ",*V2LON,ACLAIM,*HOFF:
+                      "Health Fund: ",*V2LON,AFUNDH,*HOFF,"Table: ":
+                      *V2LON,PTHFBCAT:
+                      *HOFF,"Casemix Code: ",*V2LON,CMDRG,*P1:24;
+            CALL      HITENTER
+          ENDIF
+.
+DCAS9999  RETURN
++
+.*******************************************************************************
+.         LUMD0000 - Generate lumpsum for daycase
+.*******************************************************************************
+LUMD0000  MOVE      SP70,CASMXKEY
+          MOVE      ZERO,NOFEE
+          OPEN      PATLSDA1,"patlsdaf"   * open Day case file
+          PACK      KEY27,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG  
+          CALL      RDPTLSD1
+          IF        OVRCD = 1
+            PACK      KEY27,CONTRCID,ACLAIM,SP6,SP3,CMDRG  
+            CALL      RDPTLSD1
+            IF        OVRCD = 1
+              CALL      DCLM0000
+              PACK      KEY27,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG
+              CALL      RDPTLSD1
+              BRANCH    OVRCD,LUMD9000        * no lumpsum charge
+            ENDIF
+          ENDIF
+.
+          MOVE      KEY27,CASMXKEY
+          ADD       PTLSLREB,LUMHF
+          ADD       PTLSLPAT,LUMPAT
+          GOTO      LUMD9999
+.
+LUMD9000  MOVE      ONE,NOFEE
+LUMD9999  RETURN
++
+.*******************************************************************************
+.         GADD0000 - Generate additional charge for sameday
+.*******************************************************************************
+GADD0000  MOVE      ZERO,NOFEE
+          OPEN      PATASDA1,"patasdaf"   * open additional charge file
+          PACK      KEY30,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG,SAVBTYP
+          PACK      CASMXKEY,CASMXKEY,SP70
+          MATCH     SP70,CASMXKEY
+          IF        !@EQUAL
+            PACK      KEY30,CASMXKEY,CMDRG,SAVBTYP
+          ENDIF
+          CALL      RDPTASD1
+          IF        OVRCD = 1
+            MATCH     SP70,CASMXKEY
+            GOTO      GADD9000 IF NOT EQUAL
+.
+            PACK      KEY30,CONTRCID,ACLAIM,SP6,SP3,CMDRG,SAVBTYP
+            CALL      RDPTASD1
+            IF        OVRCD = 1
+              CALL      DCLM0000
+              PACK      KEY30,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG,SAVBTYP
+              CALL      RDPTASD1
+              BRANCH    OVRCD,GADD9000        * no additional charge
+            ENDIF
+          ENDIF
+.
+          MOVE      PTADDES1,SAVDES2
+.
+          ADD       PTADDREB,ADDHF
+          ADD       PTADDPAT,ADDPAT
+          GOTO      GADD9999
+.
+GADD9000  MOVE      ONE,NOFEE
+GADD9999  RETURN
++
+.*******************************************************************************
+.         IPAT0000 - Generate rates for Overnight
+.*******************************************************************************
+.         Lumpsum amount for overnight
+.
+IPAT0000  MOVE      ZERO,FORM2
+          IF        AINVPRT = 0
+            CALL      VLUM0000              * generate overnight lumpsum
+            BRANCH    NOFEE,IPAT9999
+            ADD       NOFEE,FORM2
+          ENDIF
+.
+          COMPARE     THREE,ASTAT
+          GOTO        IPAT2000 IF NOT EQUAL * not discharged, use highoutliers
+.
+.         Low or high outliers ?
+.
+          COMPARE     ONE,LOWFLAG           * Low outliers ?
+          GOTO        IPAT2000 IF NOT EQUAL * No, High outliers
+.
+.         Low outliers - don't have lumpsum
+.
+          MOVE      ZERO,LUMHF
+          MOVE      ZERO,LUMPAT
+.
+.         Daily fee for low outliers
+.
+          CALL      LOWC0000              * generate daily fee for lowoutliers
+          ADD       NOFEE,FORM2
+          GOTO      IPAT3000
+.
+.         Lumpsum fee for Inlier/high outliers
+.
+IPAT2000  MOVE      PTHLLREB,LUMHF
+          MOVE      PTHLLPAT,LUMPAT
+.
+.         Daily fee for outliers
+.
+          CALL      IHGH0000              * generate daily fee for outliers
+          ADD       NOFEE,FORM2
+.
+.         Additional fee for overnight
+.
+IPAT3000  CALL      VADD0000              * generate overnight additional fee
+          ADD       NOFEE,FORM2
+.
+.         Check if any of rates was setup
+.
+          MOVE      ZERO,NOFEE
+          IF        FORM2 = 3
+            MOVE      ONE,NOFEE
+            BRANCH    MSGFLAG,IPAT9999        * no error message
+            DISPLAY   *P1:22,*B,*EL,*V2LON,"Overnight ",*HOFF:
+                      "Rates not Setup for: ":
+                      *P1:23,"Claim Code : ",*V2LON,ACLAIM,*HOFF:
+                      "Health Fund: ",*V2LON,AFUNDH,*HOFF,"Table: ":
+                      *V2LON,PTHFBCAT:
+                      *HOFF,"Casemix Code: ",*V2LON,CMDRG,*P1:24,*EL;
+            CALL      HITENTER
+            DISPLAY   *P1:22,*EF;
+          ENDIF
+.
+IPAT9999  RETURN
++
+.*******************************************************************************
+.         VLUM0000 - Overnight lumpsum
+.*******************************************************************************
+VLUM0000  MOVE      ZERO,NOFEE
+          MOVE      SP70,CASMXKEY
+          MOVE      ZERO,PTHLLREB
+          MOVE      ZERO,PTHLLPAT
+          OPEN      PATHLFA1,"pathlfaf"
+          PACK      KEY27,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG
+          CALL      RDPTHLF1
+          IF        OVRCD = 1
+            PACK      KEY27,CONTRCID,ACLAIM,SP6,SP3,CMDRG
+            CALL      RDPTHLF1
+            IF        OVRCD = 1
+             CALL      DCLM0000
+             PACK      KEY27,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG
+             CALL      RDPTHLF1
+              BRANCH    OVRCD,VLUM9000        * no lumpsum charges
+            ENDIF
+          ENDIF
+          MOVE      KEY27,CASMXKEY
+          GOTO      VLUM9999
+.
+VLUM9000  MOVE      ONE,NOFEE
+VLUM9999  RETURN
++
+.*******************************************************************************
+.         IHGH0000 - Generate daily fee for inliers/high outliers
+.*******************************************************************************
+IHGH0000  MOVE      ZERO,NOFEE
+          OPEN      PATHDFA1,"pathdfaf"
+          PACK      SDIM27,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG
+          PACK      CASMXKEY,CASMXKEY,SP70
+          MATCH     SP70,CASMXKEY
+          IF        !@EQUAL
+            PACK      SDIM27,CASMXKEY,CMDRG
+          ENDIF
+.
+          MOVE      ZERO,FORM1
+IHGH2000  PACK      KEY31,SDIM27,SP10
+          CALL      RSPTHDF1
+IHGH3000  CALL      RKPTHDF1
+          BRANCH    OVRCD,IHGH4000
+          PACK      DIM27,PTHDCNID,PTHDCLMN,PTHDHFND,PTHDTABT,PTHDCASM
+          MATCH     DIM27,SDIM27
+          GOTO      IHGH7000 IF EQUAL
+.
+IHGH4000  MATCH     SP70,CASMXKEY
+          GOTO      IHGH4200 IF NOT EQUAL
+          ADD       ONE,FORM1
+          BRANCH    FORM1,IHGH5000,IHGH6000
+IHGH4200  MOVE      ONE,NOFEE               * No fee setup
+          GOTO      IHGH9999
+.
+IHGH5000  PACK      SDIM27,CONTRCID,ACLAIM,SP6,SP3,CMDRG
+          GOTO      IHGH2000
+.
+IHGH6000  CALL      DCLM0000
+          PACK      SDIM27,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG
+          GOTO      IHGH2000
+.
+IHGH7000  ADD       ONE,DAYCOL            * Add one to no of column
+          BRANCH    ADMFLAG,IHGH8000      * Adm.program use the first column
+.
+          COMPARE   BDAYS,PTHDEDAY        * Check the bed days against the
+          GOTO      IHGH3000 IF LESS      * ending day
+.
+IHGH8000  MOVE      PTHDDES1,SAVDES1
+          MOVE      PTHDDES2,SAVDES2
+.
+          ADD       PTHDDREB,DAYHF
+          ADD       PTHDDPAT,DAYPAT
+          MOVE      PTHDEDAY,DAYEND       * ending day of daily charge
+.
+IHGH9999  RETURN
++
+.*******************************************************************************
+.           LOWC0000 - Generate daily charge for low outliers
+.*******************************************************************************
+LOWC0000  MOVE      ZERO,NOFEE
+          OPEN      PATLDFA1,"patldfaf"
+          PACK      SDIM27,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG
+          PACK      CASMXKEY,CASMXKEY,SP70
+          MATCH     SP70,CASMXKEY
+          IF        !@EQUAL
+            PACK      SDIM27,CASMXKEY,CMDRG
+          ENDIF
+.
+          MOVE      ZERO,FORM1
+LOWC2000  PACK      KEY31,SDIM27,SP10
+          CALL      RSPTLDF1
+LOWC3000  CALL      RKPTLDF1
+          BRANCH    OVRCD,LOWC4000
+          PACK      DIM27,PTLDCNID,PTLDCLMN,PTLDHFND,PTLDTABT,PTLDCASM
+          MATCH     DIM27,SDIM27
+          GOTO      LOWC7000 IF EQUAL
+.
+LOWC4000  MATCH     SP70,CASMXKEY
+          GOTO      LOWC4200 IF NOT EQUAL
+          ADD       ONE,FORM1
+          BRANCH    FORM1,LOWC5000,LOWC6000
+LOWC4200  MOVE      ONE,NOFEE               * No fee setup
+          GOTO      LOWC9999
+.
+LOWC5000  PACK      SDIM27,CONTRCID,ACLAIM,SP6,SP3,CMDRG
+          GOTO      LOWC2000
+.
+LOWC6000  CALL      DCLM0000
+          PACK      SDIM27,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG
+          GOTO      LOWC2000
+.
+LOWC7000  ADD       ONE,DAYCOL            * Add one to no of column
+          COMPARE   BDAYS,PTLDEDAY        * check the bed days against endingday
+          GOTO      LOWC3000 IF LESS      * get next rate
+.
+          MOVE      PTLDDREB,DAYHF
+          MOVE      PTLDDPAT,DAYPAT
+          MOVE      PTLDEDAY,DAYEND       * ending day of daily charge
+          MOVE      PTLDDES1,SAVDES1
+          MOVE      PTLDDES2,SAVDES2
+.
+LOWC9999  RETURN
++
+.*******************************************************************************
+.           VADD0000 - Generate additional charge for overnight
+.*******************************************************************************
+VADD0000  MOVE      ZERO,NOFEE
+          MOVE      TRBTYP,SAVBTYP
+          MOVE      SAVBTYP,STRBTYP
+          MOVE      ONE,FORM1          * Calculate beddays for a bed type
+          CALL      DBTP0000
+          MATCH     ADATE,DDATE
+          IF        !@EQUAL
+            ADD       ONE,NBRDAYS
+          ENDIF
+.
+          OPEN      PATAFEA1,"patafeaf"
+          PACK      SDIM30,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG,SAVBTYP,SP10
+          PACK      CASMXKEY,CASMXKEY,SP70
+          MATCH     SP70,CASMXKEY
+          IF        !@EQUAL
+            PACK      SDIM30,CASMXKEY,CMDRG,SAVBTYP,SP10
+          ENDIF
+.
+          MOVE      ZERO,FORM1
+VADD2000  PACK      KEY34,SDIM30,SP10
+          CALL      RSPTAFE1
+VADD3000  CALL      RKPTAFE1
+          BRANCH    OVRCD,VADD4000        * no additional charge
+.
+          PACK      DIM30,PTFECNID,PTFECLMN,PTFEHFND,PTFETABT,PTFECASM,PTFEBTYP
+          MATCH     DIM30,SDIM30
+          GOTO      VADD7000 IF EQUAL
+.
+VADD4000  MATCH     SP70,CASMXKEY
+          GOTO      VADD4200 IF NOT EQUAL
+          ADD       ONE,FORM1
+          BRANCH    FORM1,VADD5000,VADD6000  * try no hf, try no claim code
+VADD4200  MOVE      ONE,NOFEE               * No fee setup
+          GOTO      VADD9999                 * no addition charge
+.
+.         Try with no health fund
+.
+VADD5000  PACK      SDIM30,CONTRCID,ACLAIM,SP6,SP3,CMDRG,SAVBTYP,SP10
+          GOTO      VADD2000
+.
+.         Try with no claim code
+.
+VADD6000  CALL      DCLM0000
+          PACK      SDIM30,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG,SAVBTYP,SP10
+          GOTO      VADD2000
+.
+.         Get the first column of the rate
+.
+VADD7000  ADD       ONE,ADDCOL            * Add one to no of column
+          BRANCH    ADMFLAG,VADD8000      * Adm.program use the first column
+.
+          COMPARE   NBRDAYS,PTFEEDAY      * Check the bed days against the
+          GOTO      VADD3000 IF LESS      * ending day
+.
+VADD8000  ADD       PTFEDREB,ADDHF
+          ADD       PTFEDPAT,ADDPAT
+          MOVE      PTFEEDAY,ADDEND        * Ending day of additional charge
+VADD9999  RETURN
++
+.==============================================================================
+.
+          INC       IBAOVRIO/INC            * Over flags
+          INC       CALCDAYS                * Calculate diff between 2 dates
+          INC       NHOSPDAY                * Calculate no of days in hospital
+          INC       PATASFKY                * Keyin the admission SFA code
+          INC       PATVADKY                * Keyin a transfer source code
+          INC       GETCNEFF
+          INC       GETBFEES
+.
+          INC       PATCMXIO/INC            * Casemix code file
+          INC       PATAFEIO/INC
+          INC       PATASDIO/INC
+          INC       PATHDFIO/INC
+          INC       PATLDFIO/INC
+          INC       PATHLFIO/INC
+          INC       PATLSDIO/INC
+.
+          INC       PATAA1IO/INC            * Admission audit file
+          INC       PATASFIO/INC            * Admission SFA file
+          INC       PATBFEIO/INC            * Bed fee file
+          INC       PATCODIO/INC            * Codes file
+          INC       PATDSCIO/INC            * Discharge file
+          INC       PATMA1IO/INC            * Master file
+.         INC       HL7BMTIO/INC
+.         INC       HL7BMTMA
+          INC       PATMI1IO/INC            * Admission file
+          INC       PATSFAIO/INC            * SFA file
+          INC       PATSTAIO/INC            * Admission stats file
+          INC       PATVADIO/INC            * Transfer source code file
+          INC       PATTRNIO/INC            * Transfer file
+.         INC       HL7BMTTR
+          INC       PATVISIO/INC            * Visit file
+          INC       PATWR1IO/INC            * Ward/bed file
+.         INC       HL7BMTVI
+.
+ENDCADTP  ENDPROC
++
+.
+

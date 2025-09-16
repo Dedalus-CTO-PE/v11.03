@@ -1,0 +1,137 @@
+create table pmscmtaf
+(
+  pmccccod    char(3) default ' ' not null,
+  pmcchfun    char(6) default ' ' not null,
+  pmcchfty    char(3) default ' ' not null,
+  pmcccmcd    char(9) default ' ' not null,
+  dpmcccnt    char(6) default ' ' not null,
+  pmccpody    decimal(6,0) default 0 not null,
+  pmccnpdy    decimal(6,0) default 0 not null,
+  pmcchbpt    decimal(6,0) default 0 not null,
+  pmccccdy    decimal(6,0) default 0 not null,
+  pmccftdg    decimal(1,0) default 0 not null,
+  pmccddrg    char(4) default ' ' not null,
+  pmccftcm    decimal(1,0) default 0 not null,
+  pmccpcmf    char(9) default ' ' not null,
+  pmccpcmt    char(9) default ' ' not null,
+  pmccftsc    decimal(1,0) default 0 not null,
+  pmccscmf    char(9) default ' ' not null,
+  pmccscmt    char(9) default ' ' not null,
+  pmccfttc    decimal(1,0) default 0 not null,
+  pmcctcmf    char(9) default ' ' not null,
+  pmcctcmt    char(9) default ' ' not null,
+  pmccftds    decimal(1,0) default 0 not null,
+  pmccdsta    char(3) default ' ' not null,
+  pmccdst2    char(3) default ' ' not null,
+  pmccdst3    char(3) default ' ' not null,
+  pmccdst4    char(3) default ' ' not null,
+  pmccdst5    char(3) default ' ' not null,
+  pmccftdd    decimal(1,0) default 0 not null,
+  pmccddes    char(3) default ' ' not null,
+  pmccdde2    char(3) default ' ' not null,
+  pmccdde3    char(3) default ' ' not null,
+  pmccdde4    char(3) default ' ' not null,
+  pmccdde5    char(3) default ' ' not null,
+  pmccftas    decimal(1,0) default 0 not null,
+  pmccasrc    char(3) default ' ' not null,
+  pmccasr2    char(3) default ' ' not null,
+  pmccasr3    char(3) default ' ' not null,
+  pmccasr4    char(3) default ' ' not null,
+  pmccasr5    char(3) default ' ' not null,
+  pmccft1c    decimal(1,0) default 0 not null,
+  pmccpicd    char(9) default ' ' not null,
+  pmccpic2    char(9) default ' ' not null,
+  pmccpic3    char(9) default ' ' not null,
+  pmccpic4    char(9) default ' ' not null,
+  pmccpic5    char(9) default ' ' not null,
+  pmccftat    decimal(1,0) default 0 not null,
+  pmccatyp    char(3) default ' ' not null,
+  pmccaty2    char(3) default ' ' not null,
+  pmccaty3    char(3) default ' ' not null,
+  pmccaty4    char(3) default ' ' not null,
+  pmccaty5    char(3) default ' ' not null,
+  pmccftau    decimal(1,0) default 0 not null,
+  pmccaudf    char(3) default ' ' not null,
+  pmccaud2    char(3) default ' ' not null,
+  pmccaud3    char(3) default ' ' not null,
+  pmccaud4    char(3) default ' ' not null,
+  pmccaud5    char(3) default ' ' not null,
+  pmccftdu    decimal(1,0) default 0 not null,
+  pmccdudf    char(3) default ' ' not null,
+  pmccdud2    char(3) default ' ' not null,
+  pmccdud3    char(3) default ' ' not null,
+  pmccdud4    char(3) default ' ' not null,
+  pmccdud5    char(3) default ' ' not null,
+  pmcctype    char(1) default ' ' not null,
+  pmcccont    char(6) default ' ' not null,
+  pmccmind    decimal(6,0) default 0 not null,
+  pmccicp1    char(9) default ' ' not null,
+  pmccicp2    char(9) default ' ' not null,
+  pmccicp3    char(9) default ' ' not null,
+  pmccicp4    char(9) default ' ' not null,
+  pmccicp5    char(9) default ' ' not null,
+  pmccicpf    decimal(1,0) default 0 not null,
+  pmccfts4    decimal(1,0) default 0 not null,
+  pmccpc4f    char(9) default ' ' not null,
+  pmccpc4t    char(9) default ' ' not null,
+  pmccft5c    decimal(1,0) default 0 not null,
+  pmccsc5f    char(9) default ' ' not null,
+  pmccsc5t    char(9) default ' ' not null,
+  pmccft6c    decimal(1,0) default 0 not null,
+  pmcctc6f    char(9) default ' ' not null,
+  pmcctc6t    char(9) default ' ' not null,
+  pmccspar    char(23) default ' ' not null,
+  lf          char(1)
+);
+create unique index pmscmta1 on pmscmtaf
+(
+pmccccod,
+pmcccont,
+pmcchfun,
+pmcchfty,
+pmcctype,
+pmcccmcd,
+dpmcccnt
+);
+create unique index pmscmta2 on pmscmtaf
+(
+pmcccont,
+pmccccod,
+pmcchfun,
+pmcchfty,
+pmcctype,
+pmcccmcd,
+dpmcccnt
+);
+create unique index pmscmta3 on pmscmtaf
+(
+pmccccod,
+pmcchfun,
+pmcchfty,
+pmcctype,
+dpmcccnt,
+pmcccont,
+pmcccmcd
+);
+create unique index pmscmta4 on pmscmtaf
+(
+pmcccmcd,
+pmccccod,
+pmcchfun,
+pmcchfty,
+pmcctype,
+dpmcccnt,
+pmcccont
+);
+create unique index pmscmta5 on pmscmtaf
+(
+pmcccont,
+pmccccod,
+pmcchfun,
+pmcchfty,
+pmcctype,
+dpmcccnt,
+pmcccmcd
+);
+revoke all on pmscmtaf from public ; 
+grant select on pmscmtaf to public ; 

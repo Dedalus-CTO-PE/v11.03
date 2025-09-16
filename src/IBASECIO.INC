@@ -1,0 +1,83 @@
+.
+.         INCLUDE NAME : IBAIOSEC.PBL
+.
+.         FILE  I/O REQUESTS FOR PROGRAM SECURITY FILE
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY8   DIM             8             KEY FOR IBASECU1
+.KEY16  DIM            16             KEY FOR IBASECU2
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE IBAAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+RDSSECU1 MOVE      ZERO,OVRCD
+         RESET     KEY8
+         READ      IBASECU1,KEY8;;
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSECU1  MOVE      ZERO,OVRCD
+         RESET     KEY8
+         READ      IBASECU1,KEY8;PSECNME,PSECDESC,PSECLEV,PSECPW,PPAPER:
+                                 PSEALIAS,PSECSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDKSECU1 MOVE      ZERO,OVRCD
+         READKS    IBASECU1;PSECNME,PSECDESC,PSECLEV,PSECPW,PPAPER:
+                            PSEALIAS,PSECSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+WRSECU1  RESET     KEY8
+         WRITE     IBASECU1,KEY8;KEY8,PSECDESC,PSECLEV,PSECPW,PPAPER:
+                                 PSEALIAS,PSECSPAR
+         RETURN  
+.
+UPSECU1  UPDATE    IBASECU1;PSECNME,PSECDESC,PSECLEV,PSECPW,PPAPER:
+                            PSEALIAS,PSECSPAR
+         RETURN  
+.
+DESECU1  RESET     KEY8
+         DELETE    IBASECU1,KEY8
+         RETURN  
+.
+.
+.
+RDSSECU2 MOVE      ZERO,OVRCD
+         RESET     KEY16
+         READ      IBASECU2,KEY16;;
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSECU2  MOVE      ZERO,OVRCD
+         RESET     KEY16
+         READ      IBASECU2,KEY16;PSECNME,PSECDESC,PSECLEV,PSECPW,PPAPER:
+                                 PSEALIAS,PSECSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDKSECU2 MOVE      ZERO,OVRCD
+         READKS    IBASECU2;PSECNME,PSECDESC,PSECLEV,PSECPW,PPAPER:
+                            PSEALIAS,PSECSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+WRSECU2  RESET     KEY16
+         WRITE     IBASECU2,KEY16;KEY16,PSECDESC,PSECLEV,PSECPW,PPAPER:
+                                 PSEALIAS,PSECSPAR
+         RETURN  
+.
+UPSECU2  UPDATE    IBASECU2;PSECNME,PSECDESC,PSECLEV,PSECPW,PPAPER:
+                            PSEALIAS,PSECSPAR
+         RETURN  
+.
+DESECU2  RESET     KEY16
+         DELETE    IBASECU2,KEY16
+         RETURN  
+.

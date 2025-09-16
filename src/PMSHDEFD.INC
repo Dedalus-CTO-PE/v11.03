@@ -1,0 +1,128 @@
+. V10.14.01 28/03/2019 JT C-0857392 Created ABF HAC Details table               
+. *----------------------------------------------------------------------
+. * Include Name  :   PMSHDEFD.INC
+. *
+. * Function      :   File Def'n Include for Patient System                     
+. *                   ABF HAC Detail Complexity Table    
+. *
+. * File Type     :   SQL
+. *
+. * File Name     :   pmshdeaf.dat
+. *
+. * Index Values  :   KEY15                                                  
+. *
+. *----------------------------------------------------------------------
+.
+.Data File Definition
+.--------------------
+PMSHDEA1   IFILE    SQL, FIXED=126, KEY="U1-6,7-9,10-12,13-15"
+.
+.Name     Type      Length Physical Start Description
+.----     ----      ------ -------- ----- -----------
+PMHECNTR  DIM       6      6        1     Contract ID                        
+PMHEHACG  DIM       3      3        7     HAC Group 01-16 Cat Ha             
+.                                         01 - Pressure Injury
+.                                         02 - Falls resulting in fracture or
+.                                              other intracranial injury
+.                                         03 - Healthcare associated infection
+.                                         04 - Surgical complications requiring
+.                                              unplanned return to theatre
+.                                         06 - Respiratory complications
+.                                         07 - Venous thromboembolism
+.                                         08 - Renal failure
+.                                         09 - Gastrointestinal bleeding
+.                                         10 - Medication complications
+.                                         11 - Delirium
+.                                         12 - Persistent incontinence
+.                                         13 - Malnutrition
+.                                         14 - Cardiac complications
+PMHEHACT  DIM       3      3        10    HAC Complexity Type                
+.                                         001 - Charlson                       
+.                                         002 - Age                            
+.                                         003 - MDC                            
+PMHEHACF  DIM       3      3        13    HAC Complexity Field               
+.
+.         001 - Charlson - 009 - Charlson Score 1
+.         001 - Charlson - 010 - Charlson Score 2
+.         001 - Charlson - 011 - Charlson Score 3
+.         001 - Charlson - 012 - Charlson Score 4
+.         001 - Charlson - 013 - Charlson Score 5
+.         001 - Charlson - 014 - Charlson Score 6
+.         001 - Charlson - 015 - Charlson Score 7
+.         001 - Charlson - 016 - Charlson Score 8
+.         001 - Charlson - 017 - Charlson Score 9
+.         001 - Charlson - 018 - Charlson Score 10
+.         001 - Charlson - 019 - Charlson Score 11
+.         001 - Charlson - 020 - Charlson Score 12
+.         001 - Charlson - 021 - Charlson Score 13
+.         001 - Charlson - 022 - Charlson Score 14
+.         001 - Charlson - 023 - Charlson Score 15
+.         001 - Charlson - 024 - Charlson Score 16
+.
+.         002 - Age - 025 - Age Range 1 (000-004)
+.         002 - Age - 026 - Age Range 2 (005-009)
+.         002 - Age - 027 - Age Range 3 (010-014)
+.         002 - Age - 028 - Age Range 4 (015-019)
+.         002 - Age - 029 - Age Range 5 (020-024)
+.         002 - Age - 030 - Age Range 6 (025-029)
+.         002 - Age - 031 - Age Range 7 (030-034)
+.         002 - Age - 032 - Age Range 8 (035-039)
+.         002 - Age - 033 - Age Range 9 (040-044)
+.         002 - Age - 034 - Age Range 10 (045-049)
+.         002 - Age - 035 - Age Range 11 (050-054)
+.         002 - Age - 036 - Age Range 12 (055-059)
+.         002 - Age - 037 - Age Range 13 (060-064)
+.         002 - Age - 038 - Age Range 14 (065-069)
+.         002 - Age - 039 - Age Range 15 (070-074)
+.         002 - Age - 040 - Age Range 16 (075-079)
+.         002 - Age - 041 - Age Range 17 (080-084)
+.         002 - Age - 042 - Age Range 18 (085-089)
+.         002 - Age - 043 - Age Range 19 (090-094)
+.         002 - Age - 044 - Age Range 20 (095-099)
+.
+.         003 - MDC - 069 - MDC 00      (Ventilation)
+.         003 - MDC - 045 - MDC 01      (Nervous System)
+.         003 - MDC - 046 - MDC 02      (Eye)
+.         003 - MDC - 047 - MDC 03      (Ear,Nose,Mouth & Throat)
+.         003 - MDC - 048 - MDC 04      (Respiratory System)
+.         003 - MDC - 049 - MDC 05      (Circulatory System)
+.         003 - MDC - 050 - MDC 06      (Digestive System)
+.         003 - MDC - 051 - MDC 07      (Hepatobiliary System & Pancreas)
+.         003 - MDC - 052 - MDC 08      (Musculoskeletal System & Connective
+.                                        Tissue)
+.         003 - MDC - 053 - MDC 09      (Skin,Subcutaneous Tissue & Breast)
+.         003 - MDC - 054 - MDC 10      (Endocrine,Nutritional & Metabolic)
+.         003 - MDC - 055 - MDC 11      (Kidney & Urinary Tract)
+.         003 - MDC - 056 - MDC 12      (Male Reproductive System)
+.         003 - MDC - 057 - MDC 13      (Female Reproductive System)
+.         003 - MDC - 058 - MDC 14      (Pregnancy,Childbirt & the Puerperium)
+.         003 - MDC - 059 - MDC 15      (Newborns & Other Neonates)
+.         003 - MDC - 060 - MDC 16      (Blood,Blood Forming Organs,
+.                                        Immunological Disorder)
+.         003 - MDC - 061 - MDC 17      (Neoplastic Disorders)
+.         003 - MDC - 062 - MDC 18      (Infectious & Parasitic Disease)
+.
+.         003 - MDC - 067 - MDC 19      (Mental Diseases & Disorders)
+.         003 - MDC - 068 - MDC 20      (Alcohol/Drug Use&Induced Organic 
+.                                        Mental Disorder)
+.
+.         003 - MDC - 063 - MDC 21      (Injuries,Poisonings & Toxic Effects
+.                                        of Drugs)
+.         003 - MDC - 064 - MDC 22      (Burns)
+.         003 - MDC - 065 - MDC 23      (Factors Influencing Health Status &
+.                                        Other Contacts with Health Services)
+.         003 - MDC - 070 - MDC 24       Unknown
+.
+.         001 - Charlson - 066 - Charlson Score 0
+.
+PMHECOMV  FORM      10.4   8        16    Complexity Value                   
+PMHECDAT  DIM       8      8        24    Date record created                
+PMHECTIM  DIM       8      8        32    Time record created                
+PMHECUID  DIM       10     10       40    Record created by                  
+PMHEUDAT  DIM       8      8        50    Date record updated                
+PMHEUTIM  DIM       8      8        58    Time record updated                
+PMHEUUID  DIM       10     10       66    Record updated by                  
+PMHESPAR  DIM       50     50       76    Spare variable                     
+.
+.End of Record                      126  
+.

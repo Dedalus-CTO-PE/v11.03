@@ -1,0 +1,917 @@
+.         REBCATBI : 
+.         This include controls the display and printing of Health Fund/Rebate
+.         invoices for Using new Patient Portion Invoice functionality
+.         PTCNPPIN=1  & PREBFLAG=1
+.
+.         MODIFICATIONS:
+.
+.         V11.03.01 12/09/2023  J.Tan          TSK 0935891
+.                   Mod to use KEY70 displaying longer bed fees desc.
+.         V11.01.01 03/05/2021  J.Tan          TSK 0863287
+.                   Mod for Inv.pending details patinpaf (PTCNPPIN=1)
+.         V11.00.01 07/04/2020  J.Tan             TSK 0863287
+.                   Created a new routine for display/print Rebate invoice
+.
+.        IF PROGFLAG = 1  THEN WORK OUT THE AMOUNT TO BE INVOICED
+.
+.        IF PROGFLAG = 2  THEN DISPLAY NEXT INVOICE
+.
+.        IF PROGFLAG = 3  THEN PRINT NEXT INVOICE
+.
+.        IF PROGFLAG = 4  THEN UPDATE PATFINS WITH AMOUNTS TO BE INVOICED
+.
+
+.
+.*******************************************************************************
+
+
+.*******************************************************************************
+.          Rebate invoice
+.*******************************************************************************
+RBINV000  CALL     INVR0000                  * Initialise variables
+.
+          MOVE     AADMNO,KEY8
+          CALL     RDMISS1             * restore admission detail for Casemix
+          BRANCH   OVRCD,RBINV999
+.
+          BRANCH   ASTAT,RBINV999     * Preadmission - no invoice pending
+          COMPARE  FIVE,ASTAT
+          GOTO     RBINV999 IF EQUAL   * Cancel admission - no invoice pending
+.
+          MOVE     ZERO,DCFLAG
+          IF       ASTAT=3
+            MATCH    DDATE,ADATE
+            IF       @EQUAL
+              MOVE     ONE,DCFLAG      * Daycase
+            ENDIF
+          ENDIF
+.
+          MOVE     SP70,PMVXMHOS
+          OPEN     PMSVX1A1,"pmsvx1af"
+          PACK     KEY8,AADMNO
+          CALL     RDPMVX11
+.
+          MOVE     AADMNO,TADMN
+.
+. ----- Check if chargeable theatre fees
+.
+          MOVE      ZERO,CMBSFEE
+          READ      CONTROLF,HUND05;*177,PTCNTFEE       * Using theatre fees
+          PACK      KEY5,CODECL,ACLAIM
+          CALL      RDCODE1
+          IF        OVRCD=0
+            CMATCH    "1",TCINDC1
+            IF        @EQUAL
+              CMATCH    "1",TCINDC2
+              IF        @EQUAL
+                MOVE      ONE,CMBSFEE
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          MOVE      ZERO,WEBFLAG
+          MATCH     "IBARSH",PGM
+          IF        @EQUAL
+            MOVE      ONE,WEBFLAG
+          ENDIF
+          MATCH     "PATWEB71",PRGID
+          IF        @EQUAL
+            MOVE      ONE,WEBFLAG
+          ENDIF
+.
+          UNPACK    SP20,CMCODE,CMDRG
+.
+          MATCH     "IBAHMS70",PRGID
+          IF        !@EQUAL
+            CALL      ICDS0000              * Check for ICD10 Suggested Class.
+          ENDIF
+.
+          MOVE      ZERO,TOTXTRA
+          MOVE      ZERO,SAMTG
+          MOVE      ZERO,TPATAMTG
+          MOVE      ZERO,PARTFLAG
+          MOVE      SP70,BEDDESC
+          MOVE      ZERO,CMXFLAG            * Charge perdiem
+          UNPACK    SP20,CMCODE,CMDRG
+          MOVE      ZERO,MVDAYS
+          MOVE      SP70,CONTRCID
+          MOVE      SP70,SAVCONTR
+          MOVE      SP70,SAVDATE1
+.
+          MOVE      AADMNO,TADMNO
+          OPEN      PATHTRA1,"pathtraf"
+          OPEN      PATINVR1,"patinvrf"
+.
+          BRANCH    DBSFLAG,RBINV400        * Discharge billing
+.
+          PACK      KEY22 WITH AADMNO,SP70
+RBINV100  CALL      RSPTHTR1
+RBINV200  CALL      RKPTHTR1
+          BRANCH    OVRCD,RBINV400
+.
+          MATCH     DAADMNO,PTHTADMN
+          GOTO      RBINV400 IF NOT EQUAL
+.
+          MATCH     SP70,PTHTTREF              * Blank Rebate Invoice no?
+          GOTO      RBINV400 IF NOT EQUAL
+.
+.         Check if the Patient invoice has been credited
+.
+          MOVE      PTHTPINV,KEY8
+          CALL      RDINV1
+          BRANCH    OVRCD,RBINV200
+.
+          MATCH     "1",PTINCRST
+          GOTO      RBINV200 IF EQUAL          * fully credited
+.
+          MOVE      PTHTCNID,CONTRCID
+          MOVE      PTHTCNID,SAVCONTR
+          MOVE      ZERO,LUMPFLAG
+.
+          MATCH     "1",PTHTRECT
+          GOTO      RBINV300 IF NOT EQUAL   * Not Accommodation
+.
+.         Get Casemix code from Patient Invoice for this Rebate invoice
+.
+          MATCH     SP70,PTHTPINV
+          GOTO      RBINV300 IF  EQUAL
+.
+          PACK      KEY8,PTHTPINV
+          CALL      RDINV1
+          IF        OVRCD=0
+            IF        PTINCMIX=1
+              MOVE      ONE,CMXFLAG
+              MOVE      PTINCMCD,CMCODE         * Casemix code
+              MOVE      PTINCMCD,CMDRG          * Casemix code
+              MOVE      PTINMVDY,MVDAYS         * Mech.Vent.Billing Days
+            ENDIF
+          ENDIF
+.
+RBINV300  MOVE      PTHTAMTT,LINETOT
+          MOVE      PTHTGSTM,LINEGST
+          MOVE      PTHTDESC,TDDESC
+          MOVE      PTHTITEM,TITEMNO
+.
+          MOVE      PTHTAMTH,LSTRATE
+          ADD       PTHTADRB,LSTRATE
+          MOVE      LSTRATE,FNDLRATE
+          MOVE      PTHTADMT,STATYPE
+.
+          MOVE      PTHTAMTT,LINETOT
+          MOVE      PTHTGSTM,LINEGST
+.
+          ADD       LINETOT,GROSSTOT
+          IF        IBCNUGST=2
+            ADD       LINEGST,TOTGST
+          ENDIF
+.
+.         Check for Lumpsum amount
+.
+          IF        CMXFLAG=1
+            MATCH     SP70,PTHTLSD1
+            IF        !@EQUAL
+              ADD       PTHTLSRB,GROSSTOT
+              IF        IBCNUGST=2
+                ADD       PTHTGSTL,TOTGST
+              ENDIF
+              IF        PTHTLSRB<>0
+                MOVE      ONE,LUMPFLAG
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          PACK      SKEY22,PTHTADMN,PTHTTREF,PTHTTRNS,SP70
+          CALL      RPRG0000                   * process Rebate invoice
+          IF        PROGFLAG=3
+            MOVE      SKEY22,KEY22
+            GOTO      RBINV100                 * printing rebate invoice
+          ENDIF
+          GOTO      RBINV200
+.
+RBINV400  CALL      GMSC0000                   * Processing items
+          MOVE      ZERO,EXIT
+.
+RBINV999  RETURN
++
+.*******************************************************************************
+.          Display/write accommodation record for Rebate invoice
+.*******************************************************************************
+RPRG0000  MOVE      LSTRATE,XLSTRATE
+          MOVE      LINETOT,XLINETOT
+          MOVE      LINEGST,XLINEGST
+.
+          MOVE      ONE,FRSTACCM
+.
+RPRG1000  BRANCH    PROGFLAG OF RPRG7000,RPRG2000,RPRG5000,RPRG6000,RPRG9999
+.
+.         Display Invoice
+.
+RPRG2000  MATCH     "1",PTHTRECT
+          IF        @EQUAL
+            CALL      RACM0000       * Display accommodation record
+          ELSE
+            CALL      RSIM0000       * Display item record
+          ENDIF
+          GOTO      RPRG8000
+.
+.         Print invoice
+.
+RPRG5000  MATCH     "1",PTHTRECT
+          IF        @EQUAL
+            CALL      IPRG0000       * Print accommodation line
+          ELSE
+            CALL      XITM0000       * Print Item line
+          ENDIF
+.
+.         update invoice and transaction number on pathtraf
+.
+          MOVE      TTRANSN1,PTHTTRN1
+          MOVE      CNEXTINV,PTHTTREF        * Update Rebate invoice number
+          CALL      UPPTHTR1
+.
+.         Update Financial Summary - patfinsf file 
+.
+RPRG6000  MATCH     "1",PTHTRECT
+          GOTO      RPRG6800 IF EQUAL
+.
+.         Update Financial summary for Item
+.
+          CALL      UFIN0000        * Update Financial summary file
+          GOTO      RPRG8000
+.
+.         Update Financial summary for Accommodation
+.
+RPRG6800  MOVE      ZERO,SAMTG
+          MOVE      PTHTWARD,STWARD
+          MOVE      PTHTADMT,STATYPE
+          MOVE      ZERO,REVBFLAG
+          CALL      WAFN0000                  * Set up key for a call to PATCALF
+.
+.         Check for lumpsum amount
+.
+          COMPARE   ONE,LUMPFLAG
+          GOTO      RPRG8000 IF NOT EQUAL
+.
+          IF        CACCFEE=5
+            PACK      FINCODE WITH ANSC,DCFLAG,ACLAIM,SP20
+          ELSE
+            PACK      FINCODE WITH ANSC,DCFLAG,TATYPE,SP20
+          ENDIF
+          MOVE      PTHTLSRB,LINETOT
+          MOVE      PTHTGSTL,LINEGST
+          CALL      WFINS000                * Write a record to patfinsf
+          GOTO      RPRG8000
+.
+RPRG7000  COMPARE   ONE,INVDFLAG
+          GOTO      RPRG8000 IF NOT EQUAL
+.
+.         write to invoice details file
+.
+          MATCH    "1",PTHTRECT
+          IF       @EQUAL
+            CALL     RACRD000               * accommodation record
+          ELSE
+            CALL     RMCCR000               * item record
+          ENDIF
+.
+RPRG8000  MOVE      ZERO,EXIT
+RPRG9999  RETURN
++
+.*******************************************************************************
+.         Print accommodation record for Rebate invoice
+.*******************************************************************************
+IPRG0000  CALL      MHTD0000        * move fields from pathtraf to patdtraf file
+.
+          PACK      DFDATE,PTHTFCEN,PTHTFYER,PTHTFMON,PTHTFDAY
+          PACK      DTDATE,PTHTTCEN,PTHTTYER,PTHTTMON,PTHTTDAY
+.
+          IF        CMXFLAG=1
+            MATCH     ADATE,DDATE
+            IF        @EQUAL
+              IF        LSTRATE = 0
+                GOTO      IPRG5400          * daycase without daily charge
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          MOVE      ONE,RECFLAG     * flag for printing accommodation
+          CALL      PRLN0000        * Print line of invoice
+.
+.         Set up DTRAN record ready for writing
+.
+IPRG5400  CALL      NXTTRAN1
+          MOVE      CNEXTINV,TREF
+          PACK      KEY22 WITH TADMNO,TREF,TTRANSN1
+          CALL      RDADTRN1
+          COMPARE   ZERO,OVRCD
+          GOTO      IPRG5400 IF EQUAL     * Try the next transaction number
+.
+          PACK      KEY22 WITH TADMNO,TREF,TTRANSN1
+          CALL      WRDTRN1
+
+IPRG9999  RETURN
++
+.*******************************************************************************
+.         Print Item record for Rebate invoice
+.*******************************************************************************
+XITM0000  CALL      MHTD0000        * move fields from pathtraf to patdtraf file
+.
+          MOVE      PTHTAMTP,PMMIAMTP
+          MOVE      PTHTRBAT,PMMIRBAT
+          MOVE      PTHTITEM,PMMIITEM
+          MOVE      PTHTDESC,PMMIDESC
+          MOVE      PTHTDES2,PMMIDES2
+          MOVE      PTHTRECT,PMMIRTYP
+          MOVE      PTHTSERV,PMMISERV
+          MOVE      PTHTEPSD,PMMIMVBR
+          UNPACK    SP70,PMMISVTM,PMMIINCT,PMMIUNIQ
+.
+          CALL      PITM0000        * Print Item line
+.
+.         Write to DTR file - WDDT0000
+.
+          MOVE      CNEXTINV,TREF        * Update invoice number
+          MOVE      ONE,TINVPRT          * Flag as being printed
+          PACK      PTDTEFFD,PINVDTE     * Effective date to fees invoiced
+          MOVE      ZERO,PTDTGSTM
+          MOVE      ZERO,PTDTGSTL
+          IF        IBCNUGST=2 & PTDTGSTA=1
+            CALL      IGST0000               * Get Item GST rate
+            MOVE      TPATAMTT,PTDTGSTM
+            MULT      IBGEAMNT,PTDTGSTM  * Item GST Amount
+            DIV       "100.00",PTDTGSTM
+          ENDIF
+.
+XITM2000  CALL      NXTTRAN1      * Get the next transaction number
+          PACK      KEY22 WITH TADMNO,TREF,TTRANSN1
+          CALL      RDADTRN1
+          COMPARE   ZERO,OVRCD
+          GOTO      XITM2000 IF EQUAL
+.
+.         Check Flag for billing mechanical vent.
+.
+          IF        PTHTEPSD=1
+            PACK      DIM30,SP70
+            MOVE      MVDAYS,KEY4
+            SQUEEZE   KEY4
+            CLEAR     DIM30
+            APPEND    KEY4,DIM30
+            APPEND    SP1,DIM30
+            APPEND    TDDESC,DIM30
+            APPEND    SP70,DIM30
+            RESET     DIM30
+            PACK      TDDESC,DIM30,SP70
+          ENDIF
+          CALL      WRDTRN1              * Write Misc.Charge
+.
+XITM9999  RETURN
++
+.*******************************************************************************
+.         Display accommodation record for Rebate invoice
+.*******************************************************************************
+RACM0000  MOVE      PTHTFMON,FORM2
+          LOAD      MTHNAM3,FORM2,NJAN,NFEB,NMAR,NAPR,NMAY,NJUN,NJUL,NAUG:
+                                  NSEP,NOCT,NNOV,NDEC
+          MOVE      PTHTTMON,FORM2
+          LOAD      MTHNAM3A,FORM2,NJAN,NFEB,NMAR,NAPR,NMAY,NJUN,NJUL:
+                              NAUG,NSEP,NOCT,NNOV,NDEC
+          PACK      KEY4,PTHTFCEN,PTHTFYER
+          REP       " 0",KEY4
+.
+          MOVE      SP70,ANS
+          PACK      KEY5,ANSA,SP1,PTHTADMT
+          CALL      RDCODE1
+          IF        OVRCD=0
+            MOVE      TCINDC12,ANS
+          ENDIF
+.
+.         Check for lumpsum amount
+.
+          COMPARE   ONE,LUMPFLAG
+          GOTO      RACM5000 IF NOT EQUAL
+.
+          WRITE     HTMLFILE;"<tr><td>",PTHTFDAY,SP1,MTHNAM3,SP1,KEY4:
+                             "</td><td><table width=100%><tr><td>",PTHTLSD1;
+.
+          PACK      KEY8,PTHTFCEN,PTHTFYER,PTHTFMON,PTHTFDAY,SP70
+          REP       " 0",KEY8
+          WRITE     HTMLFILE;"</td><td align=right>":
+                             "<img src=../images/CommentIcon.gif ":
+                             " class=ListIcon onclick='ShowStepdown(#"":
+                             AURNO,"#",#"":
+                             AADMNO,"#",#"":
+                             KEY8,"#",#"":
+                             ANS,"#",#"",PTHTCNID,"#")'></td></tr></table>";
+.
+          WRITE     HTMLFILE;"</td><td>&nbsp;",PTHTCNID:  * contract id
+                             "</td><td>&nbsp;":
+                             "</td><td>&nbsp;";
+.
+          WRITE     HTMLFILE;"</td><td align=right>",PTHTLSRB:
+                            "</td><td align=right>",PTHTLSPT;
+.
+          MOVE      PTHTLSRB,FORM12P2
+          ADD       PTHTGSTL,FORM12P2
+          WRITE     HTMLFILE;"</td><td align=right>",PTHTLSRB:
+                             "</td><td align=right>",PTHTGSTL:
+                             "</td><td align=right>",FORM12P2;
+.
+          WRITE     HTMLFILE;"</td></tr>"
+.
+          MATCH     DDATE,ADATE
+          GOTO      RACM5000 IF NOT EQUAL
+.
+          COMPARE   ZERO,PTHTAMTT
+          GOTO      RACM9999 IF EQUAL
+.
+RACM5000  MOVE      SP70,KEY70
+          CLEAR     KEY70
+          APPEND    PTHTDESC,KEY70
+          MATCH     SP70,PTHTDES2
+          IF        !@EQUAL
+            RESET     KEY70
+            STRIP     KEY70
+            ENDSET    KEY70
+            APPEND    "/",KEY70
+            APPEND    PTHTDES2,KEY70
+          ENDIF
+          APPEND    SP70,KEY70
+          RESET     KEY70
+.
+          MOVE      LINETOT,FORM12P2
+          ADD       LINEGST,FORM12P2
+          WRITE     HTMLFILE;"<tr><td>",PTHTFDAY,SP1,MTHNAM3,SP1,KEY4:
+                               " to ";
+.
+          PACK      KEY4,PTHTTCEN,PTHTTYER
+          REP       " 0",KEY4
+          WRITE     HTMLFILE;PTHTTDAY,SP1,MTHNAM3A,SP1,KEY4;
+.
+          BRANCH    DCFLAG,RACM6000       * Daycase
+.
+          IF        PTHTNDAY=1
+            MOVE      "DAY",DAYFORMT
+          ELSE
+            MOVE      "DAYS",DAYFORMT
+          ENDIF
+          WRITE     HTMLFILE;"</td><td><table width=100%><tr><td>":
+                             PTHTNDAY,SP1,DAYFORMT,SP1,KEY70;
+.
+          GOTO      RACM7000
+.
+RACM6000  WRITE     HTMLFILE;"</td><td><table width=100%><tr><td>",KEY70;
+.
+RACM7000  MATCH     SP70,BEDDESC
+          IF        !@EQUAL
+             MOVE    ZERO,EXIT
+             PROC    CETT0000         *certificat type
+             IF        EXIT=1
+               WRITE    HTMLFILE;"<font color=red>",BEDDESC,"</font>";
+             ELSE
+               WRITE    HTMLFILE;"<font color=green>",BEDDESC,"</font>";
+             ENDIF
+          ENDIF
+.
+          PACK      KEY8,PTHTFCEN,PTHTFYER,PTHTFMON,PTHTFDAY,SP70
+          REP       " 0",KEY8
+          WRITE     HTMLFILE;"</td><td align=right>":
+                             "<img src=../images/CommentIcon.gif ":
+                             " class=ListIcon onclick='ShowStepdown(#"":
+                             AURNO,"#",#"":
+                             AADMNO,"#",#"":
+                             KEY8,"#",#"":
+                             ANS,"#",#"",PTHTCNID,"#")'></td></tr></table>";
+.
+          WRITE     HTMLFILE;"</td><td>&nbsp;",PTHTCNID:  * contract id
+                             "</td><td>&nbsp;":
+                             "</td><td>&nbsp;";
+.
+          WRITE     HTMLFILE;"</td><td align=right>",PTHTRBAT:
+                            "</td><td align=right>",PTHTAMTP;
+.
+          MOVE      PTHTAMTT,FORM12P2
+          ADD       PTHTGSTM,FORM12P2
+          WRITE     HTMLFILE;"</td><td align=right>",PTHTAMTT:
+                             "</td><td align=right>",PTHTGSTM:
+                             "</td><td align=right>",FORM12P2;
+.
+          WRITE     HTMLFILE;"</td></tr>"
+.
+RACM9999  RETURN
++
+.*******************************************************************************
+.         Display item record for Rebate invoice
+.*******************************************************************************
+RSIM0000 MOVE      SP70,DIM20
+         MOVE      SP70,DIM21
+         MOVE      SP70,CERTINDC
+         MATCH     "2",PTHTRECT
+         IF        @EQUAL
+           MOVE      PTHTITEM,KEY9
+           CALL      RDITEM1
+           IF        OVRCD=0
+             MATCH     SP70,PTITTCER
+             IF        !@EQUAL & !@EOS
+               PACK      KEY5,CATCR,PTITTCER,SP70
+               CALL      RDCODE1
+               IF        OVRCD=0
+                 MATCH     "D",TCINDC1
+                 IF        @EQUAL
+                   MOVE      TDESC,DIM20
+                   MOVE      ONE,CERTINDC
+                 ENDIF
+               ENDIF
+             ENDIF
+             MATCH     "1",PTITIWRN
+             IF        @EQUAL
+               MOVE      "Prosthetic Required  ",DIM21
+             ENDIF
+           ENDIF
+           IF        PTHTSERV=0
+             MOVE      ONE,PTHTSERV
+           ENDIF
+         ENDIF
+.
+         MOVE      PTHTFMON,FORM2
+         LOAD      MTHNAM3,FORM2,NJAN,NFEB,NMAR,NAPR,NMAY,NJUN,NJUL,NAUG:
+                                      NSEP,NOCT,NNOV,NDEC
+         MOVE      LINETOT,FORM12P2
+         ADD       LINEGST,FORM12P2
+         MOVE      FORM12P2,FORM72
+         PACK      KEY4,PTHTFCEN,PTHTFYER
+         REP       " 0",KEY4
+.
+         IF        PTHTEPSD=1
+           WRITE     HTMLFILE;"<tr><td>",PTHTFDAY,SP1,MTHNAM3,SP1,KEY4,"</td>":
+                              "<td>",MVDAYS,"x ",PTHTDESC,"</td>";
+           WRITE     HTMLFILE;"<td>&nbsp;</td>";
+           WRITE     HTMLFILE;"<td>",PTHTITEM,"</td>";
+.
+           WRITE     HTMLFILE;"<td>&nbsp;</td>";
+.
+           WRITE     HTMLFILE;"<td align=right>",PTHTRBAT,"</td>":
+                              "<td align=right>",PTHTAMTP,"</td>";
+           GOTO      RSIM8000
+         ELSE
+           WRITE     HTMLFILE;"<tr><td>",PTHTFDAY,SP1,MTHNAM3,SP1,KEY4;
+.
+           WRITE     HTMLFILE;"</td>";
+.
+           MATCH     SP70,DIM20
+           IF        @EQUAL | @EOS
+             WRITE     HTMLFILE;"<td>",PTHTDESC;
+           ELSE
+             STRIP     DIM20
+             MOVE      ZERO,EXIT         * check certificate return parameter
+             PROC      CCERT000          * Check Certificate record
+             IF        EXIT=0
+               WRITE     HTMLFILE;"<td>",PTHTDESC:
+                                  " (<font color=green>",DIM20,"</font>)";
+             ELSE
+               WRITE     HTMLFILE;"<td>",PTHTDESC:
+                                  " (<font color=red>",DIM20,"</font>)";
+             ENDIF
+           ENDIF
+
+           MATCH     SP70,DIM21
+           IF        !@EQUAL
+             WRITE     HTMLFILE;" (<font color=red>",DIM21,"</font>)</td>";
+           ELSE
+             WRITE     HTMLFILE;"</td>";
+           ENDIF
+.
+           WRITE     HTMLFILE;"<td>&nbsp;",PTHTCNID,"</td>";
+.
+           MOVE      "0",KEY1              * Set 'No' to Change item desc.
+           MOVE      "0",DIM1              * Set 'No' to Change item amount
+.
+           WRITE     HTMLFILE;"<td><img src=../images/EditIcon.gif ":
+                              " class=ListIcon onclick='DeleteItem(#"":
+                              AURNO,"#",#"":
+                              AADMNO,"#",#"":
+                              PTHTTRNS,"#",#"":
+                              KEY1,"#",#"":
+                              DIM1,"#",#"":
+                              PTHTAMTP,"#",#"",PTHTRBAT,"#")'>":
+                              PTHTITEM,"</td>";
+         ENDIF
+.
+         IF        PTHTSERV<>0
+           WRITE     HTMLFILE;"<td>",PTHTSERV,"</td>":
+                              "<td align=right>",PTHTRBAT,"</td>":
+                              "<td align=right>",PTHTAMTP,"</td>";
+         ELSE
+           WRITE     HTMLFILE;"<td>&nbsp;</td>":
+                              "<td>&nbsp;</td>":
+                              "<td>&nbsp;</td>";
+         ENDIF
+.
+RSIM8000 MOVE      PTHTAMTT,FORM12P2
+         ADD       PTHTGSTM,FORM12P2
+.
+         WRITE     HTMLFILE;"<td align=right>",PTHTAMTT,"</td>":
+                            "<td align=right>",PTHTGSTM,"</td>":
+                            "<td align=right>",FORM12P2,"</td>":
+                            "</tr>"
+.
+RSIM9999  RETURN
++
+.*******************************************************************************
+.        Display Rebate invoice Total
+.*******************************************************************************
+RSIN0000
+          WRITE     HTMLFILE;"<tr><td>&nbsp;</td>":
+                                "<td>&nbsp;</td>":
+                                "<td>&nbsp;</td>";
+.
+          WRITE     HTMLFILE;"<td>&nbsp;</td>":
+                             "<td>&nbsp;</td>";
+.
+          WRITE     HTMLFILE;"<td>&nbsp;</td>";
+.
+          BRANCH    DBSFLAG,RSIN2000
+          WRITE     HTMLFILE;"<td>&nbsp;</td>":
+                              "<td>&nbsp;</td>":
+                              "<td>&nbsp;</td>":
+                              "<td>&nbsp;</td>";
+.
+RSIN2000
+          WRITE     HTMLFILE;"</tr>";
+.
+          WRITE     HTMLFILE;"<tr><td>&nbsp;</td>":
+                                  "<td><b> Invoice Total </b></td>":
+                                  "<td>&nbsp;</td>";
+.
+          BRANCH    DBSFLAG,RSIN4000
+.
+          WRITE     HTMLFILE;"<td>&nbsp;</td>":
+                             "<td>&nbsp;</td>";
+.
+         WRITE     HTMLFILE;"<td>&nbsp;</td>";
+.
+         WRITE      HTMLFILE;"<td>&nbsp;</td>";
+.
+RSIN4000
+          WRITE      HTMLFILE;"<td align=right><b>",GROSSTOT,"</b></td>":
+                              "<td align=right><b>",TOTGST,"</b></td>":
+                              "<td align=right><b>",FORM12P2,"</b></td>":
+                              "</tr>"
+.
+          MOVE      GROSSTOT,NETTOT
+          IF        IBCNUGST=2
+            ADD       TOTGST,NETTOT
+          ENDIF
+.
+          WRITE      HTMLFILE;"<input type=hidden name=pcbiinvt ":
+                              "value='",FORM12P2,"'>"
+RSIN9999  RETURN
++
+.*******************************************************************************
+.*                                  RACRD000                                  *
+.*                     Write Accommodation record to patinpaf                 *
+.*******************************************************************************
+RACRD000  CALL      CLPATINP                * clear patinpaf vars
+.
+          MOVE      AADMNO,PTIPADMN         * admission number
+          MOVE      AURNO,PTIPURNO          * u/r number
+          PACK      PTIPRTYP,ANSA,SP3       * record type
+          MOVE      ACLAIM,PTIPCLAM         * claim type
+          MOVE      AFUNDH,PTIPHFND         * health fund
+          MOVE      AFNDTB,PTIPFTBL         * health fund table
+.         MOVE      PTMIPCMX,PTIPPDRG       * casemix MBS/DRG code provisional
+          MOVE      CMCODE,PTIPPDRG         * Casemix code
+          MOVE      PTHTADMT,PTIPATYP       * admission type
+          MOVE      PTHTWARD,PTIPWARD       * ward
+          MOVE      PTHTBTYP,PTIPBTYP       * bed type
+          MOVE      PTHTDOCT,PTIPADOC       * Attending doctor
+.
+          PACK      KEY8,PTHTFCEN,PTHTFYER,PTHTFMON,PTHTFDAY
+          REP       " 0",KEY8
+          PACK      KEY30,PTIPADMN,KEY8,Z70
+          CALL      RDSTRAN2
+          CALL      RDPTRAN2                * get applicable transfer record
+          BRANCH    OVRCD,RACRD500
+          COMPARE   TADMNO,PTIPADMN
+          GOTO      RACRD500 IF NOT EQUAL
+.
+          MOVE      TATYPE,PTIPATYP         * admission type
+          MOVE      TWARD,PTIPWARD          * ward
+          MOVE      TBED,PTIPWBED           * bed
+          MOVE      TRBTYP,PTIPBTYP         * bed type
+          MOVE      TADOCT,PTIPADOC         * attending doctor code
+.
+. Change the record type to 'I' if this is an ICU bed
+.
+RACRD500  PACK      KEY5,ANSB,ANST,PTIPBTYP
+          CALL      RDCODE1
+          IF        OVRCD<>1
+            MATCH     ANSI,TCINDC1
+            IF        @EQUAL
+              PACK      PTIPRTYP,ANSI,SP3   * record type='I' for ICU/CCU
+            ENDIF
+          ENDIF
+.
+          MATCH     ANSA,PTIPRTYP
+          IF        @EQUAL
+            ADD       ONE,ACCCOUNT
+            MOVE      ACCCOUNT,PTIPTRNN   * transaction number ('A')
+          ELSE
+            ADD       ONE,ICUCOUNT
+            MOVE      ICUCOUNT,PTIPTRNN   * transaction number ('I')
+          ENDIF
+.
+          MATCH     SP3,PTIPWARD
+          IF        @EQUAL
+            MOVE      PTHTNDAY,PTIPLDAY       * leave days
+            MOVE      ZERO,PTIPBDAY
+          ELSE
+            MOVE      PTHTNDAY,PTIPBDAY       * days in bed
+            MOVE      ZERO,PTIPLDAY
+            MOVE      PTIPBTYP,PTIPBTYP     * bed type
+          ENDIF
+.
+          PACK      PTIPACCF,PTHTFCEN,PTHTFYER,PTHTFMON,PTHTFDAY  * date from
+          REP       " 0",PTIPACCF
+          PACK      PTIPACCT,PTHTTCEN,PTHTTYER,PTHTTMON,PTHTTDAY  * to date
+          REP       " 0",PTIPACCT
+.
+          PACK      KEY6,PTIPADOC
+          CALL      RDDOCT1
+          IF        OVRCD<>1
+            MOVE      DSNAME,PTIPFNAM
+            STRIP     PTIPFNAM
+            ENDSET    PTIPFNAM
+            APPEND    DGNAME,PTIPFNAM
+            RESET     PTIPFNAM
+            STRIP     PTIPFNAM
+            ENDSET    PTIPFNAM
+            APPEND    DTITL,PTIPFNAM
+            RESET     PTIPFNAM              * attending doctor name
+            MOVE      DRTYPE,PTIPDTYP       * attending doctor specialty
+          ENDIF
+.
+          MOVE      PTHTAMTT,PTIPAREV       * accommodation revenue
+          MOVE      ONE,PTIPTTYP            * transaction type (1=Accomm.)
+.
+          MOVE      PTHTAMTG,PTIPGPOR       * government portion amount
+          MOVE      PTHTAMTI,PTIPORAT       * original rate
+          MOVE      PTIPORAT,PTIPDRAT
+          MOVE      PTHTADRB,PTIPADDT       * casepayment additional rate
+          MOVE      PTHTRBAT,PTIPFREB
+          MULT      PTHTNDAY,PTIPFREB       * estimated fund rebate
+.
+          MOVE      PTHTLSPT,PTIPPPOR     * lump sum amount - patient portion
+          MOVE      PTHTLSRB,PTIPRPOR     * lump sum amount - rebate portion
+.
+RACRD300  IF        PTHTDTYP=1
+            MOVE      ONE,PTIPCTYP        * casemix day type lowoutlier
+          ENDIF
+.
+          CALL      GDTA0000                * get date/time & operator id
+.
+          PACK      KEY16,PTIPADMN,PTIPRTYP,PTIPTRNN
+          CALL      WRPTINP1
+RACRD999  RETURN
++
+.******************************************************************************
+.*                                  RMCRD000                                  *
+.*                    Write Misc. Charge record to patinpaf                   *
+.******************************************************************************
+RMCCR000  CALL      CLPATINP                * clear patinpaf vars
+.
+          MOVE      AADMNO,PTIPADMN         * admission number
+          MOVE      AURNO,PTIPURNO          * u/r number
+          MOVE      ACLAIM,PTIPCLAM         * claim type
+          MOVE      AFUNDH,PTIPHFND         * health fund
+          MOVE      AFNDTB,PTIPFTBL         * health fund table
+.
+          PACK      KEY8,PTHTFCEN,PTHTFYER,PTHTFMON,PTHTFDAY
+          REP       " 0",KEY8
+          MOVE      KEY8,PTIPACCF           * date of item
+          PACK      KEY30,PTIPADMN,KEY8,Z70
+          CALL      RDSTRAN2
+          CALL      RDPTRAN2                * get applicable transfer record
+          BRANCH    OVRCD,RMCRD500
+          COMPARE   TADMNO,PTIPADMN
+          GOTO      RMCRD500 IF NOT EQUAL
+.
+          MOVE      TATYPE,PTIPATYP         * admission type
+          MOVE      TWARD,PTIPWARD          * ward
+          MOVE      TBED,PTIPWBED           * bed
+          MOVE      TRBTYP,PTIPBTYP         * bed type
+.
+          MOVE      TADOCT,PTIPADOC         * attending doctor code
+          PACK      KEY6,PTIPADOC
+          CALL      RDDOCT1
+          IF        OVRCD<>1
+            MOVE      DSNAME,PTIPFNAM
+            STRIP     PTIPFNAM
+            ENDSET    PTIPFNAM
+            APPEND    DGNAME,PTIPFNAM
+            RESET     PTIPFNAM
+            STRIP     PTIPFNAM
+            ENDSET    PTIPFNAM
+            APPEND    DTITL,PTIPFNAM
+            RESET     PTIPFNAM              * attending doctor name
+            MOVE      DRTYPE,PTIPDTYP       * attending doctor specialty
+          ENDIF
+.
+RMCRD500  MOVE      PTHTITEM,PTIPITEM       * item number
+          PACK      PTIPITEM,PTIPITEM,SP70
+          MATCH     SP70,PTIPITEM
+          IF        !@EQUAL
+            PACK      KEY5,ANSF,ANSI,PTHTMISG
+            CALL      RDCODE1
+            IF        OVRCD<>1
+              MOVE      TCINDC2,PTIPMHDP    * misc. charge group (Cat.FI, Ind.2)
+            ENDIF
+          ENDIF
+.
+          MOVE      PTHTRBAT,PTIPFREB        * estimated fund rebate
+          MOVE      PTHTMISG,PTIPBAND        * Item Group (Cat FI)
+.
+          MATCH     "2",PTHTRECT
+          IF        @EQUAL
+            CALL      WTITM000              * write theatre item record
+          ELSE
+            MATCH       "3",PTHTRECT
+            IF          @EQUAL
+              CALL      WMITM000            * write misc. item record
+            ENDIF
+          ENDIF
+RMCCR999  RETURN
++
+.*******************************************************************************
+.        Move HF debtor transaction (pathtraf) to DTR fields
+.*******************************************************************************
+MHTD0000  MOVE      PTHTADMN,TADMNO       * Admission Number
+          MOVE      PTHTTRN1,TTRANSN1     * Transaction Number
+          MOVE      PTHTTDEB,TTYPEDEB     * Type of Debt
+          MOVE      PTHTDCOD,TDCODE       * Code for HF,Insurance
+          MOVE      PTHTAMTT,TPATAMTT     * Gross Total Amount
+          MOVE      PTHTAMTG,TPATAMTG     * Government Portion
+          MOVE      PTHTAMTH,TPATAMTH     * Original Rate before any Disc.Allw
+          MOVE      PTHTAMTI,TPATAMTI     * Daily Rate amount
+          MOVE      PTHTAMTP,TPATAMTP     * Patient Portion
+          MOVE      PTHTFCEN,TFCENT       * Century On/From
+          MOVE      PTHTFYER,TFYEAR       * Year    On/From
+          MOVE      PTHTFMON,TFMONTH      * Month   On/From
+          MOVE      PTHTFDAY,TFDAY        * Day     On/From
+          MOVE      PTHTTCEN,TTCENT       * Centrury, To date(Accom.rec.only)
+          MOVE      PTHTTYER,TTYEAR       * Year, To date(Accom.record only)
+          MOVE      PTHTTMON,TTMONTH      * Month,To date(Accom.record only)
+          MOVE      PTHTTDAY,TTDAY        * To date(Accom.record only)
+          MOVE      PTHTTTYP,TTYPE        * Transaction type
+          MOVE      PTHTITEM,TITEMNO      * Item Number
+          MOVE      PTHTTREF,TREF         * Reference (Invoice Number)
+          MOVE      PTHTPAYT,TPAYTYPE     * Payment Method
+          MOVE      PTHTRCPT,TRECEIPT     * Receipt Number
+          MOVE      PTHTDESC,TDDESC       * Description
+          MOVE      PTHTINVP,TINVPRT      * Patient Invoice printed(0=No,1=Yes)
+          MOVE      PTHTRECT,TRECTYPE     * Record Type
+          MOVE      PTHTNDAY,TNODAYS      * No of days (Accom.only)
+          MOVE      PTHTCLMD,TCLAIM       * Claim(0=No,1=Yes)
+          MOVE      PTHTRBAT,TREBATE      * Estimated Fund Rebate
+          MOVE      PTHTDOCT,TDOCTA       * Treating Doctor
+          MOVE      PTHTSERV,TSERVS       * Number of Services
+          MOVE      PTHTDOCO,TDOCTO       * Operating Doctor
+          MOVE      PTHTSESS,TSESSION     * Session (Theatre Only)
+          MOVE      PTHTMISG,TMISGRP      * Misc.Group (Cat FI)
+          MOVE      PTHTDEPT,TDEPTYP      * Deposit Type
+          MOVE      PTHTWARD,TDWARD       * Ward of Accommodation record
+          MOVE      PTHTCLMT,TCLMTYP      * Claim type when printing Invoice
+          MOVE      PTHTADMT,TADMTYP      * Adm.Type when printing Invoice
+          MOVE      PTHTBTCH,TBATCHN      * Batch Number for Misc/Cash/Journal
+          MOVE      PTHTNINV,TNINVS       * Number of Invoices to be printed
+          MOVE      PTHTLSPT,PTDTLSPT     * Lumpsum amount Patient Portion
+          MOVE      PTHTLSRB,PTDTLSRB     * Lumpsum amount Rebate Portion
+          MOVE      PTHTDTYP,PTDTDTYP     * Day type
+          MOVE      PTHTDES2,PTDTDES2     * Description 2
+          MOVE      PTHTEPSD,PTDTEPSD     * Mechanical Ventilation Billing Rec?
+          MOVE      PTHTTCCU,PTDTCCU      * Flag for Additional Charge(Accom.)
+          MOVE      PTHTGSTA,PTDTGSTA     * Is GST applicable to this time ?
+          MOVE      PTHTGSTC,PTDTGSTC     * GST Payable code
+          MOVE      PTHTGSTM,PTDTGSTM     * GST Amount
+          MOVE      PTHTEFFD,PTDTEFFD     * Date Item assigned to Fees Inv.
+          MOVE      PTHTGSTL,PTDTGSTL     * GST Lumpsum Amount
+          MOVE      PTHTTTIM,PTDTTIME     * Time of ORD message (hh:mm:ss)
+          MOVE      PTHTCRST,PTDTCRST     * Credit Note Status
+          MOVE      PTHTUNIQ,PTDTUNIQ     * Unique Id for Theatre booking
+          MOVE      PTHTBTYP,PTDTBTYP     * Bed Type (Cat BT) Accom.only
+          MOVE      PTHTCNTR,PTDTCNTR     * Contract/Health Fund
+          MOVE      PTHTSUNQ,PTDTSUNQ     * Subsequence Proc.Uniq.No
+          MOVE      PTHTBATC,PTDTBTCH     * Batch Details
+          MOVE      PTHTADPT,PTDTADPT     * Additional rate Pat Portion C/P
+.
+          MOVE      PTHTADRB,PTDTADRB     * Additional rate Reb Porton C/P
+          MOVE      PTHTCNID,PTDTCNID     * Contract Id
+          MOVE      PTHTLSD1,PTDTLSD1     * Lumpsum Descripttion 1
+          MOVE      PTHTLSD2,PTDTLSD2     * Lumpsum Description 2
+          MOVE      PTHTTMNO,PTDTTMNO     * Patient MBS Team (oprpmbaf)
+          MOVE      PTHTPMBS,PTDTPCOD     * Patient MBS Counter (oprpmbaf)
+.
+MHTD9999  RETURN
++
+.
+.
+

@@ -1,0 +1,156 @@
+.
+. PATTMAIO.INC
+. ------------
+. Filename     : pattmaaf
+. Description  : Doctor team header file                     
+. Variables    : OVRCD    FORM     1       0 = NOT OVER
+.                                          1 = OVER
+.                KEY6     DIM      6       KEY FOR PATTMAA1
+.                KEY36    DIM      36      KEY FOR PATTMAA2
+.                KEY39    DIM      39      KEY FOR PATTMAA3
+.                KEY19    DIM      19      KEY FOR PATAUDTA
+.
+.
+. ------ I/O routines for PATTMAA1 ------
+.
+RAPTTMA1  MOVE    ZERO,OVRCD
+          RESET   KEY6
+          READ    PATTMAA1,KEY6;ANS
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RSPTTMA1  RESET   KEY6
+          READ    PATTMAA1,KEY6;;
+          RETURN
+.
+RDPTTMA1  MOVE    ZERO,OVRCD
+          RESET   KEY6
+          READ    PATTMAA1,KEY6;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RLPTTMA1  MOVE    ZERO,OVRCD
+          RESET   KEY6
+          READL   PATTMAA1,KEY6;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERLOCK IF LOCKED
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RKPTTMA1  MOVE    ZERO,OVRCD
+          READKS  PATTMAA1;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RPPTTMA1  MOVE    ZERO,OVRCD
+          READKP  PATTMAA1;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+WRPTTMA1  MOVE    ZERO,OVRCD 
+          RESET   KEY6
+          TRAP    OVERLOCK IF IO
+          WRITE   PATTMAA1,KEY6;KEY6,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          TRAPCLR IO
+          RETURN
+.
+UPPTTMA1  
+          UPDATE  PATTMAA1;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          RETURN
+.
+ULPTTMA1  UNLOCK  PATTMAA1
+          RETURN
+.
+DEPTTMA1  RESET   KEY6
+          DELETE  PATTMAA1,KEY6
+          RETURN
+.
+. ------ I/O routines for PATTMAA2 ------
+.
+RAPTTMA2  MOVE    ZERO,OVRCD
+          RESET   KEY36
+          READ    PATTMAA2,KEY36;ANS
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RSPTTMA2  RESET   KEY36
+          READ    PATTMAA2,KEY36;;
+          RETURN
+.
+RDPTTMA2  MOVE    ZERO,OVRCD
+          RESET   KEY36
+          READ    PATTMAA2,KEY36;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RKPTTMA2  MOVE    ZERO,OVRCD
+          READKS  PATTMAA2;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RPPTTMA2  MOVE    ZERO,OVRCD
+          READKP  PATTMAA2;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+. ------ I/O routines for PATTMAA3 ------
+.
+RAPTTMA3  MOVE    ZERO,OVRCD
+          RESET   KEY39
+          READ    PATTMAA3,KEY39;ANS
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RSPTTMA3  RESET   KEY39
+          READ    PATTMAA3,KEY39;;
+          RETURN
+.
+RDPTTMA3  MOVE    ZERO,OVRCD
+          RESET   KEY39
+          READ    PATTMAA3,KEY39;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RKPTTMA3  MOVE    ZERO,OVRCD
+          READKS  PATTMAA3;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+RPPTTMA3  MOVE    ZERO,OVRCD
+          READKP  PATTMAA3;PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+. ------ I/O routines for PATAUDTA (Audit file) ------
+.
+ASPTTMA   RESET   KEY19
+          READ    PATAUDTA,KEY19;;
+          RETURN
+.
+AKPTTMA   MOVE    ZERO,OVRCD
+          READKS PATAUDTA;PTTAAUDD,PTTAAUDT,PTTAAUDP,PTTAAUDR,PTTAAUDS,PTTAAUDO:
+                  PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          GOTO    OVERCOND IF OVER
+          RETURN
+.
+AWPTTMA   RESET   KEY19
+          WRITE   PATAUDTA,KEY19;KEY19,PTTAAUDS,PTTAAUDO:
+                  PTTATEAM,PTTADESC,PTTATYPE,PTTASTAT:
+                  PTTASPAR
+          RETURN
+.
+ADPTTMA   RESET   KEY19
+          DELETE  PATAUDTA,KEY19
+          RETURN

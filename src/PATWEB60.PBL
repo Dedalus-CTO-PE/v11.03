@@ -1,0 +1,340 @@
+.----------------------------------------------------------------------
+. Program       : PATWEB60
+.
+. Function      : ACC45 Claim Result Polling Server - Process Claim Result Data
+.
+. Description   : This server will poll the 'ACC XML Message Directory Path'
+.                 (every 5 seconds) and process any pipe-delimited
+.                 ACC45 Claim Result Data files (".rslt") created from the
+.                 user script 'patweb60.us1' when submitting a claim via
+.                 the ACC Claim API.
+.
+.                 'patweb60.us1' is called from PATWEB89 when a patient
+.                 ACC Claim is submitted via the 'Submit to ACC' button and
+.                 the 'ACC Transmission Method' as been set to 'API'.
+.
+.                 Once processing has completed, the result file (".rslt") will
+.                 be renamed with a ".bak" extension (for historical purposes).
+.
+.                 If the ACC Claim Number is invalid (i.e. record not found in
+.                 'acclodaf') the result file will be renamed with a ".err"
+.                 extension (for debugging purposes).
+.
+.
+.                 Result Filename Format:
+.                 -----------------------
+.                   ACC Number followed by ".rslt" file extension
+.
+.                   Example: "AA123456.rslt"
+.
+.
+.                 Result File Content (pipe-delimited):
+.                 -------------------------------------
+.                   ACCClaimNumber|ResponseHTTPCode|ResponseJSON
+.
+.
+.                 The ACC Claim Lodge File ('acclodaf') record will be updated
+.                 with one of the following ACC Status (ACLOSTAT) values:
+.
+.                   0 - Submitted  (Created but not sent to ACC)
+.                   1 - Sent       (No response from ACC API)
+.                   2 - Receipted  (202 - Accepted)
+.                   3 - Failed
+.                   4 - Failed     (400 - Bad Request: invalid data)
+.                   5 - Failed     (401 - Unauthorized: authentication error)
+.                   6 - Failed     (403 - Forbidden: authorization error)
+.                   7 - Failed     (404 - Not Found)
+.                   9 - Failed     (500 - Internal Server Error)
+.
+.                 Also update the Date/Time (ACLOUDAT/ACLOUTIM) value
+.
+.
+. Modifications :
+.
+.     V11.01.03   01/12/2021  Don Nguyen      TSK 0875549
+.                 Default ACC status value to '3 - Failed' if unknown
+.                 HTTP response code.
+.     V11.01.02   15/10/2021  Don Nguyen      TSK 0912634
+.                 Re-worked code to use the same temp file for the files list
+.     V11.01.01   19/08/2021  Don Nguyen      TSK 0875549
+.                 Renamed result file with a ".err" extension on update error
+.     V11.01.00   17/08/2021  Don Nguyen      TSK 0875549
+.                 Created program
+.----------------------------------------------------------------------
+.
+          INC       IBAWEBDF
+          INC       WEBDATDF
+.
+          INC       PATCONFD/INC
+          INC       TFILEVAR/INC
+          INC       ACCLODFD/INC        * ACC Claim Lodge File
+.
+.
+. Files List file (one line per file path)
+.
+FILELIST  FILE      ASCII, FIXED=127    * Output of shell command to list files
+.
+.
+. ACC Claim Result file (pipe-delimited)
+.
+ACCRSLT1  FILE      HL7, FIXED=4000     * Example: AA123456.rslt 
+.
+.         Fields must be pipe-delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+RESCLNUM  DIM       20       * ACC Claim Number
+.PIPE     DIM       1        * Pipe Delimiter
+RESHTTPC  DIM       3        * HTTP Code (ACC API HTTP Response Code)
+.PIPE     DIM       1        * Pipe Delimiter
+RESJSOND  DIM       3950     * API Response Data (JSON string)
+.
+. End of record                  
+.
+.
+. ----- Program Variables -----
+.
+CMDLINE   DIM       200
+COUNTER   FORM      2
+DIM4A     DIM       4
+FILEPATH  DIM       127      * Fully qualified file name and path
+PATHNAME  DIM       60       * Path Name (directory only)
+POLLTIME  FORM      16       * Polling wait (time in seconds)
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+SP100     INIT      "                                                  ":
+                    "                                                  "
+.
+.----------------------------------------------------------------------
+PRGID     INIT      "PATWEB60"
+VERSION   INIT      "V11.03.00"
+PRGNAM    INIT      "ACC45 Claim Response Polling Server"
+.----------------------------------------------------------------------
+.
+          CALL      WEBINT00      * Initialise Fifo Etc.
+.
+          CALL      INIT0000      * Open Files
+.
+MAIN0000  COMMIT                  * Match BEGIN in WEBINT00 for Transactions
+.
+          BEGIN
+.
+          DISPLAY   *WPOLLTIME    * wait for POLLTIME
+.
+          CALL      PROC0000      * Process all result files (include subdirs) 
+.
+          GOTO      MAIN0000
++
+.------------------------------------------------------------------------------
+.         Open Files and Initialize Variables
+.------------------------------------------------------------------------------
+INIT0000  OPEN      CONTROLF,"controlf"
+.
+.         Get the 'ACC XML Message Directory Path'
+.
+          READ      CONTROLF,HUND12;*179,PTCNACPT
+.
+          OPEN      IBASEQA1,"ibaseqaf"
+          OPEN      ACCLODA1,"acclodaf"
+.
+          MOVE      FIVE,POLLTIME      * default poll time to 5 seconds
+.
+          CALL      TFILENAM           * get new temp filename
+.
+INIT9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Create temp file
+.------------------------------------------------------------------------------
+CREA0000  CALL      KILL0000           * delete existing file
+          PREP      FILELIST,TFILNAME  * create new file
+CREA9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Close and delete temp file
+.------------------------------------------------------------------------------
+KILL0000  CLOSE     FILELIST,DELETE    * close and delete file
+KILL9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Process any ACC Claim result files (.rslt); include sub directories
+.------------------------------------------------------------------------------
+PROC0000  CALL      CREA0000           * create temp file (Files List)
+.
+          PACK      PATHNAME,PTCNACPT,SP70
+          STRIP     PATHNAME
+.
+.
+.         Get a list of files with '.rslt' extension; from the current & 
+.         subdirectories of the 'ACC XML Message Directory Path'
+.
+          CLEAR     CMDLINE
+          APPEND    "find ",CMDLINE
+          APPEND    PATHNAME,CMDLINE
+          APPEND    " -name '*rslt' > ",CMDLINE
+          APPEND    TFILNAME,CMDLINE
+          APPEND    ".txt",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          MATCH     "1",TASKID
+          GOTO      PROC9999 IF EQUAL  * shell command failed
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FILELIST,TFILNAME  * open the Files List file
+          TRAPCLR   IO
+          BRANCH    OVRCD,PROC9999
+.
+.
+.         Loop through the files list
+.
+PROC1000  PACK      FILEPATH,SP70,SP70
+          READ      FILELIST,SEQ;FILEPATH
+          GOTO      PROC9999 IF OVER
+
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      ACCRSLT1,FILEPATH  * open the result file
+          TRAPCLR   IO
+          BRANCH    OVRCD,PROC1000     * get next result file path
+.
+.
+.         Read the result line (pipe-delimited)
+.
+          PACK      RESCLNUM,SP20
+          PACK      RESHTTPC,SP10
+          CALL      CLRJSD00           * clear JSON data variable
+.
+          READ      ACCRSLT1,SEQ;RESCLNUM,RESHTTPC,RESJSOND
+          GOTO      PROC9999 IF OVER
+.
+.         Pad fields out to full length
+          PACK      RESCLNUM,RESCLNUM,SP70
+          PACK      RESHTTPC,RESHTTPC,SP70
+.
+.
+.         Update the Status value of our ACC Claim Lodge File record ...
+.
+          PACK      KEY20,RESCLNUM,SP20
+          CALL      RDACLOD1
+          BRANCH    OVRCD,PROC1900
+.
+          MATCH     "202",RESHTTPC
+          IF        @EQUAL
+            MOVE      TWO,ACLOSTAT     * Receipted
+            GOTO      PROC2000
+          ENDIF
+.
+          MATCH     "400",RESHTTPC
+          IF        @EQUAL
+            MOVE      FOUR,ACLOSTAT    * Failed - Bad Request: invalid data
+            GOTO      PROC2000
+          ENDIF
+.
+          MATCH     "401",RESHTTPC
+          IF        @EQUAL
+            MOVE      FIVE,ACLOSTAT    * Failed - Unauthorized: authentication error
+            GOTO      PROC2000
+          ENDIF
+.
+          MATCH     "403",RESHTTPC
+          IF        @EQUAL
+            MOVE      SIX,ACLOSTAT     * Failed - Forbidden: authorization error
+            GOTO      PROC2000
+          ENDIF
+.
+          MATCH     "404",RESHTTPC
+          IF        @EQUAL
+            MOVE      SEVEN,ACLOSTAT   * Failed - Not Found
+            GOTO      PROC2000
+          ENDIF
+.
+          MATCH     "500",RESHTTPC
+          IF        @EQUAL
+            MOVE      NINE,ACLOSTAT    * Failed - Internal Server Error
+            GOTO      PROC2000
+          ENDIF
+.
+.
+.         Default to '3 - Failed' if unknown HTTP status code
+          MOVE      THREE,ACLOSTAT
+.
+.
+.         Get update Date/Time value
+PROC2000  CALL      IBACLOCK
+.
+          PACK      ACLOUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",ACLOUDAT
+          UNPACK    CTIMEIS,ACLOUTIM,DIM4A
+          REP       " 0",ACLOUTIM
+.
+          CALL      UPACLOD1
+.
+          CLOSE     ACCRSLT1           * close the result file
+.
+.         Now we rename the result file with a ".bak" extension
+.
+          CLEAR     CMDLINE
+          APPEND    "mv ",CMDLINE
+          APPEND    FILEPATH,CMDLINE
+          APPEND    SP1,CMDLINE
+          APPEND    FILEPATH,CMDLINE
+          APPEND    ".bak",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          GOTO      PROC1000           * get next result file
+.
+PROC1900  CLOSE     ACCRSLT1           * close the result file
+.
+.         Now we rename the result file with a ".err" extension
+.
+          CLEAR     CMDLINE
+          APPEND    "mv ",CMDLINE
+          APPEND    FILEPATH,CMDLINE
+          APPEND    SP1,CMDLINE
+          APPEND    FILEPATH,CMDLINE
+          APPEND    ".err",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          GOTO      PROC1000           * get next result file
+.
+PROC9999  RETURN
++
+.------------------------------------------------------------------------------
+.         Clear the JSON data variable
+.------------------------------------------------------------------------------
+CLRJSD00  CLEAR     RESJSOND
+.
+          MOVE      ZERO,COUNTER
+          WHILE     COUNTER < 40
+            ADD       ONE,COUNTER
+            APPEND    SP100,RESJSOND
+          DO
+.
+          RESET     RESJSOND
+.
+CLRJSD99  RETURN
++
+.------------------------------------------------------------
+. Clear Parameters
+.------------------------------------------------------------
+CLRPAR00  RETURN
++
+.------------------------------------------------------------
+. Set Parameters
+.------------------------------------------------------------
+SETPAR00  RETURN
++
+.------------------------------------------------------------
+. Process Fields
+.------------------------------------------------------------
+PROFLD00  RETURN
++
+.------------------------------------------------------------------------------
+.
+          INC       IBAWEBCD
+          INC       TFILENAM
+.
+          INC       ACCLODIO/INC

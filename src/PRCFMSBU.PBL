@@ -1,0 +1,921 @@
+.******************************************************************************
+.* System    :   Accounting System                                            *
+.* Procedure :   PRCFMSBU                                                     *
+.* Desc      :   Budget Total Account Update                                  *
+.******************************************************************************
+.* Date      :   11.10.90                                                     *
+.* Author    :   B.G.Ackland (IBA)                                            *
+.* Mods      :   29.10.90  Neeriem Dye                                        *
+.*                         Fixed to Accomodate Stat Accounts                  *
+.*                                                                            *
+.*               03.06.91  Neeriem Dye (IBA)                                  *
+.*                         Modified for Budget Linking                        *
+.*                                                                            *
+.*               26.08.91  Neeriem Dye (IBA)                                  *
+.*                         Modified to move zero to a var divided by zero     *
+.*                                                                            *
+.*               18.11.91  Neeriem Dye (IBA)                                  *
+.*                         Stopped data changing if update run more than once *
+.*                         srf 111774                                         *
+.*                                                                            *
+.******************************************************************************
+.$$$$$$
+.Update Procedure - DEFPROC
+.----------------
+.INCLUDE NAME - PRCFMSBU.PBL
+.
+.For the Budget Type passed to this procedure perform the following.
+.
+.1. OPEN Budget by Budget Type - fmsbxxxx   
+.   OPEN Account Master File   - fmsamaaf
+.   OPEN Report Calculation    - fmstcfaf
+.   OPEN Ledger Master File    - fmslmaaf
+.   OPEN Total Account Update  - fmstupaf
+.
+.2. Pass 1 Clear Totals
+.   if program id = IBAFMS85 Display "Clearing : " on line 24
+.   Loop through the account master file by index 4 by account type report level
+.   FMSAMAA4  IFILE  SQL, FIXED=345, KEY="U53-53,310-312,1-2,3-14" * Calculation
+.     for all account of Type 6 and 9. ( ie Total Accounts  and Stats Totals)
+.     if program id = IBAFMS85 Display Each Account on line 24
+.     Read Actuals file
+.        If no record exists
+.             Continue Loop
+.        if record exists
+.             Move Zero to All Values and Update Record
+.             Continue Loop
+.        
+.
+.3. Pass 2 Accumulate Total Accounts
+.   if program id = IBAFMS85 Display "Accumulating : " on line 24
+.   Loop through the account reporting sequence file by index 3
+.   FMSARSA3  IFILE  SQL, FIXED=71, KEY="U3-4,27-29,15-26,1-2"  * Total Calc 
+.   if program id = IBAFMS85 Display Each Account on line 24
+.   Read Actuals Record
+.       If no record exists
+.            Continue Loop
+.       If record exists
+.            Move period values to save values
+.            Read Actuals record for Addto Ledger/Account
+.                 If no record exists
+.                    Write new record with saved period values
+.                    Continue loop
+.                 If record exists
+.                    Add period values 
+.                    Update Total Record
+.                    Continue Loop
+.
+.$$$$$$
+.
+.==============================================================================
+.FILE DESCRIPTION INCLUDES
+.-------------------------
+          DEFPROC   FMSBU000
+          INC       FMSAMAFD/INC      * Account Master file
+          INC       FMSCONFD/INC      * Control File
+          INC       FMSLMAFD/INC      * Ledger Master File
+          INC       FMSTCFFD/INC      * Total Calculation
+          INC       FMSTUPFD/INC      * Total Acc Update
+          INC       FMSBUDFD/INC      * Budget Summary
+          INC       FMSLBUFD/INC      * Stats Budget Linking
+          INC       FMSSBUFD/INC      * Stats Budget Summary
+.
+.==============================================================================
+.LOCAL VARIABLE DEFINITION
+.-------------------------
+BUDFILE   DIM       8
+STATFILE  DIM       8
+LINKFILE  DIM       8
+F12P6     FORM      12.6
+SAVLEVEL  DIM       3
+.
+SAV01     FORM      12.6
+SAV02     FORM      12.6
+SAV03     FORM      12.6
+SAV04     FORM      12.6
+SAV05     FORM      12.6
+SAV06     FORM      12.6
+SAV07     FORM      12.6
+SAV08     FORM      12.6
+SAV09     FORM      12.6
+SAV10     FORM      12.6
+SAV11     FORM      12.6
+SAV12     FORM      12.6
+SAV13     FORM      12.6
+.
+SAVC01    FORM      12.2
+SAVC02    FORM      12.2
+SAVC03    FORM      12.2
+SAVC04    FORM      12.2
+SAVC05    FORM      12.2
+SAVC06    FORM      12.2
+SAVC07    FORM      12.2
+SAVC08    FORM      12.2
+SAVC09    FORM      12.2
+SAVC10    FORM      12.2
+SAVC11    FORM      12.2
+SAVC12    FORM      12.2
+SAVC13    FORM      12.2
+.
+SAVC01D   FORM      12
+SAVC02D   FORM      12
+SAVC03D   FORM      12
+SAVC04D   FORM      12
+SAVC05D   FORM      12
+SAVC06D   FORM      12
+SAVC07D   FORM      12
+SAVC08D   FORM      12
+SAVC09D   FORM      12
+SAVC10D   FORM      12
+SAVC11D   FORM      12
+SAVC12D   FORM      12
+SAVC13D   FORM      12
+.
+SAVC01T   FORM      9
+SAVC02T   FORM      9
+SAVC03T   FORM      9
+SAVC04T   FORM      9
+SAVC05T   FORM      9
+SAVC06T   FORM      9
+SAVC07T   FORM      9
+SAVC08T   FORM      9
+SAVC09T   FORM      9
+SAVC10T   FORM      9
+SAVC11T   FORM      9
+SAVC12T   FORM      9
+SAVC13T   FORM      9
+.
+SAVKEY18  DIM       18
+SAVKEY14  DIM       14
+.
+.******************************************************************************
+.*  MAINLINE - Controlling Logic                                              *
+.******************************************************************************
+ML0000    CALL      INIT0000           * display heading and open files
+          BRANCH    EXIT,ML9999
+.
+ML0100    CALL      CALC0000           * Calc Total and Stats Total Records
+.
+ML9999    GOTO      FMSBU999
+.
+.******************************************************************************
+.* INIT - Open Files                             Called by ML0000             *
+.******************************************************************************
+INIT0000  CLEAR     BUDFILE
+          APPEND    "fmsb",BUDFILE
+          APPEND    BUDTYPE,BUDFILE
+          RESET     BUDFILE
+          REP       " 0",BUDFILE
+.
+          CLEAR     STATFILE
+          APPEND    "fmsc",STATFILE
+          APPEND    BUDTYPE,STATFILE
+          RESET     STATFILE
+          REP       " 0",STATFILE
+.
+          CLEAR     LINKFILE
+          APPEND    "fmsl",LINKFILE
+          APPEND    BUDTYPE,LINKFILE
+          RESET     LINKFILE
+          REP       " 0",LINKFILE
+.
+          MATCH     "IBAFMS85",PRGID
+          GOTO      INIT1000 IF NOT EQUAL
+.
+          DISPLAY   *P50:24,"Opening fmsamaa1";
+          OPEN      FMSAMAA1,"fmsamaaf"
+.
+          DISPLAY   *P58:24,"fmsamaa2";
+          OPEN      FMSAMAA2,"fmsamaaf"
+.
+          DISPLAY   *P58:24,"fmsamaa4";
+          OPEN      FMSAMAA4,"fmsamaaf"
+.
+          DISPLAY   *P58:24,"fmstcfa1";
+          OPEN      FMSTCFA1,"fmstcfaf"
+.
+          DISPLAY   *P58:24,"fmslmaa1";
+          OPEN      FMSLMAA1,"fmslmaaf"
+.
+          DISPLAY   *P58:24,"fmstupa1";
+          OPEN      FMSTUPA1,"fmstupaf"
+.
+          DISPLAY   *P58:24,"controlf"
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P58:24,BUDFILE
+          GOTO      INIT2000
+.
+INIT1000  OPEN      FMSAMAA1,"fmsamaaf"
+          OPEN      FMSAMAA2,"fmsamaaf"
+          OPEN      FMSAMAA4,"fmsamaaf"
+          OPEN      FMSTCFA1,"fmsarsaf"
+          OPEN      FMSLMAA1,"fmstupaf"
+          OPEN      FMSLMAA1,"fmslmaaf"
+          OPEN      CONTROLF,"controlf"
+          CALL      RDFMCO52
+.
+INIT2000  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FMSSBUA1,STATFILE
+          TRAPCLR   IO
+          STORE     SP70,OVRCD,STATFILE
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FMSLBUA2,LINKFILE
+          TRAPCLR   IO
+          STORE     SP70,OVRCD,LINKFILE
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FMSBUDA1,BUDFILE
+          TRAPCLR   IO
+.
+          MOVE      ZERO,EXIT
+          COMPARE   ZERO,OVRCD
+          GOTO      INIT9999 IF EQUAL
+.
+          MOVE      ONE,EXIT     * No file for this Financial Year
+          MATCH     "IBAFMS85",PRGID
+          GOTO      INIT9999 IF NOT EQUAL
+          DISPLAY   *P1:24,*EL,"Budget file ",BUDFILE," does not exist - ";
+          CALL      HITENTER
+.
+INIT9999  DISPLAY   *P1:24,*EL;
+          RETURN
+.
+.******************************************************************************
+.* CALC - Calculate totals                       Called by ML0000             *
+.******************************************************************************
+CALC0000  MATCH     "IBAFMS85",PRGID
+          GOTO      CALC0100 IF NOT EQUAL
+          DISPLAY   *P1:24,*EL,"Calculating     - ";
+.                             
+CALC0100  PACK      KEY18,SIX,SP70
+          CALL      RSFMAM4
+.
+CALC1000  CALL      RKFMAM4
+          BRANCH    OVRCD,CALC2000
+          MATCH     "6",FMAMTYPE
+          GOTO      CALC2000 IF NOT EQUAL
+.
+          MATCH     "IBAFMS85",PRGID
+          GOTO      CALC1100 IF NOT EQUAL
+          DISPLAY   *P20:24,*V2LON,FMAMLEDG,"/",FMAMACCT;
+.
+CALC1100  CALL      MZTS0000       * Move Zero to Save Variables
+.
+          MOVE      FMAMCLEV,SAVLEVEL
+          CALL      CALF0000       * Calculate Financial Total
+.
+          PACK      KEY14,FMAMLEDG,FMAMACCT
+          CALL      RDFMBU1
+          BRANCH    OVRCD,CALC1200
+.
+          CALL      MSTA0000       * Move Save to File Variables
+          CALL      UPFMBU1
+          GOTO      CALC1000
+.
+CALC1200  MOVE      FMAMLEDG,FMBUCULD
+          MOVE      FMAMACCT,FMBUCUAC
+          MOVE      SP70,FMBUCUSP
+          CALL      MSTA0000       * Move Save to File Variables
+          CALL      WRFMBU1
+          GOTO      CALC1000
+.
+. Statistical Calculations
+.
+CALC2000  MATCH     SP70,STATFILE
+          GOTO      CALC9999 IF EQUAL  * no stat file ?
+          PACK      KEY18,NINE,SP70
+.
+CALC3000  CALL      RSFMAM4
+          CALL      RKFMAM4
+          BRANCH    OVRCD,CALC9999
+          MATCH     "9",FMAMTYPE
+          GOTO      CALC9999 IF NOT EQUAL
+.
+          PACK      SAVKEY18,FMAMTYPE,FMAMCLEV,FMAMLEDG,FMAMACCT
+.
+          MATCH     "IBAFMS85",PRGID
+          GOTO      CALC3100 IF NOT EQUAL
+          DISPLAY   *P20:24,*V2LON,FMAMLEDG,"/",FMAMACCT;
+.
+CALC3100  CALL      MZSS0000       * Move Zeros to Saved Amounts
+.
+          MOVE      FMAMCLEV,SAVLEVEL
+          CALL      CALS0000       * Calculate Statistical Totals
+.
+          PACK      KEY14,FMAMLEDG,FMAMACCT
+          CALL      RDFMST1
+          BRANCH    OVRCD,CALC3200
+.
+          CALL      MSTF0000       * Move Saved Amounts to File Totals
+          CALL      UPFMST1
+          GOTO      CALC4000
+.
+CALC3200  MOVE      FMAMLEDG,FMSTCULD
+          MOVE      FMAMACCT,FMSTCUAC
+          CALL      MSTF0000       * Move Saved Amounts to File Totals
+          CALL      WRFMST1
+.
+.---- check for budget link ----
+.
+CALC4000  MATCH     SP70,LINKFILE
+          GOTO      CALC5000 IF EQUAL
+.
+          PACK      KEY28,FMAMLEDG,FMAMACCT,SP70
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          CALL      RSFMBL2       * go to start of budget link file (if open)
+          TRAPCLR   IO
+          BRANCH    OVRCD,CALC5000
+.
+CALC4100  CALL      RKFMBL2
+          BRANCH    OVRCD,CALC5000
+          PACK      KEY14,FMBLFLED,FMBLFACC,SP70
+          MATCH     KEY14,KEY28
+          GOTO      CALC5000 IF NOT EQUAL
+.
+          PACK      KEY14,FMBLTLED,FMBLTACC,SP70
+          CALL      RDFMAM1
+          BRANCH    OVRCD,CALC4100
+.
+          CALL      WRTU0000
+          MATCH     "8",FMAMTYPE
+          GOTO      CALC4200 IF NOT EQUAL   * stat posting ?
+          UNPACK    KEY14,FMSTCULD,FMSTCUAC
+          UNPACK    SP70,FMSTCUPR
+          CALL      DEFMST1
+          CALL      WRFMST1
+          GOTO      CALC4100
+.
+CALC4200  MATCH     "6",FMAMTYPE
+          GOTO      CALC4100 IF NOT LESS    * normal posting ?
+          UNPACK    KEY14,FMBUCULD,FMBUCUAC
+          UNPACK    SP70,FMBUCUPR
+          CALL      GETS0000
+          CALL      DEFMBU1
+          CALL      WRFMBU1
+          GOTO      CALC4100
+.
+. ---- restore key ----
+.
+CALC5000  MOVE      SAVKEY18,KEY18
+          GOTO      CALC3000
+.
+CALC9999  RETURN
+.**********************************************************************
+.  WRTU - write total update for budget link           Called By CALC
+.**********************************************************************
+WRTU0000  MOVE      "~~",KEY2
+          PACK      KEY20,KEY2,BUDTYPE,FMBLTLED,FMBLTACC,SP70
+          CALL      RDFMTU1            * record exists ?
+          COMPARE   ZERO,OVRCD
+          GOTO      WRTU9000 IF EQUAL
+.
+          UNPACK    KEY20,FMTUPORT,FMTUSPEC,FMTUTLED,FMTUTACC
+          MOVE      SP70,FMTUSPAR
+          CALL      WRFMTU1            * Flag For Total Account Update
+.
+WRTU9000  
+.
+WRTU9999  RETURN
+.**********************************************************************
+.  GETS - move stat values to actuals                  Called By CALC
+.**********************************************************************
+GETS0000  MOVE      FMSTCA01,FMBUCA01
+          MOVE      FMSTCA02,FMBUCA02
+          MOVE      FMSTCA03,FMBUCA03
+          MOVE      FMSTCA04,FMBUCA04
+          MOVE      FMSTCA05,FMBUCA05
+          MOVE      FMSTCA06,FMBUCA06
+          MOVE      FMSTCA07,FMBUCA07
+          MOVE      FMSTCA08,FMBUCA08
+          MOVE      FMSTCA09,FMBUCA09
+          MOVE      FMSTCA10,FMBUCA10
+          MOVE      FMSTCA11,FMBUCA11
+          MOVE      FMSTCA12,FMBUCA12
+          MOVE      FMSTCA13,FMBUCA13
+.
+          MOVE      FMSTCA01,FMBUCB01
+          MOVE      FMSTCA02,FMBUCB02
+          MOVE      FMSTCA03,FMBUCB03
+          MOVE      FMSTCA04,FMBUCB04
+          MOVE      FMSTCA05,FMBUCB05
+          MOVE      FMSTCA06,FMBUCB06
+          MOVE      FMSTCA07,FMBUCB07
+          MOVE      FMSTCA08,FMBUCB08
+          MOVE      FMSTCA09,FMBUCB09
+          MOVE      FMSTCA10,FMBUCB10
+          MOVE      FMSTCA11,FMBUCB11
+          MOVE      FMSTCA12,FMBUCB12
+          MOVE      FMSTCA13,FMBUCB13
+.
+          MOVE      FMSTCA01,FMBUCC01
+          MOVE      FMSTCA02,FMBUCC02
+          MOVE      FMSTCA03,FMBUCC03
+          MOVE      FMSTCA04,FMBUCC04
+          MOVE      FMSTCA05,FMBUCC05
+          MOVE      FMSTCA06,FMBUCC06
+          MOVE      FMSTCA07,FMBUCC07
+          MOVE      FMSTCA08,FMBUCC08
+          MOVE      FMSTCA09,FMBUCC09
+          MOVE      FMSTCA10,FMBUCC10
+          MOVE      FMSTCA11,FMBUCC11
+          MOVE      FMSTCA12,FMBUCC12
+          MOVE      FMSTCA13,FMBUCC13
+          DIV       "1000",FMBUCC01
+          DIV       "1000",FMBUCC02
+          DIV       "1000",FMBUCC03
+          DIV       "1000",FMBUCC04
+          DIV       "1000",FMBUCC05
+          DIV       "1000",FMBUCC06
+          DIV       "1000",FMBUCC07
+          DIV       "1000",FMBUCC08
+          DIV       "1000",FMBUCC09
+          DIV       "1000",FMBUCC10
+          DIV       "1000",FMBUCC11
+          DIV       "1000",FMBUCC12
+          DIV       "1000",FMBUCC13
+.
+GETS9999  RETURN
+.**********************************************************************
+.* Calculate Financial Total Account
+.**********************************************************************
+CALF0000  PACK      KEY33,FMAMLEDG,FMAMACCT
+          PACK      SAVKEY14,FMAMLEDG,FMAMACCT
+          CALL      RSFMTC1
+.
+CALF1000  CALL      RKFMTC1
+          BRANCH    OVRCD,CALF9999
+.
+          UNPACK    SAVKEY14,FMAMLEDG,FMAMACCT
+.
+          MATCH     FMAMLEDG,FMTCTLED
+          GOTO      CALF9999 IF NOT EQUAL
+.
+          MATCH     FMAMACCT,FMTCTACC
+          GOTO      CALF9999 IF NOT EQUAL
+.
+          CALL      CLEV0000           * check if level ok
+          BRANCH    EXIT,CALF1000
+.
+          PACK      KEY14,FMTCSLED,FMTCSACC
+          CALL      RDFMBU1            * Get Summary Details
+          BRANCH    OVRCD,CALF1000
+.
+          CALL      ADDF0000           * Add Sub total to Saved Totals
+.
+          GOTO      CALF1000
+.
+CALF9999  RETURN
+.**********************************************************************
+.* Calculate Statistical Total Account
+.**********************************************************************
+CALS0000  PACK      KEY33,FMAMLEDG,FMAMACCT
+          PACK      SAVKEY14,FMAMLEDG,FMAMACCT
+          CALL      RSFMTC1
+.
+CALS1000  CALL      RKFMTC1
+          BRANCH    OVRCD,CALS9000
+.
+          UNPACK    SAVKEY14,FMAMLEDG,FMAMACCT
+.
+          MATCH     FMAMLEDG,FMTCTLED
+          GOTO      CALS9000 IF NOT EQUAL
+.
+          MATCH     FMAMACCT,FMTCTACC
+          GOTO      CALS9000 IF NOT EQUAL
+.
+          CALL      CLEV0000           * check if level ok
+          BRANCH    EXIT,CALS1000
+.
+          MATCH     "7",FMAMTYPE
+          GOTO      CALS2000 IF NOT LESS   * stat record
+.
+          CALL      RDFMBU1
+          BRANCH    OVRCD,CALS1000     * get data from nornal sub-account
+.
+          MOVE      FMBUCA01,FMSTCA01
+          MOVE      FMBUCA02,FMSTCA02
+          MOVE      FMBUCA03,FMSTCA03
+          MOVE      FMBUCA04,FMSTCA04
+          MOVE      FMBUCA05,FMSTCA05
+          MOVE      FMBUCA06,FMSTCA06
+          MOVE      FMBUCA07,FMSTCA07
+          MOVE      FMBUCA08,FMSTCA08
+          MOVE      FMBUCA09,FMSTCA09
+          MOVE      FMBUCA10,FMSTCA10
+          MOVE      FMBUCA11,FMSTCA11
+          MOVE      FMBUCA12,FMSTCA12
+          MOVE      FMBUCA13,FMSTCA13
+.
+          GOTO      CALS3000
+.
+CALS2000  CALL      RDFMST1
+          BRANCH    OVRCD,CALS1000     * get data from stat sub-account
+.
+CALS3000  CALL      ADDS0000           * Add Sub total to Saved Totals (stats)
+.
+          GOTO      CALS1000
+.
+CALS9000  MOVE      SAVKEY14,KEY14     * Read back masterfile record and 
+          CALL      RDFMAM1            * mult/div by constants
+          BRANCH    OVRCD,CALS9999
+          CALL      MAMT0000
+.
+CALS9999  RETURN
+.**********************************************************************
+.  CLEV - Check add to levels                          Called By lots
+.        Requires - SAVLEVEL (total account level)
+.        Returns  - EXIT     (1=level or account invalid)
+.**********************************************************************
+CLEV0000  PACK      KEY14,FMTCSLED,FMTCSACC,SP70
+          CALL      RDFMAM1
+          BRANCH    OVRCD,CLEV9500          * account not found ?
+.
+          MATCH     SAVLEVEL,FMAMCLEV
+          GOTO      CLEV9500 IF NOT LESS    * level less than add to account ?
+.
+CLEV9000  MOVE      ZERO,EXIT          * continue
+          GOTO      CLEV9999
+.
+CLEV9500  MOVE      ONE,EXIT           * quit
+.
+CLEV9999  RETURN
+.**********************************************************************
+.* Mult Amounts by Constant                                           *
+.**********************************************************************
+MAMT0000  MOVE      FMAMMULT,F12P6     * get constant
+          MOVE      FMAMDIV,CDIV1
+          MOVE      F12P6,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,F12P6
+.
+          MULT      F12P6,SAV01
+          MULT      F12P6,SAV02
+          MULT      F12P6,SAV03
+          MULT      F12P6,SAV04
+          MULT      F12P6,SAV05
+          MULT      F12P6,SAV06
+          MULT      F12P6,SAV07
+          MULT      F12P6,SAV08
+          MULT      F12P6,SAV09
+          MULT      F12P6,SAV10
+          MULT      F12P6,SAV11
+          MULT      F12P6,SAV12
+          MULT      F12P6,SAV13
+.
+MAMT9999  RETURN
+.**********************************************************************
+.* Add stats records to temps
+.**********************************************************************
+ADDS0000  MOVE      FMTCADDT,F1
+          BRANCH    F1,ADDS2000,ADDS3000,ADDS4000 * 0=add,1=sub,2=div,3=mult
+.
+. add
+.
+ADDS1000  ADD       FMSTCA01,SAV01
+          ADD       FMSTCA02,SAV02
+          ADD       FMSTCA03,SAV03
+          ADD       FMSTCA04,SAV04
+          ADD       FMSTCA05,SAV05
+          ADD       FMSTCA06,SAV06
+          ADD       FMSTCA07,SAV07
+          ADD       FMSTCA08,SAV08
+          ADD       FMSTCA09,SAV09
+          ADD       FMSTCA10,SAV10
+          ADD       FMSTCA11,SAV11
+          ADD       FMSTCA12,SAV12
+          ADD       FMSTCA13,SAV13
+          GOTO      ADDS9999
+.
+. sub
+.
+ADDS2000  SUB       FMSTCA01,SAV01
+          SUB       FMSTCA02,SAV02
+          SUB       FMSTCA03,SAV03
+          SUB       FMSTCA04,SAV04
+          SUB       FMSTCA05,SAV05
+          SUB       FMSTCA06,SAV06
+          SUB       FMSTCA07,SAV07
+          SUB       FMSTCA08,SAV08
+          SUB       FMSTCA09,SAV09
+          SUB       FMSTCA10,SAV10
+          SUB       FMSTCA11,SAV11
+          SUB       FMSTCA12,SAV12
+          SUB       FMSTCA13,SAV13
+          GOTO      ADDS9999
+.
+. div
+.
+ADDS3000  MOVE      FMSTCA01,CDIV1
+          MOVE      SAV01,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV01
+.
+          MOVE      FMSTCA02,CDIV1
+          MOVE      SAV02,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV02
+.
+          MOVE      FMSTCA03,CDIV1
+          MOVE      SAV03,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV03
+.
+          MOVE      FMSTCA04,CDIV1
+          MOVE      SAV04,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV04
+.
+          MOVE      FMSTCA05,CDIV1
+          MOVE      SAV05,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV05
+.
+          MOVE      FMSTCA06,CDIV1
+          MOVE      SAV06,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV06
+.
+          MOVE      FMSTCA07,CDIV1
+          MOVE      SAV07,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV07
+.
+          MOVE      FMSTCA08,CDIV1
+          MOVE      SAV08,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV08
+.
+          MOVE      FMSTCA09,CDIV1
+          MOVE      SAV09,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV09
+.
+          MOVE      FMSTCA10,CDIV1
+          MOVE      SAV10,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV10
+.
+          MOVE      FMSTCA11,CDIV1
+          MOVE      SAV11,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV11
+.
+          MOVE      FMSTCA12,CDIV1
+          MOVE      SAV12,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV12
+.
+          MOVE      FMSTCA13,CDIV1
+          MOVE      SAV13,CDIV2
+          CALL      CDIV0000
+          MOVE      CDIV2,SAV13
+.
+          GOTO      ADDS9999
+.
+. mult
+.
+ADDS4000  MULT      FMSTCA01,SAV01
+          MULT      FMSTCA02,SAV02
+          MULT      FMSTCA03,SAV03
+          MULT      FMSTCA04,SAV04
+          MULT      FMSTCA05,SAV05
+          MULT      FMSTCA06,SAV06
+          MULT      FMSTCA07,SAV07
+          MULT      FMSTCA08,SAV08
+          MULT      FMSTCA09,SAV09
+          MULT      FMSTCA10,SAV10
+          MULT      FMSTCA11,SAV11
+          MULT      FMSTCA12,SAV12
+          MULT      FMSTCA13,SAV13
+          GOTO      ADDS9999
+.
+ADDS9999  RETURN
+.**********************************************************************
+. Move Zero to all stats Saved Amounts
+.**********************************************************************
+MZSS0000  MOVE      ZERO,SAV01
+          MOVE      ZERO,SAV02
+          MOVE      ZERO,SAV03
+          MOVE      ZERO,SAV04
+          MOVE      ZERO,SAV05
+          MOVE      ZERO,SAV06
+          MOVE      ZERO,SAV07
+          MOVE      ZERO,SAV08
+          MOVE      ZERO,SAV09
+          MOVE      ZERO,SAV10
+          MOVE      ZERO,SAV11
+          MOVE      ZERO,SAV12
+          MOVE      ZERO,SAV13
+          RETURN
+.**********************************************************************
+. Move Save Stats to File
+.**********************************************************************
+MSTF0000  MOVE      SP70,FMSTCUSP
+          MOVE      SAV01,FMSTCA01
+          MOVE      SAV02,FMSTCA02
+          MOVE      SAV03,FMSTCA03
+          MOVE      SAV04,FMSTCA04
+          MOVE      SAV05,FMSTCA05
+          MOVE      SAV06,FMSTCA06
+          MOVE      SAV07,FMSTCA07
+          MOVE      SAV08,FMSTCA08
+          MOVE      SAV09,FMSTCA09
+          MOVE      SAV10,FMSTCA10
+          MOVE      SAV11,FMSTCA11
+          MOVE      SAV12,FMSTCA12
+          MOVE      SAV13,FMSTCA13
+          RETURN
+.**********************************************************************
+. Move Zero to sav variables for calculation
+.**********************************************************************
+MZTS0000  MOVE      ZERO,SAVC01
+          MOVE      ZERO,SAVC02
+          MOVE      ZERO,SAVC03
+          MOVE      ZERO,SAVC04
+          MOVE      ZERO,SAVC05
+          MOVE      ZERO,SAVC06
+          MOVE      ZERO,SAVC07
+          MOVE      ZERO,SAVC08
+          MOVE      ZERO,SAVC09
+          MOVE      ZERO,SAVC10
+          MOVE      ZERO,SAVC11
+          MOVE      ZERO,SAVC12
+          MOVE      ZERO,SAVC13
+.
+.
+          MOVE      ZERO,SAVC01D
+          MOVE      ZERO,SAVC02D
+          MOVE      ZERO,SAVC03D
+          MOVE      ZERO,SAVC04D
+          MOVE      ZERO,SAVC05D
+          MOVE      ZERO,SAVC06D
+          MOVE      ZERO,SAVC07D
+          MOVE      ZERO,SAVC08D
+          MOVE      ZERO,SAVC09D
+          MOVE      ZERO,SAVC10D
+          MOVE      ZERO,SAVC11D
+          MOVE      ZERO,SAVC12D
+          MOVE      ZERO,SAVC13D
+.
+          MOVE      ZERO,SAVC01T
+          MOVE      ZERO,SAVC02T
+          MOVE      ZERO,SAVC03T
+          MOVE      ZERO,SAVC04T
+          MOVE      ZERO,SAVC05T
+          MOVE      ZERO,SAVC06T
+          MOVE      ZERO,SAVC07T
+          MOVE      ZERO,SAVC08T
+          MOVE      ZERO,SAVC09T
+          MOVE      ZERO,SAVC10T
+          MOVE      ZERO,SAVC11T
+          MOVE      ZERO,SAVC12T
+          MOVE      ZERO,SAVC13T
+.
+          RETURN
+.
+.**********************************************************************
+. Move Save Totals to File Totals for Update
+.**********************************************************************
+MSTA0000  MOVE      SAVC01,FMBUCA01
+          MOVE      SAVC02,FMBUCA02
+          MOVE      SAVC03,FMBUCA03
+          MOVE      SAVC04,FMBUCA04
+          MOVE      SAVC05,FMBUCA05
+          MOVE      SAVC06,FMBUCA06
+          MOVE      SAVC07,FMBUCA07
+          MOVE      SAVC08,FMBUCA08
+          MOVE      SAVC09,FMBUCA09
+          MOVE      SAVC10,FMBUCA10
+          MOVE      SAVC11,FMBUCA11
+          MOVE      SAVC12,FMBUCA12
+          MOVE      SAVC13,FMBUCA13
+.
+          MOVE      SAVC01D,FMBUCB01
+          MOVE      SAVC02D,FMBUCB02
+          MOVE      SAVC03D,FMBUCB03
+          MOVE      SAVC04D,FMBUCB04
+          MOVE      SAVC05D,FMBUCB05
+          MOVE      SAVC06D,FMBUCB06
+          MOVE      SAVC07D,FMBUCB07
+          MOVE      SAVC08D,FMBUCB08
+          MOVE      SAVC09D,FMBUCB09
+          MOVE      SAVC10D,FMBUCB10
+          MOVE      SAVC11D,FMBUCB11
+          MOVE      SAVC12D,FMBUCB12
+          MOVE      SAVC13D,FMBUCB13
+.
+          MOVE      SAVC01T,FMBUCC01
+          MOVE      SAVC02T,FMBUCC02
+          MOVE      SAVC03T,FMBUCC03
+          MOVE      SAVC04T,FMBUCC04
+          MOVE      SAVC05T,FMBUCC05
+          MOVE      SAVC06T,FMBUCC06
+          MOVE      SAVC07T,FMBUCC07
+          MOVE      SAVC08T,FMBUCC08
+          MOVE      SAVC09T,FMBUCC09
+          MOVE      SAVC10T,FMBUCC10
+          MOVE      SAVC11T,FMBUCC11
+          MOVE      SAVC12T,FMBUCC12
+          MOVE      SAVC13T,FMBUCC13
+.
+          RETURN
+.**********************************************************************
+. Add Totals to Save Totals for Update
+.**********************************************************************
+ADDF0000  ADD       FMBUCA01,SAVC01
+          ADD       FMBUCA02,SAVC02
+          ADD       FMBUCA03,SAVC03
+          ADD       FMBUCA04,SAVC04
+          ADD       FMBUCA05,SAVC05
+          ADD       FMBUCA06,SAVC06
+          ADD       FMBUCA07,SAVC07
+          ADD       FMBUCA08,SAVC08
+          ADD       FMBUCA09,SAVC09
+          ADD       FMBUCA10,SAVC10
+          ADD       FMBUCA11,SAVC11
+          ADD       FMBUCA12,SAVC12
+          ADD       FMBUCA13,SAVC13
+          COMPARE   ONE,FMTCPOST
+          GOTO      ADDF1000 IF NOT EQUAL
+.
+. Posting account so move Dollars & Cents to Dollars and Thousands 
+.
+          MOVE      FMBUCA01,FMBUCB01
+          MOVE      FMBUCA02,FMBUCB02
+          MOVE      FMBUCA03,FMBUCB03
+          MOVE      FMBUCA04,FMBUCB04
+          MOVE      FMBUCA05,FMBUCB05
+          MOVE      FMBUCA06,FMBUCB06
+          MOVE      FMBUCA07,FMBUCB07
+          MOVE      FMBUCA08,FMBUCB08
+          MOVE      FMBUCA09,FMBUCB09
+          MOVE      FMBUCA10,FMBUCB10
+          MOVE      FMBUCA11,FMBUCB11
+          MOVE      FMBUCA12,FMBUCB12
+          MOVE      FMBUCA13,FMBUCB13
+.
+          MOVE      FMBUCA01,FMBUCC01
+          MOVE      FMBUCA02,FMBUCC02
+          MOVE      FMBUCA03,FMBUCC03
+          MOVE      FMBUCA04,FMBUCC04
+          MOVE      FMBUCA05,FMBUCC05
+          MOVE      FMBUCA06,FMBUCC06
+          MOVE      FMBUCA07,FMBUCC07
+          MOVE      FMBUCA08,FMBUCC08
+          MOVE      FMBUCA09,FMBUCC09
+          MOVE      FMBUCA10,FMBUCC10
+          MOVE      FMBUCA11,FMBUCC11
+          MOVE      FMBUCA12,FMBUCC12
+          MOVE      FMBUCA13,FMBUCC13
+          CALL      UPFMBU1
+.
+ADDF1000  ADD       FMBUCB01,SAVC01D
+          ADD       FMBUCB02,SAVC02D
+          ADD       FMBUCB03,SAVC03D
+          ADD       FMBUCB04,SAVC04D
+          ADD       FMBUCB05,SAVC05D
+          ADD       FMBUCB06,SAVC06D
+          ADD       FMBUCB07,SAVC07D
+          ADD       FMBUCB08,SAVC08D
+          ADD       FMBUCB09,SAVC09D
+          ADD       FMBUCB10,SAVC10D
+          ADD       FMBUCB11,SAVC11D
+          ADD       FMBUCB12,SAVC12D
+          ADD       FMBUCB13,SAVC13D
+.
+          ADD       FMBUCC01,SAVC01T
+          ADD       FMBUCC02,SAVC02T
+          ADD       FMBUCC03,SAVC03T
+          ADD       FMBUCC04,SAVC04T
+          ADD       FMBUCC05,SAVC05T
+          ADD       FMBUCC06,SAVC06T
+          ADD       FMBUCC07,SAVC07T
+          ADD       FMBUCC08,SAVC08T
+          ADD       FMBUCC09,SAVC09T
+          ADD       FMBUCC10,SAVC10T
+          ADD       FMBUCC11,SAVC11T
+          ADD       FMBUCC12,SAVC12T
+          ADD       FMBUCC13,SAVC13T
+.
+          RETURN
+.******************************************************************************
+.* INCLUDES                                                                   *
+.******************************************************************************
+.
+          INC       FMSAMAIO/INC      * Account Master file
+          INC       FMSCONIO/INC      * Control File
+          INC       FMSLMAIO/INC      * Ledger Master File
+          INC       FMSTCFIO/INC      * Total Calculation
+          INC       FMSTUPIO/INC      * Total Acc Update
+          INC       FMSBUDIO/INC      * Budget Summary
+          INC       FMSLBUIO/INC      * Stats Budget Linking
+          INC       FMSSBUIO/INC      * Stats Budget Summary
+          INC       IBAOVRIO/INC
+.
+FMSBU999  ENDPROC

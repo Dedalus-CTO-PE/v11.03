@@ -1,0 +1,526 @@
+.*****************************************************************************
+.*    Program      : IBAOUT25                                                *
+.*    Description  : Re-calculate outsesaf statistics report and update      *
+.*                                                                           *
+.*    Author       :  Ebon Clements                                          *
+.*    Date         :  28/07/2004                                             *
+.*    Modifications:                                                         *
+.*****************************************************************************
+.*    V11.02.01   09/02/2022  Thanh T          TSK 0905641                   *
+.*                Recompiled as OUTHEDFD/OUTMA1FD changes                    *
+.*    V10.07.01   29/10/2015  Ebon Clements  CAR 268970                      *
+.*                Change to use OUTCLIFD index 1 instead of index 2          *
+.*                   V10.03.02 14/10/2013 Ania P         CAR 278232          *
+.*                             Refactored code - now using COUNTSLT for      *
+.*                             session recalculation
+.*                   V10.03.01 09/02/2011 Ebon Clements  CAR 259937          *
+.*                             Fixed length of SAVKEY28                      *
+.*                   V10.00.01 11/10/2010 Peter Vela     CAR 230308          *
+.*                             Added CHKGRP00 Check for Group Sessions       *
+.*                    V9.11.01 26.02.2009 Peter McMullen CAR 173242          *
+.*                             Re-calc and correct session scheduled time    *
+.*                    V9.03.00 27.07.2004 Ebon Clements  CAR 50760           *
+.*                             Created program from F90OTSES                 *
+.*****************************************************************************
+.
+          INC       STD001FD
+          INC       OUTSESFD/INC
+          INC       OUTMA1FD/INC
+          INC       OUTBOAFD/INC
+          INC       PATCODFD/INC
+          INC       OUTHEDFD/INC
+          INC       OUTCTYFD/INC
+          INC       OUTCLIFD/INC
+.
+CHKGRPIN  FORM      1
+.
+HOUR      FORM      2
+MIN       DIM       2
+MINUTES   FORM      6
+.
+PRFRDATE  DIM       11                      * Print from date
+PRTODATE  DIM       11                      * Print to date
+SESSDATE  DIM       11                      * Print session date
+.
+SAVEBNEW  FORM      3                       * Save booked new
+SAVEBREV  FORM      3                       * Save booked review
+SAVEBSPC  FORM      3                       * Save booked special
+SAVKEY28  DIM       28
+.
+SAVESNEW  FORM      3                       * Save scheduled new
+SAVESREV  FORM      3                       * Save scheduled review
+SAVESSPC  FORM      3                       * Save scheduled special
+SAVETIMS  DIM       5                       * Slot time in HH:MM
+SAVETIMU  DIM       5                       * Used Slot Time
+.
+UPDATSES  FORM      1                       * 1=Update stats, 0=Run report only
+.
+FINDFILE  FILE      ASCII, FIXED=256
+.
+. Enter the first or the shortest index from the original FD and rename
+. the index OLDFILE
+.   
+OLDFILE   IFILE SQL, FIXED=102, KEY="U1-6,7-12,13-20,21-25"
+.
+CMDLINE   DIM       100
+CNTNSLT   FORM      3 
+CNTRSLT   FORM      3 
+CNTSSLT   FORM      3 
+DIM60     DIM       60
+DEFITEM   FORM      1
+FROMDATE  DIM       8
+TODATE    DIM       8
+.
+RECNUM    FORM      8
+NEWFILE   DIM       60
+NEWPATH   DIM       60
+OLDPATH   DIM       60
+DEFPATH   DIM       60
+SAVEFLG   FORM      1
+.
+MINTIME   FORM      2                              * Minutes                            
+MMSTART   FORM      2                              * session start mm
+MMEND     FORM      2                              * session end   mm
+HHSTART   FORM      2                              * session start hh
+HHEND     FORM      2                              ^ session end   hh 
+.
+SP50      INIT    "                                                  "
+SP60      INIT    "                                                            "
+.
+PRGNAM    INIT      "Check Session Statistics"
+PRGID     INIT      "IBAOUT25"
+VERSION   INIT      "V11.03.00"
+.
+. Start of Program
+.
+MAIN0000  CALL      INIT0000                      * init and open files
+          BRANCH    EXIT,MAIN9999                 * init failure
+.
+          CALL      KDAT0000                      * start date for slots count 
+          CALL      KTDT0000                      * end date for slots count 
+.
+          CALL      KUPD0000                      * Update incorrect stats
+.
+          CALL      CONTQST                       * Ok to continue ?
+          BRANCH    CEXIT,MAIN1000,MAIN0000,MAIN9999 * Yes, no, cancel
+.
+. Loop thru old file and write records to new file
+.
+MAIN1000  CALL      READ0000                      * read old records 
+.
+MAIN9999  CHAIN     PGM
++
+.********************************************************************
+.*                          INIT0000                                *
+.*  Display heading and check that the files needed exist&open them *
+.********************************************************************
+INIT0000  CALL      DISPHEAD
+          MOVE      ZERO,RECNUM
+          MOVE      ZERO,UPDATSES
+.
+          OPEN      PATCODE1,"patcodes" * Open the booking file 
+.
+          PACK      CFNAME,UID,FILBOKA1 * Get the name of the BOKA1 file
+          OPEN      OUTBOKA1,CFNAME     * Open the file
+.
+          PACK      CFNAME,UID,FILSESA1 * Get the name of the SESA1 file
+          OPEN      OUTSESA1,CFNAME     * Open the file
+.
+          PACK      CFNAME,UID,FILMA1A1 * Get the name of the MA1A1 file
+          OPEN      OUTMA1A1,CFNAME     * Open the file
+.
+          PACK      CFNAME,UID,FILHEDA1 * Get the name of the HEDA1 file
+          OPEN      OUTHEDA1,CFNAME     * Open the file
+.
+          PACK      CFNAME,UID,FILCTYA1 * Get the name of the CTYA1 file
+          OPEN      OUTCTYA1,CFNAME     * Open the file
+.
+          PACK      CFNAME,UID,FILCLIA1 * Get the name of the CLIA1 file
+          OPEN      OUTCLIA1,CFNAME     * Open the file
+.
+INIT9999  RETURN
++
++
+.********************************************************************
+.*                          KDAT0000                                *
+.*  Keyin date                                                      *
+.********************************************************************
+KDAT0000  DISPLAY   *P1:6,"Enter start date for slots count :";
+          CALL      IBACLOCK
+          MOVE      CCC,CCENT
+          MOVE      CYY,CYEAR
+          MOVE      CMM,CMON
+          MOVE      CDD,CDAY
+          MOVE      "36",CCOL
+          MOVE      "6",CVERT
+          CALL      KEYDATE
+          BRANCH    OVRCD,KDAT9999
+.
+          PACK      FROMDATE WITH CCENT,CYEAR,CMON,CDAY
+          REP       " 0",FROMDATE
+.
+KDAT9999  RETURN
+.********************************************************************
+.*                          KTDT0000                                *
+.*  Keyin date                                                      *
+.********************************************************************
+KTDT0000  DISPLAY   *P1:8,"Enter end date for slots count :";
+          CALL      IBACLOCK
+          MOVE      CCC,CCENT
+          MOVE      CYY,CYEAR
+          MOVE      CMM,CMON
+          MOVE      CDD,CDAY
+          MOVE      "36",CCOL
+          MOVE      "8",CVERT
+          CALL      KEYDATE
+          BRANCH    OVRCD,KDAT9999
+.
+          PACK      TODATE WITH CCENT,CYEAR,CMON,CDAY
+          REP       " 0",TODATE
+.
+KTDT9999  RETURN
++
+.**********************************************************************
+.*                               READ0000                             *
+.*             loop thru old file                                     *
+.**********************************************************************
+READ0000  DISPLAY   *P1:24,*EL;
+          MOVE      ZERO,EXIT
+          CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:19,"Started : ",CDATE,SP1,CTIMEIS:
+                    *P1:20,"Record : "
+.
+          CALL      HEAD0000                      * Print report heading
+. 
+          DISPLAY   *P1:20,*EL,"Record No. : ";
+          PACK      KEY25,SP60
+          CALL      RDSSESA1
+READ1000  CALL      RDKSESA1
+          BRANCH    OVRCD,READ6000                * no more records
+          ADD       ONE,RECNUM                    * update record counter
+.
+          MATCH     FROMDATE,OSEDATE
+          GOTO      READ1000 IF LESS
+.
+          MATCH     OSEDATE,TODATE
+          GOTO      READ1000 IF LESS
+.
+          PACK      KEY18,OSESITE,OSECLIN,OSEDAY,OSESTRT,SP70
+          CALL      RDMASA1
+          BRANCH    OVRCD,READ1000
+.
+          PACK      KEY28,OSESITE,OSECLIN,OSEDAY,OSESTRT,OSESSHNO,OSESSDAT,SP70
+          CALL      RDOTHED1
+          BRANCH    OVRCD,READ1000
+.
+          PACK      KEY12,OTHESITE,OTHECTYP,SP70
+          CALL      RDCTYA1
+          BRANCH    OVRCD,READ1000
+.
+          PACK      KEY20,OSESITE,OSECLIN,Z70
+          CALL      RDSCLIA1
+          CALL      RDPCLIA1
+          BRANCH    OVRCD,READ1000
+.
+          MATCH     OSESITE,OCASITE
+          GOTO      READ1000 IF NOT EQUAL
+.
+          MATCH     OSECLIN,OCACLIN
+          GOTO      READ1000 IF NOT EQUAL
+.
+          MOVE      OSEBNEW,SAVEBNEW           * Save booked new
+          MOVE      OSEBRV,SAVEBREV            * Save booked review
+          MOVE      OSEBSPC,SAVEBSPC           * Save booked special
+.
+          MOVE      OSESSLTN,SAVESNEW          * Save scheduled new
+          MOVE      OSESSLTR,SAVESREV          * Save scheduled review
+          MOVE      OSESSLTS,SAVESSPC          * Save scheduled special
+.
+          MOVE      OSETIMES,SAVETIMS          * Save time scheduled
+          MOVE      OSETIMEU,SAVETIMU
+.
+          MOVE      "00:00",OSETIMEU           * reset time used
+          MOVE      ZERO,OSESLOTB              * slots booked
+          MOVE      ZERO,OSESLOTS              * slots scheduled
+          MOVE      ZERO,OSESSLTN              * New slots scheduled
+          MOVE      ZERO,OSESSLTR              * Review slots scheduled
+          MOVE      ZERO,OSESSLTS              * Special slots scheduled
+          MOVE      ZERO,OSEBNEW               * New slots scheduled
+          MOVE      ZERO,OSEBRV                * Review slots scheduled
+          MOVE      ZERO,OSEBSPC               * Special slots scheduled
+          MOVE      ZERO,OSEANEW               * New slots scheduled
+          MOVE      ZERO,OSEARV                * Review slots scheduled
+          MOVE      ZERO,OSEASPC               * Special slots scheduled
+.
+.                                              * Calculate available session time 
+          UNPACK    OTHESTRT,KEY2,KEY1,MIN   * (HH:MM) Start Session Time
+          MOVE      KEY2,HHSTART
+          MOVE      MIN,MMSTART
+.
+          UNPACK    OTHESEND,KEY2,KEY1,MIN   * (HH:MM) End Session Time
+          MOVE      KEY2,HHEND
+          MOVE      MIN,MMEND
+.
+     
+          ASSIGN    HHEND-HHSTART,F2           * diff in hrs 
+          IF        MMSTART > MMEND 
+            ASSIGN    SIXTY-MMSTART+MMEND,MINTIME  
+            ASSIGN    F2-ONE,F2
+          ELSE
+            ASSIGN    MMEND-MMSTART,MINTIME
+          ENDIF
+.
+          PACK      OSETIMES,F2,COLON,MINTIME  * build duration in HH:MM
+          REP       " 0",OSETIMES
+         
+          CALL      CSLT0000
+.
+READ2000  COMPARE   OSEBNEW,SAVEBNEW           * Booked new incorrect
+          GOTO      READ3000 IF NOT EQUAL
+.
+          COMPARE   OSEBRV,SAVEBREV            * Booked review incorrect
+          GOTO      READ3000 IF NOT EQUAL
+.
+          COMPARE   OSEBSPC,SAVEBSPC           * Booked special incorrect
+          GOTO      READ3000 IF NOT EQUAL
+.
+          COMPARE   OSESSLTN,SAVESNEW          * Scheduled new incorrect
+          GOTO      READ3000 IF NOT EQUAL
+.
+          COMPARE   OSESSLTR,SAVESREV          * Scheduled review incorrect
+          GOTO      READ3000 IF NOT EQUAL
+.
+          COMPARE   OSESSLTS,SAVESSPC          * Scheduled special incorrect
+          GOTO      READ3000 IF NOT EQUAL
+.
+          MATCH     OSETIMES,SAVETIMS          * Scheduled time incorrect         
+          GOTO      READ3000 IF NOT EQUAL
+.
+          MATCH     OSETIMEU,SAVETIMU          * Used time incorrect
+          GOTO      READ3000 IF NOT EQUAL
+.
+          GOTO      READ1000
+.
+READ3000  CALL      PRIN0000                   * Print session stats 
+.
+          COMPARE   ZERO,UPDATSES              * Run report only
+          GOTO      READ5000 IF EQUAL
+.
+READ4000  CALL      UPSESA1
+.
+READ5000  IF        (RECNUM%1000) = 0
+            DISPLAY   *P15:20,*V2LON,RECNUM,SP1,OSESSLTN,SP1,OSESSLTR
+            DISPLAY   *P15:21,*V2LON,RECNUM,SP1,OSEBNEW,SP1,OSEBRV
+          ENDIF
+.
+          GOTO      READ1000                      * get next record
+.
+READ6000  CALL      IBACLOCK
+          REP       " 0",CDATE
+          DISPLAY   *P1:22,"Ended  : ",CDATE,SP1,CTIMEIS
+          CALL      ENDP0000
+.
+READ9999  RETURN
+.
+.**********************************************************************
+.*                               CSLT0000                             *
+.*        Count Slots                                                 *
+.**********************************************************************
+CSLT0000  PACK      KEY28,OSESITE,OSECLIN,OSEDATE,OSESTRT,SP70
+          CALL      RDSBOKA1
+CSLT1000  CALL      RDKBOKA1
+          BRANCH    OVRCD,CSLT9999
+          MATCH     OSESITE,OBASITE
+          GOTO      CSLT9999 IF NOT EQUAL
+          MATCH     OSECLIN,OBACLIN
+          GOTO      CSLT9999 IF NOT EQUAL
+          MATCH     OSEDATE,OBADATE
+          GOTO      CSLT9999 IF NOT EQUAL
+          MATCH     OSESTRT,OBASTRT
+          GOTO      CSLT9999 IF NOT EQUAL
+.
+          COMPARE   THREE,OBASTAT
+          GOTO      CSLT1000 IF EQUAL
+.
+          COMPARE   SEVEN,OBASTAT
+          GOTO      CSLT1000 IF EQUAL
+.
+          PACK      KEY5,ANSC,ANSV,OBAVISIT
+          CALL      RDCODE1
+          BRANCH    OVRCD,CSLT1000
+.
+          IF        TCFORM6=0
+            MOVE      ONE,TCFORM6
+          ENDIF
+          ADD       TCFORM6,OSESLOTS
+.
+          IF        (OBASTAT=1|OBASTAT=4|OBASTAT=5)
+            ADD       TCFORM6,OSESLOTB
+            CALL      ADDTIM00
+          ENDIF
+.
+          MATCH     ANSN,TCINDC1
+          GOTO      CSLT2000 IF NOT EQUAL
+.
+          ADD       ONE,OSESSLTN
+          IF        (OBASTAT=1|OBASTAT=5)
+            ADD       ONE,OSEBNEW
+          ENDIF
+          IF        OBASTAT=4
+            ADD       ONE,OSEBNEW
+            ADD       ONE,OSEANEW
+          ENDIF
+          GOTO      CSLT1000 
+.
+CSLT2000  MATCH     ANSR,TCINDC1
+          GOTO      CSLT3000 IF NOT EQUAL
+.
+          ADD       ONE,OSESSLTR
+          IF        (OBASTAT=1|OBASTAT=5)
+            ADD       ONE,OSEBRV
+          ENDIF
+          IF        OBASTAT=4
+            ADD       ONE,OSEBRV
+            ADD       ONE,OSEARV
+          ENDIF
+ 
+          GOTO      CSLT1000 
+.
+CSLT3000  MATCH     ANSS,TCINDC1
+          GOTO      CSLT1000 IF NOT EQUAL
+.
+          ADD       ONE,OSESSLTS
+          IF        (OBASTAT=1|OBASTAT=5)
+            ADD       ONE,OSEBSPC
+          ENDIF
+          IF        OBASTAT=4
+            ADD       ONE,OSEBSPC
+            ADD       ONE,OSEASPC
+          ENDIF
+          GOTO      CSLT1000 
+.
+CSLT9999  RETURN
+.
+.------------------------------------------------------------
+. Update incorrect session statistics or run report only
+.------------------------------------------------------------
+KUPD0000  DISPLAY   *P1:10,*EF
+          KEYIN     *P1:10,*EL,"Update incorrect session statistics":
+                    " (",*V2LON,"Y",*HOFF,"/":
+                    *V2LON,"N",*HOFF,") ? ",*V2LON,ANS;
+.
+          REP       UPPLOW,ANS
+          MATCH     ANSY,ANS
+          IF        @EQUAL
+            MOVE      ONE,UPDATSES
+            GOTO      KUPD9999
+          ENDIF
+.
+          MATCH     ANSN,ANS
+          IF        @EQUAL
+            MOVE      ZERO,UPDATSES
+            GOTO      KUPD9999
+          ENDIF
+.
+          BEEP
+          GOTO      KUPD0000
+.
+KUPD9999  RETURN
+.
+.*********************************************************************
+.         print a new page
+.*********************************************************************
+HEAD0000  CALL      HEAD132
+.
+          UNPACK    FROMDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,PRFRDATE         * formatted start date
+.
+          UNPACK    TODATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,PRTODATE         * formatted start date
+.
+          PRINT     *20,"From : ",PRFRDATE," to ",PRTODATE;
+          IF        UPDATSES=1
+            PRINT     *70,"Update Records : Yes"
+          ELSE
+            PRINT     *70,"Update Records : No"
+          ENDIF
+.
+          CALL      UND132
+.
+          PRINT     *001,"| Clinic",*034,"| Clinic",*043,"| Session":
+                    *056,"| Current:":
+                    *092,"| Actual:":
+                    *132,"|"
+.
+          PRINT     *001,"|",*034,"| Type",*043,"| Date":
+                    *056,"| Booked":
+                    *070,"| Slots ":
+                    *084,"|":                    
+                    *092,"| Booked":
+                    *106,"| Slots ":
+                    *120,"|":                    
+                    *132,"|"
+.
+          PRINT     *001,"|",*034,"|",*043,"|":
+                    *056,"| New Rev  Sp":                    
+                    *070,"| New Rev  Sp":
+                    *084,"|  Time":                    
+                    *092,"| New Rev  Sp":                    
+                    *106,"| New Rev  Sp":
+                    *120,"|  Time":                    
+                    *132,"|"
+.
+          CALL      UND132
+          ADD       FIVE,CLNO
+.
+HEAD9999  RETURN
+.
+.**********************************************************************
+.*                         PRIN0000                                   *
+.*                        Print Data                                  *
+.**********************************************************************
+.
+PRIN0000  UNPACK    OSEDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,SESSDATE         * formatted start date
+.
+          ADD       ONE,CLNO
+          PRINT     *001,"| ",OCADESC,*034,"| ",OTHECTYP,*043,"| ",SESSDATE:
+                    *056,"| ",SAVEBNEW," ",SAVEBREV," ",SAVEBSPC:
+                    *070,"| ",SAVESNEW," ",SAVESREV," ",SAVESSPC:
+                    *084,"| ",SAVETIMS: 
+                    *092,"| ",OSEBNEW," ",OSEBRV," ",OSEBSPC:
+                    *106,"| ",OSESSLTN," ",OSESSLTR," ",OSESSLTS:
+                    *120,"| ",OSETIMES: 
+                    *132,"|"
+.
+          COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS
+.
+PRIN9999  RETURN
+.
+.**********************************************************************
+.*                           ENDP0000                                 *
+.*                      Print the end of the report                   *
+.**********************************************************************
+ENDP0000  CALL      UND132                   * finish off report
+.
+          PRINT     *N,*50,"*** End of Report ***"
+ENDP9999  RETURN
+.
+.**********************************************************************
+.
+          INC       STD001IO
+.
+          INC       COUNTSLT
+.
+          INC       OUTSESIO/INC
+          INC       OUTBOAIO/INC
+          INC       OUTMA1IO/INC
+          INC       OUTHEDIO/INC
+          INC       OUTCLIIO/INC
+          INC       OUTCTYIO/INC
+          INC       PATCODIO/INC

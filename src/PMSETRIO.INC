@@ -1,0 +1,129 @@
+.
+.         Index 1
+.
+RSPMETR1  RESET     KEY51
+          READ      PMSETRA1,KEY51;;
+          RETURN
+.
+RAPMETR1  RESET     KEY51
+          MOVE      ZERO,OVRCD
+          READ      PMSETRA1,KEY51;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPMETR1  RESET     KEY51
+          MOVE      ZERO,OVRCD
+          READ      PMSETRA1,KEY51;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPMETR1  MOVE      ZERO,OVRCD
+          READKS    PMSETRA1;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPMETR1  MOVE      ZERO,OVRCD
+          READKP    PMSETRA1;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPMETR1  UPDATE    PMSETRA1;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          RETURN
+.
+WRPMETR1  RESET     KEY51
+          WRITE     PMSETRA1,KEY51;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          RETURN
+.
+DEPMETR1  RESET     KEY51
+          DELETE    PMSETRA1,KEY51
+          RETURN
+.
+.         Index 2
+.
+RSPMETR2  RESET     KEY51
+          READ      PMSETRA2,KEY51;;
+          RETURN
+.
+RAPMETR2  RESET     KEY51
+          MOVE      ZERO,OVRCD
+          READ      PMSETRA2,KEY51;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPMETR2  RESET     KEY51
+          MOVE      ZERO,OVRCD
+          READ      PMSETRA2,KEY51;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPMETR2  MOVE      ZERO,OVRCD
+          READKS    PMSETRA2;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPMETR2  MOVE      ZERO,OVRCD
+          READKP    PMSETRA2;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+.         Index 3
+.
+RSPMETR3  RESET     KEY51
+          READ      PMSETRA3,KEY51;;
+          RETURN
+.
+RAPMETR3  RESET     KEY51
+          MOVE      ZERO,OVRCD
+          READ      PMSETRA3,KEY51;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPMETR3  RESET     KEY51
+          MOVE      ZERO,OVRCD
+          READ      PMSETRA3,KEY51;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPMETR3  MOVE      ZERO,OVRCD
+          READKS    PMSETRA3;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPMETR3  MOVE      ZERO,OVRCD
+          READKP    PMSETRA3;PMETSTAT,PMETTYPE,PMETTRID,PMETCDTE:
+                                  PMETCTIM,PMETBATN,PMETINVN,PMETUDTE:
+                                  PMETUTIM,PMETLOCN,PMETSNID,PMETFDTM:
+                                  PMETTDTM,PMETEROR,PMETMODL,PMETSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
++

@@ -1,0 +1,924 @@
+.***************************************************************************
+.* System    :   Private Practice                                          *
+.* Program   :   IBAPRI72                                                  *
+.* Desc      :   Exception Charges Maintenance                             *
+.***************************************************************************
+.* Date      :   11/03/1995                                                *
+.* Author    :   Graeme Williams                                           *
+.* Function  :   Provide the normal maintenance functions for the Exception*
+.*               Charges file                                              *
+.* Mods.     :                                                             *
+.*        V5.07.02  15/10/1999  D.Di Paola                                 *
+.*                  Recompiled for PRIITMFD                                *
+.*        V5.07.01  15/10/1999  Steve Armstrong                            *
+.*                  Recompiled for PRIAUDEX length change                  *
+.*        V5.07.B01 30/11/1998  Davin                                      *
+.*                  Mods for 507 (CPDATE)                                  *
+.***************************************************************************
+.*        V5.05.01  08/10/1997  Steve Armstrong         WWH Mods           *
+.*                  Mods for change from GETITEM to KYPRIITM               *
+.***************************************************************************
+.
+.$$$$$
+.         Exception Charges File Maintenance Program ( IBAPRI72 )
+.         -------------------------------------------------------
+.
+.         ML0000
+.         Initialise and open files
+.              priaudex
+.              priexcaf
+.              priitemf
+.              patcodes
+.              controlf
+.
+.         ML0100
+.         See which option is selected - insert, change, delete.
+.         If 0 is selected, chain back to the calling program.
+.
+.         ML1000
+.         Insert option selected
+.
+.         User prompted to input claim code.
+.           If nothing input, returns to get next menu option
+.         User prompted to input item type and number
+.           If nothing/exitchar input, returns to get claim code
+.           If "?" input, items on file are displayed
+.         User prompted to input effective from date
+.           If nothing input, returns to get item number
+.           If "?" input, displays any effective dates for that item number
+.              already on file
+.
+.         If the item input is not already on file, the program proceeds to
+.         accept input for the rest of the fields.  The charge in mandatory.
+.         The ending date is optional
+.         If exitchar is input for description, the program returns to get the
+.         next option.
+.
+.         Once these details are input, the user is prompted to post.
+.         If an item number is selected, that field can be edited.
+.         If (C)ancel is input, the program returns to get the next item flag.
+.         If (P)ost is input, the record is written to the exception charges
+.         file (and audits if required).
+.
+.         ML2000
+.         Change option selected
+.
+.         Change mode begins as for insert mode, accept that details
+.         must be on file already.
+.         Once a record is selected, the details for the first screen are
+.         displayed, and the user is prompted to edit.
+.         If (C)ancel is input, the program returns to get the next item type.
+.         If an item is selected, the user can edit that field.
+.         If (P)ost is input, the changes are written to the exception charges
+.         file (and audit files if required), then
+.         the program returns to get the next item type.
+.
+.         ML3000
+.         Delete option selected
+.
+.         The delete option proceeds the same as the change mode, except that
+.         once a specific item is selected, all the related details are
+.         displayed, and the user is prompted to confirm the deletion.
+.         If (C)ancel is input, the program returns to get the next option.
+.         If (N)o is input, the program returns to get the item type.
+.         If (Y)es is input, the record is deleted
+.
+.         ML9999
+.         Erase any existing temporary file, then chaim back to calling program
+.
+.
+.$$$$$
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       PRIITMFD/INC                 * item file
+          INC       PRIEXCFD/INC                 * exception charging file
+          INC       PATCODFD/INC                 * codes file
+          INC       PRICONFD/INC                 * control file
+.
+. PROGRAM CONSTANTS
+. -----------------
+.
+AMA       INIT      "AMA"
+CODECL    INIT      "CL"                         * set codes
+MBS       INIT      "MBS"
+NINE8     FORM      "999999999"                  * for PRIITMDS
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+CLMCODE   DIM       3                            * claim code
+CLMDESC   DIM       20                           * claim code description
+CODE      DIM       3                            * for PATDSCOD routine
+.
+DIM8      DIM       8
+EFFDATE   DIM       8                            * effective date (CCYYMMDD)
+ENDDATE   DIM       8                            * ending date (CCYYMMDD)
+.
+IFEE      FORM      8.2                          * item schedule fee
+IFLAG     FORM      2                            * item type flag
+.                                                       0 = MBS
+.                                                       1 = AMA
+ITDESC    DIM       30                           * item description
+ITEMNUMB  DIM       9                            * item number
+ITMDESC   DIM       30                           * for PRIITMDS
+ITMFLAG   FORM      1                            * for PRIITMDS
+ITYPE     DIM       1                            * item type
+.
+PATHFLAG  FORM      1                            * for PRIITMDS
+PITEM     DIM       9                            * primary item number
+PSITEM    DIM       3                            * primary subitem number
+.
+SERDATE   DIM       8                            * for PRIITMDS
+SHTDESC   DIM       23                           * for PRIITMDS
+SUBITEM   DIM       3                            * subitem number
+.
+TYPDESC   DIM       3                            * MBS or AMA display field
+.
+PRGID     INIT      "IBAPRI72"
+PRGNAM    INIT      "Execption Charging Maintenance"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialization and open files
+.
+ML0100    CALL      OPTN0000               * select options
+          BRANCH    COPTION,ML1000:        * insert
+                            ML2000:        * change
+                            ML3000         * delete
+          GOTO      ML9999                 * exit
+.
+. ---- add a procedure code ----
+.
+ML1000    CALL      SCRA0000               * display first screen format
+          CALL      CLR0000                * Clear the record variables
+.
+ML1100    CALL      KCLM0000               * get claim code
+          BRANCH    EXIT,ML0100            * nothing input
+.
+ML1200    CALL      TYPE0000               * get item type
+          BRANCH    EXIT,ML1100            * nothing entered
+.
+ML1300    CALL      PROC0000               * input procedure code
+          BRANCH    EXIT,ML1200            * nothing input, get next option
+.
+          CALL      DATE0000               * get effective date
+          BRANCH    EXIT,ML1300            * nothing entered
+.
+          CALL      ACPT0000               * accept initial values
+.
+          CALL      SEL0000                * select field to modify
+          BRANCH    EXIT,ML1200            * (C)ancel selected
+.
+          CALL      WRT0000                * write to file
+          GOTO      ML1200                 * get next record
+.
+. ---- modify a procedure code ----
+.
+ML2000    CALL      SCRA0000               * display screen format
+          CALL      CLR0000                * Clear the record variables
+.
+ML2100    CALL      KCLM0000               * get claim code
+          BRANCH    EXIT,ML0100            * nothing input
+.
+ML2200    CALL      TYPE0000               * get item type
+          BRANCH    EXIT,ML2100            * nothing entered
+.
+ML2300    CALL      PROC0000               * input procedure code
+          BRANCH    EXIT,ML2200            * nothing input, get next option
+.
+          CALL      DATE0000               * get effective date
+          BRANCH    EXIT,ML2300            * nothing entered
+.
+          CALL      LOAD0000               * get details on file
+          CALL      DISA0000               * display details
+.
+ML2800    CALL      SEL0000                * select field to modify
+          BRANCH    EXIT,ML2200            * (C)ancel selected
+.
+          CALL      UPD0000                * update record
+          GOTO      ML2200                 * get next record
+.
+. ---- delete a procedure code ----
+.
+ML3000    CALL      SCRA0000               * display screen format
+          CALL      CLR0000                * Clear the record variables
+.
+ML3100    CALL      KCLM0000               * get claim code
+          BRANCH    EXIT,ML0100            * nothing input
+.
+ML3200    CALL      TYPE0000               * get item type
+          BRANCH    EXIT,ML3100            * nothing entered
+.
+ML3300    CALL      PROC0000               * input procedure code
+          BRANCH    EXIT,ML3200            * nothing input, get next option
+.
+          CALL      DATE0000               * get effective date
+          BRANCH    EXIT,ML3300            * nothing entered
+.
+          CALL      LOAD0000               * get details on file
+          CALL      DISA0000               * display details
+.
+          CALL      DELQST                 * ok to delete ?
+          BRANCH    CEXIT,ML3500:          * Yes 
+                          ML3200:          * No
+                          ML0100           * Cancel
+ML3500    CALL      DEL0000                * delete this record
+          GOTO      ML3200                 * get next record
+.
+ML9999    CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                Open files and initialise variables                       *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"controlf"
+          OPEN      CONTROLF,"controlf"          * control file
+          READ      CONTROLF,THIRTY3;*58,PRCNAUDH
+.
+          DISPLAY   *P64:24,"priitemf";          * item file
+          OPEN      PRIITEM1,"priitemf"
+.
+          DISPLAY   *P64:24,"priitemf";          * item file
+          OPEN      PRIITEM2,"priitemf"
+.
+          DISPLAY   *P64:24,"priexcaf";          * exception charging file
+          OPEN      PRIEXCA1,"priexcaf"
+.
+          DISPLAY   *P64:24,"patcodes";          * codes file
+          OPEN      PATCODE1,"patcodes"
+.
+          BRANCH    PRCNAUDH,INIT9000            * item audit flag not set
+.
+          DISPLAY   *P64:24,"priaudex";          * item audit file
+          OPEN      PRIAUDEX,"priaudex"
+.
+INIT9000  MOVE      ZERO,CHIGHLT
+          MOVE      ONE,CNEWDS
+.
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  COPTION - Option selected                                   *
+.****************************************************************************
+.
+. ---- display option screen ----
+.
+OPTN0000  CALL      SELOPTN
+.
+OPTN9999  RETURN
++
+.**************************************************************************
+.*                                  CLR0000            Called by: PROC0000*
+.*                            clear global variables                      *
+.**************************************************************************
+.
+CLR0000   DISPLAY   *P24:4,*EL:
+                    *P24:5,*EL:
+                    *P24:6,*EL:
+                    *P24:7,*EL
+.
+          MOVE      SP3,CLMCODE
+          MOVE      SP1,ITYPE
+          MOVE      SP9,ITEMNUMB
+          MOVE      SP3,SUBITEM
+          MOVE      SP8,EFFDATE
+          MOVE      SP8,ENDDATE
+          MOVE      ZERO,IFEE
+.
+CLR9999   RETURN
++
+.**************************************************************************
+.*                               KCLM0000              Called by: ML0000  *
+.*                       input claim code                                 *
+.**************************************************************************
+KCLM0000  DISPLAY   *P24:4,*EL;
+          MOVE      TWENTY4,ECOL             * keyin column
+          MOVE      FOUR,EVERT               * keyin row
+          MOVE      CODECL,CODE              * category CL
+          MOVE      SP3,CKYIDEF3             * no default
+          MOVE      ZERO,CKYIMAND            * not mandatory
+.
+          CALL      PATCODKY                 * keyin claim code
+          BRANCH    EXIT,KCLM9000,KCLM9000   * nothing or exitchar input
+.
+          MOVE      ACODE,CLMCODE            * claim code entered
+          MOVE      TDESC,CLMDESC            * claim code description
+          DISPLAY   *P40:4,CLMDESC           * display desc.
+          MOVE      ZERO,EXIT
+          GOTO      KCLM9999
+.
+KCLM9000  MOVE      ONE,EXIT
+.
+KCLM9999  RETURN
++
+.**************************************************************************
+.*                               PROC0000              Called by: ML0000  *
+.*                       input item code                                  *
+.**************************************************************************
+PROC0000  MOVE      TWENTY4,CCOL                 * set screen position
+          MOVE      SIX,CVERT 
+          DISPLAY   *P24:6,*EL;
+          CALL      KYPRIITM                     * get an item #
+          BRANCH    EXIT,PROC9000:               * exitchar entered
+                         PROC4000:               * ? entered
+                         PROC9000                * nothing entered
+.
+          MOVE      ITEMNUMB,PITEM               * save primary item numbers
+          MOVE      SUBITEM,PSITEM
+.
+          CALL      CHKI0000                     * see if item on file
+          BRANCH    EXIT,PROC0000
+.
+          GOTO      PROC8000
+.
+PROC4000  MOVE      ZERO,HLEF
+          CALL      GETSCR00                     * save screen
+PROC4200  MOVE      ONE,ITMFLAG
+          MOVE      ONE,PATHFLAG
+          CALL      PRIITMDS                     * list codes on file
+.
+PROC4500  DISPLAY   *P1:24,*EL,"Item Number: "
+          MOVE      TEN4,CCOL
+          MOVE      TWENTY4,CVERT
+          CALL      KYPRIITM                     * get item number
+          BRANCH    EXIT,PROC9000:               * exitchar entered
+                         PROC4200:               * ? entered
+                         PROC5000                * nothing entered
+.
+          MOVE      ITEMNUMB,PITEM               * save primary item numbers
+          MOVE      SUBITEM,PSITEM
+          CALL      CHKI0000                     * item on file ?
+          BRANCH    EXIT,PROC4500                * no
+          GOTO      PROC7900
+.
+PROC5000  CALL      PUTSCR00                     * restore screen
+          DISPLAY   *P24:6,*EL
+          GOTO      PROC9000
+.
+PROC7900  CALL      PUTSCR00                     * restore screen
+          DISPLAY   *P24:6,*V2LON,ITEMNUMB
+.
+          MATCH     SP3,SUBITEM                  * subitem number ?
+          GOTO      PROC8000 IF EQUAL            * no
+.
+          DISPLAY   *P33:6,"(",*V2LON,SUBITEM,*HOFF,")"
+PROC8000  MOVE      PRITDESC,ITDESC              * save item description
+          DISPLAY   *P40:6,ITDESC
+          MOVE      ZERO,EXIT
+          GOTO      PROC9999
+.
+PROC9000  MOVE      ONE,EXIT
+.
+PROC9999  RETURN
++
+.***************************************************************************
+.*                             CHKI0000               Called by: PROC0000  *
+.*                                                               STEP0000  *
+.*                    check if item on file                                *
+.***************************************************************************
+.
+CHKI0000  PACK      KEY22,IFLAG,ITEMNUMB,SUBITEM,SP8
+          CALL      RSPRIT1                      * position in file
+          CALL      RKPRIT1                      * read next record
+          BRANCH    OVRCD,CHKI5000               * end of file
+.
+          COMPARE   PRITFLAG,IFLAG               * same item type ?
+          GOTO      CHKI5000 IF NOT EQUAL        * no
+.
+          MATCH     ITEMNUMB,PRITITMN            * same item number ?
+          GOTO      CHKI5000 IF NOT EQUAL        * no
+.
+          MATCH     SUBITEM,PRITSUBN             * same subitem number ?
+          GOTO      CHKI5000 IF NOT EQUAL        * no
+.
+          GOTO      CHKI9000                     * item number on file
+.
+CHKI5000  DISPLAY   *P1:24,*EL,*B,"Item not on file.  ";
+          CALL      HITENTER
+          GOTO      CHKI9500
+.
+CHKI9000  MOVE      ZERO,EXIT
+          GOTO      CHKI9999
+.
+CHKI9500  MOVE      ONE,EXIT
+.
+CHKI9999  RETURN
++
+.****************************************************************************
+.*                               DATE0000              Called by: ML0000    *
+.*                     get effective date of the item                       *
+.****************************************************************************
+.
+DATE0000  MOVE      TWENTY4,CCOL
+          MOVE      SEVEN,CVERT
+          UNPACK    SP6,CDAY,CMON,CYEAR
+          MOVE      CCC,CCENT
+          CALL      KEYDATE                      * get date
+          BRANCH    CQUEST,DATE4000
+          BRANCH    OVRCD,DATE9500               * invalid date input
+.
+          CALL      VALD0000                     * validate test & date
+          BRANCH    EXIT,DATE0000                * not valid
+.
+          GOTO      DATE9000                     * valid
+.
+DATE4000  MOVE      ZERO,HLEF
+          CALL      GETSCR00                     * save screen
+.
+DATE5000  CALL      GETD0000                     * display effective dates
+          MOVE      TWENTY4,CCOL
+          MOVE      SEVEN,CVERT
+          UNPACK    SP6,CDAY,CMON,CYEAR
+          MOVE      CCC,CCENT
+          CALL      KEYDATE                      * get date
+          BRANCH    CQUEST,DATE5000
+          BRANCH    OVRCD,DATE9400               * invalid date input
+.
+          CALL      VALD0000                     * validate test & date
+          BRANCH    EXIT,DATE5000                * invalid
+.
+          CALL      PACDATE
+          CALL      PUTSCR00
+          
+DATE9000  MOVE      ZERO,EXIT
+          GOTO      DATE9999
+.
+DATE9400  CALL      PUTSCR00
+DATE9500  MOVE      ONE,EXIT
+.
+DATE9999  RETURN
++
+.****************************************************************************
+.*                                VALD0000             Called by: DATE0000  *
+.*                validate the item and date input                          *
+.*   RETURNS:      EXIT   0 = invalid item and date                         *
+.*                        1 = valid item and date                           *
+.****************************************************************************
+.
+VALD0000  PACK      EFFDATE,CCENT,CYEAR,CMON,CDAY * save date
+.
+          PACK      KEY25,CLMCODE,IFLAG,ITEMNUMB,SUBITEM,EFFDATE
+          CALL      RDPREX1
+          BRANCH    COPTION,VALD1000:            * insert mode
+                            VALD2000:            * change mode
+                            VALD2000             * delete mode
+.
+.         Insert mode
+.
+VALD1000  BRANCH    OVRCD,VALD9000               * not on file - ok
+.
+          DISPLAY   *P1:24,*EL,*B,"Item and date already on file.  ";
+          CALL      HITENTER
+          GOTO      VALD9500
+.
+.         Change / Delete mode
+.
+VALD2000  BRANCH    OVRCD,VALD3000               * not on file
+.
+          GOTO      VALD9000                     * on file - ok
+.
+VALD3000  DISPLAY   *P1:24,*EL,*B,"Item not on file for this date.  ";
+          CALL      HITENTER
+          GOTO      VALD9500
+.
+VALD9000  MOVE      ZERO,EXIT
+          GOTO      VALD9999
+.
+VALD9500  MOVE      ONE,EXIT
+.
+VALD9999  RETURN
++
+.***************************************************************************
+.*                               GETD0000              Called by: DATE0000 *
+.*                  display effective dates for item number                *
+.***************************************************************************
+.
+GETD0000  DISPLAY   *P1:9,*EF,*V2LON,*ULON,"Effective Dates for ",ITEMNUMB
+.
+          MATCH     SP3,SUBITEM                  * subitem ?
+          GOTO      GETD0500 IF EQUAL            * no
+.
+          DISPLAY   *P30:9,*V2LON,*ULON,"(",SUBITEM,")"
+.
+GETD0500  MOVE      NINE,CVERT
+          PACK      KEY25,CLMCODE,IFLAG,ITEMNUMB,SUBITEM,SP8
+          CALL      RSPREX1                      * position in file
+          CALL      RKPREX1                      * read next record
+          BRANCH    OVRCD,GETD8000
+.
+          GOTO      GETD2000
+.
+GETD1000  CALL      RKPREX1                      * read next record
+          BRANCH    OVRCD,GETD9999               * no records on file
+.
+GETD2000  MATCH     CLMCODE,PREXCLM              * same item number ?
+          GOTO      GETD9999 IF NOT EQUAL        * no
+.
+          COMPARE   IFLAG,PREXFLAG               * same item type ?
+          GOTO      GETD9999 IF NOT EQUAL        * no
+.
+          MATCH     ITEMNUMB,PREXITMN            * same item number ?
+          GOTO      GETD9999 IF NOT EQUAL        * no
+.
+          MATCH     SUBITEM,PREXSUBN             * same sub item number ?
+          GOTO      GETD9999 IF NOT EQUAL        * no
+.
+          COMPARE   TWENTY2,CVERT                * page full ?
+          GOTO      GETD5000 IF NOT LESS         * yes
+.
+GETD3000  ADD       ONE,CVERT                    * increment line count
+          UNPACK    PREXDAT1,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          DISPLAY   *P1:CVERT,CPCDATE            * display date
+.
+          GOTO      GETD1000                     * get next record
+.
+GETD5000  KEYIN     *P1:24,*EL,"(",*V2LON,*DV,ANSC,*HOFF,")ontinue, (":
+                    *V2LON,*DV,ANSN,*HOFF,")ext page, (",*V2LON,*DV,ANSF,*HOFF:
+                    ")irst page ? ":
+                    *P41:24,*V2LON,ANS
+.
+          RESET     ANS
+          REP       UPPLOW,ANS
+.
+          CMATCH    ANSC,ANS                     * continue ?
+          GOTO      GETD9999 IF EQUAL            * yes
+.
+          CMATCH    ANSN,ANS                     * next ?
+          GOTO      GETD7000 IF EQUAL            * yes
+.
+          CMATCH    ANSF,ANS                     * first
+          GOTO      GETD0000 IF EQUAL            * yes
+.
+          BEEP
+          GOTO      GETD5000
+.
+GETD7000  DISPLAY   *P1:9,*EF                    * clear page for next screen
+          MOVE      EIGHT,CVERT
+          GOTO      GETD3000
+.
+GETD8000  DISPLAY   *P1:24,*EL,*B,"No dates for this item on file.  ";
+          CALL      HITENTER
+.
+GETD9999  RETURN
++
+.**************************************************************************
+.*                                  SCRA0000           Called by: ML0000  *
+.*                    display initial screen format                       *
+.**************************************************************************
+.
+SCRA0000  DISPLAY   *P1:3,*EF:
+                    *P5:4,"Claim Code",*P22:4,COLON:
+                    *P5:5,"MBS or AMA (M/A)",*P22:5,COLON:
+                    *P5:6,"Item Number",*P22:6,COLON:
+                    *P5:7,"Effective From",*P22:7,COLON:
+                    *P1:9,*V2LON,"1",*HOFF,". Charge",*P22:9,COLON:
+                    *P1:10,*V2LON,"2",*HOFF,". Ending Date",*P22:10,COLON
+.
+SCRA9999  RETURN
++
+.*************************************************************************
+.*                                  ACPT0000           Called by: ML0000 *
+.*   INPUT mode only :      accept initial values                        *
+.*************************************************************************
+.
+ACPT0000  CALL      CHRG0000                     * item charge
+.
+          CALL      EDAT0000                     * ending date
+.
+ACPT9999  RETURN 
++ 
+.**************************************************************************** 
+.*                                  TYPE0000           Called by: PROC0000  *
+.*                        get the type of item                              *
+.****************************************************************************
+.
+TYPE0000  DISPLAY      *P24:6,*EL:
+                       *P24:7,*EL:
+                       *P24:9,*EL:
+                       *P24:10,*EF
+.
+          KEYIN        *P24:5,*EL,*DV,UNDLN1:
+                       *P24:5,*V2LON,ITYPE
+.
+          ENDSET       ITYPE
+          APPEND       SP1,ITYPE
+          RESET        ITYPE
+          REP          UPPLOW,ITYPE
+.
+          MATCH        SP1,ITYPE                 * anything entered ?
+          GOTO         TYPE9500 IF EQUAL         * no
+.
+          MATCH        ANSM,ITYPE                * M entered ?
+          GOTO         TYPE8000 IF EQUAL         * yes
+.
+          MATCH        ANSA,ITYPE                * A entered ?
+          GOTO         TYPE8500 IF EQUAL         * yes
+.
+          DISPLAY      *P1:24,*EL,*B,"Type not valid. ";
+          CALL         HITENTER
+          GOTO         TYPE0000
+.
+TYPE8000  MOVE         MBS,TYPDESC
+          MOVE         ZERO,IFLAG
+          GOTO         TYPE9000
+.
+TYPE8500  MOVE         AMA,TYPDESC
+          MOVE         ONE,IFLAG
+.
+TYPE9000  DISPLAY      *P24:5,*V2LON,TYPDESC
+          MOVE         ZERO,EXIT
+          GOTO         TYPE9999
+.
+TYPE9500  DISPLAY      *P24:5,*V2LON,SP1
+          MOVE         ONE,EXIT
+.
+TYPE9999  RETURN
++
+.****************************************************************************
+.*                                  CHRG0000           Called by: SEL0000   *
+.*                        input item charge                       ACPT0000  *
+.****************************************************************************
+.
+CHRG0000  KEYIN     *P24:9,*DV,IFEE:
+                    *P24:9,*V2LON,*RV,IFEE:
+                    *P24:9,*DV,IFEE
+.
+CHRG9999  RETURN
++
+.****************************************************************************
+.*                                  EDAT0000           Called by: SEL0000   *
+.*                      input ending date                         ACPT0000  *
+.****************************************************************************
+.
+EDAT0000  MOVE      TWENTY4,CCOL
+          MOVE      TEN,CVERT
+          MOVE      ONE,CCANLDTE
+          MOVE      ONE,CDEFDTE
+          UNPACK    ENDDATE,CCENT,CYEAR,CMON,CDAY
+          MATCH     SP2,CCENT
+          IF        @EQUAL
+            MOVE      CCC,CCENT
+          ENDIF
+          CALL      KEYDATE                      * get date
+          BRANCH    CQUEST,EDAT4000
+          BRANCH    OVRCD,EDAT9500               * nothing date input
+.
+.         Make sure date if >= effective date
+.
+          PACK      DIM8,CCENT,CYEAR,CMON,CDAY
+          MATCH     EFFDATE,DIM8
+          GOTO      EDAT8000 IF NOT LESS
+.
+          DISPLAY   *P1:24,*EL,*B,"Date cannot be before effective date. ";
+          CALL      HITENTER
+          GOTO      EDAT0000
+.
+EDAT4000  BEEP
+          GOTO      EDAT0000
+.
+EDAT8000  PACK      ENDDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",ENDDATE
+          GOTO      EDAT9999
+.
+EDAT9500  MOVE      SP8,ENDDATE
+.
+EDAT9999  RETURN
++
+.****************************************************************************
+.*                                   SEL0000           Called by: ML0000    *
+.*                         select field to modify or post                   *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Post was selected.                     *
+.*                        TRUE  (1)  Cancel was selected.                   *
+.****************************************************************************
+.
+SEL0000   CALL      MAINQST                  * Ask for an item, post or cancel
+.
+          COMPARE   ZERO,CCITEM              * What was entered ?
+          GOTO      SEL8000 IF EQUAL         * Post was selected
+          GOTO      SEL9000 IF LESS          * Cancel was selected
+.
+          BRANCH    CCITEM,SEL1100:          * item charge
+                           SEL1200           * ending date
+.
+          BEEP
+          GOTO      SEL0000
+.
+SEL1100   CALL      CHRG0000
+          GOTO      SEL0000
+.
+SEL1200   CALL      EDAT0000
+          GOTO      SEL0000
+.
+.         Post was selected. Set the exit flag to tell the calling routine.
+.
+SEL8000   MOVE      FALSE,EXIT               * Post was selected
+          GOTO      SEL9999
+.
+.         Cancel was selected. Set the exit flag to tell the calling routine.
+.
+SEL9000   MOVE      TRUE,EXIT                * Cancel was selected
+.
+SEL9999   RETURN
++
+.**************************************************************************
+.*                             LOAD0000                Called by: ML0000  *
+.*                 load program variables into file variables for editing *
+.**************************************************************************
+.
+LOAD0000  MOVE      PREXCHRG,IFEE
+          MOVE      PREXDAT2,ENDDATE
+.
+LOAD9999  RETURN
++
+.**************************************************************************
+.*                              WRT0000                Called by: ML0000  *
+.*                          write a new record                            *
+.**************************************************************************
+.
+WRT0000   DISPLAY   *P50:24,*V2LON,"* Record Inserted *";
+.
+          CALL      SAVE0000                     * load file variables
+.
+.         Write item file record
+.
+          PACK      KEY25,PREXCLM,PREXFLAG,PREXITMN,PREXSUBN,PREXDAT1
+          CALL      WRPREX1
+.
+.         See if audit record needs to be written
+.
+          BRANCH    PRCNAUDH,WRT9999             * audit flag not set
+.
+          CALL      IBACLOCK
+          PACK      PREXAUDD,CCC,CYY,CMM,CDD     * date
+          REP       " 0",PREXAUDD
+          MOVE      CTIMEIS,PREXAUDT
+.
+          MOVE      PORT,PREXAUDP                * port
+          MOVE      ANSA,PREXAUDR                * added
+          MOVE      ONE,PREXAUDS                 * not printed
+          MOVE      PASSCODE,PREXAUDO            * operator
+.
+          PACK      KEY19,PREXAUDD,PREXAUDT,PREXAUDP,PREXAUDR
+          CALL      AWPREX                       * write audit record
+.
+WRT9999   RETURN
++
+.**************************************************************************
+.*                                DISA0000             Called by: ML0000  *
+.*       display details corresponse to procedure code.                   *
+.*                 and save values read from file                         *
+.**************************************************************************
+.
+DISA0000  BRANCH    IFLAG,DISA1000               * AMA item
+.
+          MOVE      MBS,TYPDESC
+          GOTO      DISA2000
+.
+DISA1000  MOVE      AMA,TYPDESC
+.
+DISA2000  DISPLAY   *P24:4,*V2LON,CLMCODE,*HOFF,*P40:4,CLMDESC:
+                    *P24:5,*V2LON,TYPDESC:
+                    *P24:6,PITEM
+.
+          MATCH     SP3,PSITEM                   * any subitem number
+          GOTO      DISA3000 IF EQUAL            * no
+.       
+          DISPLAY   *P33:6,*V2LON,"(",PSITEM,")"    * display subitem
+.
+DISA3000  DISPLAY   *P40:6,ITDESC
+.
+          UNPACK    EFFDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          DISPLAY   *P24:7,*V2LON,CPCDATE:
+                    *P24:9,IFEE
+.
+          UNPACK    ENDDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          DISPLAY   *P24:10,*V2LON,CPCDATE
+.
+DISA9999  RETURN
++
+.***************************************************************************
+.*                               UPD0000               Called by: ML0000   *
+.*                      update record ad insert key if part of             *
+.*                      key has been modified.                             *
+.***************************************************************************
+.
+UPD0000   DISPLAY   *P50:24,*V2LON,"* Record Changed *";
+.
+          PACK      KEY25,CLMCODE,IFLAG,PITEM,PSITEM,EFFDATE  * read orig rec
+          CALL      RDPREX1
+          BRANCH    OVRCD,UPD9800
+.
+.         See if audit record has to be written
+.
+          BRANCH    PRCNAUDH,UPD5000             * audit flag not set
+.
+          CALL      IBACLOCK
+          PACK      PREXAUDD,CCC,CYY,CMM,CDD     * date
+          REP       " 0",PREXAUDD
+          MOVE      CTIMEIS,PREXAUDT
+.
+          MOVE      PORT,PREXAUDP                * port
+          MOVE      ANSB,PREXAUDR                * before
+          MOVE      ONE,PREXAUDS                 * not printed
+          MOVE      PASSCODE,PREXAUDO            * operator
+.
+          PACK      KEY19,PREXAUDD,PREXAUDT,PREXAUDP,PREXAUDR
+          CALL      AWPREX                       * write audit record
+.
+.         Update item record
+.
+UPD5000   CALL      SAVE0000                     * load new file variables
+          CALL      UPPREX1
+.
+          BRANCH    PRCNAUDH,UPD9999
+.
+          MOVE      ANSC,PREXAUDR                * after image
+.
+          PACK      KEY19,PREXAUDD,PREXAUDT,PREXAUDP,PREXAUDR
+          CALL      AWPREX
+          GOTO      UPD9999
+.
+UPD9800   DISPLAY   *P1:24,"Original record has disappeared. ";
+          CALL      HITENTER
+.
+UPD9999   RETURN
++
+.****************************************************************************
+.*                              DEL0000                Called by: ML0000    *
+.*                         delete an existing record                        *
+.****************************************************************************
+.
+DEL0000   DISPLAY   *P50:24,*V2LON,"* Record Deleted *";
+.
+.         See if audit record needs to be written
+.
+          BRANCH    PRCNAUDH,DEL5000             * audit flag not set
+.
+          CALL      IBACLOCK
+          PACK      PREXAUDD,CCC,CYY,CMM,CDD     * date
+          REP       " 0",PREXAUDD
+          MOVE      CTIMEIS,PREXAUDT
+.
+          MOVE      PORT,PREXAUDP                * port
+          MOVE      ANSD,PREXAUDR                * added
+          MOVE      ONE,PREXAUDS                 * not printed
+          MOVE      PASSCODE,PREXAUDO            * operator
+.
+          PACK      KEY19,PREXAUDD,PREXAUDT,PREXAUDP,PREXAUDR
+          CALL      AWPREX                       * write audit record
+.
+DEL5000   PACK      KEY25,CLMCODE,IFLAG,PITEM,PSITEM,EFFDATE
+          CALL      DEPREX1                      * delete file
+.
+DEL9999   RETURN
+.
++
+.****************************************************************************
+.*                                 SAVE0000            Called by: WRT0000   *
+.*                load program variables into file variables      UPD0000   * 
+.****************************************************************************
+.
+SAVE0000  MOVE      CLMCODE,PREXCLM
+          MOVE      IFLAG,PREXFLAG
+          MOVE      PITEM,PREXITMN
+          MOVE      PSITEM,PREXSUBN
+          MOVE      EFFDATE,PREXDAT1
+          MOVE      IFEE,PREXCHRG
+          MOVE      ENDDATE,PREXDAT2
+.
+SAVE9999  RETURN
++
+. =========================================================================
+.        I/O INCLUDES
+.==========================================================================
+.
+          INC       STD001IO
+.
+          INC       KYPRIITM
+          INC       PATCODKY
+          INC       PRIITMDS                     * item listing
+.
+          INC       PRIITMIO/INC                 * item file
+          INC       PRIEXCIO/INC                 * group file
+          INC       PATCODIO/INC                 * codes file

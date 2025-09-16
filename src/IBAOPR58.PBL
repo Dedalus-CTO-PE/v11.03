@@ -1,0 +1,901 @@
+.******************************************************************************
+.* System        : OPERATING ROOMS                                            *
+.* Program       : IBAOPR58                                                   *
+.* Description   : Operation Type Listing                                     *
+.******************************************************************************
+.* Date          : 03/01/1991                                                 *
+.* Author        : Justin Coates                                              *
+.* Function      : To find all operations of a given type for a given date    *
+.*                 range                                                      *
+.* Modifications : 
+.******************************************************************************
+.*        V11.03.02 19/04/2023  Thanh T        TSK 0909393                    *
+.*                  Changed TEAM8000 to setup KEY22 with OPDAHOSP.            *
+.*                  Changed REPT0000 to use RSOPDEA6 instead of RSOPDEA1.     * 
+.*        V11.03.01 20/03/2023  PJ Le Febour   TSK 0909393                    *
+.*                  Amended KEY19 to KEY22 for theatre index changes          *
+.*        V10.01.01 03/02/2011  Jill Parkinson CAR 233088                     *
+.*                  Added PMSVX1FD                                            *
+.*        V9.02.01  14/02/2003  Tonii  SRS No: 36667                          *
+.*                  Mods to use new tables if a record exists in oprsrgaf     *
+.******************************************************************************
+.*        V5.08.01  28/08/2000  Caleb Sharman                                 *
+.*                  Changed Health Fund variables to be 8 chars               *
+.*                 V5.01  03/01/91 ROD                                        *
+.*                        Alter report according to new specifications        *
+.*              V5.01.01  21/01/91 Justin Coates                              *
+.*                        Converted to Release 5.01                           *
+.*                        04/02/91 ROD                                        *
+.*                        Don't print cancelled bookings                      *
+.*              V5.01.02  25/07/91 ROD                                        *
+.*                        Recompiled for OPRSESFD                             *
+.*              V5.01.03  01/10/91 i chung           SRF 110873               *
+.*                        Fixed I * C on oprcliaf                             *
+.*              V5.01.04  02/02/93 J.Tan   SRF 120243                         *
+.*                        Mods to allow backdate                              *
+.*                                                                            *
+.******************************************************************************
+.
+.$$$$$
+.         IBAOPR58        Operation Type Listing
+.         ========        ======================
+.         INIT0000 - Initialization
+.         OPTN0000 - Determine if to continue
+.         KTYP0000 - Enter the operation type
+.         KDAT0000 - Enter the date range
+.         REPT0000 - Produce the report
+.             PAGE0000 - Prints a new page
+.             TABL0000 - Prints a table heading
+.             PDET0000 - Prints the details about an operation
+.$$$$$
+.
+. ------- FD includes needed -------
+.
+          INC       STD001FD                * all fd's
+.
+          INC       BOKRC1FD/INC            * Bookings file
+          INC       OPRCLIFD/INC            * Clinics file
+          INC       OPRCONFD/INC            * Control file
+          INC       OPRDEAFD/INC            * Operation Details file
+          INC       OPRDEBFD/INC            * Operation Teams file
+          INC       OPRSESFD/INC            * Sessions file
+          INC       OPRSRGFD/INC            * new operation details file
+          INC       OPRTSMFD/INC            * new operation team file
+.
+          INC       PATCODFD/INC            * Codes file
+          INC       PATDO1FD/INC            * Doctors file
+          INC       PATMA1FD/INC            * Master file
+          INC       PATMI1FD/INC            * Admissions file
+          INC       PMSVX1FD/INC            * Admissions file
+          INC       PATPR1FD/INC            * Pre-admissions file
+.
+. ------- program variables -------
+.
+CASETOTL  FORM      4         * total count of operations
+CODE      DIM       2         * category for codes file
+CODETYPE  DIM       3         * operation type to search for
+CURRSESS  DIM       22        * current session
+CURRDATE  DIM       8         * current date
+.
+DATESTRT  DIM       8         * starting date
+DATESTOP  DIM       8         * ending date
+DESCANAE  DIM       35        * anaesthetist description for operation
+DESCASST  DIM       35        * assistant description for operation
+DESCSURG  DIM       35        * surgeon description for operation
+DESCTYPE  DIM       20        * operation type to search for description
+DIM10A    DIM       10        * session date   dd/mm/ccyy
+.
+FLAG      FORM      1
+.
+PATNAME   DIM       42        * patient name
+SAVEUNIQ  DIM       10        * the operation unique number
+SAVKEY11  DIM       11
+SAVETEAM  DIM       1
+SCRNFLAG  FORM      1         * ? performed flag
+.
+. ------- program constants -------
+.
+.
+PRGID     INIT      "IBAOPR58"
+PRGNAM    INIT      "Operation Type Listing"
+VERSION   INIT      "V11.03.02"
++
+.*********************************************************************
+.*                  ML0000                                           *
+.*        Mainline Code / Controlling Logic                          *
+.*********************************************************************
+ML0000    CALL      INIT0000
+.
+ML1000    CALL      OPTN0000                * get which option
+          BRANCH    EXIT,ML9999             * exit
+.
+ML2000    CALL      KTYP0000                * enter operation type
+          CALL      KDAT0000                * enter date range
+          BRANCH    EXIT,ML2000             * re-enter type
+.
+.         OK to continue
+.
+ML3000    CALL      CONTQST
+          BRANCH    CEXIT,ML4000,ML2000,ML1000
+.                         Yes    No     Cancel
+.
+.         produce the report
+.
+ML4000    CALL      REPT0000
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM
++
+.*********************************************************************
+.*                  INIT0000                    Called by : ML0000   *
+.*        Initialization and open files                              *
+.*********************************************************************
+INIT0000  CALL      DISPHEAD                * display program header
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE           * current date
+.
+          MOVE      ONE,CNEWDS              * new ? mark option
+          MOVE      ONE,CDEFDTE             * once to accept default
+          MOVE      ONE,CNOUNDLN            * no underlines
+          MOVE      ZERO,CHIGHLT            * use highlighting
+.
+          DISPLAY   *P50:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,FORTY;*96,OPCNCDSC,*111,OPCNCLSU
+          READ      CONTROLF,FORTY2;*50,OPCNR58A
+.
+          DISPLAY   *P58:24,"bokrc1af";
+          OPEN      BOKRC1A1,"bokrc1af"     * Bookings file
+.
+          DISPLAY   *P58:24,"oprcliaf";
+          OPEN      OPRCLIA1,"oprcliaf"     * Clinics file
+.
+          DISPLAY   *P58:24,"oprdetaf";
+          OPEN      OPRDETA6,"oprdetaf"     * Operation Details file
+.
+          DISPLAY   *P58:24,"oprdetbf";
+          OPEN      OPRDETB1,"oprdetbf"     * Operation Teams file
+.
+          DISPLAY   *P58:24,"oprsesaf";
+          OPEN      OPRSESA1,"oprsesaf"     * Sessions file
+.
+          DISPLAY   *P58:24,"oprsrgaf"
+          OPEN      OPRSRGA1,"oprsrgaf"     * operation details
+.
+          DISPLAY   *P58:24,"oprtsmaf"
+          OPEN      OPRTSMA1,"oprtsmaf"     * new team file
+.
+          DISPLAY   *P58:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"     * Codes file
+.
+          DISPLAY   *P58:24,"patdo1af";
+          OPEN      PATDO1A1,"patdo1af"     * Doctors file
+.
+          DISPLAY   *P58:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"     * Master file
+          DISPLAY   *P58:24,"patmx1af";
+          OPEN      PATMX1A1,"patmx1af"     * Master Extension file
+.
+          DISPLAY   *P58:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"     * Admissions file
+          OPEN      PMSVX1A1,"pmsvx1af"     * Admissions file
+.
+          DISPLAY   *P58:24,"patpramf";
+          OPEN      PATPR1A1,"patpr1af"
+          OPEN      PATPX1A1,"patpx1af"
+.
+INIT9999  RETURN
++
+.*********************************************************************
+.*                  OPTN0000                    Called by : ML1000   *
+.*        See if to produce report                                   *
+.*        Returns : EXIT = 1      exit chosen                        *
+.*                  MOPTION       option type                        *
+.*********************************************************************
+OPTN0000  DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,ZERO,*P1:5,ONE,*HOFF:
+                    *P3:4,"= Exit":
+                    *P3:5,"= Operation Type Listing":
+                    *P1:7,"Select Option : ";
+.
+OPTN1000  KEYIN     *P17:7,*EL,*DV,UNDLN1,*P17:7,*V2LON,MOPTION;
+.
+          COMPARE   ZERO,MOPTION
+          GOTO      OPTN9000 IF EQUAL       * exit selected
+.
+          BRANCH    MOPTION,OPTN8000
+          BEEP
+          GOTO      OPTN1000
+.
+OPTN8000  MOVE      FALSE,EXIT              * valid answer
+          GOTO      OPTN9999
+.
+OPTN9000  MOVE      TRUE,EXIT               * exit selected
+.
+OPTN9999  RETURN
++
+.********************************************************************
+.*                  KTYP0000                   Called by : ML2000   *
+.*        Enter the Operation type                                  *
+.*        Returns : DESCTYPE      operation type description        *
+.*                  CODETYPE      operation type code               *
+.********************************************************************
+KTYP0000  MOVE      ONE,SCRNFLAG            * set ? as not performed
+          MOVE      "OY",CODE               * the category
+          MOVE      "11",CVERT               * row
+          DISPLAY   *P1:11,"Operation Type : ",*EF;
+.
+KTYP1000  KEYIN     *P18:CVERT,*DV,UNDLN3,*P18:CVERT,*V2LON,CODETYPE:
+                    *P18:CVERT,*DV,CODETYPE;
+.
+          ENDSET    CODETYPE
+          APPEND    SP3,CODETYPE
+          RESET     CODETYPE
+.
+          MATCH     SP3,CODETYPE 
+          GOTO      KTYP7900 IF EQUAL       * nothing entered
+.
+          CMATCH    QUEST,CODETYPE 
+          GOTO      KTYP2000 IF NOT EQUAL   * ? not entered
+.
+.         ? entered
+.
+          CALL      PATCODDS                * ? routine
+          MOVE      TWENTY4,CVERT           * row for input
+          MOVE      ZERO,SCRNFLAG           * set ? as performed
+          DISPLAY   *P1:24,"Operation Type : ",*EL;
+          GOTO      KTYP1000
+.
+.         validate what was entered
+.
+KTYP2000  PACK      KEY5,CODE,CODETYPE      * key of entered value
+          CALL      RDCODE1                 * read code file
+          BRANCH    OVRCD,KTYP7000          * invalid input
+.
+          MOVE      TDESC,DESCTYPE          * the description
+          GOTO      KTYP8000                * valid input
+.
+.         ERROR: invalid code entered
+.
+KTYP7000  DISPLAY   *P1:24,*EL,*B,*V2LON,"** Invalid Operation Type **    ";
+          CALL      HITENTER
+          BRANCH    SCRNFLAG,KTYP1000          * ? not entered
+.
+          DISPLAY   *P1:24,"Operation Type : ",*EL;
+          GOTO      KTYP1000    
+.
+.         nothing was entered
+.
+KTYP7900  MOVE      "All Operations",DESCTYPE
+.
+.         valid code entered
+.
+KTYP8000  BRANCH    SCRNFLAG,KTYP8100       * ? not entered
+.
+          CALL      SCRN0000
+          GOTO      KTYP9999
+.
+KTYP8100  DISPLAY   *P28:11,DESCTYPE;        * display description
+.
+KTYP9999  RETURN
++
+.*********************************************************************
+.*                  SCRN0000                    Called by : KTYP0000 *
+.*        Redisplay Screen after a ? mark                            *
+.*********************************************************************
+SCRN0000  DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,ZERO,*P1:5,ONE,*HOFF:
+                    *P3:4,"= Exit":
+                    *P3:5,"= Operation Type Listing":
+                    *P1:7,"Select Option : ",*V2LON,MOPTION,*HOFF:
+                    *P1:11,"Operation Type : ",*V2LON,CODETYPE,*HOFF:
+                    *P28:11,DESCTYPE;
+.
+SCRN9999  RETURN
++
+.*********************************************************************
+.*                  KDAT0000                    Called by : ML2000   *
+.*        Enter the date ranges                                      *
+.*        Returns : EXIT = 1      exit chosen                        * 
+.*                  DATESTRT      starting date                      *
+.*                  DATESTOP      ending date                        *
+.*********************************************************************
+KDAT0000  DISPLAY   *P1:13,"Starting Date  : ",*EL:
+                    *P1:15,"Ending   Date  : ",*EL;
+.
+.         enter starting date
+.
+KDAT1000  MOVE      "13",CVERT              * row
+          MOVE      "18",CCOL               * column
+          UNPACK    SP6,CYEAR,CMON,CDAY     * no defaults
+          MOVE      CCC,CCENT
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,KDAT9000          * nothing entered
+          BRANCH    CQUEST,KDAT1000         * ? entered
+.
+          PACK      DATESTRT,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",DATESTRT           * set up start date
+.
+          MATCH     DATESTRT,CURRDATE
+          GOTO      KDAT2000 IF NOT LESS    * date is <= current date
+.
+.         DISPLAY   *P1:24,*EL,*B,*V2LON:
+.                   "** Starting Date must not be a future date **    ";
+.         CALL      HITENTER 
+.         GOTO      KDAT1000
+.
+.         enter ending date (default to starting date)
+.
+KDAT2000  MOVE      "15",CVERT              * row
+          MOVE      "18",CCOL               * column
+          UNPACK    DATESTRT,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,KDAT9000          * nothing entered
+          BRANCH    CQUEST,KDAT2000         * ? entered
+.
+          PACK      DATESTOP,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",DATESTOP           * set up end date
+.
+          MATCH     DATESTRT,DATESTOP
+          GOTO      KDAT3000 IF NOT LESS    * date is <= start date
+.
+          DISPLAY   *P1:24,*EL,*B,*V2LON:
+                    "** Ending Date must be > or = to Starting Date **    ";
+          CALL      HITENTER 
+          GOTO      KDAT2000
+.
+.         check end date is before current date
+.
+KDAT3000  MATCH     DATESTOP,CURRDATE
+          GOTO      KDAT8000 IF NOT LESS    * date is <= current date
+.
+.         DISPLAY   *P1:24,*EL,*B,*V2LON:
+.                   "** Ending Date must not be a future date **    ";
+.         CALL      HITENTER 
+.         GOTO      KDAT2000
+.
+KDAT8000  MOVE      FALSE,EXIT              * valid dates
+          GOTO      KDAT9999
+.
+KDAT9000  MOVE      TRUE,EXIT               * exit selected
+.
+KDAT9999  RETURN
++
+.*********************************************************************
+.*                  REPT0000                    Called by : ML4000   *
+.*        Produce the report                                         *
+.*********************************************************************
+REPT0000  CALL      IBACLOCK
+          DISPLAY   *P1:24,*EL,"Generating Listing now - ":
+                    *BLINKON,*V2LON,"Please wait",*HOFF,*P55:24,"Session :";
+.
+          MOVE      ZERO,CPAGENO            * first page
+          MOVE      ZERO,CASETOTL           * clear total operation counter
+          MOVE      SP20,CURRSESS           * no current session
+          CALL      PAGE0000                * print a new page header
+.
+          PACK      KEY26,DATESTRT,SP20     * start at start date
+          CALL      RSOPDEA6                * positional read
+.
+.         get the next operation
+.
+REPT1000  CALL      RKOPDEA6                * read next record
+          BRANCH    OVRCD,REPT8000          * finished range
+.
+          MATCH     OPDADATE,DATESTOP
+          GOTO      REPT8000 IF LESS        * finished range
+.
+          COMPARE   THREE,OPDASTAT          * cancelled ?
+          GOTO      REPT1000 IF EQUAL
+.
+          MOVE      OPDAUNIQ,SAVEUNIQ       * save the unique number
+.
+          MATCH     SP3,CODETYPE
+          GOTO      REPT1500 IF EQUAL       * using all operation types
+.
+          MATCH     OPDATYPE,CODETYPE
+          GOTO      REPT1000 IF NOT EQUAL   * invalid type
+.
+.         print the details
+.
+REPT1500  PACK      KEY22,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN
+          MATCH     KEY22,CURRSESS
+          GOTO      REPT2000 IF EQUAL       * same clinic
+.
+.         have a new clinic, print new heading
+.
+          MOVE      KEY22,CURRSESS          * set the current clinic
+.
+          COMPARE   "50",CLNO
+          GOTO      REPT1800 IF NOT LESS    * will need a new page
+.
+          CALL      TABL0000                * print new table
+          GOTO      REPT2000                * print details
+.
+REPT1800  MOVE      "55",CLNO               * set up for a new page
+.
+REPT2000  COMPARE   "53",CLNO
+          CALL      PAGE0000 IF NOT LESS    * print a new page and table
+.
+          CALL      PDET0000                * print the details
+.
+          UNPACK    OPDADATE,XCENT,XYEAR,XMON,XDAY
+          DISPLAY   *P65:24,*V2LON,XDAY,"/",XMON,"/",XCENT,XYEAR;
+.
+          GOTO      REPT1000                * get next operation
+.
+.         finished report
+.
+REPT8000  COMPARE   "52",CLNO               * page overflow ?
+          GOTO      REPT8100 IF LESS
+          CALL      LHDR0000
+          GOTO      REPT8200
+
+.
+REPT8100  PRINT     *N,"==================================================":
+                       "================================":
+                       "=================================================="
+.
+REPT8200  PRINT     *N,*N,"Number of Cases printed = ",CASETOTL:
+                    *N,*N,*N,"*** End of Report ***"
+.
+          DISPLAY   *P1:24,*EL,*P24:24,*V2LON:
+                    "** Listing Generation Completed **",*W1;
+.
+REPT9999  RETURN
++
+.*********************************************************************
+.*                  PAGE0000                    Called by : REPT0000 *
+.*        Print the report page heading                              *
+.*        Para's  : OPCNR58A      which report layout                * 
+.*********************************************************************
+PAGE0000  CALL      LHDR0000                * Listing Header
+          CALL      TABL0000                * Table heading 
+.
+PAGE9999  RETURN
++
+.*********************************************************************
+.*                  LHDR0000                    Called by : PAGE0000 *
+.*        Print Listing Header                              REPT8000 *
+.*********************************************************************
+LHDR0000  CALL      HEAD132
+          UNPACK    DATESTRT,XCENT,XYEAR,XMON,XDAY    * Starting Date
+.
+          PRINT    *40,"Operation Type : ",CODETYPE,SP4,DESCTYPE,*N,*N:
+                   *40,"Date Range     : ",XDAY,"/",XMON,"/",XCENT,XYEAR," to ";
+.
+          UNPACK    DATESTOP,XCENT,XYEAR,XMON,XDAY    * Ending Date
+          PRINT     XDAY,"/",XMON,"/",XCENT,XYEAR
+          MOVE      "7",CLNO                * set line counter
+.
+LHDR9999  RETURN
++
+.*********************************************************************
+.*                  TABL0000                    Called by : PAGE0000 *
+.*        Print a new table heading                         REPT0000 *
+.*********************************************************************
+TABL0000  MATCH     SP20,CURRSESS
+          GOTO      TABL9999 IF EQUAL       * no current session
+.
+          UNPACK    OPDADATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,DIM10A          * session date
+.
+.         get clinic/surgeon name
+.
+          MOVE      OPDACLIN,KEY6           * set up key to files
+          MOVE      "UNKNOWN",OPCLDESC
+          BRANCH    OPCNCLSU,TABL0100       * using surgeons
+.
+.         using clinic so read clinic file
+.
+          CALL      RDOPCLI1                * read clinic file
+          BRANCH    OVRCD,TABL0999          * invalid clinic
+.
+          MATCH     SP6,OPCLDOCT
+          GOTO      TABL0999 IF EQUAL       * no doctor code set up
+.
+          MOVE      OPCLDOCT,KEY6           * set up the key
+.
+.         using surgeon so read doctor file
+.
+TABL0100  CALL      RDDOCT1
+          BRANCH    OVRCD,TABL0999          * invalid doctor code
+.
+          MOVE      DSNAME,PACSNAME
+          MOVE      DGNAME,PACGNAME
+          MOVE      DTITL,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,OPCLDESC       * set up docs name
+.
+TABL0999  BRANCH    OPCNR58A,TABL1000
+          GOTO      TABL9999
+.
+.         report layout one table heading
+.
+TABL1000  PRINT     *N,"==================================================":
+                       "================================":
+                       "==================================================":
+                    *N,OPCNCDSC," : ",OPCLDESC,"  Session Date : ",DIM10A:
+                       *89,"Session Time : ",OPDATIME:
+                    *N,"==================================================":
+                       "================================":
+                       "==================================================";
+.
+          ADD       THREE,CLNO              * add to line counter
+.
+TABL9999  RETURN
++
+.*********************************************************************
+.*                  PDET0000                    Called by : xxxx0000 *
+.*        Print the details about an operation                       *
+.*********************************************************************
+PDET0000  MOVE      "** Missing PMI Details **",PATNAME
+          MOVE      OPDAADMN,KEY8
+          CALL      RDMISS1                 * admission file
+          COMPARE   ZERO,OVRCD
+          GOTO      PDET1000 IF EQUAL       * on admission, get name
+.
+.         try the booking file
+.
+          CALL      RDBKREC1                * read booking file
+          BRANCH    OVRCD,PDET5000          * no details
+.
+          MOVE      BKREURNO,AURNO          * set up UR number
+.
+.         see if a zero UR or not
+.
+PDET1000  MATCH     ZEROUR,AURNO
+          GOTO      PDET2000 IF EQUAL       * on pram file
+.
+.         details on master file
+.
+          MOVE      AURNO,KEY8
+          CALL      RDMAST1                 * master file
+          BRANCH    OVRCD,PDET5000          * invalid details
+          GOTO      PDET4000                * format name
+.
+.         details on pre-admission file
+.
+PDET2000  MOVE      OPDAADMN,KEY8
+          CALL      RDPRAM1
+          BRANCH    OVRCD,PDET5000          * invalid details
+.
+          MOVE      ZEROUR,PURNO            * reset UR number to zero
+.
+PDET4000  MOVE      TWO,PACFRMT             * get patients name
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          CALL      PACNAME
+          MOVE      PACFNAME,PATNAME
+.
+.         display the details
+.
+PDET5000  BRANCH    OPCNR58A,PDET6000
+          GOTO      PDET9999
+.
+.         report layout 1
+.
+PDET6000  PRINT     *N,"Patient : ",PATNAME:
+                    *54,"Operation Description : ",OPDADES1:
+                    *N,"U/R No. : ",PURNO:
+                    *39,"Case No. : ",OPDACASE,*78,OPDADES2:
+                    *N,"Adm No. : ",OPDAADMN,*78,OPDADES3
+.
+          ADD       FOUR,CLNO               * add to line counter
+.
+PDET7000  PACK      KEY11,SAVEUNIQ,SP1      * check for record in oprsrgaf
+          CALL      RSOPSRG1                * if there is one, use oprtsmaf
+          CALL      RKOPSRG1                * to get team details
+          BRANCH    OVRCD,PDET8000
+.
+          MATCH     SAVEUNIQ,OPSGUNID       * valid record?
+          GOTO      PDET8000 IF NOT EQUAL   * no, use oprdetbf for team details
+.
+          CALL      TSMD0000               
+          ADD       ONE,CASETOTL
+          GOTO      PDET9999
+.
+PDET8000  CALL      TEAM0000                * print the team details
+          ADD       ONE,CASETOTL            * add on to operation total
+.
+PDET9999  RETURN
++
+.*********************************************************************
+.*                  TSMD0000                    Called by : PDET7000 *
+.*        Print the teams for an operation                           *
+.********************************************************************* 
+TSMD0000  MOVE      ZERO,FORM1
+          MOVE      ZERO,FLAG 
+          MOVE      SP1,SAVETEAM            * save team number
+          PACK      KEY11,SAVEUNIQ,SP1
+          CALL      RSOPTSM1
+TSMD1000  CALL      RKOPTSM1
+          BRANCH    OVRCD,TSMD9999
+.
+          MATCH     SAVEUNIQ,OPTSUNID
+          GOTO      TSMD9999 IF NOT EQUAL
+.
+          COMPARE   TWO,OPTSSIND            * nurse record
+          GOTO      TSMD1000 IF EQUAL       
+.
+          COMPARE   THREE,OPTSSIND          * other record
+          GOTO      TSMD1000 IF EQUAL       
+.
+          MOVE      OPTSTMNO,SAVETEAM       * save team
+.
+          COMPARE   ZERO,FLAG               * 1st rec. in new team no.
+          GOTO      TSMD1200 IF EQUAL
+.
+.         Read back a record to get previous team number
+.
+          CALL      RPOPTSM1                
+          BRANCH    OVRCD,TSMD1100          * if ovrcd. On 1st record, no check
+.
+          PACK      SAVKEY11,SAVEUNIQ,SAVETEAM * save current position
+.
+          MATCH     SAVETEAM,OPTSTMNO
+          GOTO      TSMD5000 IF NOT EQUAL
+.
+TSMD1100  CALL      RKOPTSM1                * reposition on current record
+.          
+TSMD1200  MOVE      ONE,FLAG
+          PACK      DESCSURG,SP20,SP20      * clear description 
+          PACK      DESCASST,SP20,SP20      * clear description
+          PACK      DESCANAE,SP20,SP20      * clear description
+.
+          PACK      KEY6,OPTSSCDE   
+          CALL      RDDOCT1
+          BRANCH    OVRCD,TSMD1000          
+.
+          MOVE      DSNAME,PACSNAME
+          MOVE      DGNAME,PACGNAME
+          MOVE      DTITL,PACTITLE
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME
+.
+          COMPARE   ZERO,OPTSSIND           * surgeon?
+          GOTO      TSMD2000 IF EQUAL       * yes
+.
+          COMPARE   ONE,OPTSSIND            * doctor?
+          GOTO      TSMD3000 IF EQUAL       * yes, check what doct. type also
+.
+          GOTO      TSMD1000
+.
+TSMD2000  MOVE      PACFNAME,DESCSURG
+          GOTO      TSMD1000 
+.
+.         Staff type is 1, doctor, check if assistant or anaesthetist
+.
+TSMD3000  PACK      KEY5,ANSO,ANSP,OPTSSTYP
+          CALL      RDCODE1
+          BRANCH    OVRCD,TSMD1000     * invalid code
+.
+          MATCH     ANSA,TCINDC1
+          IF        @EQUAL
+            MOVE      PACFNAME,DESCASST
+            GOTO      TSMD1000
+          ENDIF
+.
+          MATCH     ANSN,TCINDC1
+          IF        @EQUAL
+            MOVE      PACFNAME,DESCANAE
+            GOTO      TSMD1000
+          ENDIF
+.
+.         print the team details
+.
+TSMD5000  PRINT     *N,"Team    : ",OPDBTEAM:
+                    *16,"Surgeon":
+                    *52,"Assistant":
+                    *88,"Anaesthetist":
+                    *N,"-----------",*16,DESCSURG,*52,DESCASST,*88,DESCANAE
+.
+          ADD       ONE,FORM1               * add to team counter
+          ADD       THREE,CLNO              * add to line counter
+          MOVE      ZERO,FLAG          * new team number
+          MOVE      SAVKEY11,KEY11
+          CALL      RSOPTSM1
+          GOTO      TSMD1000
+.
+TSMD9999  RETURN
++
+.*********************************************************************
+.*                  TEAM0000                    Called by : PDET5000 *
+.*        Print the teams for an operation                           *
+.********************************************************************* 
+TEAM0000  PACK      KEY11,SAVEUNIQ,SP1
+          MOVE      ONE,FORM1               * first team
+          CALL      RSOPDEB1                * position at first team
+.
+TEAM1000  CALL      RKOPDEB1                * get next team
+          BRANCH    OVRCD,TEAM8000          * finished operation
+.
+          MATCH     OPDBUNIQ,SAVEUNIQ
+          GOTO      TEAM8000 IF NOT EQUAL   * finished operation
+.
+.         get the surgeons name, DESCSURG
+.
+TEAM2000  MOVE      ONE,FORM2               * start at first code
+          PACK      DESCSURG,SP20,SP20      * clear description
+.
+TEAM2100  LOAD      KEY3,FORM2,OPDBTYD1,OPDBTYD2,OPDBTYD3,OPDBTYD4:
+                               OPDBTYD5,OPDBTYD6,OPDBTYD7,OPDBTYD8
+.         
+          MATCH     SP3,KEY3
+          GOTO      TEAM2200 IF EQUAL       * no code
+.
+          PACK      KEY5,ANSO,ANSP,KEY3
+          CALL      RDCODE1                 * read codes file
+          BRANCH    OVRCD,TEAM2200          * invalid code
+.
+          MATCH     ANSS,TCINDC1
+          GOTO      TEAM2200 IF NOT EQUAL   * not a surgeon
+.
+.         have a surgeon, read doctors file for name
+.
+          LOAD      KEY6,FORM2,OPDBDCC1,OPDBDCC2,OPDBDCC3,OPDBDCC4:
+                               OPDBDCC5,OPDBDCC6,OPDBDCC7,OPDBDCC8
+          CALL      RDDOCT1
+          BRANCH    OVRCD,TEAM2200          * invalid code
+.
+          MOVE      DSNAME,PACSNAME 
+          MOVE      DGNAME,PACGNAME 
+          MOVE      DTITL,PACTITLE
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,DESCSURG       * the name
+          GOTO      TEAM3000
+.
+TEAM2200  ADD       ONE,FORM2               * increment surgeon counter
+.
+          COMPARE   SEVEN,FORM2
+          GOTO      TEAM2100 IF LESS        * try next surgeon code
+.
+.         get the assistants name, DESCASST
+.
+TEAM3000  MOVE      ONE,FORM2               * start at first code
+          PACK      DESCASST,SP20,SP20      * clear description
+.
+TEAM3100  LOAD      KEY3,FORM2,OPDBTYD1,OPDBTYD2,OPDBTYD3,OPDBTYD4:
+                               OPDBTYD5,OPDBTYD6,OPDBTYD7,OPDBTYD8
+.         
+          MATCH     SP3,KEY3
+          GOTO      TEAM3200 IF EQUAL       * no code
+.
+          PACK      KEY5,ANSO,ANSP,KEY3
+          CALL      RDCODE1                 * read codes file
+          BRANCH    OVRCD,TEAM3200          * invalid code
+.
+          MATCH     ANSA,TCINDC1
+          GOTO      TEAM3200 IF NOT EQUAL   * not an assistant
+.
+.         have an assistant, read doctors file for name
+.
+          LOAD      KEY6,FORM2,OPDBDCC1,OPDBDCC2,OPDBDCC3,OPDBDCC4:
+                               OPDBDCC5,OPDBDCC6,OPDBDCC7,OPDBDCC8
+          CALL      RDDOCT1
+          BRANCH    OVRCD,TEAM3200          * invalid code
+.
+          MOVE      DSNAME,PACSNAME 
+          MOVE      DGNAME,PACGNAME 
+          MOVE      DTITL,PACTITLE
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,DESCASST       * the name
+          GOTO      TEAM4000
+.
+TEAM3200  ADD       ONE,FORM2               * increment surgeon counter
+.
+          COMPARE   SEVEN,FORM2
+          GOTO      TEAM3100 IF LESS        * try next surgeon code
+.
+.         get the anaesthetist name, DESCANAE
+.
+TEAM4000  MOVE      ONE,FORM2               * start at first code
+          PACK      DESCANAE,SP20,SP20      * clear description
+.
+TEAM4100  LOAD      KEY3,FORM2,OPDBTYD1,OPDBTYD2,OPDBTYD3,OPDBTYD4:
+                               OPDBTYD5,OPDBTYD6,OPDBTYD7,OPDBTYD8
+.         
+          MATCH     SP3,KEY3
+          GOTO      TEAM4200 IF EQUAL       * no code
+.
+          PACK      KEY5,ANSO,ANSP,KEY3
+          CALL      RDCODE1                 * read codes file
+          BRANCH    OVRCD,TEAM4200          * invalid code
+.
+          MATCH     ANSN,TCINDC1
+          GOTO      TEAM4200 IF NOT EQUAL   * not an assistant
+.
+.         have an anaesthetist, read doctors file for name
+.
+          LOAD      KEY6,FORM2,OPDBDCC1,OPDBDCC2,OPDBDCC3,OPDBDCC4:
+                               OPDBDCC5,OPDBDCC6,OPDBDCC7,OPDBDCC8
+          CALL      RDDOCT1
+          BRANCH    OVRCD,TEAM4200          * invalid code
+.
+          MOVE      DSNAME,PACSNAME 
+          MOVE      DGNAME,PACGNAME 
+          MOVE      DTITL,PACTITLE
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,DESCANAE       * the name
+          GOTO      TEAM5000
+.
+TEAM4200  ADD       ONE,FORM2               * increment surgeon counter
+.
+          COMPARE   SEVEN,FORM2
+          GOTO      TEAM4100 IF LESS        * try next surgeon code
+.
+.         print the team details
+.
+TEAM5000  PRINT     *N,"Team    : ",OPDBTEAM:
+                    *16,"Surgeon":
+                    *52,"Assistant":
+                    *88,"Anaesthetist":
+                    *N,"-----------",*16,DESCSURG,*52,DESCASST,*88,DESCANAE
+.
+          ADD       ONE,FORM1               * add to team counter
+          ADD       THREE,CLNO              * add to line counter
+          GOTO      TEAM1000                * get next team
+.
+.         end of operation has been found, check if any teams displayed
+.
+TEAM8000  COMPARE   ONE,FORM1
+          GOTO      TEAM9999 IF NOT EQUAL   * have found teams
+.
+.         means have no teams set up so use session file default team
+.
+          PACK      KEY22,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP70
+          CALL      RDOPSES1
+          BRANCH    OVRCD,TEAM9999          * invalid session details
+.
+          MOVE      OPSETYD1,OPDBTYD1
+          MOVE      OPSETYD2,OPDBTYD2
+          MOVE      OPSETYD3,OPDBTYD3
+          MOVE      OPSETYD4,OPDBTYD4
+          MOVE      OPSETYD5,OPDBTYD5
+          MOVE      OPSETYD6,OPDBTYD6
+          MOVE      OPSETYD7,OPDBTYD7
+          MOVE      OPSETYD8,OPDBTYD8
+.
+          MOVE      OPSEDCC1,OPDBDCC1
+          MOVE      OPSEDCC2,OPDBDCC2
+          MOVE      OPSEDCC3,OPDBDCC3
+          MOVE      OPSEDCC4,OPDBDCC4
+          MOVE      OPSEDCC5,OPDBDCC5
+          MOVE      OPSEDCC6,OPDBDCC6
+          MOVE      OPSEDCC7,OPDBDCC7 
+          MOVE      OPSEDCC8,OPDBDCC8
+          MOVE      ONE,OPDBTEAM
+          GOTO      TEAM2000
+.
+TEAM9999  RETURN
++
+.********************************************************************* 
+. ------- I/O includes needed -------
+.
+          INC       STD001IO                * all standard routines
+.
+          INC       PATCODKY                * ? for codes file
+.
+          INC       BOKRC1IO/INC            * Bookings file
+          INC       OPRCLIIO/INC            * Clinics file
+          INC       OPRDEAIO/INC            * Op Details file
+          INC       OPRDEBIO/INC            * Op Teams file
+          INC       OPRSESIO/INC            * Sessions file
+          INC       OPRSRGIO/INC            * new operation details file
+          INC       OPRTSMIO/INC            * new operation team file
+. 
+          INC       PATCODIO/INC            * Codes file
+          INC       PATDO1IO/INC            * Doctors file
+          INC       PATMA1IO/INC            * Master file
+          INC       PATMI1IO/INC            * Admissions file
+          INC       PMSVX1IO/INC            * Admissions file
+          INC       PATPR1IO/INC            * Pre-admissions file

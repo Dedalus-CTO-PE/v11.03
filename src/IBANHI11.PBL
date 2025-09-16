@@ -1,0 +1,1486 @@
+.******************************************************************************
+.* System   :  Patient                                                        *
+.* Program  :  IBANHI11                                                       *
+.* Desc     :  Auto/Bulk Merge PMI-NHI from input source file (MOH)           *
+.******************************************************************************
+.* Date     :  25/11/2014                                                     *
+.* Author   :  Don Nguyen                                                     *
+.* Comment  :  This program will loop through a MOH file (pipe delimited) or  *
+.*             pipe delimited UR file (OLD | NEW) to perform a local PMI      *
+.*             merge of the two UR's.                                         *
+.*                                                                            *
+.* Mods     :                                                                 *
+.*                                                                            *
+.******************************************************************************
+.* V10.11.02 21/09/2017  Thanh T.          TSK 0821710                        *
+.*           Recompiled for MRGPMIML                                          *
+.* V10.11.01 07/09/2017  Thanh T.          TSK 0821710                        *
+.*           Audit Amission/outpatient visit comments                         *
+.******************************************************************************
+.* V10.08.01 09/05/2011  Davin             CAR 239539                         *
+.*           Recompiled for MRGPMIML - Added chronic condition alert(savesn11)*
+.* V10.07.01  02/02/2016  Peter Vela        CAR 0809659                       *
+.*            Recompiled for SVRSPMI                                          *
+.* V10.06.08  14/08/2015  Don Nguyen        CAR 319786                        *
+.*            Modified VALURN00 - added check on PSTAT for temp UR            *
+.* V10.06.07  29/07/2015  Don Nguyen        CAR 319786                        *
+.*            Modified VALURN00 - added validation on PSTAT                   *
+.* V10.06.06  03/06/2015  Don Nguyen        CAR 299898                        *
+.*            Modified validation of MERGDDTE length                          *
+.* V10.06.05  12/05/2015  Jill Parkinson CAR 316449                           *
+.*            Added check that the new UR is not already merged               *
+.* V10.06.04  11/05/2015  Don Nguyen        CAR 292754 & 299898               *
+.*            Modified VALURN10 to check for validation run only flag         *
+.* V10.06.03  07/05/2015  Don Nguyen        CAR 292754 & 299898               *
+.*            Modified MVURNS00 to allow for a blank NHI Number (MERGNHIN)    *
+.* V10.06.02  07/05/2015  Don Nguyen        CAR 292754 & 299898               *
+.*            Modified KEYFIL00 to allow for long filenames. Also modified    *
+.*            FILPTH00 to check for file extension in input file name.        *
+.* V10.06.01  12/03/2015  Steve Armstrong   CAR 314108                        *
+.*            Removed definition of PTCGDATE as PATCGPFD is no longer         *
+.*            in use.                                                         *
+.******************************************************************************
+.* V10.05.02  18/12/2014  Don Nguyen        CAR 292754 & 299898               *
+.*            Modified KEYFIL00 to allow exit on empty input filename         *
+.* V10.05.01  16/12/2014  Don Nguyen        CAR 292754 & 299898               *
+.*            Added VCHKFLAG (Validation Only mode) & subsequent err logging. *
+.*            Fixed loop in LOOP0000.                                         *
+.*            Modified MVURNS00 to cater for FILEFRMT=2 UR numbers.           *
+.*            Removed calls to WRTEMP2 in VALURN00.                           *
+.* V10.05.00  25/11/2014  Don Nguyen        CAR 299898                        *
+.*            Created new program                                             *
+.******************************************************************************
+.
+          INC       STD001FD
+.
+          INC       IBACONFD/INC
+          INC       BOKRC1FD/INC
+          INC       NHIMASFD/INC
+          INC       NZHISIFD/INC
+          INC       OUTCLIFD/INC
+          INC       OUTPREFD/INC
+          INC       MRTCONFD/INC
+          INC       MRTMASFD/INC
+          INC       PATCOMM/INC
+          INC       PATALRFD/INC
+          INC       PATAU1FD/INC
+          INC       PATCALAG/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATCSLFD/INC
+          INC       PATDHEAD/INC 
+          INC       PATDINVS/INC
+          INC       PATDO1FD/INC
+          INC       PATDNRFD/INC
+          INC       PATDSCFD/INC
+          INC       PATGSRFD/INC
+          INC       PATHOSFD/INC
+          INC       PATHSPFD/INC
+          INC       PATKWCFD/INC
+          INC       PATLINFD/INC
+          INC       PATMA1FD/INC
+          INC       PATMI1FD/INC
+          INC       PATMRGFD/INC
+          INC       PATNIDFD/INC
+          INC       PATPA1FD/INC
+          INC       PATPR1FD/INC
+          INC       PATURAFD/INC
+          INC       PMIVARS/INC
+          INC       PMSPX2FD/INC
+          INC       PMSVX1FD/INC
+          INC       PATSDNFD/INC
+          INC       PATSMWFD/INC
+          INC       PMSUPDFD/INC
+          INC       SAVPX2FD/INC
+          INC       SCRPSTFD/INC
+          INC       WEBSECFD/INC
+
++
+.******************************************************************************
+.*                           CONSTANTS                                        *
+.******************************************************************************
+CHAINPRG  INIT      "IBAPMS05"         * Second merge program to change
+KWCFIL    INIT      "patkwc"
+EXTN_TXT  INIT      ".TXT"
+.
+.
+.
+FINDFILE  FILE      ASCII, FIXED=256
+.
+INPTFILE  FILE      HL7, FIXED=4065    * Pipe delimited input source file
+.
+.         Fields must be pipe delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+MERGTMPN  DIM       14       1         * Temporary number (Zero-padded)
+MERGONHI  DIM       7        15        * Old NHI number
+MERGPDOB  DIM       8        22        * Date of birth (YYYYMMDD)
+MERGPSEX  DIM       1        30        * Patient's sex
+MERGFNAM  DIM       20       31        * Family Name
+MERGGNAM  DIM       25       51        * First Given Name
+MERGSNAM  DIM       40       76        * Second Given Name
+MERGTNAM  DIM       40       116       * Third Given Name
+MERGADD1  DIM       35       156       * Address Line 1 (street address)
+MERGADD2  DIM       35       191       * Address Line 2 (street address)
+MERGADD3  DIM       35       226       * Address Line 3 (suburb)
+MERGADD4  DIM       35       261       * Address Line 4 (city)
+MERGADD5  DIM       35       296       * Address Line 5 (country)
+MERGETH1  DIM       2        331       * Ethnicity code 1 (Cat EN)
+MERGETH2  DIM       2        333       * Ethnicity code 2 (Cat EN)
+MERGETH3  DIM       2        335       * Ethnicity code 3 (Cat EN)
+MERGTELH  DIM       20       337       * Home Phone Number 
+MERGTELM  DIM       20       357       * Mobile Phone Number
+MERGPEML  DIM       80       377       * Patient's Email Address
+MERGNHIN  DIM       7        457       * NHI Number (7 characters alphanumeric)
+MERGMTYP  DIM       1        464       * Type of match (D = direct match)
+MERGDDTE  DIM       8        465       * Date of death (YYYYMMDD)
+.
+.End of Record               4065
+.
+
+.
+. Following file is read and used by MRGPMIML (COMM0000) to merge UR's
+.
+TEMP1     FILE      ASCII, FIXED=17
+.
+.Name     Type      Length    Start
+.-------  ----      ------    -----
+OLDURNO   DIM       8         1
+NEWURNO   DIM       8         9
+.
+. End of Record               17
+.
+
+
+.
+. Following file is used to output merge records (with result log message)
+.
+TEMP2     FILE      HL7, FIXED=4065    * Pipe delimited merge result file
+.
+.Name     Type      Length    Start
+.-------  ----      ------    -----
+.MERGTMPN  DIM       14       1         * Temporary number (Zero-padded)
+.MERGONHI  DIM       7        15        * Old NHI number
+.MERGPDOB  DIM       8        22        * Date of birth (YYYYMMDD)
+.MERGPSEX  DIM       1        30        * Patient's sex
+.MERGFNAM  DIM       20       31        * Family Name
+.MERGGNAM  DIM       25       51        * First Given Name
+.MERGSNAM  DIM       40       76        * Second Given Name
+.MERGTNAM  DIM       40       116       * Third Given Name
+.MERGADD1  DIM       35       156       * Address Line 1 (street address)
+.MERGADD2  DIM       35       191       * Address Line 2 (street address)
+.MERGADD3  DIM       35       226       * Address Line 3 (suburb)
+.MERGADD4  DIM       35       261       * Address Line 4 (city)
+.MERGADD5  DIM       35       296       * Address Line 5 (country)
+.MERGETH1  DIM       2        331       * Ethnicity code 1
+.MERGETH2  DIM       2        333       * Ethnicity code 2
+.MERGETH3  DIM       2        335       * Ethnicity code 3
+.MERGTELH  DIM       20       337       * Home Phone Number
+.MERGTELM  DIM       20       357       * Mobile Phone Number
+.MERGPEML  DIM       80       377       * Patient's Email Address
+.MERGNHIN  DIM       7        457       * NHI Number (7 characters alphanumeric)
+.MERGMTYP  DIM       1        464       * Type of match (D = direct match)
+.MERGDDTE  DIM       8        465       * Date of death (YYYYMMDD)
+MERGRSLT  DIM        50       473       * Merge result log message
+.
+.End of Record               4065
+.
+
+.
+. Following file is used for IO error logging (WERR0000) in MRGPMIML & MRGUREOC
+.
+TEMP3     FILE      ASCII, FIXED=107
+.
+.Name     Type      Length    Start
+.-------  ----      ------    -----
+.OLDURNO   DIM       8        1
+.NEWURNO   DIM       8        9
+.CHOSPNUM  FORM      2        17
+XXFILE     DIM       8        19
+XXDESC     DIM       80       27
+.
+. End of Record               107
+.
+.
+DIM107    DIM       107
+SEQ1      FORM      "-3"
+LOGERR    FORM      "1"
+.
+URNOTMP1  DIM       8        * Old UR (read from merge source file)
+URNOTMP2  DIM       8        * New UR (read from merge source file)
++
+.******************************************************************************
+.*                       GLOBAL VARIABLES                                     *
+.******************************************************************************
+.
+CMDLINE   DIM       200
+CHARNUM   FORM      2
+CHG       FORM      1
+FILEFRMT  FORM      1        * file format of source (1=complete, 2=simple)
+FNAMER    DIM       8
+FNAMEA    DIM       8
+FNAMEL    DIM       8
+FOUNDCHR  FORM      1
+INFILPTH  DIM       60       * input file path
+INFILNAM  DIM       32       * input filename
+OLDCASE   DIM       20
+RECCOUNT  FORM      5
+SAVEURNO  DIM       8
+SAVESIN1  DIM       1
+SAVESIN7  DIM       1
+SAVESIN8  DIM       1
+SAVESIN9  DIM       1
+SAVESN11  DIM       1
+USERID    DIM       10
+VCHKFLAG  FORM      1        * Validation Check Flag
+.                                0 = normal mode
+.                                1 = validation only mode
+.
+.
+. Variables for FIXMAS...
+.
+EXISTFL   FORM      1
+MRGODDAT  DIM       8
+MRGURDAT  FORM      1
+OURNO     DIM       8
+SAVEDETL  FORM      1
+.
+PIPE      INIT      "|"
+.-----------------------------------------------------------------------
+PRGID     INIT      "IBANHI11"
+PRGNAM    INIT      "Auto/Bulk Merge PMI-NHI"
+VERSION   INIT      "V11.03.00"
+.-----------------------------------------------------------------------
++
+.******************************************************************************
+.*                           MAINLINE                                         *
+.******************************************************************************
+MAIN0000  CALL      INIT0000           * Initialization
+          BRANCH    EXIT,MAIN9999      * cannot open national link
+.
+MAIN1000  CALL      OPTN0000           * Get option
+          BRANCH    COPTION,MAIN1100,MAIN1200
+          GOTO      MAIN9999
+.
+MAIN1100  MOVE      ONE,FILEFRMT       * Using MOH input file format
+          GOTO      MAIN2000
+.
+MAIN1200  MOVE      TWO,FILEFRMT       * Using misc input file format
+          GOTO      MAIN2000
+.
+MAIN2000  CALL      KEYFIL00           * Keyin input filename
+          BRANCH    EXIT,MAIN1000      * Empty input filename
+.
+          CALL      OPEN0000           * Open input source file
+          BRANCH    EXIT,MAIN2000      * Failed to open input file
+.
+          CALL      FILPTH00           * Display input file path (full)
+.
+          CALL      ASKQ0000           * Validation run only ?
+.
+          CALL      CONTQST            * Ok to continue ?
+          BRANCH    CEXIT,MAIN3000:    * yes
+                          MAIN1000:    * no
+                          MAIN1000     * cancel
+.
+MAIN3000  CALL      OPNA0000           * Open tmpmerge.txt (merge output file)
+          CALL      LOGS0000           * Log start time
+          CALL      LOOP0000           * Loop over the input file (HL7) and 
+                                       * write all accepted mergers (UR's) to
+                                       * the temp file (TEMP1)
+.
+          COMPARE   ZERO,RECCOUNT      * nothing to merge?
+          GOTO      MAIN9000 IF EQUAL
+.
+          CALL      HOSP0000           * Loop over the hospital file and exec.
+                                       * their RUN macro on the temp file data
+.
+. ------- position at end of IO error log ---------------------
+.
+          OPEN      TEMP3,FNAMEL
+          READ      TEMP3,SEQ1;DIM107
+.
+          CALL      COMM0000           * Execute the mergers on the
+.                                      * files common to all hospitals
+MAIN9000  CALL      DISCNNCT           * Disconnect from National system
+          CALL      LOGF0000           * Log finished time to error file
+.
+MAIN9999  CHAIN     PGM
++
+.******************************************************************************
+.*                           INIT0000                                         *
+.******************************************************************************
+INIT0000  CALL      DISPHEAD                  * display heading
+. 
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,TWENTY1;*138,PTCNNHII,*174,PTCNDONR
+          CALL      IBACLOCK
+.
+          OPEN      PATALRT1,"patalrtf"
+          OPEN      PATMWSA1,"patmwsaf"
+          OPEN      PATDNRA1,"patdnraf"
+          OPEN      PATHOSP1,"pathospf"
+          OPEN      PATHOSP2,"pathospf"
+          OPEN      PATLINK1,"patlinkf"
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      PMSPX2A1,"pmspx2af"
+          OPEN      PATMRGG1,"patmrgaf"
+          OPEN      PATPA1A1,"patpa1af"
+          OPEN      PATCODE1,"patcodes"
+.
+          OPEN      NHIMASA1,"nhimasaf"
+          OPEN      NHIMASA2,"nhimasaf"
+.
+          OPEN      PATGSRN1,"patgsrnf"
+          OPEN      PATGSRN3,"patgsrnf"
+          OPEN      PATGSRN4,"patgsrnf"
+          OPEN      PATGSRN2,"patgsrnf"
+          OPEN      WEBSECA2,"websecaf"
+.
+          OPEN      MRTMASA1,"mrtmasaf"
+          OPEN      PATHSPA1,"pathspaf"
+.
+INIT9000  OPEN      PATURAD1,"paturadf"
+          OPEN      PATURAD2,"paturadf"
+.
+          READ      CONTROLF,TEN;*244,CHOSPNUM,*244,CHOSINDX
+          READ      CONTROLF,TWENTY;*186,PTCNUCSL,*196,PTCNUCRD,PTCNUFML
+          READ      CONTROLF,FIFTY9;*84,CMERGEUR,*86,CDETENTE,*92,CDETPATH:
+                                    *234,PTCNNMPI
+          READ      CONTROLF,SEVENTY7;*240,PTCNAXEU
+          READ      CONTROLF,EIGHTY;*140,PTCNANMA
+          IF        PTCNANMA = 1
+            OPEN      NHIAUDMA,"nhiaudma"
+          ENDIF
+.
+.
+.         Using Alerts Audit? Open the files needed if so
+. 
+          READ      CONTROLF,TEN;*250,CAUDA1
+          IF        CAUDA1<>1
+            OPEN      PATAUDAL,"pataudal"
+            OPEN      PATAUDA2,"pataudal"
+          ENDIF
+.
+.
+.         Using Case Note Location file?
+.
+          COMPARE   ONE,PTCNUCSL
+          GOTO      INIT9100 IF NOT EQUAL
+          OPEN      PATCSLA1,"patcslaf"
+.
+.
+          CALL      CONNECT            * try connecting to the NHI database
+          IF        OVRCD=1
+            MOVE      ONE,EXIT         * can't connect; don't continue
+            GOTO      INIT9999
+          ENDIF
+.
+.
+.         See if merge URs file exists; if not create one
+.
+INIT9100  CLEAR     FNAMER
+          APPEND    "mergeurs",FNAMER
+          RESET     FNAMER
+          REPLACE   " 0",FNAMER
+.
+          TRAP      INIT9200 IF IO
+          OPEN      TEMP1,FNAMER
+          TRAPCLR   IO
+          CLOSE     TEMP1
+          PREP      TEMP1,FNAMER
+.
+.         See if IO error log file exists; if not create one
+.
+INIT9110  CLEAR     FNAMEA
+          APPEND    "tmpmerge",FNAMEA
+          RESET     FNAMEA
+          REPLACE   " 0",FNAMEA
+.
+          TRAP      INIT9300 IF IO
+          OPEN      TEMP2,FNAMEA
+          TRAPCLR   IO
+          CLOSE     TEMP2
+          PREP      TEMP2,FNAMEA
+.
+.
+.         See if IO error log file exists; if not create one
+.
+INIT9120  CLEAR     FNAMEL
+          APPEND    "mergelog",FNAMEL
+          RESET     FNAMEL
+          REPLACE   " 0",FNAMEL
+.
+          TRAP      INIT9400 IF IO
+          OPEN      TEMP3,FNAMEL
+          TRAPCLR   IO
+          CLOSE     TEMP3
+          PREP      TEMP3,FNAMEL
+.
+          GOTO      INIT9500
+.
+INIT9200  NORETURN
+          DISPLAY   *P1:24,*EL,*B,"mergeurs.txt does not exist. "
+          PREP      TEMP1,FNAMER            * create "mergeurs.txt"
+          GOTO      INIT9110
+.
+INIT9300  NORETURN
+          DISPLAY   *P1:24,*EL,*B,"tmpmerge.txt does not exist. "
+          PREP      TEMP2,FNAMEA            * create "tmpmerge.txt"
+          GOTO      INIT9120
+.
+INIT9400  NORETURN
+          DISPLAY   *P1:24,*EL,*B,"mergelog.txt does not exist. "
+          PREP      TEMP3,FNAMEL            * create "mergelog.txt"
+.
+.
+.         Since batch merging, dont give warning of inconsistent Local/Nat data
+.
+INIT9500  MOVE      ONE,NZIBIGCK
+.
+          MOVE      ZERO,EXIT
+          MOVE      ZERO,FILEFRMT
+.
+          MOVE      ZERO,VCHKFLAG
+.
+INIT9999  RETURN
++
+.******************************************************************************
+.*                               OPNA0000              Called by: MAIN0000    *
+.*                  Open "tmpmerge.txt" file (HL7)                            *
+.******************************************************************************
+OPNA0000  TRAP      OVERCOND IF IO
+          OPEN      TEMP2,FNAMEA
+          TRAPCLR   IO
+          CLOSE     TEMP2              * Position at top of file
+          PREP      TEMP2,FNAMEA
+.
+OPNA9999  RETURN
++
+.******************************************************************************
+.*                               OPEN0000              Called by: MAIN0000    *
+.*                  Open input source file (HL7)                              *
+.******************************************************************************
+OPEN0000  MOVE      ZERO,OVRCD
+.
+          TRAP      OVERCOND IF IO
+          OPEN      INPTFILE,INFILNAM
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,*B,"Input file - '",*+,INFILNAM,*-,"'":
+                    " not found in the data path.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.******************************************************************************
+.*                               KEYFIL00              Called by: MAIN0000    *
+.*                  Key in input source filename                              *
+.******************************************************************************
+KEYFIL00  MOVE      ZERO,EXIT 
+          MOVE      "SampleInputFile",INFILNAM
+.
+KEYFIL10  KEYIN     *P1:10,*EL,"Keyin input filename: ":
+                    *P23:10,*EL,*DV,*RV,INFILNAM:
+                    *P23:10,INFILNAM;
+.
+          MOVE      ZERO,F2
+          MOVELPTR  INFILNAM,F2
+          COMPARE   ZERO,F2            * empty input?
+          GOTO      KEYFIL91 IF EQUAL
+.
+          ENDSET    INFILNAM
+          APPEND    SP70,INFILNAM
+          RESET     INFILNAM
+          STRIP     INFILNAM
+.
+KEYFIL90  MOVE      ZERO,EXIT
+          GOTO      KEYFIL99
+.
+KEYFIL91  MOVE      ONE,EXIT
+KEYFIL99  RETURN
++
+.******************************************************************************
+.*                           FILPTH00                   Called by: MAIN0000   *
+.*                  Display the input file path (full)                        *
+.******************************************************************************
+FILPTH00  PACK      CMDLINE,SP70,SP70
+          CLEAR     CMDLINE
+          APPEND    "ldat ",CMDLINE
+          APPEND    INFILNAM,CMDLINE
+.
+          MOVE      ZERO,F2
+          MOVELPTR  INFILNAM,F2
+          COMPARE   FOUR,F2
+          GOTO      FILPTH10 IF LESS
+          GOTO      FILPTH10 IF EQUAL
+.
+          ASSIGN    (F2-4),F2
+          BUMP      INFILNAM,F2             * position ourself at file ext
+.
+          MOVE      SP10,D4
+          MOVE      INFILNAM,D4
+          REP       UPPLOW,D4
+          RESET     INFILNAM
+          MATCH     D4,EXTN_TXT
+          GOTO      FILPTH20 IF EQUAL
+.
+FILPTH10  APPEND    ".txt",CMDLINE
+
+FILPTH20  APPEND    " > temp.txt",CMDLINE
+          APPEND    SP70,CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+          PACK      INFILPTH,SP30,SP30
+          CLOSE     FINDFILE
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FINDFILE,"temp"
+          TRAPCLR   IO
+          BRANCH    OVRCD,FILPTH91
+.
+          READ      FINDFILE,SEQ;INFILPTH
+          GOTO      FILPTH91 IF OVER
+.
+          STRIP     INFILPTH
+          RESET     INFILPTH
+          CLOSE     FINDFILE
+.
+          MOVE      ZERO,EXIT
+          DISPLAY   *P1:12,*EL,*B,"Input file path: ":
+                    *P10:13,INFILPTH;
+          GOTO      FILPTH99
+.
+FILPTH91  CLOSE     FINDFILE
+          MOVE      ONE,EXIT
+.
+FILPTH99  RETURN
++
+.******************************************************************************
+.*                           OPTN0000                 Called by: MAIN0000     *
+.*                  Get user options or exit                                  *
+.*    Returns:  EXIT    = FALSE (0)  Ok to proceed                            *
+.*                        TRUE  (1)  Exit option selected                     *
+.*              COPTION - option selected                                     *
+.******************************************************************************
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Loop MOH file (pipe delimited)":
+                    *P1:6,*V2LON,TWO,*HOFF,". Loop Old/New UR file"
+.                   *P1:7,*V2LON,THREE,*HOFF,". Loop Old/New UR file (Validation Only)"
+.
+OPTN0500  KEYIN     *P1:8,*EL,"Select Option : ":
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000,OPTN9000              * run c-isam fixit
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               ASKQ0000              Called by: MAIN0000   *
+.*                  Ask if running validation only                           *
+.* Returns: VCHKFLAG  - validation flag                                      *
+.*                       0 = normal mode                                     *
+.*                       1 = validation only mode                            *
+.*****************************************************************************
+ASKQ0000  MOVE      ANSY,ANS
+          KEYIN     *P1:15,*EL,"Validation only (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+                    *P25:15,*V2LON,*RV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS           * Y input ?
+          IF        @EQUAL
+            MOVE      ONE,VCHKFLAG     * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          MATCH     ANSN,ANS           * N input ?
+          IF        @EQUAL
+            MOVE      ZERO,VCHKFLAG    * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          GOTO      ASKQ0000           * invalid input
+.
+ASKQ9999  RETURN
++
+.**********************************************************************
+.* LOGS0000 - Log start date/time in the error file
+.**********************************************************************
+LOGS0000  CLOCK     TIME,CTIMEIS
+          PACK      DIM8,CCC,CYY,CMM,CDD,SP10
+          UNPACK    DIM8,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE 
+          CLEAR     DIM107
+          APPEND    "Merge ",DIM107
+          IF        VCHKFLAG=1
+            APPEND    "Validation Run ",DIM107
+          ENDIF
+          APPEND    "started on ",DIM107
+          APPEND    CPCDATE,DIM107
+          APPEND    " at ",DIM107
+          APPEND    CTIMEIS,DIM107          
+          APPEND    SP70,DIM107
+          APPEND    SP70,DIM107
+          RESET     DIM107
+          WRITE     TEMP3,SEQ;DIM107
+.
+LOGS9999  RETURN
++
+.**********************************************************************
+.* LOGF0000 - Log finished date/time in the error file
+.**********************************************************************
+LOGF0000  CLOCK     TIME,CTIMEIS
+          PACK      DIM8,CCC,CYY,CMM,CDD,SP10
+          UNPACK    DIM8,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE 
+          CLEAR     DIM107
+          APPEND    "Merge ",DIM107
+          IF        VCHKFLAG=1
+            APPEND    "Validation Run ",DIM107
+          ENDIF
+          APPEND    "finished on ",DIM107
+          APPEND    CPCDATE,DIM107
+          APPEND    " at ",DIM107
+          APPEND    CTIMEIS,DIM107          
+          APPEND    SP70,DIM107
+          APPEND    SP70,DIM107
+          RESET     DIM107
+          WRITE     TEMP3,SEQ;DIM107
+.
+LOGF9999  RETURN
++
+.******************************************************************************
+.*                            LOOP0000                                        *
+.*                  Loop over the input file records                          *
+.******************************************************************************
+LOOP0000  OPEN      TEMP1,FNAMER       * mergeurs.txt
+          MOVE      ZERO,RECCOUNT
+.
+LOOP0100  IF        FILEFRMT=1
+            READ      INPTFILE,SEQ;MERGTMPN,MERGONHI,MERGPDOB,MERGPSEX,MERGFNAM:
+                                   MERGGNAM,MERGSNAM,MERGTNAM,MERGADD1,MERGADD2:
+                                   MERGADD3,MERGADD4,MERGADD5,MERGETH1,MERGETH2:
+                                   MERGETH3,MERGTELH,MERGTELM,MERGPEML,MERGNHIN:
+                                   MERGMTYP,MERGDDTE
+            GOTO      LOOP9999 IF OVER
+          ENDIF
+.
+          IF        FILEFRMT=2
+            READ      INPTFILE,SEQ;URNOTMP1,URNOTMP2
+            GOTO      LOOP9999 IF OVER
+          ENDIF
+.
+          CALL      MVURNS00      * Move UR's to their corresponding temp vars
+          BRANCH    EXIT,LOOP0100
+.
+          IF        FILEFRMT=2
+            MOVE      PTMROLUR,OLDURNO
+            MOVE      PTMRNWUR,NEWURNO
+            CALL      VALTMP00         * Validate the Old/New UR's to be merged
+            IF        EXIT=1 | VCHKFLAG=1
+              GOTO      LOOP2100            * Write to "tempmerge.txt"
+            ENDIF
+            GOTO      LOOP2000              * No error; write UR's to merge file
+          ENDIF
+.
+          CALL      VALURN00                * Validate UR/NHI Number
+          IF        EXIT=1 | VCHKFLAG=1
+            GOTO      LOOP2100              * Write to "tempmerge.txt"
+          ENDIF
+.
+          MOVE      ZERO,F1
+          MOVELPTR  MERGDDTE,F1             * Get length of Date of Death field
+          COMPARE   EIGHT,F1                * Correct date field length?
+          GOTO      LOOP2000 IF NOT EQUAL
+.
+          MATCH     SP70,MERGDDTE
+          IF        !@EQUAL
+            MATCH     SP70,PTMRNWUR
+            GOTO      LOOP2000 IF EQUAL
+.
+            MOVE      PTMRNWUR,KEY8
+            CALL      RDMAST1
+            IF        OVRCD = 0
+              MOVE      MERGDDTE,PDECDTE
+              MOVE      ONE,PCEASE
+              TRAP      OVERCOND IF IO
+              CALL      UPMAST1        * Update the master record
+              TRAPCLR   IO
+            ENDIF
+          ENDIF
+.
+LOOP2000  CALL      WRTMRG00      * write a record to patmrgaf (merge request)
+          CALL      WRTEMP1       * write to "mergeurs.txt" (merge UR's)
+.
+LOOP2100  CALL      WRTEMP2       * write to "tempmerge.txt" (merge result file)
+.
+          ADD       ONE,RECCOUNT
+          GOTO      LOOP0100
+.
+LOOP9999  RETURN
++
+.******************************************************************************
+.*                            MVURNS00                                        *
+.*        Moves the temp (Old UR) and NHI (New UR) number to their            *
+.*        corresponding TEMP1 (merge file) variables (PTMROLUR & PTMRNWUR).   *
+.******************************************************************************
+MVURNS00  MOVE      ZERO,EXIT
+          RESET     MERGTMPN
+          RESET     MERGNHIN
+          RESET     URNOTMP1
+          RESET     URNOTMP2
+.
+          COMPARE   "2",FILEFRMT
+          GOTO      MVURNS30 IF EQUAL
+.
+          MATCH     SP70,MERGTMPN
+          GOTO      MVURNS91 IF EQUAL
+.
+          MATCH     SP70,MERGNHIN
+          GOTO      MVURNS21 IF EQUAL
+.
+.
+.         Remove leading 0's from Temporary number...
+.
+MVURNS10  CMATCH    "0",MERGTMPN
+          GOTO      MVURNS11 IF NOT EQUAL
+          BUMP      MERGTMPN,1
+          GOTO      MVURNS10
+.
+MVURNS11  PACK      PTMROLUR,MERGTMPN       * move MERGTMPN to Old UR
+          RJUSTIFY  PTMROLUR                * right-justify UR number
+          RESET     MERGTMPN
+.
+.         Remove leading 0's from NHI number
+.
+MVURNS20  CMATCH    "0",MERGNHIN
+          GOTO      MVURNS21 IF NOT EQUAL
+          BUMP      MERGNHIN,1
+          GOTO      MVURNS20
+.
+MVURNS21  PACK      PTMRNWUR,MERGNHIN       * move MERGNHIN to New UR (NHI num)
+          RJUSTIFY  PTMRNWUR                * right-justify NHI number
+          RESET     MERGNHIN
+          GOTO      MVURNS99
+.
+.
+.
+MVURNS30  MATCH     SP70,URNOTMP1
+          GOTO      MVURNS91 IF EQUAL
+.
+          MATCH     SP70,URNOTMP2
+          GOTO      MVURNS91 IF EQUAL
+.
+MVURNS40  CMATCH    "0",URNOTMP1
+          GOTO      MVURNS41 IF NOT EQUAL
+          BUMP      URNOTMP1,1
+          GOTO      MVURNS40
+.
+MVURNS41  PACK      PTMROLUR,URNOTMP1       * move URNOTMP1 to Old UR
+          RJUSTIFY  PTMROLUR                * right-justify
+          RESET     URNOTMP1
+.
+MVURNS50  CMATCH    "0",URNOTMP2
+          GOTO      MVURNS51 IF NOT EQUAL
+          BUMP      URNOTMP2,1
+          GOTO      MVURNS50
+.
+MVURNS51  PACK      PTMRNWUR,URNOTMP2       * move URNOTMP2 to New UR
+          RJUSTIFY  PTMRNWUR                * right-justify
+          RESET     URNOTMP2
+          GOTO      MVURNS99
+.
+MVURNS91  MOVE      ONE,EXIT
+.
+MVURNS99  RETURN
++
+.******************************************************************************
+.*                            VALURN00                                        *
+.*                  Validate temp UR and NHI numbers exists in our tables     *
+.******************************************************************************
+VALURN00  MOVE      ZERO,EXIT
+.
+          MATCH     SP70,MERGNHIN      * NHI Number blank?
+          GOTO      VALURN91 IF EQUAL
+.
+.         Check if new NHI Number is already merged
+.
+          PACK      KEY8,MERGNHIN
+          RJUSTIFY  KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,VALURN01     * new NHI Number not in database
+.
+          COMPARE   ONE,PSTAT          * already merged?
+          GOTO      VALURN98 IF EQUAL
+.
+VALURN01  MOVE      PTMROLUR,KEY8      * check Temporary Number exists?
+          CALL      RDMAST1
+          BRANCH    OVRCD,VALURN92     * not in master file
+.
+          COMPARE   ONE,PSTAT          * already merged?
+          GOTO      VALURN98 IF EQUAL
+.
+          CALL      RDNHMAS2
+          BRANCH    OVRCD,VALURN93     * not in NHI file
+.
+.         Check other PMI fields
+.
+          MATCH     MERGPDOB,PBDATE    * matching DOB?
+          GOTO      VALURN94 IF NOT EQUAL
+.
+          MATCH     MERGPSEX,PSEX      * matching Sex?
+          GOTO      VALURN95 IF NOT EQUAL
+.
+          MATCH     MERGFNAM,PSNAME    * matching Surname?
+          GOTO      VALURN96 IF NOT EQUAL
+.
+          MOVE      PTMROLUR,OURNO
+          MOVE      PTMROLUR,OLDURNO
+          MOVE      MERGNHIN,NEWURNO
+          RJUSTIFY  NEWURNO
+.
+.
+.         Now check the NHI number...
+.
+          MOVE      MERGNHIN,KEY7
+          CALL      RDNHMAS1           * NHI number exists in nhimasaf?
+          BRANCH    OVRCD,VALURN10
+.
+          MOVE      "Merged Successfully to Existing NHI",MERGRSLT
+          GOTO      VALURN99
+.
+.
+.         NHI number doesn't exist; so call FIXMAS to create new records
+.         (patma1af, patmx1af, pmspx2af) and also add new nhimasaf record.
+.
+VALURN10  COMPARE   ONE,VCHKFLAG
+          GOTO      VALURN90 IF EQUAL
+.
+          MOVE      ONE,EXISTFL      * new UR does not exist
+          PROC      FIXMAS
+.
+          IF        PTCNNHII = 1
+.
+.           Update nhimasaf record for temp number (if it exists)
+.
+            BUMP      PTMROLUR,1
+            MOVE      PTMROLUR,KEY7
+            RESET     PTMROLUR
+            CALL      RDNHMAS1
+            IF        OVRCD=0
+              MOVE      MERGNHIN,NHMANMPI
+              PACK      NHMAURNO,MERGNHIN,SP70
+              RJUSTIFY  NHMAURNO
+              CALL      UPNHMAS1
+            ENDIF
+          ENDIF
+.
+VALURN90  MOVE      "Merged Successfully to New NHI",MERGRSLT
+          GOTO      VALURN99
+.
+VALURN91  MOVE      ONE,EXIT
+          MOVE      "No NHI number supplied",MERGRSLT
+          GOTO      VALURN99
+.
+VALURN92  MOVE      ONE,EXIT
+          MOVE      "Missing patma1af record for temp number",MERGRSLT
+          GOTO      VALURN99
+.
+VALURN93  MOVE      ONE,EXIT
+          MOVE      "Missing nhimasaf record for temp number",MERGRSLT
+          GOTO      VALURN99
+.
+VALURN94  MOVE      ONE,EXIT
+          MOVE      "DOB not matched",MERGRSLT
+          GOTO      VALURN99
+.
+VALURN95  MOVE      ONE,EXIT
+          MOVE      "Sex not matched",MERGRSLT
+          GOTO      VALURN99
+.
+VALURN96  MOVE      ONE,EXIT
+          MOVE      "Surname not matched",MERGRSLT
+          GOTO      VALURN99
+.
+VALURN98  MOVE      ONE,EXIT
+          MOVE      "Numbers are already merged",MERGRSLT
+          GOTO      VALURN99
+.
+VALURN99  RETURN
++
+.******************************************************************************
+.*                            VALTMP00                                        *
+.*                  Validate both temp UR's exists in patma1af and not        *
+.*                  already merged (i.e. PSTAT=1)
+.******************************************************************************
+VALTMP00  MOVE      ZERO,EXIT
+.
+.         Validate 1st UR number exists in patma1af
+.
+          CLEAR     MERGRSLT
+          APPEND    "UR: ",MERGRSLT
+          APPEND    URNOTMP1,MERGRSLT
+          MOVE      URNOTMP1,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,VALTMP91
+.
+          COMPARE   ONE,PSTAT          * Already merged?
+          GOTO      VALTMP92 IF EQUAL
+.
+.         Now validate 2nd UR number exists in patma1af
+.
+          CLEAR     MERGRSLT
+          APPEND    "UR: ",MERGRSLT
+          APPEND    URNOTMP2,MERGRSLT
+          MOVE      URNOTMP2,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,VALTMP91
+.
+          COMPARE   ONE,PSTAT          * Already merged?
+          GOTO      VALTMP92 IF EQUAL
+.
+VALTMP90  CLEAR     MERGRSLT
+          MOVE      "Merged Successfully",MERGRSLT
+          RESET     MERGRSLT
+          GOTO      VALTMP99
+.
+VALTMP91  MOVE      ONE,EXIT
+          APPEND    " not found!",MERGRSLT
+          RESET     MERGRSLT
+          GOTO      VALTMP99
+.
+VALTMP92  MOVE      ONE,EXIT
+          APPEND    " already merged!",MERGRSLT
+          RESET     MERGRSLT
+          GOTO      VALTMP99
+.
+VALTMP99  RETURN
++
+.******************************************************************************
+.*                            WRTMRG00                                        *
+.*                  Writw a record to the Merge Request File (patmrgaf)       *
+.******************************************************************************
+WRTMRG00  MOVE      OLDURNO,PTMROLUR
+          MOVE      NEWURNO,PTMRNWUR
+.
+          PACK      PTMRRDTE,CCC,CYY,CMM,CDD
+          REP       " 0",PTMRRDTE
+.
+          MOVE      CHOSINDX,DIM2
+          PACK      KEY2,DIM2
+          CALL      RDHOSP2
+          MOVE      HOSCODE,PTMRRHOS
+.
+          MOVE      SP30,PTMRAPPR
+          MOVE      CHOSINDX,HOSINDX             * Use Current Hospital Number
+          SUB       ONE,HOSINDX
+          RESET     PTMRAPPR,HOSINDX
+          APPEND    ANSY,PTMRAPPR
+          RESET     PTMRAPPR
+          ADD       ONE,HOSINDX
+.
+          MOVE      THREE,PTMRSTAT     * Set COMPLETED merge status
+.
+          PACK      PTMRSDTE,CCC,CYY,CMM,CDD
+          REP       " 0",PTMRSDTE
+          CLOCK     TIME,CTIMEIS
+          MOVE      CTIMEIS,PTMRSTIM
+          REP       " 0",PTMRSTIM
+.
+          MOVE      SP2,PTMRLOCK
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          CALL      WRPTMRG1
+          TRAPCLR   IO
+          BRANCH    OVRCD,WRTMRG91
+.
+          MOVE      ZERO,EXIT
+          GOTO      WRTMRG99
+.
+WRTMRG91  MOVE      ONE,EXIT
+          GOTO      WRTMRG99
+.
+WRTMRG99  RETURN
++
+.****************************************************************************
+.*                             WNHI0000                Called by: VALURN00  *
+.*                 Write a record to the nhimasaf file                      *
+.****************************************************************************
+WNHI0000  MOVE      ZERO,EXIT
+          CALL      GIVN0000                * get first given name
+.
+.         MOVE      PURNO,NHMAURNO          * load other file variables
+          PACK      NHMASURN,PSNAME,SP30
+          MOVE      SP20,NHMAGIV2
+          MOVE      SP20,NHMAGIV3
+          MOVE      ONE,NHMAPREI
+          MOVE      PADD1,NHMAADD1
+          MOVE      PADD2,NHMAADD2
+          MOVE      PSUBRB,NHMAADD3
+          MOVE      PADD4,NHMAADD4
+          MOVE      SP30,NHMAADD5
+          MOVE      PBDATE,NHMADOB
+          IF        PCEASE = 1
+            MOVE      PDECDTE,NHMADDTH
+          ELSE
+            MOVE      SP8,NHMADDTH
+          ENDIF
+          MOVE      PPOST,NHMADOMC
+          MOVE      SP1,NHMARES
+          MOVE      SP2,NHMAETH
+          MOVE      PSEX,NHMASEX
+          MOVE      SP8,NHMADAT
+          MOVE      SP8,NHMATIM
+          MOVE      SP2,NHMAETH2
+          MOVE      SP2,NHMAETH3
+          PACK      NHMASPA,SP20,SP6
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          CALL      WRNHMAS1
+          TRAPCLR   IO
+          BRANCH    OVRCD,WNHI9100
+.
+.         Check if nhimasaf audit record has to be written
+.
+          MOVE      ONE,AUDTTYPE          * set audit flag for "write"
+          CALL      WANHMA00
+          GOTO      WNHI9999
+.
+WNHI9100  MOVE      ONE,EXIT
+          GOTO      WNHI9999
+.
+WNHI9999  RETURN
++
+.******************************************************************************
+.*                                  GIVN0000              Called by: WNHI0000 *
+.*                           Get the first given name                         *
+.******************************************************************************
+GIVN0000  CLEAR     NHMAGIV1
+          MATCH     SP25,PGNAME                  * given name blank ?
+          IF        @EQUAL
+            MOVE      PGNAME,NHMAGIV1            * yes
+            GOTO      GIVN9999
+          ENDIF
+.
+          MOVE      ZERO,FOUNDCHR                * initialise found char. flag
+          MOVE      ZERO,CHARNUM                 * initialise charcater count
+          WHILE     CHARNUM < 25
+            CMATCH    SP1,PGNAME                 * character blank ?
+            IF        @EQUAL
+              BRANCH    FOUNDCHR,GIVN9000        * yes -
+            ENDIF
+.
+            CMOVE     PGNAME,ANS                 * save character
+            ENDSET    NHMAGIV1
+            APPEND    ANS,NHMAGIV1               * add char. to nhi field
+            RESET     NHMAGIV1
+.
+            MOVE      ONE,FOUNDCHR               * set char. found flag
+            BUMP      PGNAME,1                   * position on next character
+            ADD       ONE,CHARNUM                * increment char. count
+          DO
+.
+GIVN9000  RESET     PGNAME
+          PACK      NHMAGIV1,NHMAGIV1,SP30
+.
+GIVN9999  RETURN
++
+.******************************************************************************
+.*                            HOSP0000                                        *
+.*                 Execute Hospital Dependent Mergers                         *
+.******************************************************************************
+HOSP0000  PACK      KEY4,SP30
+          CALL      RDSHOSP1
+HOSP0100  CALL      RDKHOSP1
+          BRANCH    OVRCD,HOSP9999
+.
+          CMATCH    ANSI,PTHOACTV
+          GOTO      HOSP0100 IF EQUAL       * ignore inactive hospitals
+.
+          MOVE      HOSDESC,CNAME
+          CLEAR     CMDLINE                 * Get Hospital dependent RUN macro
+          APPEND    HOSRUN,CMDLINE          * and append merge program 1 space
+          ENDSET    CMDLINE                 * after end of RUN macro
+.
+HOSP1000  CMATCH    SP1,CMDLINE
+          GOTO      HOSP2000 IF NOT EQUAL
+.
+          BUMP      CMDLINE,-1
+          GOTO      HOSP0100 IF EOS         * No RUN macro on file
+          GOTO      HOSP1000
+.
+HOSP2000  APPEND    SP1,CMDLINE
+          APPEND    CHAINPRG,CMDLINE        * Run Second Merger program to
+          RESET     CMDLINE                 * merge hos. dependent files
+.
+          EXECUTE   CMDLINE,TASKID
+          GOTO      HOSP0100
+.
+HOSP9999  RETURN
++
+.******************************************************************************
+.*                       Temp File I/O Routines                               *
+.******************************************************************************
+WRTEMP2   IF        FILEFRMT=1
+            WRITE     TEMP2,SEQ;*+,MERGTMPN,PIPE,MERGONHI,PIPE,MERGPDOB,PIPE:
+                                MERGPSEX,PIPE,MERGFNAM,PIPE,MERGGNAM,PIPE:
+                                MERGSNAM,PIPE,MERGTNAM,PIPE,MERGADD1,PIPE:
+                                MERGADD2,PIPE,MERGADD3,PIPE,MERGADD4,PIPE:
+                                MERGADD5,PIPE,MERGETH1,PIPE,MERGETH2,PIPE:
+                                MERGETH3,PIPE,MERGTELH,PIPE,MERGTELM,PIPE:
+                                MERGPEML,PIPE,MERGNHIN,PIPE,MERGMTYP,PIPE:
+                                MERGDDTE,PIPE,MERGRSLT
+          ENDIF
+.
+          IF        FILEFRMT=2
+            WRITE     TEMP2,SEQ;*+,URNOTMP1,PIPE,URNOTMP2,PIPE,MERGRSLT
+          ENDIF
+.
+          RETURN
++
+.********************************************************************
+. PROC FIXMAS : Fix master file
+. parameters  : EXISTFL
+.********************************************************************
+          DEFPROC   FIXMAS    
+.
+          INC       PATDETFD/INC
+          INC       SAVPMIFD/INC
+.
+SVSN12    DIM       1
+SVSN13    DIM       1
+SVSN14    DIM       1
+SVSN15    DIM       1
+.
+.       Read in the master file data that was corrected on the screen
+.
+.   CMERGEUR = 1 - Save old U/R details to Correct U/R
+.   CMERGEUR = 2 - Save new U/R details to Correct U/R
+.
+....  I- 19558
+          IF        SAVEDETL=1
+            ASSIGN    ONE,CMERGEUR
+          ELSE
+            ASSIGN    TWO,CMERGEUR
+          ENDIF
+....
+          IF        EXISTFL = 1
+            MOVE      OURNO,KEY8            * new ur does not exist so move old
+            CALL      RDMAST1              * To new
+            MOVE      NEWURNO,PURNO
+            MOVE      NEWURNO,KEY8
+            MOVE      ZERO,PSTAT
+.                                         * I CAR 41829
+            IF        MRGURDAT = 1
+              MOVE      PTMXRDAT,MRGODDAT
+              CLEAR     PTMXRDAT
+              CALL      IBACLOCK
+              PACK      PTMXRDAT,CCC,CYY,CMM,CDD
+              RESET     PTMXRDAT
+              REP       " 0",PTMXRDAT
+              CALL      WRMAST1
+              MOVE      MRGODDAT,PTMXRDAT
+            ELSE
+              CALL      WRMAST1
+            ENDIF      
+.
+            CALL      CRMED000            * create medical record
+.
+            MOVE      OURNO,KEY8          * new ur does not exist so move old
+            CALL      RDPMPX21            * To new
+            MOVE      NEWURNO,PMPXURNO
+            MOVE      NEWURNO,KEY8
+            CALL      WRPMPX21
+.
+         ELSE                             
+            IF        CMERGEUR = 1
+              MOVE      OURNO,KEY8
+              CALL      RDMAST1            * read in old
+              CALL      SAVEPMI             * Save the details
+              MOVE      NEWURNO,KEY8        * read in new
+              CALL      RDMAST1
+              CALL      RESTPMI             * restore old details
+              MOVE      NEWURNO,PURNO 
+              MOVE      ZERO,PSTAT
+              CALL      UPMAST1            * update the master
+.
+              MOVE      OURNO,KEY8
+              CALL      RDPMPX21          * read in old
+              CALL      SVPMSPX2          * save the old details
+              MOVE      NEWURNO,PMPXURNO  * read in new
+              MOVE      NEWURNO,KEY8      * read in new  
+              CALL      RDPMPX21         
+              CALL      RSPMSPX2          * restore values
+              CALL      UPPMPX21          * update master exten file two
+.
+            ELSE
+              MOVE      NEWURNO,KEY8
+              CALL      RDMAST1
+              MOVE      ZERO,PSTAT          * make active
+              CALL      UPMAST1            * update the master
+.
+              MOVE      NEWURNO,KEY8
+              CALL      RDPMPX21            * read ext file details
+            ENDIF
+          ENDIF
+.
+          MOVE      NEWURNO,PURNO
+          CALL      WRUPD000
+.
+.                            * Update outstanding debt indicators as required
+          CALL      ODEBT000                * update Patient Debt Indicators
+.
+          GOTO      FIXMAS99
+.
+.                                 * routines for FIXMAS ----------------------
+.
+.         Make sure that the outstanding debts are set for the new U/R -
+.         (pmspx2af.pmpxsn12, pmpxsn13, pmpxsn14 & pmpxsn15 and "patdetaf")
+.                               (also in IBAPMS05)
+ODEBT000  MOVE      ZERO,OVRCD
+          UNPACK    SP70,SVSN12,SVSN13,SVSN14,SVSN15
+          DISPLAY   *P64:24,"patdetaf"
+          OPEN      PATDETA2,"patdetaf"
+.
+ODEBT100  PACK      KEY17,OLDURNO,SP70
+          CALL      RSPTDET2
+ODEBT200  CALL      RKPTDET2
+          BRANCH    OVRCD,ODEBT400
+.
+          MATCH     OLDURNO,PTDEURNO
+          GOTO      ODEBT400 IF NOT EQUAL
+.
+          MOVE      PTDETYPE,FORM1
+          MATCH     SP8,PTDEDTCL            * is debt still active ?
+          IF        @EQUAL
+            STORE     "1",FORM1,SVSN12,SVSN13,SVSN14       * debt active
+          ENDIF
+.
+          MOVE      NEWURNO,PTDEURNO
+          CALL      UPPTDET2
+          GOTO      ODEBT100
+.
+.
+ODEBT400  PACK      KEY8,OLDURNO,SP70
+          CALL      RDPMPX21
+          BRANCH    OVRCD,ODEBT999
+.
+          MOVE      PMPXSN15,SVSN15         * save BAD DEBT indicator
+.
+          MOVE      NEWURNO,KEY8
+          CALL      RDPMPX21
+          BRANCH    OVRCD,ODEBT999
+.
+          MOVE      "0",KEY1
+          MATCH     "1",SVSN12
+          IF        @EQUAL
+            MOVE      "1",PMPXSN12
+            MOVE      "1",KEY1
+          ENDIF
+          MATCH     "1",SVSN13
+          IF        @EQUAL
+            MOVE      "1",PMPXSN13
+            MOVE      "1",KEY1
+          ENDIF
+          MATCH     "1",SVSN14
+          IF        @EQUAL
+            MOVE      "1",PMPXSN14
+            MOVE      "1",KEY1
+          ENDIF
+          MATCH     "1",SVSN15
+          IF        @EQUAL
+            MOVE      "1",PMPXSN15
+            MOVE      "1",KEY1
+          ENDIF
+.
+          MATCH     "1",KEY1
+          IF        @EQUAL
+            CALL      UPPMPX21
+          ENDIF
+.
+ODEBT999  RETURN
+.
+OVERCOND  MOVE      ONE,OVRCD
+          RETURN
+.
+          INC       SVRSPMI
+          INC       PATDETIO/INC
+.
+FIXMAS99  MOVE      NEWURNO,KEY8
+          MOVE      OURNO,KEY8
+          CALL      UUPTMAS1                * Release old U/R
+          MOVE      NEWURNO,KEY8
+          CALL      UUPTMAS1                * Release the new U/R
+          ENDPROC
+++
+.------------------------------------------------------------
+. Write an update demographics record (pmsupdaf)
+.------------------------------------------------------------
+WRUPD000  OPEN      PMSUPDA1,"pmsupdaf"
+.
+          PACK      PMUDURNO,NEWURNO,SP70
+.
+          CALL      IBACLOCK
+          PACK      PMUDDATE,CCC,CYY,CMM,CDD
+          REPLACE   " 0",PMUDDATE
+          CLOCK     TIME,PMUDTIME
+.
+          PACK      PMUDUSER,USERID,SP70
+.
+          PACK      KEY8,PMUDURNO,SP70
+          CALL      RDPMUPD1
+          IF        OVRCD=1
+            CALL      IBACLOCK
+            PACK      PMUDDATC,CCC,CYY,CMM,CDD
+            REPLACE   " 0",PMUDDATC
+            CLOCK     TIME,PMUDTIMC
+            PACK      PMUDWEBC,USERID,SP70
+            CALL      WRPMUPD1
+          ELSE
+            CALL      IBACLOCK
+            PACK      PMUDDATE,CCC,CYY,CMM,CDD
+            REPLACE   " 0",PMUDDATE
+            CLOCK     TIME,PMUDTIME
+            CALL      UPPMUPD1
+          ENDIF
+.
+          CLOSE     PMSUPDA1
+.
+WRUPD999  RETURN
++
+.*******************************************************************************
+.         Create a medical record
+.*******************************************************************************
+CRMED000  READ      CONTROLF,NINTY7;*152,MRCNACRR
+          COMPARE   ONE,MRCNACRR
+          GOTO      CRMED999 IF NOT EQUAL
+.
+          OPEN      MRTMASA1,"mrtmasaf"
+          MOVE      PURNO,MRMAURNO
+          IF        IBCNMHOS=1
+            PACK      KEY3,WBSEHOSP,SP70
+            CALL      RDPTHSP1
+            BRANCH    OVRCD,CRMED999
+.
+            MOVE      PTHSHLOC,MRMAHLOC            * Home Location
+            MOVE      PTHSHLOC,MRMACLOC            * Current Location
+            MOVE      PTHSRCTY,MRMADOTY            * Document Type
+            MOVE      PTHSSTAT,MRMASTAT            * Status
+            SQUEEZE   PTHSVOLM
+            MOVE      PTHSVOLM,MRMAVOLN
+          ELSE
+            READ      CONTROLF,SIXTY;*84,MRCNHLOC
+            READ      CONTROLF,SIXTY;*88,MRCNRCTY
+            READ      CONTROLF,SIXTY;*91,MRCNVOLM
+            READ      CONTROLF,SIXTY;*108,MRCNSTAT
+            MOVE      MRCNHLOC,MRMAHLOC            * Home Location
+            MOVE      MRCNHLOC,MRMACLOC            * Current Location
+            MOVE      MRCNRCTY,MRMADOTY            * Document Type 
+            MOVE      MRCNSTAT,MRMASTAT            * Status
+            SQUEEZE   MRCNVOLM
+            MOVE      MRCNVOLM,MRMAVOLN
+          ENDIF
+.
+          MATCH     SP70,MRMAHLOC
+          GOTO      CRMED999 IF EQUAL
+.
+          MATCH     SP70,MRMADOTY
+          GOTO      CRMED999 IF EQUAL
+.
+          READ      CONTROLF,SIXTY;*95,MRCNUKEY
+          ADD       ONE,MRCNUKEY
+          WRITAB    CONTROLF,SIXTY;*95,MRCNUKEY
+          SUB       ONE,MRCNUKEY
+          MOVE      MRCNUKEY,MRMAKEY
+          MOVE      SP70,MRMACOMM
+.
+          CALL      IBACLOCK
+          PACK      MRMADTCR,CCC,CYY,CMM,CDD
+          REP       " 0",MRMADTCR
+          MOVE      CTIMEIS,MRMATMCR
+          MOVE      SP70,MRMADTUP
+          MOVE      SP70,MRMATMUP
+          MOVE      SP70,MRMAUUID
+.
+          PACK      KEY17,MRMAURNO,MRMAHLOC,MRMADOTY,MRMAVOLN,SP70
+          CALL      RAMRMAS1
+          IF        OVRCD=1
+            CALL      WRTMAS1
+          ENDIF
+.
+CRMED999  RETURN
++
+.******************************************************************************
+.*              I/O INCLUDES FOR FILES AND GENERAL ROUTINES                   *
+.******************************************************************************
+.
+          INC       STD001IO
+          INC       AGECHK
+          INC       CALCAGE 
+          INC       CLPATMAS
+          INC       CLPMSPX2
+          INC       MRGPMIML
+          INC       NZHISIIO
+          INC       NZIBSRCH
+          INC       PATSNDX
+          INC       PATSNX2
+          INC       PATSRCH
+          INC       PMIGTNID
+          INC       SVPMSPX2
+          INC       BOKRC1IO/INC
+          INC       NHIMASIO/INC
+          INC       MRTMASIO/INC
+          INC       PATCODIO/INC
+          INC       PATCSLIO/INC
+          INC       PATDO1IO/INC
+          INC       PATDSCIO/INC
+          INC       PATALRIO/INC
+          INC       PATAU1IO/INC
+          INC       PATGSRIO/INC
+          INC       PATHOSIO/INC
+          INC       PATHSPIO/INC
+          INC       PATKWCIO/INC
+          INC       PATLINIO/INC
+          INC       PATMA1IO/INC
+          INC       PATMI1IO/INC
+          INC       PATMRGIO/INC
+          INC       PATPA1IO/INC
+          INC       PATURAIO/INC
+          INC       PATDNRIO/INC
+          INC       PATSDNIO/INC
+          INC       PATSMWIO/INC
+          INC       PATNIDIO/INC
+          INC       PATPR1IO/INC
+          INC       PMSPX2IO/INC
+          INC       PMSVX1IO/INC
+          INC       PMSUPDIO/INC
+          INC       OUTCLIIO/INC
+          INC       OUTPREIO/INC
+          INC       WEBSECIO/INC
+.
+GETSVAR   RETURN

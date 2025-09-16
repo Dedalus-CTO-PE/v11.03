@@ -1,0 +1,789 @@
+.******************************************************************************
+.* System         : Patient Management                                        *
+.* Include        : PATWIS15.PBL                                              *
+.* Description    : Calculate WIES15 value for an individual admission        *
+.******************************************************************************
+.* Date           : 16/07/2008                                                *
+.* Author         : Davin Sloan                                               *
+.*                                                                            *
+.* Vars Required  : VARWIS15 - Variables required for WIES15                  *
+.*                                                                            *
+.* Files Required Open :                                                      *
+.*        PATASFFD  PATASFA1 - Admission special funding arrangement file     *
+.*        PATCODFD  PATCODE1 - Codes file                                     *
+.*        PATECDFD  PATECDA2 - Episode disease coding file                    *
+.*        PATECOFD  PATECOA2 - Episode operation coding file                  *
+.*        PAT10OFD  PATI10O1 - ICD10 operations file                          *
+.*        PATICUFD  PATICUA1 - ICU file                                       *
+.*        PATTRNFD  PATTRAN2 - Transfer file                                  *
+.*        PATW15FD  PATW15A1 - Victorian cost weights (for WIES15) file       *
+.*                                                                            *
+.* Parameters Req : Successful read on admission file                         *
+.*                  Successful read on discharge file                         *
+.*                  HIHLOS   - for Hopsipta in Home LOS (from RHIHDAYS)       *
+.*                  NBRDAYS  - for LOS calculation (from NHOSPDAY)            *
+.*                  PNSWRACE - User defined field for race                    *
+.*                  WIS15DRG - DRG to calculate WIES15 for                    *
+.*                                                                            *
+.* Returns        : TOTWIS15 - Total WIES15 value                             *
+.*                  WIS15DRG - DRG used to calculate WIES15                   *
+.*                  WIS15LOS - LOS used to calculate WIES15                   *
+.*                  WIS15WGT - Weight used to calculate WIES15                *
+.*                  WIS15DSC - Description of DRG weight used                 *
+.*                                                                            *
+.* Modifications  :                                                           *
+.*        V10.02.01 28/03/2011  Mike Laming   CAR 240107                      *
+.*                  Mods to PATECDaf & PATECOaf variables & Keys - file change*
+.*        V9.10.01  24/09/2008  Davin            CAR 178428                   *
+.*                  Changed radiotherapy drg modification (R15IO000)          *
+.*        V9.10.00  16/07/2008  Davin            CAR 163993                   *
+.*                  Created for 2008/2009 WIES15 changes:                     *
+.*                    - Calculate ATSI Loading if aboriginality = 1, 2, or 3  *
+.*                    - AR-DRG mod for Hysterscopy Sterilisation              *
+.*                    - AR-DRG mod for Neonat Diag not consistent w age/weight*
+.*                  Removed old functionality:                                *
+.*                    - mech.vent copayment for pt15mvel='N'                  *
+.*                    - Colonoscopy Co-payment check                          *
+.*                    - AR-DRG mod for Bone Marrow Transplants                *
+.*                    - AR-DRG mod for incompatible Sex                       *
+.******************************************************************************
++
+PATWIS15  CALL      IN15W000                * Initialise variables
+          BRANCH    EXIT,WIS15950
+.
+          CALL      C15TY000                * Determine and Check Care Type
+          BRANCH    EXIT,WIS15950
+.
+          CALL      C15TR000                * Check for Contracted Patient
+          BRANCH    EXIT,WIS15950
+.
+          CALL      M15RG000                * Modify DRG if necessary
+.
+          CALL      C15RG000                * Check for problem DRG
+          BRANCH    EXIT,WIS15950
+.
+          CALL      M15CH000                * Check for Mechanical Ventilation
+.
+          CALL      T15AL000                * Check for Thalessaemia
+.
+          CALL      A15AA000                * Check for AAA
+.
+          CALL      A15SD000                * Check for ASD
+.
+          CALL      B15SW000                * Calculate Base WIES15
+.
+          CALL      C15AB000                * Check for aboriginality
+.
+. ---- Calculate WIES15 value ----
+.
+          MOVE      TOTBWIES,TOTWIS15       * base WIES
+          ADD       MVCOPAY,TOTWIS15        * mechv copayment
+          ADD       THCOPAY,TOTWIS15        * thal  copayment
+          ADD       AAACOPAY,TOTWIS15       * AAA   copayment
+          ADD       ASDCOPAY,TOTWIS15       * ASD   copayment
+          ADD       ATSIWIES,TOTWIS15       * ATSI  copayment
+.
+          MOVE      ZERO,EXIT
+          GOTO      WIS15999
+.
+WIS15950  MOVE      ONE,EXIT
+WIS15999  RETURN
++
+.******************************************************************************
+.*                                  IN15W000              Called by: PATWIS15 *
+.*                         Initialise WIES15 variables                        *
+.******************************************************************************
+IN15W000  MOVE      ZERO,TOTWIS15
+          MOVE      ZERO,WIS15LOS
+          MOVE      ZERO,WIS15WGT
+          MOVE      SP20,WIS15DSC
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      PATW15A1,"patw15af"
+          TRAPCLR   IO
+          BRANCH    OVRCD,IN15W950
+.
+IN15W900  MOVE      ZERO,EXIT
+          GOTO      IN15W999
+.
+IN15W950  MOVE      ONE,EXIT
+IN15W999  RETURN
++
+.******************************************************************************
+.*                                  C15TY000              Called by: PATWIS15 *
+.*                 Check for valid Care Type & Incomplete Coding              *
+.******************************************************************************
+C15TY000  PACK     KEY5,ANSC,ANSC,ACARE     * use admission care type
+          CALL     RDCODE1
+          BRANCH   OVRCD,C15TY900
+.
+          MATCH    "6",TCINDC4              * Check Program Funding Source
+          GOTO     C15TY900 IF NOT EQUAL
+.
+          MATCH    "0   ",THCSCOD           * check care types
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "1   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "2   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "6   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "7   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "8   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "9   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "5   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "3   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "E   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "F   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+          MATCH    "J   ",THCSCOD
+          GOTO     C15TY900 IF EQUAL
+.
+          MOVE     ZERO,EXIT
+          GOTO     C15TY999
+.
+C15TY900  MOVE     ONE,EXIT                 * Not valid
+C15TY999  RETURN
++
+.******************************************************************************
+.*                                  C15TR000              Called by: PATWIS15 *
+.*                        Check for Contracted Patient                        *
+.******************************************************************************
+C15TR000  PACK     KEY25,AADMNO,ANSA,SP30
+          CALL     RSPTASF1
+C15TR100  CALL     RKPTASF1                 * Read adm. special funding file
+          BRANCH   OVRCD,C15TR800           * still process
+.
+          COMPARE  AADMNO,PTAFADMN
+          GOTO     C15TR800 IF NOT EQUAL    * still process
+.
+          MATCH    ANSA,PTAFTYPE            * special fund. arrang. type = adm
+          GOTO     C15TR100 IF NOT EQUAL
+.
+          MATCH    ANSB,PTAFCROL            * Ignore if contract role = 'B'
+          GOTO     C15TR900 IF EQUAL
+.
+C15TR800  MOVE     ZERO,EXIT                * valid
+          GOTO     C15TR999
+.
+C15TR900  MOVE     ONE,EXIT                 * invalid
+C15TR999  RETURN
++
+.******************************************************************************
+.*                                  M15RG000              Called by: PATWIS15 *
+.*                      Modify DRG if necessary for WIES15                    *
+.******************************************************************************
+M15RG000  CALL      P15IT000           * Peritoneal Dialysis
+          CALL      R15IO000           * Radiotherapy
+          CALL      M15TO000           * Mastoid Procedure
+          CALL      E15RA000           * Extra Corporal Life Support
+          CALL      N15NA000           * Neonat Diag not consistent w age/weight
+M15RG999  RETURN
++
+.******************************************************************************
+.*                                  P15IT000              Called by: M15RG000 *
+.*                      Modify DRG if Peritoneal Dialysis                     *
+.******************************************************************************
+P15IT000  PACK      KEY16,AADMNO,SP20
+          CALL      RSPTECD2                * Position on & read a patient
+P15IT100  CALL      RKPTECD2                  episode disease file record
+          BRANCH    OVRCD,P15IT999
+.
+          COMPARE   AADMNO,PTEDADMN
+          GOTO      P15IT999 IF NOT EQUAL
+.
+          MATCH     CMDISP,PTEDTYPE         * want principal diagnosis
+          GOTO      P15IT100 IF NOT EQUAL
+.
+          MATCH     "Z49.2",PTEDCODE
+          GOTO      P15IT100 IF NOT EQUAL
+.
+          MOVE      "L61Y",WIS15DRG         * modified for WIES15
+P15IT999  RETURN
++
+.******************************************************************************
+.*                                  R15IO000              Called by: M15RG000 *
+.*                         Modify DRG if Radiotherapy                         *
+.******************************************************************************
+.>>>>     Don't modify these DRGs:
+.
+R15IO000  MATCH     "B61A",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "B61B",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "A40Z",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "A41A",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "A41B",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "W60Z",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "W61Z",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "S65A",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "S65B",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "S65C",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "B60A",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+          MATCH     "B60B",WIS15DRG
+          GOTO      R15IO999 IF EQUAL
+.
+.>>>>     Check if operation code exists:
+.
+          PACK      ICDRDDTE,DDATE,SP10
+          PACK      KEY16,AADMNO,SP20
+          CALL      RSPTECO2                * Position on & read a patient
+R15IO050  CALL      RKPTECO2                  episode operation file record
+          BRANCH    OVRCD,R15IO999
+.
+          COMPARE   AADMNO,PTEOADMN         * same admission?
+          GOTO      R15IO999 IF NOT EQUAL
+.
+.>>>>     Check if block number is in range 1786-1792, 1794 or 1795:
+.
+          PACK      KEY9,PTEOCODE,SP9
+          CALL      RDPTICO1
+          BRANCH    OVRCD,R15IO050
+.
+          MATCH     "1786",PT0OBLKN         * block code >= 1786?
+          GOTO      R15IO050 IF LESS
+.
+          MATCH     "1796",PT0OBLKN         * block code <=1795?
+          GOTO      R15IO050 IF NOT LESS
+.
+          MATCH     "1793",PT0OBLKN         * block code = 1793?
+          GOTO      R15IO050 IF EQUAL
+.
+.>>>>     Check if disease code exists in range C00-D48:
+.
+          PACK      KEY16,AADMNO,SP20
+          CALL      RSPTECD2                * Position on & read a patient
+R15IO100  CALL      RKPTECD2                  episode disease file record
+          BRANCH    OVRCD,R15IO999
+.
+          COMPARE   AADMNO,PTEDADMN         * same admission?
+          GOTO      R15IO999 IF NOT EQUAL
+.
+          MATCH     "C00",PTEDCODE          * neoplasm code >= C00?
+          GOTO      R15IO100 IF LESS
+.
+          MATCH     "D49",PTEDCODE          * neoplasm code <= D48.9?
+          GOTO      R15IO100 IF NOT LESS
+.
+          MOVE      "R64Z",WIS15DRG         * modified for WIES15
+R15IO999  RETURN
++
+.******************************************************************************
+.*                                  M15TO000              Called by: M15RG000 *
+.*                    Modify DRG if Mastoid procedure                         *
+.******************************************************************************
+M15TO000  MATCH     "D06Z",WIS15DRG
+          GOTO      M15TO999 IF NOT EQUAL
+.
+          MOVE      "D06B",WIS15DRG         * Other Sinus/mid/ear Proc.
+.
+          PACK      KEY16,AADMNO,SP20
+          CALL      RSPTECO2                * Position on & read a patient
+M15TO100  CALL      RKPTECO2                  episode operation file record
+          BRANCH    OVRCD,M15TO999
+.
+          COMPARE   AADMNO,PTEOADMN
+          GOTO      M15TO999 IF NOT EQUAL
+.
+          MATCH     "41545-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          MATCH     "41551-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO       M15TO999
+          ENDIF
+.
+          MATCH     "41554-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          MATCH     "41557-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          MATCH     "41557-03",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          MATCH     "41560-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          MATCH     "41563-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          MATCH     "41564-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          MATCH     "41566-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          MATCH     "41566-01",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          MATCH     "41566-02",PTEOCODE
+          IF        @EQUAL
+            MOVE      "D06A",WIS15DRG       * Mastoid Procedure.
+            GOTO      M15TO999
+          ENDIF
+.
+          GOTO      M15TO100
+.
+M15TO999  RETURN
++
+.******************************************************************************
+.*                                  E15RA000              Called by: M15RG000 *
+.*                    Modify DRG if Extra Corporeal Life Support              *
+.******************************************************************************
+E15RA000  MATCH     "A01Z",WIS15DRG
+          GOTO      E15RA999 IF EQUAL
+.
+          MATCH     "A03Z",WIS15DRG
+          GOTO      E15RA999 IF EQUAL
+.
+          MATCH     "A05Z",WIS15DRG
+          GOTO      E15RA999 IF EQUAL
+.
+          PACK      KEY16,AADMNO,SP20
+          CALL      RSPTECO2                * Position on & read a patient
+E15RA100  CALL      RKPTECO2                  episode operation file record
+          BRANCH    OVRCD,E15RA999
+.
+          COMPARE   AADMNO,PTEOADMN
+          GOTO      E15RA999 IF NOT EQUAL
+.
+          MATCH     "90225-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "A40Z",WIS15DRG   
+            GOTO      E15RA999
+          ENDIF
+.
+          MATCH     "38615-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "A40Z",WIS15DRG   
+            GOTO      E15RA999
+          ENDIF
+.
+          MATCH     "38615-01",PTEOCODE
+          IF        @EQUAL
+            MOVE      "A40Z",WIS15DRG   
+            GOTO      E15RA999
+          ENDIF
+.
+          MATCH     "38618-00",PTEOCODE
+          IF        @EQUAL
+            MOVE      "A40Z",WIS15DRG   
+            GOTO      E15RA999
+          ENDIF
+.
+          GOTO      E15RA100
+.
+E15RA999  RETURN
++
+.******************************************************************************
+.*                                  N15NA000              Called by: M15RG000 *
+.*       Modify DRG if Neonatal Diagnosis not consistent with age/weight      *
+.******************************************************************************
+N15NA000  MATCH     "963Z",WIS15DRG
+          GOTO      N15NA999 IF NOT EQUAL
+.
+          MOVE      ABWGHT,D6               * check if admission weight > 2499g
+          SQUEEZE   D6
+          MOVE      D6,F6
+          COMPARE   "2500",F6
+          GOTO      N15NA999 IF LESS
+.
+          PACK      KEY16,AADMNO,SP20
+          CALL      RSPTECD2                * Position on & read a patient
+N15NA100  CALL      RKPTECD2                  episode disease file record
+          BRANCH    OVRCD,N15NA999
+.
+          COMPARE   AADMNO,PTEDADMN
+          GOTO      N15NA999 IF NOT EQUAL
+.
+          MATCH     CMDISP,PTEDTYPE         * want principal diagnosis
+          GOTO      N15NA100 IF NOT EQUAL
+.
+          MATCH     "P07",PTEDCODE          * P07.xx as principal diagnosis?
+          GOTO      N15NA100 IF NOT EQUAL
+.
+          MOVE      "P67D",WIS15DRG         * modified for WIES15
+.
+N15NA999  RETURN
++
+.******************************************************************************
+.*                                  C15RG000              Called by: PATWIS15 *
+.*                            Check for Problem DRG                           *
+.******************************************************************************
+C15RG000  PACK     KEY4,WIS15DRG
+          CALL     RDPT151                  * check WIES15 weights file
+          BRANCH   OVRCD,C15RG900
+.
+          MATCH    "960Z",PT15DRGC
+          GOTO     C15RG900 IF EQUAL
+.
+          MATCH    "961Z",PT15DRGC
+          GOTO     C15RG900 IF EQUAL
+.
+          MATCH    "962Z",PT15DRGC
+          GOTO     C15RG900 IF EQUAL
+.
+          MATCH    "963Z",PT15DRGC
+          GOTO     C15RG900 IF EQUAL
+.
+          MOVE     ZERO,EXIT
+          GOTO     C15RG999
+.
+C15RG900  MOVE     ONE,EXIT
+C15RG999  RETURN
++
+.******************************************************************************
+.*                                  M15CH000              Called by: PATWIS15 *
+.*                Calculate Mechanical Ventialtion Co-payment                 *
+.******************************************************************************
+M15CH000  MOVE      ZERO,ADJMVDAY
+          MOVE      ZERO,MVCOPAY
+.
+          PACK      KEY8,AADMNO
+          CALL      RDPTICU1                * get mech. vent. hours
+          BRANCH    OVRCD,M15CH999
+.
+          MATCH     "D",PT15MVEL            * check mech. vent. eligibility
+          IF        @EQUAL
+            IF        PTICUMEC > 6
+              ASSIGN    ((PTICUMEC+12)/24),FORM12P4    * days receiving copay.
+              MOVE      FORM12P4,ADJMVDAY
+              ASSIGN    ((ADJMVDAY*0.7729)+0.6980),MVCOPAY  * mech. vent. copay.
+            ENDIF
+            GOTO      M15CH999
+          ENDIF
+.
+          MATCH     "4",PT15MVEL
+          IF        @EQUAL
+            IF        PTICUMEC > 96
+              ASSIGN    (((PTICUMEC+12)/24)-4),FORM12P4   * days recving copay.
+              MOVE      FORM12P4,ADJMVDAY
+              ASSIGN    ((ADJMVDAY*0.7729)+0.6980),MVCOPAY  * mech. vent. copay.
+            ENDIF
+          ENDIF
+.
+M15CH999  RETURN
++
+.******************************************************************************
+.*                                  T15AL000              Called by: PATWIS15 *
+.*                      Calculate Thalessaemia Co-payment                     *
+.******************************************************************************
+T15AL000  MOVE      ZERO,THCOPAY
+          MATCH     "T",PT15CPAY            * check WIES15 weights file
+          IF        @EQUAL
+            PACK      KEY16,AADMNO,SP20
+            CALL      RSPTECD2              * Position on & read a patient
+T15AL100    CALL      RKPTECD2                episode disease file record
+            BRANCH    OVRCD,T15AL999
+.
+            COMPARE   AADMNO,PTEDADMN
+            GOTO      T15AL999 IF NOT EQUAL
+.
+            MATCH     "D56",PTEDCODE        * check ICD-10 code
+            IF        !@EQUAL
+              MATCH     "D57.2",PTEDCODE    * check ICD-10 code
+              GOTO      T15AL100 IF NOT EQUAL
+            ENDIF
+            MOVE      "0.2648",THCOPAY      * eligible for thal. copayment
+          ENDIF
+T15AL999  RETURN
++
+.******************************************************************************
+.*                                  A15AA000              Called by: PATWIS15 *
+.*                          Calculate AAA Co-payment                          *
+.******************************************************************************
+A15AA000  MOVE      ZERO,AAACOPAY
+          MATCH     "AAA",PT15CPAY          * check WIES15 weights file
+          GOTO      A15AA999 IF NOT EQUAL
+.
+          PACK      KEY16,AADMNO,SP20
+          CALL      RSPTECO2                * Position on & read a patient
+A15AA100  CALL      RKPTECO2                * episode operation file record
+          BRANCH    OVRCD,A15AA999
+.
+          COMPARE   AADMNO,PTEOADMN
+          GOTO      A15AA999 IF NOT EQUAL
+.
+          MATCH     "33116-00",PTEOCODE     * check ICD-10 code
+          GOTO      A15AA100 IF NOT EQUAL
+.
+          MOVE      "3.1421",AAACOPAY       * eligible for AAA copayment
+A15AA999  RETURN
++
+.******************************************************************************
+.*                                  A15SD000              Called by: PATWIS15 *
+.*                          Calculate ASD Co-payment                          *
+.******************************************************************************
+A15SD000  MOVE      ZERO,ASDCOPAY
+          MATCH     "ASD",PT15CPAY          * check WIES15 weights file
+          GOTO      A15SD999 IF NOT EQUAL
+.
+          PACK      KEY16,AADMNO,SP20
+          CALL      RSPTECO2                * Position on & read a patient
+A15SD100  CALL      RKPTECO2                * episode operation file record
+          BRANCH    OVRCD,A15SD999
+.
+          COMPARE   AADMNO,PTEOADMN
+          GOTO      A15SD999 IF NOT EQUAL
+.
+          MATCH     "38742-00",PTEOCODE     * check ICD-10 code
+          GOTO      A15SD100 IF NOT EQUAL
+.
+          MOVE      "2.4713",ASDCOPAY       * eligible for ASD copayment
+A15SD999  RETURN
++
+.******************************************************************************
+.*                                  B15SW000              Called by: PATWIS15 *
+.*                            Calculate Base WIES15                           *
+.******************************************************************************
+B15SW000  CALL      D15SC000                * length of stay category
+          CALL      C15ST000                * calculate inlier status
+.
+          MATCH     "L",W15NLIER            * low outlier
+          CALL      BW15L000 IF EQUAL       * calculate base WIES15
+.
+          MATCH     "I",W15NLIER            * inlier
+          CALL      BW15N000 IF EQUAL       * calculate base WIES15
+.
+          MATCH     "H",W15NLIER            * high outlier
+          CALL      BW15H000 IF EQUAL       * calculate base WIES15
+.
+B15SW999  RETURN
++
+.******************************************************************************
+.*                                  D15SC000              Called by: B15SW000 *
+.*                      Determine Length Of Stay Category                     *
+.******************************************************************************
+D15SC000  MOVE      NBRDAYS,WIS15LOS        * length of stay from NHOSPDAY
+          MOVE      "M",LOSCAT              * set LOS category to multiday
+          MATCH     ADATE,DDATE             * check for sameday
+          IF        @EQUAL
+            MOVE      ONE,SAMEDAY           * sameday
+            MOVE      ONE,WIS15LOS          * LOS = 1
+            MOVE      "S",LOSCAT            * set LOS category to sameday
+            GOTO      D15SC999
+          ELSE
+            MOVE      ZERO,SAMEDAY          * not sameday
+          ENDIF
+.
+          IF        SAMEDAY = 0 & WIS15LOS = 1
+            MOVE      "O",LOSCAT            * set LOS category to oneday
+            GOTO      D15SC999
+          ENDIF
+.
+          IF        WIS15LOS > 1825
+            MOVE      "1825",WIS15LOS       * maximum LOS is 5 years
+          ENDIF
+.
+D15SC999  RETURN
++
+.******************************************************************************
+.*                                  C15ST000              Called by: B15SW000 *
+.*                           Calculate Inlier Status                          *
+.******************************************************************************
+C15ST000  MOVE      "I",W15NLIER            * set status to inlier
+          IF        WIS15LOS < PT15LIBP
+            MOVE      "L",W15NLIER          * set status to low outlier
+            GOTO      C15ST999
+          ENDIF
+.
+          ASSIGN    (PT15HIBP+ADJMVDAY),FORM12P4   * high bound. + mech.v days
+          IF        WIS15LOS > FORM12P4
+            MOVE      "H",W15NLIER          * set status to high outlier
+          ENDIF
+C15ST999  RETURN
++
+.******************************************************************************
+.*                                  BW15L000              Called by: B15SW000 *
+.*                     Calculate Base WIES15 for Low Outlier                  *
+.******************************************************************************
+BW15L000  MATCH     "S",LOSCAT            * sameday
+          IF        @EQUAL
+            MOVE      PT15TSDW,TOTBWIES             * base WIES15
+            ASSIGN    (TOTBWIES/PT15TIMW),TOTIES15  * IES15
+.
+            MOVE      PT15TSDW,WIS15WGT             * for display
+            MOVE      "Same Day Wgt ",WIS15DSC
+            GOTO      BW15L999
+          ENDIF
+.
+          MATCH     "O",LOSCAT            * oneday
+          IF        @EQUAL
+            MOVE      PT15TODW,TOTBWIES             * base WIES15
+            ASSIGN    (TOTBWIES/PT15TIMW),TOTIES15  * IES15
+.
+            MOVE      PT15TODW,WIS15WGT             * for display
+            MOVE      "One Day Wgt  ",WIS15DSC
+            GOTO      BW15L999
+          ENDIF
+.
+          MATCH     "M",LOSCAT            * multiday
+          IF        @EQUAL
+            ASSIGN    (PT15TODW+((WIS15LOS-1)*PT15TLOM)),TOTBWIES
+.                                                    * base WIES15
+            ASSIGN    (TOTBWIES/PT15TIMW),TOTIES15   * IES15
+.
+            MOVE      PT15TLOM,WIS15WGT             * for display
+            MOVE      "Low Outlr Wgt",WIS15DSC
+            GOTO      BW15L999
+          ENDIF
+BW15L999  RETURN
++
+.******************************************************************************
+.*                                  BW15N000              Called by: B15SW000 *
+.*                      Calculate Base WIES15 for Inlier                      *
+.******************************************************************************
+BW15N000  MOVE      ONE,TOTIES15          * IES15 = 1
+          MATCH     "S",LOSCAT            * sameday
+          IF        @EQUAL
+            MOVE      PT15TSDW,TOTBWIES   * base WIES15
+.
+            MOVE      PT15TSDW,WIS15WGT             * for display
+            MOVE      "Same Day Wgt ",WIS15DSC
+            GOTO      BW15N999
+          ENDIF
+.
+          MATCH     "O",LOSCAT            * oneday
+          IF        @EQUAL
+            MOVE      PT15TODW,TOTBWIES   * base WIES15
+.
+            MOVE      PT15TODW,WIS15WGT             * for display
+            MOVE      "One Day Wgt  ",WIS15DSC
+            GOTO      BW15N999
+          ENDIF
+.
+          MATCH     "M",LOSCAT            * multiday
+          IF        @EQUAL
+            MOVE      PT15TIMW,TOTBWIES   * base WIES15
+.
+            MOVE      PT15TIMW,WIS15WGT             * for display
+            MOVE      "Inlier Wgt   ",WIS15DSC
+            GOTO      BW15N999
+          ENDIF
+BW15N999  RETURN
++
+.******************************************************************************
+.*                                  BW15H000              Called by: B15SW000 *
+.*                    Calculate Base WIES15 for High Outlier                  *
+.******************************************************************************
+BW15H000  ASSIGN    ((WIS15LOS-PT15HIBP)-ADJMVDAY),HIGHDAYS  * high outlr days
+          COMPARE   ZERO,HIGHDAYS
+          IF        @LESS
+            MOVE      ZERO,HIGHDAYS         * highdays must be >= zero
+          ENDIF
+.
+          COMPARE   HIGHDAYS,HIHLOS
+          IF        @LESS
+            MOVE      HIHLOS,HITHDAYS       * get lesser of highdays and
+          ELSE                              *  HIHLOS
+            MOVE      HIGHDAYS,HITHDAYS
+          ENDIF
+.
+          ASSIGN    (HIGHDAYS-HITHDAYS)*PT15THOM,TOTBWIES    *high WIES
+          ASSIGN    (HITHDAYS*PT15THIH)+TOTBWIES,TOTBWIES    *HITH WIES
+          ASSIGN    (PT15TIMW+TOTBWIES),TOTBWIES             *base WIES15
+          ASSIGN    (TOTBWIES/PT15TIMW),TOTIES15             * IES15
+.
+          MOVE      PT15THOM,WIS15WGT                        * for display
+          MOVE      "High Outl Wgt",WIS15DSC
+BW15H999  RETURN
++
+.******************************************************************************
+.*                                  C15AB000              Called by: PATWIS15 *
+.*                          Check for Aboriginality                           *
+.******************************************************************************
+C15AB000  MOVE      ZERO,ATSIWIES                * set ATSI WIES to zero
+          IF        PNSWRACE<1 | PNSWRACE>14
+            GOTO      C15AB999              * Invalid parameter
+          ENDIF
+.
+          LOAD      TCODE,PNSWRACE,CATP1,CATP2,CATP3,CATP4,CATP5:
+                                   CATP6,CATA1,CATA2,CATA3,CATA4:
+                                   CATA5,CATA6,CATA7,CATVA
+          LOAD      ACODE,PNSWRACE,PUSR1,PUSR2,PUSR3,PUSR4,PUSR5:
+                                   PUSR6,AUSR1,AUSR2,AUSR3,AUSR4:
+                                   AUSR5,AUSR6,AUSR7,PMPXABRG
+.
+          MATCH     ACODE,SP3
+          GOTO      C15AB999 IF EQUAL
+.
+          PACK      KEY5,TCODE,ACODE
+          CALL      RDCODE1                 * Read a code file record
+          BRANCH    OVRCD,C15AB999
+.
+          UNPACK    THCSCOD,DIM1,KEY1       * use 2nd char of HDP Equiv
+.>>>>     MOVE      THCSCOD,KEY1
+          TYPE      KEY1
+          GOTO      C15AB999 IF NOT EQUAL   * Non numeric, error
+.
+          MOVE      KEY1,FORM1
+.
+. ---- Calculate ATSI Loading if aboriginality = 1, 2, or 3 ----
+.
+          IF        FORM1=1 | FORM1=2 | FORM1=3
+            MOVE      TOTBWIES,FORM12P4       * base WIES
+            ADD       MVCOPAY,FORM12P4        * mechv copayment
+            ADD       THCOPAY,FORM12P4        * thal  copayment
+            ADD       AAACOPAY,FORM12P4       * AAA   copayment
+            ADD       ASDCOPAY,FORM12P4       * ASD   copayment
+            ASSIGN    (0.3*FORM12P4),ATSIWIES
+          ENDIF
+.
+C15AB999  RETURN
++

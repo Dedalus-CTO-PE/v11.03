@@ -1,0 +1,10 @@
+RKFMBB1   MOVE      ZERO,OVRCD
+          READ      FMSBIBA1,SEQ;FMBBLED,FMBBACC,FMBBPRO,FMBBSIN,FMBBVAL:
+                                 FMBBSPA
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRFMBB1   WRITE     FMSBIBA1,SEQ;FMBBLED,FMBBACC,FMBBPRO,FMBBSIN,FMBBVAL:
+                                 FMBBSPA
+          RETURN
+.

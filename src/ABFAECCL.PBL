@@ -1,0 +1,1087 @@
+. Program  : ABFAECCL
+.
+. Function : Calculate the Scaled complexity score and assign the complexity 
+.            suffix to provide a final Australian Emergency Care Classification
+.            (AECC)
+.
+.*******************************************************************************
+. Modification : 
+.            V11.03.02 03/10/2023 J.Tan    TSK 0938230
+.                      Mod CCAR000 - to check for Treating Nurse
+.            V11.03.01 10/01/2023 J.Tan    TSK 0925233
+.                      Mod for Bulk print invoice (IBAAAE20)
+.            V11.02.04 18/07/2022 J.Tan    TSK 0915626
+.                      Mods for Claim code Indic2=N (NWAUFLAG=1)
+.            V11.02.03 28/06/2022 J.Tan    TSK 0920712
+.                      Fixed I*D on emrvcdaf file
+.            V11.02.02 01/06/2022 J.Tan    TSK 0915626
+.                      Mod deleting pmsabfaf record
+.            V11.02.01 07/02/2022 J.Tan    TSK 0915626
+.                      Mod checking for blank ECDG code
+.            V11.01.03 27/10/2021 J.Tan    TSK 0913056
+.                      Added ADMFLAG for Admitted predictors only
+.                      Fixed CCAR0000 - check Clinical care commencement
+.            V11.01.02 13/10/2021 J.Tan    TSK 0905305
+.                      Mod to write Adjustment type 068 & 069
+.                      Mod to use Disc.date instead of Visit date
+.            V11.01.01 15/08/2021 J.Tan    TSK 0905305
+.                      Changed Indicator value for Catg ED and ee
+.            V11.01.00 09/08/2021 J.Tan    TSK 0905305
+.                      Created
+.*******************************************************************************
+.
+          DEFPROC   ABFAECCL
+.
+          INC       PATCALAG/INC
+.
+          INC       PMSABFFD/INC
+          INC       PMSVMTFD/INC
+.
+          INC       EMRVISFD/INC
+          INC       EMRACIFD/INC
+          INC       EMRACTFD/INC
+          INC       EMRACAFD/INC
+          INC       EMRACPFD/INC
+          INC       EMRACCFD/INC
+          INC       EMRVCDFD/INC
+.
+ADMFLAG   FORM      1
+AECNAECC  DIM       8
+AECCLASS  DIM       6
+BJDAY     FORM      5
+CODE      DIM       2
+CJDAY     FORM      5
+CDYSDAYS  FORM      6
+CDYSTDTE  DIM       8
+CDYSYEAR  FORM      2
+.
+ECDGSUBC  DIM       30          * ECDG subcategory code
+ECDGSUBD  DIM       100         * ECDG subcategory description
+ECDGCODE  DIM       30          * ECDG Code
+F10P6     FORM      10.6
+EXPVALUE  DIM       30
+EXPFILE   FILE      ASCII, FIXED=127
+.
+TRIGFLAG  FORM      1
+INTSCORE  FORM    4.8           * Intercept score
+SGRSCORE  FORM    4.8           * Sub group score
+TRNSCORE  FORM    4.8           * Transport mode score
+EPSSCORE  FORM    4.8           * Episode end status score
+RRGSCORE  FORM    4.8           * Triage category score
+AGESCORE  FORM    4.8           * Age group score
+ITRSCORE  FORM    4.8           * Interactions admitted Triage score
+IAGSCORE  FORM    4.8           * Interactions admitted Age score
+PRDSCORE  FORM    4.8           * Predited value
+SCLSCORE  FORM    4.6           * Scaled complexity score
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,HUND28;*105,PTCNUABF
+          READ      CONTROLF,SEVENTY8;*66,AECNAECC
+          REP       " 0",AECNAECC
+.
+          MATCH     "1",PTCNUABF             * check if using ABF
+          GOTO      AECC9999 IF NOT EQUAL
+.
+          MATCH     "00000000",AECNAECC
+          GOTO      AECC9999 IF EQUAL
+.
+          OPEN      EMRACAA1,"emracaaf"
+          OPEN      EMRACCA2,"emraccaf"
+          OPEN      EMRACIA1,"emraciaf"
+          OPEN      EMRACPA1,"emracpaf"
+          OPEN      EMRACTA1,"emractaf"
+.
+          OPEN      EMRVISA1,"emrvisaf"
+          OPEN      EMRVCDA1,"emrvcdaf"
+          OPEN      PMSVMTA1,"pmsvmtaf"
+          OPEN      PMSABFA1,"pmsabfaf"
+.
+          PACK      KEY8,ADANUMB
+          CALL      RDEMVIS1
+          BRANCH    OVRCD,AECC9999            * invalid admission
+.
+          PACK      KEY5,ANSC,ANSL,EMVICOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD,AECC9999
+.
+          BRANCH    NWAUFLAG,AECC1000         * NWAU Calculations
+.
+          MATCH     "A",TCINDC2
+          GOTO      AECC9999 IF NOT EQUAL     * Not an ABF Funding
+          GOTO      AECC1200
+.
+AECC1000  MATCH     "N",TCINDC2               * Check for NWAU Calculations
+          GOTO      AECC9999 IF NOT EQUAL     * Not an ABF Funding
+.
+AECC1200  MOVE      EMVIDATE,KEY8             * default to admission date
+          MATCH     SP70,EMVIDDAT
+          IF        !@EQUAL
+            MOVE      EMVIDDAT,KEY8           * Use discharge date
+          ENDIF
+.
+          MATCH     AECNAECC,KEY8         * check against start date for AECC
+          GOTO      AECC9999 IF LESS
+.
+          CALL      CVAR0000                * Clear variables
+          CALL      XABF0000                * Delete existing ABF records
+.
+.         There are 4 steps to determine the AECC Complexity
+.
+          CALL      PECD0000                * 1.Pre-ECDG processing
+          BRANCH    EXIT,AECC2000
+          CALL      AECD0000                * 2.Assign ECDG and ECDG subcateg.
+          BRANCH    EXIT,AECC2000
+.
+          CALL      CMPL0000                * 3.Determine the Complexity score
+          BRANCH    EXIT,AECC2000
+.
+          CALL      ALCS0000                * 4.Allocate Classes
+          GOTO      AECC9999
+.
+AECC2000  MATCH     SP70,AECCLASS           * New AECC Code
+          GOTO      AECC9999 IF EQUAL
+.
+          CALL      WVCD00000               * Write/Update emrvcdaf
+.
+          MOVE      "060",KEY3              * Type of adjustment
+          STRIP     AECCLASS
+          PACK      KEY80,AECCLASS,SP70,SP70
+          CALL      WABF0000       * Write AECC Class to ABF adjustment file
+.
+AECC9999  GOTO      NAEC9999
++
+.******************************************************************************
+.         Step 1 - Pre ECDG processing
+.******************************************************************************
+PECD0000  MOVE      ZERO,EXIT
+          MOVE      "ED",KEY2
+          PACK      KEY5,KEY2,EMVIDSTA      * Episode end status
+          CALL      RDCODE1
+          BRANCH    OVRCD,PECD8300
+.
+.         Validating visit type
+.
+          MATCH     "4",TCINDC11
+          GOTO      PECD8000 IF EQUAL       * Not attended by a healthcare
+          MATCH     "8",TCINDC11
+          GOTO      PECD8000 IF EQUAL       * Not attended by a healthcare
+.
+          MATCH     "5",TCINDC11
+          IF        @EQUAL
+            CALL      CCAR0000              * Check Clinical care commencement
+            BRANCH    EXIT,PECD8000
+          ENDIF
+.
+          MATCH     "7",TCINDC11
+          GOTO      PECD8100 IF EQUAL       * Dead on arrival
+.
+          MOVE      "ee",KEY2
+          PACK      KEY5,KEY2,EMVIUC13      * Visit type
+          CALL      RDCODE1
+          IF        OVRCD=0
+            MATCH     "5",TCINDC1
+            GOTO      PECD8100 IF EQUAL       * Dead on arrival
+            MATCH     "2",TCINDC1
+            GOTO      PECD8200 IF EQUAL       * Planned return visit
+.
+            MATCH     "3",TCINDC1
+            GOTO      PECD8400 IF EQUAL       * Prearranged admission
+            MATCH     "1",TCINDC1
+            GOTO      PECD8500 IF EQUAL       * Emergency presentation
+          ENDIF
+.
+.          Invalid visit type for cat ee indic1 <> 1,2,3 or 5
+.
+            GOTO      PECD8300
+.
+PECD8000  MOVE      "E0001Z",AECCLASS
+.         PRINT     *1,"E0001Z Not attended by a healthcare professional."
+.         ADD       ONE,CLNO
+          MOVE      ONE,EXIT
+          GOTO      PECD9999
+.
+PECD8100  MOVE      "E0003Z",AECCLASS
+.         PRINT     *1,"E0003Z Dead on arrival."
+.         ADD       ONE,CLNO
+          MOVE      ONE,EXIT
+          GOTO      PECD9999
+.
+PECD8200  MOVE      "E0002Z",AECCLASS
+.         PRINT     *1,"E0002Z Planned return visit."
+.         ADD       ONE,CLNO
+          MOVE      ONE,EXIT
+          GOTO      PECD9999
+.
+PECD8300  MOVE      "E9901Z",AECCLASS
+.         PRINT     *1,"E9901Z Invalid visit type."
+.         ADD       ONE,CLNO
+          MOVE      ONE,EXIT
+          GOTO      PECD9999
+.
+PECD8400  
+.         PRINT     *1,"Prearranged admission."
+.         ADD       ONE,CLNO
+          MOVE      ZERO,EXIT
+          GOTO      PECD9999
+.
+PECD8500  
+.         PRINT     *1,"Emergency presentation."
+.         ADD       ONE,CLNO
+          MOVE      ZERO,EXIT
+          GOTO      PECD9999
+PECD9999  RETURN
++
+.******************************************************************************
+.         Check Clinical care commencement date/time
+.******************************************************************************
+CCAR0000  MATCH     SP70,EMVIDRDT           * Dr seen by
+          GOTO      CCAR8000 IF NOT EQUAL
+          MATCH     SP70,EMVIDRTM
+          GOTO      CCAR8000 IF NOT EQUAL
+.
+          MATCH     SP70,EMVIMPDT           * seen by MH Practictioner
+          GOTO      CCAR8000 IF NOT EQUAL
+          MATCH     SP70,EMVIMPTM
+          GOTO      CCAR8000 IF NOT EQUAL
+.
+          MATCH     SP70,EMVIMDDT           * seen by Initial Assessor
+          GOTO      CCAR8000 IF NOT EQUAL
+          MATCH     SP70,EMVIMDTM
+          GOTO      CCAR8000 IF NOT EQUAL
+.
+          MATCH     SP70,EMVINSDT           * seen by Treating Nurse
+          GOTO      CCAR8000 IF NOT EQUAL
+          MATCH     SP70,EMVINSTM
+          GOTO      CCAR9000 IF EQUAL
+.
+CCAR8000  MOVE      ZERO,EXIT
+          GOTO      CCAR9999
+.
+CCAR9000  MOVE      ONE,EXIT
+CCAR9999  RETURN
++
+.******************************************************************************
+.         Step 2 - Assign ECDG and ECDG subcategories
+.******************************************************************************
+AECD0000  MOVE      ZERO,EXIT
+.
+.         Get Principal/Primary diagnosis
+.
+          MOVE      ZERO,F1
+          MOVE      "005",KEY3            * Diagnosis coding type
+          PACK      KEY14,EMVIADMN,KEY3,SP70
+          CALL      RSEMVCD1
+AECD1000  CALL      RKEMVCD1
+          BRANCH    OVRCD,AECD8000
+.
+          MATCH     DEMVIADM,EMVCVIST
+          GOTO      AECD8000 IF NOT EQUAL
+.
+          MATCH     KEY3,EMVCTYPE           * Diagnosis type ?
+          GOTO      AECD8000 IF NOT EQUAL
+.
+          MATCH     "1",EMVCDELE            * Deleted ?
+          GOTO      AECD1000 IF EQUAL
+          MATCH     "000",EMVCSEQU          * Primary diagnosis
+          GOTO      AECD1000 IF NOT EQUAL
+.
+.         validate the diagnosis list (mapped ECC code)
+.
+          MOVE      "emricdaf",KEY8
+          PACK      KEY30,EMVCMNCD,SP70
+          MOVE      "ECC",PMVMMVSI           * Set ID
+          PACK      KEY41,KEY8,KEY30,PMVMMVSI
+          CALL      RDPMVMT1
+          IF        OVRCD=0
+            PACK      ECDGSUBC,PMVMMCOD,SP70    * ECDG subcategory code
+            PACK      ECDGSUBD,PMVMMDES,SP70    * ECDG Subcategory description
+.
+            MATCH     SP70,ECDGSUBC
+            GOTO      AECD2000 IF EQUAL         * blank ECDG code
+.
+            MOVE      ZERO,EXIT
+            GOTO      AECD9999
+          ENDIF
+.
+AECD2000  MATCH     "IBAPMS54",PRGID
+          GOTO      AECD9000 IF NOT EQUAL
+.
+          COMPARE   "50",CLNO
+          CALL      PHED0000 IF NOT LESS
+          PRINT     *1,"| ",EMVIADMN:
+                    *13,"| E99003 Invalid principal diagnosis short list code."
+          ADD       ONE,CLNO
+          GOTO      AECD9000
+.
+AECD8000  MATCH     "IBAPMS54",PRGID
+          GOTO      AECD9000 IF NOT EQUAL
+.
+          COMPARE   "50",CLNO
+          CALL      PHED0000 IF NOT LESS
+          PRINT     *1,"| ",EMVIADMN:
+                    *13,"| E99002 Missing principal diagnosis short list code."
+          ADD       ONE,CLNO
+.
+AECD9000  MOVE      ONE,EXIT
+AECD9999  RETURN
+.
+.******************************************************************************
+.         Step 3 - Determine the Complexity score
+.******************************************************************************
+CMPL0000  CALL      ACIT0000              * Table D1 : ECDG Sub category
+          BRANCH    EXIT,CMPL9999
+.
+          CALL      ACTT0000              * Table D2 : inbound transport mode
+          CALL      ACAT0000              * Table D3 : Coefficients for age
+          CALL      ACPT0000              * Table D4 : Admitted Predictors
+          CALL      ACCT0000              * Table E  : Coeeficients for ECDG
+          MOVE      ZERO,EXIT
+.
+CMPL9999  RETURN
++
+.******************************************************************************
+.         Table D1 - Coefficients for intercept
+.******************************************************************************
+ACIT0000  MOVE      ZERO,EXIT
+          PACK      KEY38,ECDGSUBC,Z70     * ECDG Subcategory
+          CALL      RSEMACI1
+ACIT1000  CALL      RPEMACI1
+          BRANCH    OVRCD,ACIT2000
+.
+          MATCH     ECDGSUBC,EMRASUBV      * Same ECDG subcategory
+          GOTO      ACIT2000 IF NOT EQUAL
+.
+          MATCH     "1",EMRAAFLG
+          GOTO      ACIT1000 IF EQUAL      * Inactive
+.
+.         Check effective dates
+.
+          MATCH     EMRAFDAT,EMVIDDAT
+          GOTO      ACIT1000 IF LESS
+.
+          MATCH     SP70,EMRATDAT
+          IF        !@EQUAL
+            MATCH     EMVIDDAT,EMRATDAT
+            GOTO      ACIT1000 IF LESS
+          ENDIF
+.
+          MOVE      EMRACODE,ECDGCODE      * ECDG Code
+          MOVE      EMRACINT,INTSCORE      * Intercept score
+          MOVE      EMRACITS,SGRSCORE      * Sub group score
+          GOTO      ACIT9999
+.
+ACIT2000  MATCH     "IBAPMS54",PRGID
+          GOTO      ACIT9000 IF NOT EQUAL
+.
+          COMPARE   "50",CLNO
+          CALL      PHED0000 IF NOT LESS
+.
+          PRINT     *1,"| ",EMVIADMN:
+                    *13,"| Missing Coefficients for Intercept and ":
+                        "ECDG Subcategories : ",ECDGSUBC
+          ADD       ONE,CLNO
+ACIT9000  MOVE      ONE,EXIT
+ACIT9999  RETURN
++
+.******************************************************************************
+.         Table 2 - Inbound transport mode
+.******************************************************************************
+ACTT0000  PACK      KEY38,ECDGCODE,Z70
+          CALL      RSEMACT1              * Table D2
+ACTT1000  CALL      RPEMACT1
+          BRANCH    OVRCD,ACTT9000
+.
+          MATCH     ECDGCODE,EMATCODE
+          GOTO      ACTT9000 IF NOT EQUAL
+.
+          MATCH     "1",EMATAFLG
+          GOTO      ACTT1000 IF EQUAL      * Inactive
+.
+.         Check effective dates
+.
+          MATCH     EMATFDAT,EMVIDDAT
+          GOTO      ACTT1000 IF LESS
+.
+          MATCH     SP70,EMATTDAT
+          IF        !@EQUAL
+            MATCH     EMVIDDAT,EMATTDAT
+            GOTO      ACTT1000 IF LESS
+          ENDIF
+.
+          CALL      TRNS0000            * Transport mode
+          CALL      EPST0000            * Episode End status
+          CALL      TRIG0000            * Triage category
+          GOTO      ACTT9999
+.
+ACTT9000  MATCH     "IBAPMS54",PRGID
+          GOTO      ACTT9999 IF NOT EQUAL
+.
+          COMPARE   "50",CLNO
+          CALL      PHED0000 IF NOT LESS
+.
+          PRINT     *1,"| ",EMVIADMN:
+                    *13,"| Missing Inbound transport mode for ECDG Code : ":
+                    ECDGCODE
+          ADD       ONE,CLNO
+.
+ACTT9999  RETURN
++
+.******************************************************************************
+.         Transport (Arrival) mode
+.******************************************************************************
+TRNS0000  MOVE      "EA",KEY2
+          PACK      KEY5,KEY2,EMVIMODE      * Mode of Arrival
+          CALL      RDCODE1
+          BRANCH    OVRCD,TRNS9999
+.
+          MATCH     "A",TCINDC1
+          IF        @EQUAL
+            MOVE      EMATABAM,TRNSCORE     * Transport mode score
+          ENDIF
+TRNS9999  RETURN
++
+.******************************************************************************
+.         Episode End status
+.******************************************************************************
+EPST0000  MATCH     SP70,EMVIDSTA
+          GOTO      EPST9000 IF EQUAL
+.
+          MOVE      "ED",KEY2
+          PACK      KEY5,KEY2,EMVIDSTA      * Episode end status
+          CALL      RDCODE1
+          BRANCH    OVRCD,EPST9000
+.
+          MOVE      ZERO,F1
+          MOVE      TCINDC11,F1
+          BRANCH    F1,EPST1000,EPST9999,EPST3000,EPST9999,EPST5000:
+                       EPST6000,EPST9999,EPST9999
+          GOTO      EPST9000
+.
+EPST1000  MOVE      EMATADMF,EPSSCORE       * Admitted
+          MOVE      ONE,ADMFLAG
+          GOTO      EPST9999
+.
+EPST3000  MOVE      EMATRTAH,EPSSCORE       * Referred to another hospital
+          GOTO      EPST9999
+.
+EPST5000  MOVE      EMATRABA,EPSSCORE       * Left at own risk
+          GOTO      EPST9999
+.
+EPST6000  MOVE      EMATDSDC,EPSSCORE       * Died in emergency department
+          GOTO      EPST9999
+.
+EPST9000  MATCH     "IBAPMS54",PRGID
+          GOTO      EPST9999 IF NOT EQUAL
+.
+          COMPARE   "50",CLNO
+          CALL      PHED0000 IF NOT LESS
+.
+          PRINT     *1,"| ",EMVIADMN:
+                    *13,"| Episode end status has an invalid value : ",EMVIDSTA
+          ADD       ONE,CLNO
+          GOTO      EPST9999
+.
+EPST9999  RETURN
++
+.******************************************************************************
+.         Triage category
+.******************************************************************************
+TRIG0000  MOVE      ZERO,TRIGFLAG
+          MATCH     SP70,EMVITRIG
+          GOTO      TRIG9000 IF EQUAL
+.
+          MOVE      "AA",KEY2
+          PACK      KEY5,KEY2,EMVITRIG      * Triage code
+          CALL      RDCODE1
+          BRANCH    OVRCD,TRIG9000
+.
+          MOVE      ZERO,FORM1
+          MOVE      TCINDC1,FORM1
+          MOVE      FORM1,TRIGFLAG
+          BRANCH    FORM1,TRIG1000,TRIG2000,TRIG3000,TRIG4000,TRIG5000
+          GOTO      TRIG9000
+.
+TRIG1000  MOVE      EMATTCT1,RRGSCORE
+          GOTO      TRIG9999
+.
+TRIG2000  MOVE      EMATTCT2,RRGSCORE
+          GOTO      TRIG9999
+.
+TRIG3000  MOVE      EMATTCT3,RRGSCORE
+          GOTO      TRIG9999
+.
+TRIG4000  MOVE      EMATTCT4,RRGSCORE
+          GOTO      TRIG9999
+.
+TRIG5000  MOVE      EMATTCT5,RRGSCORE
+          GOTO      TRIG9999
+.
+TRIG9000  MATCH     "IBAPMS54",PRGID
+          GOTO      TRIG9999 IF NOT EQUAL
+.
+          COMPARE   "50",CLNO
+          CALL      PHED0000 IF NOT LESS
+.
+          PRINT     *1,"| ",EMVIADMN:
+                    *13,"| Triage category has an invalid value - ",EMVITRIG
+.
+          ADD       ONE,CLNO
+          GOTO      TRIG9999
+.
+TRIG9999  RETURN
++
+.******************************************************************************
+.         Table 3 - Coefficient for Age group
+.******************************************************************************
+ACAT0000  PACK      KEY38,ECDGCODE,Z70
+          CALL      RSEMACA1              * Table D2
+ACAT1000  CALL      RPEMACA1
+          BRANCH    OVRCD,ACAT9000
+.
+          MATCH     ECDGCODE,EMAACODE
+          GOTO      ACAT9000 IF NOT EQUAL
+.
+          MATCH     "1",EMAAAFLG
+          GOTO      ACAT1000 IF EQUAL      * Inactive
+.
+.         Check effective dates
+.
+          MATCH     EMAAFDAT,EMVIDDAT
+          GOTO      ACAT1000 IF LESS
+.
+          MATCH     SP70,EMAATDAT
+          IF        !@EQUAL
+            MATCH     EMVIDDAT,EMAATDAT
+            GOTO      ACAT1000 IF LESS
+          ENDIF
+.
+          CALL      AGEG0000            * Age group
+          GOTO      ACAT9999
+.
+ACAT9000  MATCH     "IBAPMS54",PRGID
+          GOTO      ACAT9999 IF NOT EQUAL
+.
+          COMPARE   "50",CLNO
+          CALL      PHED0000 IF NOT LESS
+.
+          PRINT     *1,"| ",EMVIADMN:
+                    *13,"| Missing Coefficients Age group for ECDG Code : ":
+                    ECDGCODE
+          ADD       ONE,CLNO
+.
+ACAT9999  RETURN
++
+.******************************************************************************
+.         Age group
+.******************************************************************************
+.         Get Clinical care commencement from the following fields (earliest)
+.
+AGEG0000  MOVE      EMVIDRDT,KEY8         * Date first seen by Doct
+          MOVE      EMVIDRTM,D8
+.
+          MATCH     SP70,EMVIMPDT
+          GOTO      AGEG2000 IF EQUAL
+.
+          MATCH     EMVIDRDT,EMVIMPDT     * Dr seen by/seen by MH practictioner
+          GOTO      AGEG1000 IF LESS
+.
+          MATCH     EMVIDRDT,EMVIMPDT
+          IF        @EQUAL
+            MATCH     EMVIDRTM,EMVIMPTM
+            GOTO      AGEG1000 IF LESS
+          ENDIF
+          GOTO      AGEG2000
+.
+AGEG1000  MOVE      EMVIMPDT,KEY8
+          MOVE      EMVIMPTM,D8
+.
+AGEG2000  MATCH     SP70,EMVIMDDT
+          GOTO      AGEG3000 IF EQUAL
+.
+          MATCH     EMVIMDDT,KEY8         * Seen by Initial Assesor
+          GOTO      AGEG3000 IF LESS
+.
+          MATCH     EMVIMDDT,KEY8
+          IF        @EQUAL
+            MATCH     EMVIMDTM,D8
+            GOTO      AGEG3000 IF LESS
+          ENDIF
+          MOVE      EMVIMDDT,KEY8
+          MOVE      EMVIMDTM,D8
+.
+AGEG3000  UNPACK    PBDATE,CDAY,CMON,CYEAR,CCENT
+          MATCH     SP70,KEY8
+          IF        !@EQUAL
+            MOVE      KEY8,AGEDATE
+            REP       " 0",AGEDATE
+            CALL      CALCAGE
+            MOVE      PSAGEYRS,PSAGE
+          ENDIF
+.
+          MOVE      EMAAAG04,AGESCORE     * Age group score
+          COMPARE   "5",PSAGE
+          GOTO      AGEG9999 IF LESS
+.
+          MOVE      EMAAAG59,AGESCORE     * Age group score
+          COMPARE   "10",PSAGE
+          GOTO      AGEG9999 IF LESS
+.
+          MOVE      EMAAAG14,AGESCORE     * Age group score
+          COMPARE   "15",PSAGE
+          GOTO      AGEG9999 IF LESS
+.
+          MOVE      EMAAAG69,AGESCORE     * Age group score
+          COMPARE   "70",PSAGE
+          GOTO      AGEG9999 IF LESS
+.
+          MOVE      EMAAAG74,AGESCORE     * Age group score
+          COMPARE   "75",PSAGE
+          GOTO      AGEG9999 IF LESS
+.
+          MOVE      EMAAAG79,AGESCORE     * Age group score
+          COMPARE   "80",PSAGE
+          GOTO      AGEG9999 IF LESS
+.
+          MOVE      EMAAAG84,AGESCORE     * Age group score
+          COMPARE   "85",PSAGE
+          GOTO      AGEG9999 IF LESS
+.
+          MOVE      EMAAAG85,AGESCORE     * Age group score
+.
+AGEG9999  RETURN
++
+.******************************************************************************
+.          Table D4 : Admitted Predictors
+.          Only for events where Cat ED indc11=1 (Admitted)
+.******************************************************************************
+ACPT0000  COMPARE   ONE,ADMFLAG
+          GOTO      ACPT9999 IF NOT EQUAL * not admitted
+.
+          PACK      KEY38,ECDGCODE,Z70
+          CALL      RSEMACP1              * Table D2
+ACPT1000  CALL      RPEMACP1
+          BRANCH    OVRCD,ACPT9000
+.
+          MATCH     ECDGCODE,EMAPCODE
+          GOTO      ACPT9000 IF NOT EQUAL
+.
+          MATCH     "1",EMAPAFLG
+          GOTO      ACPT1000 IF EQUAL      * Inactive
+.
+.         Check effective dates
+.
+          MATCH     EMAPFDAT,EMVIDDAT
+          GOTO      ACPT1000 IF LESS
+.
+          MATCH     SP70,EMAPTDAT
+          IF        !@EQUAL
+            MATCH     EMVIDDAT,EMAPTDAT
+            GOTO      ACPT1000 IF LESS
+          ENDIF
+.
+          IF        PSAGE<15
+            MOVE      EMAPAGE1,IAGSCORE  * Interactions admitted Age score
+          ELSE
+            IF        PSAGE>=80
+              MOVE      EMAPAGE2,IAGSCORE  * Interactions admitted Age score
+            ENDIF
+          ENDIF
+.
+          MOVE      ZERO,ITRSCORE  * Interactions admitted Triage score
+          LOAD      ITRSCORE,TRIGFLAG,EMAPTCT1,EMAPTCT2,EMAPTCT3:
+                                      EMAPTCT4,EMAPTCT5
+          GOTO      ACPT9999
+.
+ACPT9000  MATCH     "IBAPMS54",PRGID
+          GOTO      ACPT9999 IF NOT EQUAL
+.
+          COMPARE   "50",CLNO
+          CALL      PHED0000 IF NOT LESS
+.
+          PRINT     *1,"| ",EMVIADMN:
+                    *13,"| Missing Admitted Predictors for ECDG Code : ":
+                    ECDGCODE
+          ADD       ONE,CLNO
+.
+ACPT9999  RETURN
++
+.******************************************************************************
+.         Table E  : Coeeficients for ECDG
+.******************************************************************************
+ACCT0000  MOVE      ZERO,PRDSCORE       * Predited value
+          ADD       INTSCORE,PRDSCORE   * Intercept score
+          ADD       SGRSCORE,PRDSCORE   * Sub group score
+          ADD       EPSSCORE,PRDSCORE   * Episode end status score
+          ADD       RRGSCORE,PRDSCORE   * Triage category score
+          ADD       TRNSCORE,PRDSCORE   * Transport mode score
+          ADD       AGESCORE,PRDSCORE   * Age group score
+          ADD       IAGSCORE,PRDSCORE   * Interactions admitted Age score
+          ADD       ITRSCORE,PRDSCORE   * Interactions admitted Triage score
+.
+          MOVE      "068",KEY3          * Type of adjustment
+          MOVE      SP70,KEY13
+          MOVE      PRDSCORE,KEY13      * Predicted value for ECDG
+          SQUEEZE   KEY13
+          PACK      KEY80,KEY13,SP70,SP70
+          CALL      WABF0000       * Write AECC Class to ABF adjustment file
+.
+.         Calculate the Scaled score
+.
+          CALL      CEXP0000            * Calculate the Exponent value
+          MOVE      F10P6,SCLSCORE      * Scaled score
+          SUB       "713",SCLSCORE
+          DIV       "166",SCLSCORE
+          ADD       "3.26",SCLSCORE
+.
+          MOVE      "069",KEY3          * Type of adjustment
+          MOVE      SP70,KEY13
+          MOVE      SCLSCORE,KEY13      * Scaled complexity score for ECDG
+          SQUEEZE   KEY13
+          PACK      KEY80,KEY13,SP70,SP70
+          CALL      WABF0000       * Write AECC Class to ABF adjustment file
+.
+          PACK      KEY48,ECDGCODE,Z70
+          CALL      RSEMACC2              * Table D2
+ACCT1000  CALL      RPEMACC2
+          BRANCH    OVRCD,ACCT9000
+.
+          MATCH     ECDGCODE,EMACCODE
+          GOTO      ACCT9000 IF NOT EQUAL
+.
+          MATCH     "1",EMACAFLG
+          GOTO      ACCT1000 IF EQUAL      * Inactive
+.
+.         Check effective dates
+.
+          MATCH     EMACFDAT,EMVIDDAT
+          GOTO      ACCT1000 IF LESS
+.
+          MATCH     SP70,EMACTDAT
+          IF        !@EQUAL
+            MATCH     EMVIDDAT,EMACTDAT
+            GOTO      ACCT1000 IF LESS
+          ENDIF
+.
+.         Check the Scaled score against Min/Max scores
+.         greater than or equal to the Minimum and less than the Maximum score
+.
+          COMPARE   EMACMINS,SCLSCORE      * check minum score
+          GOTO      ACCT1000 IF LESS
+.
+          MATCH     "1",EMACMXSI           * Infinity ?
+          GOTO      ACCT8000 IF EQUAL
+.
+          COMPARE   EMACMAXS,SCLSCORE      * check maximum score
+          GOTO      ACCT8000 IF LESS
+.
+          GOTO      ACCT1000
+.
+ACCT8000  MOVE      EMACCLAS,AECCLASS      * Final AECC Class
+          GOTO      ACCT9999
+.
+ACCT9000  MATCH     "IBAPMS54",PRGID
+          GOTO      ACCT9999 IF NOT EQUAL
+.
+          COMPARE   "50",CLNO
+          CALL      PHED0000 IF NOT LESS
+.
+          PRINT     *1,"| ",EMVIADMN:
+                    *13,"| Missing AECC Coefficients for ECDG Code : ":
+                    ECDGCODE," Scaled score ",SCLSCORE
+          ADD       ONE,CLNO
+.
+ACCT9999  RETURN
++
+.******************************************************************************
+.         Step 4 - Allocate classes
+.******************************************************************************
+ALCS0000  CALL      WVCD00000      * Update emrvcdaf
+.
+.         Write to ABF Adjustment file
+.
+          MOVE      "065",KEY3               * Type of adjustment
+          PACK      KEY80,ECDGSUBC,SP70,SP70
+          CALL      WABF0000       * Write Sub-category to ABF adjustment file
+.
+          MOVE      "067",KEY3               * Type of adjustment
+          PACK      KEY80,ECDGCODE,SP70,SP70
+          CALL      WABF0000       * Write ECDG Code to ABF adjustment file
+.
+          MOVE      "060",KEY3               * Type of adjustment
+          STRIP     AECCLASS
+          PACK      KEY80,AECCLASS,SP70,SP70
+          CALL      WABF0000       * Write AECC Class to ABF adjustment file
+.
+ALCS9999  RETURN
++
+.------------------------------------------------------------
+. Write/Update record to emrvcdaf
+.-----------------------------------------------------------
+WVCD0000  MOVE      "006",KEY3       * Coding type - AECC Class
+          MOVE      ZERO,F3          * Default unique counter
+          PACK      KEY14,EMVIADMN,KEY3,Z70
+          CALL      RSEMVCD1
+WVCD1000  CALL      RPEMVCD1
+          BRANCH    OVRCD,WVCD2000
+.
+          MATCH     DEMVIADM,EMVCVIST       * same visit number ?
+          GOTO      WVCD2000 IF NOT EQUAL
+          MATCH     KEY3,EMVCTYPE           * same coding type ?
+          GOTO      WVCD2000 IF NOT EQUAL
+.
+          IF        F3=0
+            MOVE      EMVCUNIQ,F3             * save unique counter
+          ENDIF
+          MATCH     "1",EMVCDELE            * Deleted ?
+          GOTO      WVCD1000 IF EQUAL
+.
+.         Check if the new Class is same as the current
+.
+          PACK      KEY10,AECCLASS,SP70      * New AECC Code
+          MATCH     KEY10,EMVCMNCD
+          GOTO      WVCD9999 IF EQUAL        * AECC code hasn't changed
+.
+          MOVE      "1",EMVCDELE            * delete flag
+.
+          MOVE      PASSCODE,EMVCWUSR
+          CALL      IBACLOCK
+          PACK      EMVCLUDT,CCC,CYY,CMM,CDD  * Last update date
+          REP       " 0",EMVCLUDT
+          PACK      EMVCLUTM,CTIMEIS          * last update time
+.
+          CALL      UPEMVCD1
+.
+.         Write a new record
+.
+WVCD2000  CALL      CLRVCD00
+.
+          MOVE      EMVIADMN,EMVCVIST
+          MOVE      "006",EMVCTYPE           * 006 - AECC Class
+          PACK      EMVCMNCD,AECCLASS,SP70   * AECC Code
+.
+          MOVE      PASSCODE,EMVCCUID        * user id created
+          CALL      IBACLOCK
+          PACK      EMVCCDAT,CCC,CYY,CMM,CDD  * date created
+          REP       " 0",EMVCCDAT
+          PACK      EMVCCTIM,CTIMEIS          * time created
+.
+          MOVE      "000",EMVCSEQU
+          PACK      EMVCDATE,CCC,CYY,CMM,CDD  * date
+          REP       " 0",EMVCDATE
+          PACK      EMVCTIME,CTIMEIS          * time
+.
+WVCD3000  ADD       ONE,F3
+          MOVE      F3,EMVCUNIQ
+          REP       " 0",EMVCUNIQ            * Counter
+.
+          PACK      KEY14,EMVCVIST,EMVCTYPE,EMVCUNIQ
+          CALL      RAEMVCD1
+          COMPARE   ZERO,OVRCD
+          GOTO      WVCD3000 IF EQUAL
+.
+          CALL      WREMVCD1
+.
+WVCD9999  RETURN
++
+.------------------------------------------------------------
+. Delete existing ABF details
+.-----------------------------------------------------------
+XABF0000  MOVE      SP70,KEY8
+.
+.         remove only 060,065,067,068,069 adjustment
+.
+          MOVE      "060",PMABADJT
+          PACK      KEY19,ADANUMB,KEY8,PMABADJT
+          CALL      DEPMABF1
+.
+          MOVE      "065",PMABADJT
+          PACK      KEY19,ADANUMB,KEY8,PMABADJT
+          CALL      DEPMABF1
+.
+          MOVE      "067",PMABADJT
+          PACK      KEY19,ADANUMB,KEY8,PMABADJT
+          CALL      DEPMABF1
+.
+          MOVE      "068",PMABADJT
+          PACK      KEY19,ADANUMB,KEY8,PMABADJT
+          CALL      DEPMABF1
+.
+          MOVE      "069",PMABADJT
+          PACK      KEY19,ADANUMB,KEY8,PMABADJT
+          CALL      DEPMABF1
+.
+XABF9999  RETURN
++
+.------------------------------------------------------------
+. Write Sub-category to ABF adjustment file
+.-----------------------------------------------------------
+WABF0000  MOVE      EMVIADMN,PMABADMN        * Admission number
+          MOVE      SP70,PMABINVN            * Blank Inv.no for tobe invoiced
+          MOVE      KEY3,PMABADJT            * Type of adjustment
+.
+          PACK      KEY19,PMABADMN,PMABINVN,PMABADJT,SP70
+          CALL      RDPMABF1
+          BRANCH    OVRCD,WABF1000
+.
+          PACK      PMABCDES,KEY80,SP70
+          PACK      PMABUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PMABUDAT
+          CLOCK     TIME,PMABUTIM
+          MOVE      PASSCODE,PMABUUID
+          CALL      UPPMABF1
+.
+          GOTO      WABF9999
+.
+WABF1000  CALL      CLPMSABF                 * Clear fields
+          MOVE      "1",PMABABFT             * Type of ABF Details
+          MOVE      " 1",PMABEPSN            * Episode Number
+          UNPACK    KEY19,PMABADMN,PMABINVN,PMABADJT
+.
+          PACK      PMABCDES,KEY80,SP70
+          PACK      PMABCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PMABCDAT
+          CLOCK     TIME,PMABCTIM
+          MOVE      PASSCODE,PMABCUID
+.
+          CALL      RAPMABF1
+          IF        OVRCD=1
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRPMABF1
+            TRAPCLR   IO
+          ENDIF
+
+WABF9999  RETURN
++
+.******************************************************************************
+. Calculate the Exponent value
+.******************************************************************************
+CEXP0000  CLEAR     CMDLINE
+          APPEND    "tblexp ",CMDLINE
+          APPEND    PRDSCORE,CMDLINE
+          APPEND    " > ",CMDLINE
+          APPEND    FNAMEN,CMDLINE
+          APPEND    ".txt",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      EXPFILE,FNAMEN
+          TRAPCLR   IO
+          BRANCH    OVRCD,CEXP9999
+.
+          MOVE      SP70,EXPVALUE
+          READ      EXPFILE,SEQ;EXPVALUE
+.
+          SQUEEZE   EXPVALUE
+          MOVE      ZERO,F10P6
+          MOVE      EXPVALUE,F10P6
+.
+          CLOSE     EXPFILE,DELETE
+CEXP9999  RETURN
++
+.******************************************************************************
+. Initialize's file data
+.******************************************************************************
+CLRVCD00  MOVE      SP70,EMVCVIST
+          MOVE      SP70,EMVCTYPE
+          MOVE      SP70,EMVCUNIQ
+          MOVE      SP70,EMVCCSYS
+          MOVE      SP70,EMVCMNCD
+          MOVE      SP70,EMVCSEQU
+          MOVE      SP70,EMVCDATE
+          MOVE      SP70,EMVCTIME
+          MOVE      SP70,EMVCUDC1
+          MOVE      SP70,EMVCUDC2
+          MOVE      SP70,EMVCUDC3
+          MOVE      SP70,EMVCUDC4
+          MOVE      SP70,EMVCUDR1
+          MOVE      SP70,EMVCUDR2
+          MOVE      SP70,EMVCUYN1
+          MOVE      SP70,EMVCUYN2
+          MOVE      SP70,EMVCUYN3
+          MOVE      SP70,EMVCUYN4
+          MOVE      ZERO,EMVCUDA1
+          MOVE      ZERO,EMVCUDA2
+          MOVE      ZERO,EMVCUDA3
+          MOVE      ZERO,EMVCUDA4
+          MOVE      SP70,EMVCUDD1
+          MOVE      SP70,EMVCUDD2
+          MOVE      SP70,EMVCUDD3
+          MOVE      SP70,EMVCUDD4
+          MOVE      SP70,EMVCUDT1
+          MOVE      SP70,EMVCUDT2
+          MOVE      SP70,EMVCUDT3
+          MOVE      SP70,EMVCUDT4
+          MOVE      SP70,EMVCEFLG
+          MOVE      SP70,EMVCLUDT
+          MOVE      SP70,EMVCLUTM
+          MOVE      SP70,EMVCWUSR
+          MOVE      SP70,EMVCDELE
+          MOVE      SP70,EMVCSUBN
+          MOVE      SP70,EMVCEDAD
+          PACK      EMVCFTXT,SP70,SP70
+          MOVE      SP70,EMVCSPAR
+.
+CLRVCD99  RETURN
++
+.******************************************************************************
+.*        Clear variables
+.******************************************************************************
+CVAR0000  MOVE      ZERO,INTSCORE  * Intercept score
+          MOVE      ZERO,SGRSCORE  * Sub group score
+          MOVE      ZERO,TRNSCORE  * Transport mode score
+          MOVE      ZERO,EPSSCORE  * Episode end status score
+          MOVE      ZERO,RRGSCORE  * Triage category score
+          MOVE      ZERO,AGESCORE  * Age group score
+          MOVE      ZERO,ITRSCORE  * Interactions admitted Triage score
+          MOVE      ZERO,IAGSCORE  * Interactions admitted Age score
+          MOVE      ZERO,PRDSCORE  * Predited value
+          MOVE      ZERO,SCLSCORE  * Scaled complexity score
+.
+          MOVE      ZERO,TRIGFLAG  * Triage category
+          MOVE      SP70,AECCLASS  * AECC Class
+.
+          MOVE      SP70,ECDGSUBC  * ECDG subcategory code
+          MOVE      SP70,ECDGSUBD  * ECDG subcategory description
+          MOVE      SP70,ECDGCODE  * ECDG Code
+          MOVE      ZERO,ADMFLAG   * Admitted flag
+CVAR9999  RETURN
++
+.******************************************************************************
+.         Heading
+.******************************************************************************
+PHED0000  CALL      IBACLOCK
+          MOVE      ZERO,CNOUNDLN
+          CALL      HEAD132
+          MOVE      THREE,CLNO
+.
+          PRINT     *40,"Discharge Date from : ",FROMDATE," To: ",TODATE
+          CALL      UND132
+          PRINT     *1,"| Admission",*13,"| Error ":
+                    *132,"|"
+          ADD       ONE,CLNO
+          CALL      UND132
+.
+PHED9999  RETURN
++
+.******************************************************************************
+          INC       CALCAGE
+          INC       CLPMSABF
+.
+          INC       PMSABFIO/INC
+          INC       PMSVMTIO/INC
+.
+          INC       EMRVISIO/INC
+          INC       EMRACIIO/INC
+          INC       EMRACTIO/INC
+          INC       EMRACAIO/INC
+          INC       EMRACPIO/INC
+          INC       EMRACCIO/INC
+          INC       EMRVCDIO/INC
+
+          INC       IBAOVRIO/INC
+.
+NAEC9999  ENDPROC
++

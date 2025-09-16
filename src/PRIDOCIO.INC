@@ -1,0 +1,140 @@
+RSPRDO1   RESET     KEY22
+          READ      PRIDOCT1,KEY22;;
+          RETURN
+.
+RAPRDO1   RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PRIDOCT1,KEY22;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRDO1   RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PRIDOCT1,KEY22;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPRDO1   MOVE      ZERO,OVRCD
+          READKS    PRIDOCT1;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPRDO1   MOVE      ZERO,OVRCD
+          READKP    PRIDOCT1;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPRDO1   UPDATE    PRIDOCT1;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          RETURN
+.
+WRPRDO1   RESET     KEY22
+          WRITE     PRIDOCT1,KEY22;KEY22:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          RETURN
+.
+DEPRDO1   RESET     KEY22
+          DELETE    PRIDOCT1,KEY22
+          RETURN
+.
+ASPRDO    RESET     KEY19
+          READ      PRIAUDDO,KEY19;;
+          RETURN
+.
+AKPRDO    MOVE      ZERO,OVRCD
+          READKS    PRIAUDDO;PRDOAUDD,PRDOAUDT,PRDOAUDP,PRDOAUDR:
+                                  PRDOAUDS,PRDOAUDO,PRDOPRAC,PRDODOCT,PRDOCLAM:
+                                  PRDOPIND,PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+AUPRDO    UPDATE    PRIAUDDO;PRDOAUDD,PRDOAUDT,PRDOAUDP,PRDOAUDR:
+                                  PRDOAUDS,PRDOAUDO,PRDOPRAC,PRDODOCT,PRDOCLAM:
+                                  PRDOPIND,PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          RETURN
+.
+AWPRDO    RESET     KEY19
+          WRITE     PRIAUDDO,KEY19;KEY19:
+                                  PRDOAUDS,PRDOAUDO,PRDOPRAC,PRDODOCT,PRDOCLAM:
+                                  PRDOPIND,PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          RETURN
+.
+ADPRDO    RESET     KEY19
+          DELETE    PRIAUDDO,KEY19
+          RETURN
+.
+RSPRDO2   RESET     KEY22
+          READ      PRIDOCT2,KEY22;;
+          RETURN
+.
+RAPRDO2   RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PRIDOCT2,KEY22;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRDO2   RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PRIDOCT2,KEY22;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPRDO2   MOVE      ZERO,OVRCD
+          READKS    PRIDOCT2;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPRDO2   MOVE      ZERO,OVRCD
+          READKP    PRIDOCT2;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPRDO3   RESET     KEY32
+          READ      PRIDOCT3,KEY32;;
+          RETURN
+.
+RAPRDO3   RESET     KEY32
+          MOVE      ZERO,OVRCD
+          READ      PRIDOCT3,KEY32;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRDO3   RESET     KEY32
+          MOVE      ZERO,OVRCD
+          READ      PRIDOCT3,KEY32;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPRDO3   MOVE      ZERO,OVRCD
+          READKS    PRIDOCT3;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPRDO3   MOVE      ZERO,OVRCD
+          READKP    PRIDOCT3;PRDOPRAC,PRDODOCT,PRDOCLAM,PRDOPIND:
+                                  PRDOCOMM,PRDOFEEP,PRDOSTAT:
+                                  PRDOCRCD,PRDOABNN,PRDOGSTR,PRDOPROV,PRDOSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.

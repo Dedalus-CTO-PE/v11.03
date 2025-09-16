@@ -1,0 +1,42 @@
+.
+. Include    :  WATSEAIO.INC
+. File       :  watseaaf
+. Keys       :  KEY4
+.
+RSWTSEA1  RESET     KEY4
+          READ      WATSEAA1,KEY4;;
+          RETURN
+.
+RAWTSEA1  RESET     KEY4
+          MOVE      ZERO,OVRCD
+          READ      WATSEAA1,KEY4;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTSEA1  RESET     KEY4
+          MOVE      ZERO,OVRCD
+          READ      WATSEAA1,KEY4;WTSAUSER,WTSASPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKWTSEA1  MOVE      ZERO,OVRCD
+          READKS    WATSEAA1;WTSAUSER,WTSASPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPWTSEA1  MOVE      ZERO,OVRCD
+          READKP    WATSEAA1;WTSAUSER,WTSASPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPWTSEA1  UPDATE    WATSEAA1;WTSAUSER,WTSASPAR
+          RETURN
+.
+WRWTSEA1  RESET     KEY4
+          WRITE     WATSEAA1,KEY4;WTSAUSER,WTSASPAR
+          RETURN
+.
+DEWTSEA1  RESET     KEY4
+          DELETE    WATSEAA1,KEY4
+          RETURN
+.

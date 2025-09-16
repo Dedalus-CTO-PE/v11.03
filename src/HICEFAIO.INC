@@ -1,0 +1,83 @@
+.*****************************************************************************
+.*        HICEFAIO.INC                                                       *
+.*****************************************************************************
+.
+RSHCEFA1  RESET     KEY8
+          READ      HICEFAA1,KEY8;;
+          RETURN
+.
+RAHCEFA1  RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READ      HICEFAA1,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDHCEFA1  RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READ      HICEFAA1,KEY8;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                                  HCEAPDAT,HCEAFNAM,HCEASPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKHCEFA1  MOVE      ZERO,OVRCD
+          READKS    HICEFAA1;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                             HCEAPDAT,HCEAFNAM,HCEASPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPHCEFA1  MOVE      ZERO,OVRCD
+          READKP    HICEFAA1;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                             HCEAPDAT,HCEAFNAM,HCEASPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPHCEFA1  UPDATE    HICEFAA1;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                             HCEAPDAT,HCEAFNAM,HCEASPAR
+          RETURN
+.
+WRHCEFA1  RESET     KEY8
+          WRITE     HICEFAA1,KEY8;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                                  HCEAPDAT,HCEAFNAM,HCEASPAR
+          RETURN
+.
+DEHCEFA1  RESET     KEY8
+          DELETE    HICEFAA1,KEY8
+          RETURN
+.
+RSHCEFA2  RESET     KEY16
+          READ      HICEFAA2,KEY16;;
+          RETURN
+.
+RAHCEFA2  RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READ      HICEFAA2,KEY16;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDHCEFA2  RESET     KEY16
+          MOVE      ZERO,OVRCD
+          READ      HICEFAA2,KEY16;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                                  HCEAPDAT,HCEAFNAM,HCEASPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKHCEFA2  MOVE      ZERO,OVRCD
+          READKS    HICEFAA2;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                             HCEAPDAT,HCEAFNAM,HCEASPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPHCEFA2  MOVE      ZERO,OVRCD
+          READKP    HICEFAA2;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                             HCEAPDAT,HCEAFNAM,HCEASPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPHCEFA2  UPDATE    HICEFAA2;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                             HCEAPDAT,HCEAFNAM,HCEASPAR
+          RETURN
+.
+WRHCEFA2  RESET     KEY16
+          WRITE     HICEFAA2,KEY16;HCEARNUM,HCEACNTR,HCEAPAYN,HCEAPMCI,HCEATAMT:
+                                  HCEAPDAT,HCEAFNAM,HCEASPAR
++

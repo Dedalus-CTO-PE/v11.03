@@ -1,0 +1,1535 @@
+.***************************************************************************
+.* System    :   Outpatients                                               *
+.* Program   :   IBAADT23                                                  *
+.* Desc      :   Health Fund EDI Extract Maintenance                       *
+.***************************************************************************
+.* Date      :   15/03/1999                                                *
+.* Author    :   Andrew Peel                                               *
+.* Function  :   This program maintains all invoices sent to the EDI file. *
+.* Mods      :                                                             *
+.*        V10.04.01 17/06/2014 Steve Armstrong   CAR 301639                *
+.*                  Moved call to TFILENAM for FNAME1 into INIT0000.       *
+.***************************************************************************
+.*        V10.03.02 18/02/2013 Ania Pietrusewicz CAR 281021                *
+.*                  Removed redundant modification of constants.           *
+.*        V10.03.01 19/12/2012 Patrick Adair     CAR 261630                *
+.*                  Removed port number from temp file name                *
+.*        V10.02.01 07/07/2011  Steve Armstrong  CAR 240722                *
+.*                  Added RDPMPX21 prior to calling PMIHEAD                *
+.*        V10.01.01 03/02/2011 Jill Parkinson CAR 233088                   *
+.*                  Added pmsvx1af                                         *
+.***************************************************************************
+.*        V9.10.02  23/05/2008 J.Tan      CAR 169149                       *
+.*                  Added Date and Time invoice created/updated            *
+.*        V9.10.01  30/04/2007  J.Tan         CAR 167215                   *
+.*                  Mods to incl.Credit notes for checking outstd.balance  *
+.*        V9.02.01  28/05/2002  Mike Laming  SRF 10842                     *
+.*                  Correct Invoice check to us Admission for IP, and O/P  *
+.*                  Booking for Outpatients                                *
+.***************************************************************************
+.*        V5.08.01  23/08/2000  Caleb Sharman                              *
+.*                  Changed Health Fund variables to be 8 chars            *
+.*        V5.08.00  06/07/2000  Greg Horvat                                *
+.*                  Copied from release 6.07 version V6.07.00              *
+.*                                                                         *
+.***************************************************************************
+.
+          INC       STD001FD
+          INC       PATCALAG/INC
+          INC       PATDHEAD/INC
+.
+          INC       IBAPASFD/INC
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       OUTBOAFD/INC                                       *I-90201
+          INC       OUTBB1FD/INC                                       *I-90201
+          INC       PATALRFD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATDO1FD/INC
+          INC       PATDSCFD/INC
+          INC       PATEBHFD/INC
+          INC       PATEBIFD/INC
+          INC       PATEDAFD/INC
+          INC       PATINVFD/INC
+          INC       PATMA1FD/INC
+          INC       PATMI1FD/INC
+          INC       PMSPX2FD/INC
+          INC       PMSVX1FD/INC
+          INC       PATNOBFD/INC
+          INC       PATVISFD/INC                                       *I-90201
+          INC       PATWR1FD/INC
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+TEMP1A    IFILE     SQL, FIXED=71, KEY="U1-3"
+TEMP1B    IFILE     SQL, FIXED=71, KEY="U4-11,12-19"
+FILELIN1  INIT      " 71 U1-3 U4-11,12-19" 
+.
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+DTMPNO    DIM       3         3        1     Tempfile item no
+TMPINVN   DIM       8         8        4     Invoice No
+TMPADMN   DIM       8         8       12     Admission No
+TMPINVDT  DIM       8         8       20     Invoice Date
+TMPNAME   DIM      20        20       28     Patient Name
+TMPTOTAL  DIM      11        11       48     Invoice Total
+TMPOUTST  DIM      11        11       59     Outstanding
+DEDISTAT  DIM       1         1       70     EDI Status flag
+.
+.End of Record                        71
+.
+. ----- Program Variables -----
+.
+BATCHNO   DIM       8                       * Batch Number
+BJDAY     FORM      3
+CHG       FORM      1                       * Change Flag
+CJDAY     FORM      3
+CMDLINE   DIM       100                     * Command Line
+DSPSTDTE  DIM       10                      * Display start date
+DSPEDDTE  DIM       10                      * Display end date
+EDIDESC   DIM       16                      * EDI Status Description
+EDISTAT   FORM      1                       * EDI Status Flag
+EDSTATUS  FORM      1                       * EDI Status
+FNAME1    DIM       8                       * Tempfile Name
+FROMDATE  DIM       8                       * Start Date
+IBCNUGST  FORM      1                       * Using GST
+ITMMAX    FORM      3                       * Maximum Items on Screen
+ITMMIN    FORM      3                       * Minimum Items on Screen
+ITMNO     FORM      3                       * Current Item
+INVNO     DIM       8                       * Invoice Number
+INVDATE   DIM       10                      * Invoice Date
+INVTOTAL  FORM      8.2                     * Invoice Total
+NEXT      FORM      1                       * Next Screen Flag
+NUMSEL    FORM      3                       * Number of Selected Invoices
+OUTTOTAL  FORM      8.2                     * Outstanding Total
+POST      FORM      1                       * Post Screen Flag
+PREVIOUS  FORM      1                       * Previous Screen Flag
+SALL      FORM      1                       * Select All Screen Flag
+SCRARY    DIM       3[63]                   * 1st Record on Each Screen
+SCRMAX    FORM      3                       * Maximum Screen No
+SCRNO     FORM      2                       * Current Screen No
+TMPNO     FORM      3                       * Tempfile No
+TODATE    DIM       8                       * End Date
+.
+EXCLUDE   INIT      "On Hold/Exclude."
+NOTSENT   INIT      "Not Sent."
+REJECTED  INIT      "Rejected Claim."
+SENT      INIT      "Sent."
+ZED8      INIT      "zzzzzzzz"
+.
+PRGID     INIT      "IBAADT23"
+PRGNAM    INIT      "Health Fund EDI Extract Maintenance"
+VERSION   INIT      "V11.03.00"
+.
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000                * initialisation and open files
+.
+ML0100    CALL      OPTN0000                * select options
+          BRANCH    EXIT,ML9900             * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,ML1000,ML2000,ML3000,ML4000   
+.
+ML1000    CALL      EXCL0000                * Exclude Invoice Number
+          GOTO      ML0100
+.
+ML2000    CALL      INCL0000                * Include Invoice Number 
+          GOTO      ML0100
+.          
+ML3000    CALL      RSENT000                * Resubmit Sent Invoices
+          GOTO      ML0100
+.
+ML4000    CALL      RREJT000                * Resubmit Rejected Invoices 
+          GOTO      ML0100
+.
+ML9900    CALL      KILL0000                * Delete the Tempfile
+.
+ML9999    CHAIN     PGM                     * chain back to program
+.
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                * Display Heading
+          DISPLAY   *P56:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"ihapassf";
+          OPEN      IHAPASS1,"ihapassf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patdo1af";
+          OPEN      PATDO1A1,"patdo1af"
+.
+          DISPLAY   *P64:24,"patebhaf";
+          OPEN      PATEBHA1,"patebhaf"
+.
+          DISPLAY   *P64:24,"patebiaf";
+          OPEN      PATEBIA1,"patebiaf"
+          OPEN      PATEBIA2,"patebiaf"
+.
+          DISPLAY   *P64:24,"patedaaf";
+          OPEN      PATEDAA1,"patedaaf"
+.
+          DISPLAY   *P64:24,"patdschf";
+          OPEN      PATDSCH1,"patdschf"
+.
+          DISPLAY   *P64:24,"patinvrf";
+          OPEN      PATINVR1,"patinvrf"
+          OPEN      PATINVR2,"patinvrf"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+.
+          DISPLAY   *P64:24,"patmx1af";
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"pmspx2af";
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"patnobef";
+          OPEN      PATNOBE1,"patnobef"
+.
+          DISPLAY   *P64:24,"patvisaf";                                *I-90201
+          OPEN      PATVISA1,"patvisaf"                                *I-90201
+.
+          DISPLAY   *P64:24,"patwr1af";
+          OPEN      PATWR1A4,"patwr1af"
+.
+          DISPLAY   *P64:24,"outbb1af";                                *I-90201
+          OPEN      OUTBB1A1,"outbb1af"                                *I-90201
+.
+          READ      CONTROLF,TEN;*224,CAUDX
+          READ      CONTROLF,ZERO;*85,IBCNUGST
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,FNAME1
+.
+INIT9999  RETURN
+.
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Valid Option selected                  *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  HLINE     *G37,2,58,80
+          DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Exclude Invoice Number": 
+                    *P1:6,*V2LON,TWO,*HOFF,". Include Invoice Number":
+                    *P1:7,*V2LON,THREE,*HOFF,". Resubmit Sent Invoices": 
+                    *P1:8,*V2LON,FOUR,*HOFF,". Resubmit Rejected Invoices" 
+.
+OPTN1000  KEYIN     *P1:10,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:10,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN2000,OPTN3000:   * Option 1 or 2 ?      
+                            OPTN4000,OPTN5000    * Option 3 or 4 ?      
+.
+          BEEP
+          GOTO      OPTN1000
+.
+OPTN2000  DISPLAY   *P57:2,*V2LON," - Exclude Invoice No ";
+          GOTO      OPTN9000
+.
+OPTN3000  DISPLAY   *P57:2,*V2LON," - Include Invoice No ";
+          GOTO      OPTN9000
+.
+OPTN4000  DISPLAY   *P57:2,*V2LON," - Resubmit Sent Invs ";
+          GOTO      OPTN9000
+.
+OPTN5000  DISPLAY   *P57:2,*V2LON," - Resubmit Reject Clms ";
+          GOTO      OPTN9000
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
+.
+.****************************************************************************
+.*                               EXCL0000              Called by: ML0000    *
+.*                           Exclude Invoice Number                         *
+.****************************************************************************
+EXCL0000  MOVE      ZERO,EDSTATUS           * EDI Status is Not Sent
+          CALL      KEYINV00                * Keyin Invoice Number 
+          BRANCH    EXIT,EXCL9500
+.
+          CALL      READ0000                * Read Patient Files
+          BRANCH    EXIT,EXCL9500
+.
+          CALL      DISP0000                * Display Invoice Details
+          CALL      OKEXCL00                * Exclude Invoice ? 
+          GOTO      EXCL0000
+.
+EXCL9000  MOVE      ZERO,EXIT
+          GOTO      EXCL9999
+.
+EXCL9500  MOVE      ONE,EXIT
+EXCL9999  RETURN
+.
+.****************************************************************************
+.*                                INCL0000             Called by: ML0000    *
+.*                           Include Invoice Number                         *
+.****************************************************************************
+INCL0000  DISPLAY   *P1:4,*EF,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Include Invoice": 
+                    *P1:6,*V2LON,TWO,*HOFF,". Include Invoices For A":
+                                           " Date Range":
+                    *P1:7,*V2LON,THREE,*HOFF,". Include Invoices For A": 
+                                             " Batch Number"
+.
+INCL1000  KEYIN     *P1:9,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:9,*V2LON,COPTION
+.
+          BRANCH    COPTION,INCL2000,INCL3000,INCL4000
+          GOTO      INCL9999
+.
+INCL2000  MOVE      THREE,EDSTATUS          * EDI Status is On Hold/Exclude
+          CALL      KEYINV00                * Keyin Invoice Number 
+          BRANCH    EXIT,INCL0000
+.
+          CALL      READ0000                * Read Patient Files
+          BRANCH    EXIT,INCL0000
+.
+          CALL      DISP0000                * Display Invoice Details
+          CALL      OKINCL00                * Include Invoice ?
+          GOTO      RSENT000
+.
+INCL3000  CALL      DATE0000                * Keyin Date Range
+          BRANCH    EXIT,INCL9999
+          CALL      OPEN0000                * Open the Tempfile
+          MOVE      THREE,EDSTATUS          * EDI Status is On Hold/Exclude
+          CALL      LOAD0000                * Load the Tempfile
+          CALL      BACK0000                * Display the Background Screen
+          PACK      KEY3,SP2,ONE
+          CALL      DPSC0000                * Display Screen
+          GOTO      INCL5000
+.
+INCL4000  CALL      KEYBAT00                * Keyin Batch No. Range
+          BRANCH    EXIT,INCL0000
+          CALL      OPEN0000                * Open the Tempfile
+          MOVE      THREE,EDSTATUS          * EDI Status is On Hold/Exclude
+          CALL      BLOAD000                * Load the Tempfile
+          CALL      BACK0000                * Display the Background Screen
+          PACK      KEY3,SP2,ONE
+          CALL      DPSC0000                * Display Screen
+.
+INCL5000  CALL      QUES0000                * Main question
+          COMPARE   ZERO,CCITEM
+          GOTO      INCL6000 IF EQUAL       * Post
+          GOTO      INCL0000 IF LESS        * Cancel
+.
+          PERFORM   CCITEM,NEXT0000:        * Next screen
+                           PREV0000:        * pRevious screen
+                           CHAN0000:        * Change Item
+                           SALL0000:        * Select All
+                           PAGE0000         * Select Page
+.
+          BRANCH    EXIT,INCL0000
+          GOTO      INCL5000
+.
+INCL6000  CALL      POST0000                * Post items
+          GOTO      INCL0000
+.
+INCL9999  RETURN
+.
+.****************************************************************************
+.*                               RSENT000              Called by: ML0000    *
+.*                          Resubmit Sent Invoice                           *
+.****************************************************************************
+RSENT000  DISPLAY   *P1:4,*EF,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Resubmit Sent Invoice": 
+                    *P1:6,*V2LON,TWO,*HOFF,". Resubmit Sent Invoices For A":
+                                           " Date Range":
+                    *P1:7,*V2LON,THREE,*HOFF,". Resubmit Sent Invoices For A": 
+                                             " Batch Number"
+.
+RSENT100  KEYIN     *P1:9,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:9,*V2LON,COPTION
+.
+          BRANCH    COPTION,RSENT200,RSENT300,RSENT400
+          GOTO      RSENT999
+
+RSENT200  MOVE      ONE,EDSTATUS            * EDI Status is Sent
+          CALL      KEYINV00                * Keyin Invoice Number 
+          BRANCH    EXIT,RSENT000
+.
+          CALL      READ0000                * Read Patient Files
+          BRANCH    EXIT,RSENT000
+.
+          CALL      DISP0000                * Display Invoice Details
+          CALL      OKRSUB00                * Resubmit Invoice ?
+          GOTO      RSENT000             
+.
+RSENT300  CALL      DATE0000                * Keyin Date Range
+          BRANCH    EXIT,RSENT000
+          CALL      OPEN0000                * Open the Tempfile
+          MOVE      ONE,EDSTATUS            * EDI Status is Sent
+          CALL      LOAD0000                * Load the Tempfile
+          CALL      BACK0000                * Display the Background Screen
+          PACK      KEY3,SP2,ONE
+          CALL      DPSC0000                * Display Screen
+          GOTO      RSENT500
+.
+RSENT400  CALL      KEYBAT00                * Keyin Batch No. Range
+          BRANCH    EXIT,RSENT000
+          CALL      OPEN0000                * Open the Tempfile
+          MOVE      ONE,EDSTATUS            * EDI Status is Sent
+          CALL      BLOAD000                * Load the Tempfile
+          CALL      BACK0000                * Display the Background Screen
+          PACK      KEY3,SP2,ONE
+          CALL      DPSC0000                * Display Screen
+.
+RSENT500  CALL      QUES0000                * Main question
+          COMPARE   ZERO,CCITEM
+          GOTO      RSENT600 IF EQUAL       * Post
+          GOTO      RSENT000 IF LESS        * Cancel
+.
+          PERFORM   CCITEM,NEXT0000:        * Next screen
+                           PREV0000:        * pRevious screen
+                           CHAN0000:        * Change Item
+                           SALL0000:        * Select All
+                           PAGE0000         * Select Page
+.
+          BRANCH    EXIT,RSENT000
+          GOTO      RSENT500
+.
+RSENT600  CALL      POST0000                * Post items
+          GOTO      RSENT000
+.
+RSENT999  RETURN
+.
+.****************************************************************************
+.*                               RREJT000              Called by: ML0000    *
+.*                      Resubmit Rejected Invoice                           *
+.****************************************************************************
+RREJT000  DISPLAY   *P1:4,*EF,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Resubmit Rejected Invoice": 
+                    *P1:6,*V2LON,TWO,*HOFF,". Resubmit Rejected Invoices":
+                                           " For A Date Range":
+                    *P1:7,*V2LON,THREE,*HOFF,". Resubmit Rejected Invoices": 
+                                             " For A Batch Number"
+.
+RREJT100  KEYIN     *P1:9,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:9,*V2LON,COPTION
+.
+          BRANCH    COPTION,RREJT200,RREJT300,RREJT400
+          GOTO      RREJT999
+
+RREJT200  MOVE      TWO,EDSTATUS            * EDI Status is Rejected
+          CALL      KEYINV00                * Keyin Invoice Number
+          BRANCH    EXIT,RREJT000
+.
+          CALL      READ0000                * Read Patient Files
+          BRANCH    EXIT,RREJT000
+.
+          CALL      DISP0000                * Display Invoice Details
+          CALL      OKRSUB00                * Resubmit Invoice ?
+          GOTO      RREJT000
+.
+RREJT300  CALL      DATE0000                * Keyin Date Range
+          BRANCH    EXIT,RREJT000
+          CALL      OPEN0000                * Open the Tempfile
+          MOVE      TWO,EDSTATUS            * EDI Status is Rejected
+          CALL      LOAD0000                * Load the Tempfile
+          CALL      BACK0000                * Display the Background Screen
+          PACK      KEY3,SP2,ONE
+          CALL      DPSC0000                * Display Screen
+          GOTO      RREJT500
+.
+RREJT400  CALL      KEYBAT00                * Keyin Batch No. Range
+          BRANCH    EXIT,RREJT000
+          CALL      OPEN0000                * Open the Tempfile
+          MOVE      TWO,EDSTATUS            * EDI Status is Rejected
+          CALL      BLOAD000                * Load the Tempfile
+          CALL      BACK0000                * Display the Background Screen
+          PACK      KEY3,SP2,ONE
+          CALL      DPSC0000                * Display Screen
+.
+RREJT500  CALL      QUES0000                * Main question
+          COMPARE   ZERO,CCITEM
+          GOTO      RREJT600 IF EQUAL       * Post
+          GOTO      RREJT000 IF LESS        * Cancel
+.
+          PERFORM   CCITEM,NEXT0000:        * Next screen
+                           PREV0000:        * pRevious screen
+                           CHAN0000:        * Change Item
+                           SALL0000:        * Select All
+                           PAGE0000         * Select Page
+.
+          BRANCH    EXIT,RREJT000
+          GOTO      RREJT500
+.
+RREJT600  CALL      POST0000                * Post items
+          GOTO      RREJT000
+.
+RREJT999  RETURN
+.
+.****************************************************************************
+.*                                KEYINV00             Called by: EXCL0000  *
+.*                           Keyin Invoice Number      RSENT000 & RRECT000  *
+.****************************************************************************
+KEYINV00  KEYIN     *P1:3,*EF,*P1:4,"Invoice No :":
+                    *P14:4,*V2LON,*JR,INVNO;
+.
+          PACK      INVNO,INVNO,SP8
+          MATCH     SP8,INVNO
+          GOTO      KEYINV90 IF EQUAL       * Return to Menu if Return Hit
+.
+          UNPACK    INVNO,KEY7,KEY1
+          MATCH     "       0",KEY1
+          GOTO      KEYINV90 IF EQUAL       * Return to Menu if Return Hit
+.
+          PACK      KEY8,INVNO
+          CALL      RDINV1                  * Read Patient Invoice File
+          BRANCH    OVRCD,KEYINV50          * Invoice Number not found
+.
+          COMPARE   EDSTATUS,PTINEDSF       * Check EDI Status
+          GOTO      KEYINV80 IF EQUAL       * EDI Status is OK
+.
+          IF        (EDSTATUS=ZERO)&(PTINEDSF=THREE)
+            DISPLAY   *P1:24,*EL,*B,"EDI status is already on hold/excluded.  ";
+            CALL      HITENTER
+            GOTO      KEYINV00
+          ENDIF
+.
+KEYINV40  MOVE      NOTSENT,EDIDESC 
+          LOAD      EDIDESC,PTINEDSF,SENT,REJECTED,EXCLUDE
+          PACK      EDIDESC,EDIDESC,SP20
+          DISPLAY   *P1:24,*EL,*B,"EDI status flag is currently ":
+                    *V2LON,EDIDESC;
+          CALL      HITENTER
+          GOTO      KEYINV00
+.
+KEYINV50  DISPLAY   *P1:24,*EL,*B,"Invoice number does not exist.  ";
+          CALL      HITENTER
+          GOTO      KEYINV00
+.
+KEYINV80  MOVE      ZERO,EXIT
+          GOTO      KEYINV99
+.
+KEYINV90  MOVE      ONE,EXIT
+KEYINV99  RETURN
+.
+.****************************************************************************
+.*                                KEYBAT00             Called by: RSENT000  *
+.*                           Input Batch Number                 & RREJT000  *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run Print Option                       *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+KEYBAT00  KEYIN     *P1:3,*EF,*P1:4,*EL,"Batch No : ",*V2LON,*JR,BATCHNO;
+.
+          PACK      BATCHNO,BATCHNO,SP8
+          MATCH     SP8,BATCHNO
+          GOTO      KEYBAT95 IF EQUAL
+.
+          UNPACK    BATCHNO,KEY7,KEY1
+          MATCH     "       0",KEY1
+          GOTO      KEYBAT95 IF EQUAL
+.
+          PACK      KEY8,BATCHNO
+          CALL      RDPTEBH1                     * Read Batch Header File
+          BRANCH    OVRCD,KEYBAT50
+          GOTO      KEYBAT90
+.
+KEYBAT50  DISPLAY   *P1:24,*EL,*B,"Batch number does not exist.  ";
+          CALL      HITENTER
+          GOTO      KEYBAT00 
+.
+KEYBAT90  MOVE      ZERO,EXIT
+          GOTO      KEYBAT99
+.
+KEYBAT95  MOVE      ONE,EXIT
+.
+KEYBAT99  RETURN
+.
+.****************************************************************************
+.*                                READ0000             Called by: EXCL0000  *
+.*                           Read Patient Files        RSENT000 & RREJT000  *
+.****************************************************************************
+READ0000  UNPACK    PINVDTE,CCENT,CYEAR,CMON,CDAY     * Invoice Date
+          CALL      PACDATE                 * Format the invoice date
+          MOVE      CPCDATE,INVDATE
+          REP       " 0",INVDATE
+.
+          CALL      CLPATDSC                * Clear disch file variables
+          PACK      KEY8,PINVADM
+          CALL      RDDSCH1                 * Read Patient Discharge File
+.            
+          PACK      KEY8,PINVUR
+          CALL      RDMAST1                 * Read Patient Master File
+          IF        OVRCD=1
+            DISPLAY   *P1:24,*EL,*B,"Invoice has an invalid U/R number.  ";
+            CALL      HITENTER
+            GOTO      READ9500
+          ENDIF
+.            
+          PACK      KEY8,PURNO
+          CALL      RDPMPX21
+          IF        OVRCD=1
+            DISPLAY   *P1:24,*EL,*B,"Invoice has an invalid U/R number.  ";
+            CALL      HITENTER
+            GOTO      READ9500
+          ENDIF
+.
+. ****************************************** Start of addition         *I-90201
+          PACK      KEY8,PINVADM           * Set up for & Read Visit
+          CALL      RDVISA1
+          IF        OVRCD=1
+            DISPLAY   *P1:24,*EL,*B,"Invoice has no visit record ";
+            CALL      HITENTER
+            GOTO      READ9500
+          ENDIF
+.
+          BRANCH    PINVSYS,READ8000:       * 1=A&E (shouldn't be any)
+                            READ1000:       * 2= Outpatient
+                            READ2000        * 3= InPatient
+.
+          DISPLAY   *P1:24,*EL,*B,"Invoice has an invalid system ":
+                    "identifier ";
+          CALL      HITENTER
+          GOTO      READ9500
+.
+.
+READ1000  PACK      KEY8,PINVADM            * set up for & Read Outpatient
+          CALL      RDBOKB1                 * Booking
+          IF        OVRCD=1
+            DISPLAY   *P1:24,*EL,*B,"Invoice has no Outpatient record ";
+            CALL      HITENTER
+            GOTO      READ9500
+          ENDIF
+          GOTO      READ8000
+.
+. ****************************************** End of addition           *I-90201
+.
+READ2000  PACK      KEY8,PINVADM                                       *C-90201
+          CALL      RDMISS1                 * Read Admission File to get 
+          IF        OVRCD=1
+            DISPLAY   *P1:24,*EL,*B,"Invoice has an invalid admission ":
+                      "number.  ";
+            CALL      HITENTER
+            GOTO      READ9500
+          ENDIF
+          GOTO      READ8000                                           *I-90201
+.
+READ8000  MOVE      ZERO,OUTTOTAL                                      *C-90201
+          ASSIGN    (PINVAMT+PINVPATA+PINVJOUR),OUTTOTAL   * Outstanding Amount
+.
+          MULT      "-1",PINVPATA
+          MULT      "-1",PINVJOUR
+.
+READ9000  MOVE      ZERO,EXIT
+          GOTO      READ9999
+.
+READ9500  MOVE      ONE,EXIT
+READ9999  RETURN
+.
+.****************************************************************************
+.*                                DISP0000             Called by: EXCL0000  *
+.*                          Display Invoice Details    RSENT000 & RREJT000  *
+.****************************************************************************
+DISP0000  CALL      PATHEAD                 * Display patient header
+.  Invoice No      Date       Inv Total        Paid      Journals  Outstanding
+.    12345678   12/12/1999  12345678.12  1234567.12  123456789.12  12345678.12
+          DISPLAY   *P4:8,*V2LON,*ULON,"Invoice No   ",*P17:8,"   Date    ":
+                    *P28:8,"   Inv Total ",*P41:8,"       Paid ":
+                    *P53:8,"     Journals ",*P67:8," Outstanding"
+.
+          DISPLAY   *P6:9,PINVNO,*P17:9,INVDATE:
+                    *P29:9,PINVAMT,*P42:9,PINVPATA:
+                    *P54:9,PINVJOUR,*P68:9,OUTTOTAL;
+.
+DISP9999  RETURN
+.
+.****************************************************************************
+.*                                OKEXCL00             Called by: EXCL0000  *
+.*                          OK to Exclude Invoice                           *
+.****************************************************************************
+OKEXCL00  KEYIN     *P1:24,*EL,"OK to Exclude Invoice (",*V2LON,"Y",*HOFF:
+                    "/",*V2LON,"N",*HOFF,") ? ",ANS;
+          REP       "yYnN",ANS
+          MATCH     "N",ANS
+          GOTO      OKEXCL99 IF EQUAL
+          MATCH     "Y",ANS
+          GOTO      OKEXCL00 IF NOT EQUAL
+.
+          PACK      KEY8,INVNO
+          CALL      RLPTINV1                * Read & Lock Patient Invoice File
+          MOVE      THREE,PTINEDSF          * Set EDI Flag to On Hold/Exclude
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT           * date updated
+          CLOCK     TIME,PTINUTIM           * time updated
+          MOVE      PASSCODE,PTINUUID       * web user id
+          CALL      UPINV1                  * Update Record
+          CALL      UUPTINV1                * Read & Lock Patient Invoice File
+          BRANCH    CAUDX,OKEXCL99          * Check that Audit Parameter is ON
+          MOVE      THREE,PTEDEDSF          * EDI Flag On Hold/Exclude
+          CALL      WRITED00
+.
+OKEXCL99  RETURN
+.
+.****************************************************************************
+.*                                OKINCL00             Called by: EXCL0000  *
+.*                          OK to Include Invoice                           *
+.****************************************************************************
+OKINCL00  KEYIN     *P1:24,*EL,"OK to Include Invoice (",*V2LON,"Y",*HOFF:
+                    "/",*V2LON,"N",*HOFF,") ? ",ANS;
+          REP       "yYnN",ANS
+          MATCH     "N",ANS
+          GOTO      OKINCL99 IF EQUAL
+          MATCH     "Y",ANS
+          GOTO      OKINCL00 IF NOT EQUAL
+.
+          PACK      KEY8,INVNO
+          CALL      RLPTINV1                * Read & Lock Patient Invoice File
+          MOVE      ZERO,PTINEDSF           * Set EDI Flag to Not Sent
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT           * date updated
+          CLOCK     TIME,PTINUTIM           * time updated
+          MOVE      PASSCODE,PTINUUID       * web user id
+          CALL      UPINV1                  * Update Record
+          CALL      UUPTINV1                * Unlock Patient Invoice File 
+          BRANCH    CAUDX,OKINCL99          * Check that Audit Parameter is ON
+          MOVE      ZERO,PTEDEDSF           * EDI Flag Not Sent
+          CALL      WRITED00
+.
+OKINCL99  RETURN
+.
+.****************************************************************************
+.*                                OKRSUB00             Called by: RSENT000  *
+.*                          OK to Resubmit Invoice                          *
+.****************************************************************************
+OKRSUB00  KEYIN     *P1:24,*EL,"OK to Resubmit Invoice (",*V2LON,"Y",*HOFF:
+                    "/",*V2LON,"N",*HOFF,") ? ",ANS;
+          REP       "yYnN",ANS
+          MATCH     "N",ANS
+          GOTO      OKRSUB99 IF EQUAL
+          MATCH     "Y",ANS
+          GOTO      OKRSUB00 IF NOT EQUAL
+.
+          PACK      KEY8,INVNO
+          CALL      RLPTINV1                * Read & Lock Patient Invoice File
+          MOVE      ZERO,PTINEDSF           * Set EDI Flag to Not Sent
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT           * date updated
+          CLOCK     TIME,PTINUTIM           * time updated
+          MOVE      PASSCODE,PTINUUID       * web user id
+          CALL      UPINV1                  * Update Record
+          CALL      UUPTINV1                * Unlock Patient Invoice File 
+          BRANCH    CAUDX,OKRSUB99          * Check that Audit Parameter is ON
+          MOVE      ZERO,PTEDEDSF           * EDI Flag Not Sent
+          CALL      WRITED00
+.
+OKRSUB99  RETURN
+.
+.****************************************************************************
+.*                                WRITED00             Called by: OKEXCL00  *
+.*                     Write to EDI Batch Invoice File          & OKRSUB00  *
+.****************************************************************************
+WRITED00  MOVE      INVNO,PTEDINVN
+          CALL      IBACLOCK
+          PACK      PTEDDECM,CCC,CYY,CMM,CDD,SP8      * Current Date
+          REP       " 0",PTEDDECM
+          MOVE      CTIMEIS,PTEDTECM                  * Current Time
+          MOVE      PASSCODE,PTEDOPRR                 * Current User
+          PACK      KEY16,INVNO,ZED8             * Find Batch No.
+          CALL      RSPTEBI2                * Postnl Read Batch Invoice Table
+          CALL      RPPTEBI2                * Seqntl Read Batch Invoice Table 
+          BRANCH    OVRCD,WRITED80
+.
+          MATCH     INVNO,PTEIINVN          * If Invoice Number is Correct ?
+          IF        @EQUAL
+            MOVE      PTEIBTHN,PTEDBTHN     * Set Batch Number
+          ENDIF
+.
+WRITED80  MOVE      ZERO,PTEDEETP
+          MOVE      SP70,PTEDSPR1
+.
+          PACK      KEY8,INVNO
+          CALL      WRPTEDA1                * Write to EDI Audit File
+.
+WRITED99  RETURN
+.
+.****************************************************************************
+.*                                DATE0000             Called by: INCL0000  *
+.*                            Keyin Date Range         RSENT000 & RREJT000  *
+.****************************************************************************
+DATE0000  DISPLAY   *P1:3,*EF,*P1:6,"Starting Date :";
+          DISPLAY   *P1:8,"Ending Date   :";
+          PACK      CKYIDEF8,CCC,CYY,CMM,CDD
+          REP       " 0",CKYIDEF8
+          CALL      IBACLOCK
+          MOVE      SIX,CVERT
+          MOVE      "17",CCOL
+          MOVE      CCC,CCENT
+          UNPACK    SP6,CDAY,CMON,CYEAR
+          MOVE      "0",CDEFDTE
+          MOVE      "0",CHIGHLT             * Set Keydate variables
+          CALL      KEYDATE
+          BRANCH    OVRCD,DATE9900
+.
+          PACK      FROMDATE,CCENT,CYEAR,CMON,CDAY    * Start date
+          REP       " 0",FROMDATE
+.
+          MATCH     FROMDATE,CKYIDEF8
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,*B,"Starting date cannot be in the future.  ";
+            CALL      HITENTER
+            GOTO      DATE0000
+          ENDIF
+.
+          CALL      PACDATE                 * Format the date
+          MOVE      CPCDATE,DSPSTDTE
+          REP       " 0",DSPSTDTE
+.
+DATE1000  MOVE      EIGHT,CVERT
+          CALL      KEYDATE
+          BRANCH    OVRCD,DATE0000
+.
+          PACK      TODATE,CCENT,CYEAR,CMON,CDAY      * End date
+          REP       " 0",TODATE
+.
+          MATCH     TODATE,CKYIDEF8
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,*B,"Ending date cannot be in the future.  ";
+            CALL      HITENTER
+            GOTO      DATE1000
+          ENDIF
+.
+          CALL      PACDATE                 * Format the date
+          MOVE      CPCDATE,DSPEDDTE
+          REP       " 0",DSPEDDTE
+.
+          MATCH     FROMDATE,TODATE
+          GOTO      DATE9000 IF LESS        * Start > End date
+.
+          CALL      CONTQST
+          BRANCH    CEXIT,DATE9700:           * yes
+                          DATE0000:           * no
+                          DATE9900            * cancel
+.
+DATE9000  DISPLAY   *P1:24,*EL,*B,"End date must be >= start date.  ";
+          CALL      HITENTER
+          GOTO      DATE0000
+.
+DATE9700  MOVE      ZERO,EXIT
+          GOTO      DATE9999
+.
+DATE9900  MOVE      ONE,EXIT
+.
+DATE9999  RETURN
+.
+.******************************************************************************
+.*                                  OPEN0000              Called by: INCL000  *
+.*                              Open The Tempfile         RSENT000 & RREJT000 *
+.******************************************************************************
+OPEN0000  CALL      KILL0000                * Delete the tempfile
+.
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAME1,CMDLINE
+          APPEND    FILELIN1,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID          * isbuild the temp file
+          OPEN      TEMP1A,FNAME1
+          OPEN      TEMP1B,FNAME1
+.
+OPEN9000  MOVE      ZERO,EXIT
+OPEN9999  RETURN
+.
+.******************************************************************************
+.*                                 KILL0000               Called by: ML0000   *
+.*                            Delete The Tempfile                  & OPEN0000 *
+.******************************************************************************
+KILL0000  CLOSE     TEMP1A
+          CLOSE     TEMP1B
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAME1,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID          * iserase the temp file
+.
+KILL9000  MOVE      ZERO,EXIT
+KILL9999  RETURN
+.
+.******************************************************************************
+.*                                  LOAD0000              Called by: INCL0000 *
+.*                              Load The Tempfile         RSENT000 & RREJT000 *
+.******************************************************************************
+LOAD0000  MOVE      ONE,FORM2
+          REPEAT
+            PACK      SCRARY[FORM2],SP3     * Clear array
+            ADD       ONE,FORM2
+          UNTIL     FORM2>63
+.
+          MOVE      ZERO,CHG                * Reset the change flag
+          MOVE      ZERO,TMPNO              * Reset the tempfile item no
+          MOVE      ZERO,SCRMAX             * Reset the maximum screen no
+          MOVE      ZERO,SCRNO              * Reset the current screen no
+          MOVE      ZERO,NUMSEL             * Reset the no. of selected invoices
+.
+          CALL      CLVR0000                * Clear the tempfile variables
+          DISPLAY   *P1:24,*EL,"Loading : ";
+.
+          PACK      KEY16,FROMDATE,SP20     * Key is Start Date
+          CALL      RDSINV2                 * Positional Read on Invoice File
+LOAD1000  CALL      RDKINV2                 * Sequential Read on Invoice File
+          BRANCH    OVRCD,LOAD9000          * No Valid Records
+          MATCH     PINVDTE,TODATE
+          GOTO      LOAD9000 IF LESS        * Invoice Date out of Range
+          COMPARE   EDSTATUS,PTINEDSF       * EDI status is correct ?
+          GOTO      LOAD1000 IF NOT EQUAL     
+.
+          IF        EDSTATUS=1
+            MATCH     "99999999",PINVBLCD   * Only display unbalanced invoices
+            GOTO      LOAD1000 IF NOT EQUAL
+          ENDIF
+. 
+          MOVE      PINVNO,TMPINVN          * Invoice Number
+          MOVE      PINVADM,TMPADMN         * Admission Number
+          MOVE      PINVDTE,TMPINVDT        * Invoice Date 
+          MOVE      PINVAMT,INVTOTAL        * Invoice Total
+.
+          MOVE      ZERO,OUTTOTAL           * Outstanding Amount
+        ASSIGN   (PINVAMT+PINVPATA+PINVHFDA+PINVOTHA+PINVJOUR+PTINCRTT),OUTTOTAL
+          IF        IBCNUGST=2 | IBCNUGST=3
+            ADD       PTINGSTJ,OUTTOTAL
+          ENDIF
+.
+          PACK      KEY8,PINVUR
+          CALL      RDMAST1                 * Read Patient Master File
+          BRANCH    OVRCD,LOAD5000
+.
+          MOVE      PTITL,PACTITLE
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME                 * Pack Full Name
+          MOVE      PACFNAME,TMPNAME        * Patients full name
+.
+LOAD5000  ADD       ONE,TMPNO               * Increment the tempfile item no
+          CALL      WRIT0000                * Write to the tempfile
+          BRANCH    EXIT,LOAD9500
+.
+          MOVE      ONE,SCRNO               * Current screen no - 1st
+.
+          IF        TMPNO%10=1
+            DISPLAY   *P11:24,*V2LON,PINVNO,SP2,PINVADM;
+          ENDIF
+.
+          GOTO      LOAD1000
+.
+LOAD9000  MOVE      ZERO,EXIT
+          GOTO      LOAD9999
+.
+LOAD9500  MOVE      ONE,EXIT
+LOAD9999  RETURN
+.
+.******************************************************************************
+.*                                  BLOAD000              Called by: RSENT000 *
+.*                              Load The Tempfile                  & RREJT000 *
+.******************************************************************************
+BLOAD000  MOVE      ONE,FORM2
+          REPEAT
+            PACK      SCRARY[FORM2],SP3     * Clear array
+            ADD       ONE,FORM2
+          UNTIL     FORM2>63
+.
+BLOAD050  MOVE      ZERO,CHG                * Reset the change flag 
+          MOVE      ZERO,TMPNO              * Reset the tempfile item no
+          MOVE      ZERO,SCRMAX             * Reset the maximum screen no
+          MOVE      ZERO,SCRNO              * Reset the current screen no
+          MOVE      ZERO,NUMSEL             * Reset the no. of selected invoices
+          MOVE      SP10,DSPSTDTE           * Reset the start date
+          MOVE      SP10,DSPEDDTE           * Reset the end date
+.
+          CALL      CLVR0000                * Clear the tempfile variables
+          DISPLAY   *P1:24,*EL,"Loading : ";
+.
+          PACK      KEY16,BATCHNO,SP20      * Key is Batch Number
+          CALL      RSPTEBI1                * Positional Read EDI Batch Invoice
+BLOAD100  CALL      RKPTEBI1                * Sequential Read EDI Batch Invoice
+          BRANCH    OVRCD,BLOAD900          * No Valid Records
+.
+          MATCH     BATCHNO,PTEIBTHN
+          GOTO      BLOAD900 IF NOT EQUAL   * Batch Number is not found 
+.
+          PACK      KEY8,PTEIINVN,SP8       * Key is Invoice Number
+          CALL      RDINV1                  * Read Invoice File
+          BRANCH    OVRCD,BLOAD100
+          COMPARE   EDSTATUS,PTINEDSF       * EDI status is correct ?
+          GOTO      BLOAD100 IF NOT EQUAL     
+.
+          IF        EDSTATUS=1
+            MATCH     "99999999",PINVBLCD   * Only display unbalanced invoices
+            GOTO      BLOAD100 IF NOT EQUAL
+          ENDIF
+.
+          MOVE      PINVNO,TMPINVN          * Invoice Number
+          MOVE      PINVADM,TMPADMN         * Admission Number
+          MOVE      PINVDTE,TMPINVDT        * Invoice Date 
+          MOVE      PINVAMT,INVTOTAL        * Invoice Total
+.
+          MOVE      ZERO,OUTTOTAL           * Outstanding Amount
+        ASSIGN   (PINVAMT+PINVPATA+PINVHFDA+PINVOTHA+PINVJOUR+PTINCRTT),OUTTOTAL
+          IF        IBCNUGST=2 | IBCNUGST=3
+            ADD       PTINGSTJ,OUTTOTAL
+          ENDIF
+.
+          PACK      KEY8,PINVUR
+          CALL      RDMAST1                 * Read Patient Master File
+          BRANCH    OVRCD,BLOAD500
+.
+          MOVE      PTITL,PACTITLE
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME                 * Pack Full Name
+          MOVE      PACFNAME,TMPNAME        * Patients full name
+.
+BLOAD500  ADD       ONE,TMPNO               * Increment the tempfile item no
+.                                           * Record date of first invoice
+          IF        TMPNO=1
+            UNPACK    TMPINVDT,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE               * Format the date
+            MOVE      CPCDATE,DSPSTDTE
+            REP       " 0",DSPSTDTE
+          ENDIF 
+.
+          CALL      WRIT0000                * Write to the tempfile
+          BRANCH    EXIT,BLOAD950
+.
+          MOVE      ONE,SCRNO               * Current screen no - 1st
+.
+          IF        TMPNO%10=1
+            DISPLAY   *P11:24,*V2LON,PINVNO,SP2,PINVADM;
+          ENDIF
+.
+          GOTO      BLOAD100
+.
+BLOAD900  UNPACK    TMPINVDT,CCENT,CYEAR,CMON,CDAY * Record date of last invoice
+          CALL      PACDATE                 * Format the date
+          MOVE      CPCDATE,DSPEDDTE
+          REP       " 0",DSPEDDTE
+.
+          MOVE      ZERO,EXIT                      
+          GOTO      BLOAD999
+.
+BLOAD950  MOVE      ONE,EXIT
+BLOAD999  RETURN
+.
+.******************************************************************************
+.*                                  CLVR0000              Called by: LOAD0000 *
+.*                         Clear The Tempfile Variables                       *
+.******************************************************************************
+CLVR0000  
+          MOVE      SP8,TMPINVN
+          MOVE      SP8,TMPADMN
+          MOVE      SP8,TMPINVDT
+          MOVE      SP20,TMPNAME
+          MOVE      SP20,TMPTOTAL
+          MOVE      SP20,TMPOUTST
+          MOVE      ZERO,EDISTAT            * EDI Status = no change
+.
+CLVR9000  MOVE      ZERO,EXIT
+CLVR9999  RETURN
+.
+.******************************************************************************
+.*                                  WRIT0000              Called by: LOAD0000 *
+.*                            Write To The Tempfile                           *
+.******************************************************************************
+WRIT0000  PACK      KEY3,TMPNO
+          CALL      RATEMP1A                * Check read a tempfile record
+          COMPARE   ONE,OVRCD
+          GOTO      WRIT1000 IF NOT EQUAL   * Record already on file, error
+.
+          CALL      WRTEMP1A                * Write a tempfile record
+.
+          ASSIGN    TMPNO%16,FORM2          * The remainder from a division
+          IF        FORM2=1
+            ADD       ONE,SCRMAX            * Increment the maximum screen no
+            PACK      SCRARY[SCRMAX],KEY3   * 1st record on each screen
+          ENDIF
+          GOTO      WRIT9000
+.
+WRIT1000  DISPLAY   *P1:24,*EL,*B,"Error writing to the tempfile.  ";
+          CALL      HITENTER
+          DISPLAY   *P1:24,*EL,"Reseting the tempfile ...",*W2;
+          GOTO      WRIT9500
+.
+WRIT9000  MOVE      ZERO,EXIT
+          GOTO      WRIT9999
+.
+WRIT9500  MOVE      ONE,EXIT
+WRIT9999  RETURN
+.
+.******************************************************************************
+.*                                  BACK0000              Called by: INCL0000 *
+.*                        Display The Background Screen   RSENT000 & RREJT000 *
+.******************************************************************************
+BACK0000  DISPLAY   *P1:3,*EF,*P1:4,"Start Date ",*V2LON,DSPSTDTE:
+                    *HOFF," End Date ",*V2LON,DSPEDDTE:
+                    *HOFF," No. Invoices : ",*V2LON,TMPNO:
+                    *HOFF," No. Selected : ",*V2LON,NUMSEL: 
+                    *P1:6,*ULON,"Itm  ",*P6:6,"Inv No  ":
+                    *P14:6,"Admin No  ",*P24:6,"Inv Date  ":
+                    *P34:6,"Name                   ",*P57:6,"Inv Total   ":
+                    *P69:6,"Outstanding",*HOFF
+BACK9000  MOVE      ZERO,EXIT
+BACK9999  RETURN
+.
+.******************************************************************************
+.*                                  DPSC0000     Called by: INCL0000,RSENT000 *
+.*                               Display Screen             RREJT000,NEXT0000 *
+.*                                                          PREV0000,CHAN0000 *
+.******************************************************************************
+DPSC0000  MOVE      SEVEN,CVERT
+          CALL      RDTEMP1A                * Read a tempfile record
+.
+          WHILE     CVERT<23
+            CALL      DPLN0000              * Display line
+            ADD       ONE,CVERT
+            CALL      RKTEMP1A              * Read a tempfile record
+          DO
+.
+DPSC9000  MOVE      ZERO,EXIT
+DPSC9999  RETURN
+.
+.******************************************************************************
+.*                                  DPLN0000              Called by: DPSC0000 *
+.*                                Display Line                     & CHAN0000 *
+.******************************************************************************
+DPLN0000  BRANCH    OVRCD,DPLN1000          * Invalid record, clear line
+.
+          COMPARE   ZERO,EDISTAT            * Determine if Highlight/Bold
+          IF        @EQUAL
+            DISPLAY   *P1:CVERT,*EL,TMPNO,".";
+          ELSE
+            DISPLAY   *P1:CVERT,*EL,*V2LON,TMPNO,".",*HOFF;
+          ENDIF
+.
+          UNPACK    TMPINVDT,CCENT,CYEAR,CMON,CDAY * Invoice date
+          CALL      PACDATE                 * Format the date
+          REP       " 0",CPCDATE
+.
+          DISPLAY   *P5:CVERT,TMPINVN:
+                    *P14:CVERT,TMPADMN,*P23:CVERT,CPCDATE:
+                    *P34:CVERT,TMPNAME,*P56:CVERT,INVTOTAL:
+                    *P69:CVERT,OUTTOTAL;
+          GOTO      DPLN9000
+.
+DPLN1000  DISPLAY   *P1:CVERT,*EL;
+.
+DPLN9000  MOVE      ZERO,EXIT
+DPLN9999  RETURN
+.
+.******************************************************************************
+.*                                  QUES0000              Called by: INCL0000 *
+.*                                Main Question           RSENT000 & RREJT000 *
+.******************************************************************************
+QUES0000  MOVE      ZERO,CCITEM
+          MOVE      ONE,NEXT                * Reset the next screen flag
+          MOVE      ONE,PREVIOUS            * Reset the previous screen flag
+          MOVE      ONE,POST                * Reset the post screen flag
+          MOVE      ONE,SALL                * Reset the select all screen flag
+.
+          CALL      GMMI0000                * Get minimum & maximum dis items
+.
+          DISPLAY   *P1:24,*EL;             * Display Selection List
+          MOVE      "1",CCOL
+.
+          IF        SCRNO>0
+            DISPLAY   "Select item, ";
+            ADD       "13",CCOL
+          ENDIF
+.
+          IF        SCRMAX>1
+            DISPLAY   *V2LON,"A",*HOFF,"ll, ";
+            ADD       "5",CCOL
+            MOVE      ZERO,SALL             * Set the select all screen flag
+          ENDIF
+.
+          DISPLAY   "Pa",*V2LON,"G",*HOFF,"e, ";
+          ADD       "6",CCOL
+.
+          IF        SCRNO<SCRMAX
+            DISPLAY   *V2LON,"N",*HOFF,"ext, ";
+            ADD       "6",CCOL
+            MOVE      ZERO,NEXT             * Set the next screen flag
+          ENDIF
+.
+          IF        SCRNO>1
+            DISPLAY   "p",*V2LON,"R",*HOFF,"evious, ";
+            ADD       "10",CCOL
+            MOVE      ZERO,PREVIOUS         * Set the previous screen flag
+          ENDIF
+.
+          IF        CHG=1
+            DISPLAY   *V2LON,"P",*HOFF,"ost, ";
+            ADD       "6",CCOL
+            MOVE      ZERO,POST             * Set the post screen flag
+          ENDIF
+.
+          DISPLAY   *V2LON,"C",*HOFF,"ancel ? ";
+          ADD       "9",CCOL
+.
+. Select item, Next, pRevious, Post, Cancel? 
+.
+QUES0500  MOVE      SP3,KEY3
+          KEYIN     *PCCOL:24,*EL,*V2LON,*JR,KEY3;
+.
+          ENDSET    KEY3
+          APPEND    SP3,KEY3
+          RESET     KEY3
+.
+          TYPE      KEY3
+          GOTO      QUES1000 IF NOT EQUAL   * Non numeric
+.
+. ----- Numeric selection -----
+.
+          COMPARE   ONE,SCRNO
+          GOTO      QUES1500 IF LESS        * Not in change mode
+.
+          MOVE      ZERO,ITMNO
+          MOVE      KEY3,ITMNO
+          IF        ITMNO<1 | ITMNO<ITMMIN | ITMNO>ITMMAX | ITMNO>999
+            GOTO      QUES1500
+          ENDIF
+.
+          PACK      KEY3,ITMNO
+          CALL      RDTEMP1A                * Read a tempfile record
+          COMPARE   ONE,OVRCD
+          GOTO      QUES3500 IF NOT EQUAL   * Record exists continue
+.
+          DISPLAY   *P1:24,*EL,*B,"Error reading selection ",*V2LON,ITMNO:
+                    *HOFF," from the tempfile.  ";
+          CALL      HITENTER
+          GOTO      QUES0000
+.
+. ----- Non numeric selection -----
+.
+QUES1000  UNPACK    KEY3,KEY1,KEY1,KEY1
+          REP       UPPLOW,KEY1
+          REP       "N1R2P3C4A5G6",KEY1
+          MOVE      ZERO,FORM1
+          MOVE      KEY1,FORM1
+          BRANCH    FORM1,QUES2000,QUES2500,QUES4000,QUES7500,QUES5000,QUES6000
+.                         Next     pRevious  Post     Cancel Select All  Page
+.
+QUES1500  BEEP
+          GOTO      QUES0500
+.
+QUES2000  BRANCH    NEXT,QUES1500
+          MOVE      "1",CCITEM              * Next
+          GOTO      QUES8000
+.
+QUES2500  BRANCH    PREVIOUS,QUES1500
+          MOVE      "2",CCITEM              * Previous
+          GOTO      QUES8000
+.
+QUES3500  MOVE      "3",CCITEM              * Change
+          GOTO      QUES8000
+.
+QUES4000  BRANCH    POST,QUES1500
+          MOVE      "0",CCITEM              * Post
+          GOTO      QUES8000
+.
+QUES5000  BRANCH    SALL,QUES1500
+          MOVE      "4",CCITEM              * Select All
+          GOTO      QUES8000
+.
+QUES6000  MOVE      "5",CCITEM              * Select Page
+          GOTO      QUES8000
+
+QUES7500  MOVE      "-1",CCITEM             * Cancel
+.
+QUES8000  DISPLAY   *P1:24,*EL;
+QUES9000  MOVE      ZERO,EXIT
+QUES9999  RETURN
+.
+.******************************************************************************
+.*                                  GMMI0000              Called by: QUES0000 *
+.*                        Get The Minimum & Maximum Items                     *
+.******************************************************************************
+GMMI0000  COMPARE   ZERO,TMPNO
+          GOTO      GMMI9000 IF EQUAL       * No operation screen
+.
+          UNPACK    SCRARY[SCRNO],KEY3
+          MOVE      KEY3,ITMMIN             * Minimum items on screen
+          MOVE      ITMMIN,TMPNO
+          MOVE      ONE,FORM2
+          CALL      RDTEMP1A                * Read a tempfile record
+.
+          WHILE     OVRCD<>1 & FORM2<16
+            ADD       ONE,FORM2
+            CALL      RKTEMP1A              * Read a tempfile record
+          DO
+          MOVE      TMPNO,ITMMAX            * Maximum items on screen
+.
+GMMI9000  MOVE      ZERO,EXIT
+GMMI9999  RETURN
+.******************************************************************************
+.*                                  NEXT0000              Called by: INCL0000 *
+.*                                 Next Screen            RSENT000 & RREJT000 *
+.******************************************************************************
+NEXT0000  ADD       ONE,SCRNO
+          UNPACK    SCRARY[SCRNO],KEY3
+          CALL      DPSC0000                * Display screen
+.
+NEXT9000  MOVE      ZERO,EXIT
+NEXT9999  RETURN
+.
+.******************************************************************************
+.*                                  PREV0000              Called by: INCL0000 *
+.*                               Previous Screen          RSENT000 & RREJT000 *
+.******************************************************************************
+PREV0000  SUB       ONE,SCRNO
+          UNPACK    SCRARY[SCRNO],KEY3
+          CALL      DPSC0000                * Display screen
+.
+PREV9000  MOVE      ZERO,EXIT
+PREV9999  RETURN
+.
+.******************************************************************************
+.*                                  POST0000              Called by: INCL0000 *
+.*                                 Post Items             RSENT000 & RREJT000 *
+.******************************************************************************
+POST0000  CALL      IBACLOCK
+          PACK      PTEDDECM,CCC,CYY,CMM,CDD,SP8      * Current Date
+          REP       " 0",PTEDDECM
+          MOVE      CTIMEIS,PTEDTECM        * Current Time
+          MOVE      PASSCODE,PTEDOPRR       * Current User
+          MOVE      ZERO,PTEDEDSF           * EDI Flag Not Sent
+          PACK      KEY3,SP3
+          CALL      RSTEMP1A                * Position on & read a tempfile
+POST1000  CALL      RKTEMP1A                  record
+          BRANCH    OVRCD,POST9000
+.
+          COMPARE   ONE,EDISTAT             * Only Update Records Changed
+          GOTO      POST1000 IF NOT EQUAL
+.
+          PACK      KEY8,TMPINVN,SP8
+          CALL      RLPTINV1                * Read & Lock Patient Invoice File
+          BRANCH    OVRCD,POST2000
+          MOVE      ZERO,PTINEDSF           * Set EDI Flag to Not Sent
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT           * date updated
+          CLOCK     TIME,PTINUTIM           * time updated
+          MOVE      PASSCODE,PTINUUID       * web user id
+          CALL      UPINV1                  * Update Record
+POST2000  CALL      UUPTINV1                * Unlock Patient Invoice File 
+.
+          BRANCH    CAUDX,POST1000          * Check that Audit Parameter is ON
+.
+          MOVE      TMPINVN,PTEDINVN
+          PACK      KEY16,TMPINVN,ZED8      * Find Batch No.
+          CALL      RSPTEBI2                * Postnl Read Batch Invoice Table
+          CALL      RPPTEBI2                * Seqntl Read Batch Invoice Table 
+          BRANCH    OVRCD,POST8000
+.
+          MATCH     TMPINVN,PTEIINVN         * If Invoice Number is Correct ?
+          IF        @EQUAL
+            MOVE      PTEIBTHN,PTEDBTHN     * Set Batch Number
+          ENDIF
+.
+POST8000  MOVE      ZERO,PTEDEETP
+          MOVE      SP70,PTEDSPR1
+.
+          PACK      KEY8,TMPINVN,SP8
+          CALL      WRPTEDA1                * Write to EDI Audit File
+          GOTO      POST1000
+.
+POST9000  MOVE      ZERO,EXIT
+POST9999  RETURN
+.
+.******************************************************************************
+.*                                  CHAN0000              Called by: INCL0000 *
+.*                                Change Items            RSENT000 & RREJT000 *
+.******************************************************************************
+CHAN0000  COMPARE   ZERO,EDISTAT  
+          IF        @EQUAL
+            MOVE      ONE,EDISTAT           * EDI Status has changed
+            ADD       ONE,NUMSEL            * Increment number selected
+          ELSE
+            MOVE      ZERO,EDISTAT          * EDI Status has not changed
+            SUB       ONE,NUMSEL            * Decrement number selected
+          ENDIF
+.          
+          CALL      UPTEMP1A                * Update a tempfile record
+.
+          MOVE      ONE,CHG                 * Change made
+          ASSIGN    (ITMNO-ITMMIN)+7,CVERT
+          CALL      DPLN0000                * Display Line
+          DISPLAY   *P77:4,*EL,*V2LON,NUMSEL
+.
+CHAN9000  MOVE      ZERO,EXIT
+.
+CHAN9999  RETURN
+.
+.******************************************************************************
+.*                                  SALL0000              Called by: INCL0000 *
+.*                              Select All Items          RSENT000 & RREJT000 *
+.******************************************************************************
+SALL0000  PACK      KEY3,SP3                * Start at first invoice
+          CALL      RSTEMP1A
+SALL1000  CALL      RKTEMP1A
+          BRANCH    OVRCD,SALL8000
+          COMPARE   ONE,EDISTAT
+          GOTO      SALL1000 IF EQUAL
+.
+          MOVE      ONE,EDISTAT             * EDI Status has changed 
+          CALL      UPTEMP1A                * Update a tempfile record
+          ADD       ONE,NUMSEL              * Increment number selected
+          GOTO      SALL1000
+.
+SALL8000  MOVE      ONE,CHG                 * Change made
+          UNPACK    SCRARY[SCRNO],KEY3
+          CALL      DPSC0000                * Display screen
+          DISPLAY   *P77:4,*EL,*V2LON,NUMSEL
+.
+SALL9000  MOVE      ZERO,EXIT
+.
+SALL9999  RETURN
+.
+.******************************************************************************
+.*                                  PAGE0000              Called by: INCL0000 *
+.*                             Select Page Items          RSENT000 & RREJT000 *
+.******************************************************************************
+PAGE0000  PACK      KEY3,ITMMIN,SP3         * Start at first invoice
+          CALL      RDTEMP1A
+          BRANCH    OVRCD,PAGE8000
+PAGE1000  COMPARE   TMPNO,ITMMAX
+          GOTO      PAGE8000 IF LESS
+          COMPARE   ONE,EDISTAT
+          GOTO      PAGE2000 IF EQUAL
+.
+          MOVE      ONE,EDISTAT             * EDI Status has changed 
+          CALL      UPTEMP1A                * Update a tempfile record
+          ADD       ONE,NUMSEL              * Increment number selected
+PAGE2000  CALL      RKTEMP1A
+          BRANCH    OVRCD,PAGE8000
+          GOTO      PAGE1000
+.
+PAGE8000  MOVE      ONE,CHG                 * Change made
+          UNPACK    SCRARY[SCRNO],KEY3
+          CALL      DPSC0000                * Display screen
+          DISPLAY   *P77:4,*EL,*V2LON,NUMSEL
+.
+PAGE9000  MOVE      ZERO,EXIT
+.
+PAGE9999  RETURN
+.
+.******************************************************************************
+.*                        I/O Routines For The Tempfile                       *
+.******************************************************************************
+RSTEMP1A  RESET     KEY3
+          READ      TEMP1A,KEY3;;
+          RETURN
+.
+RATEMP1A  MOVE      ZERO,OVRCD
+          RESET     KEY3
+          READ      TEMP1A,KEY3;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP1A  MOVE      ZERO,OVRCD
+          RESET     KEY3
+          READ      TEMP1A,KEY3;DTMPNO,TMPINVN,TMPADMN,TMPINVDT,TMPNAME:
+                                TMPTOTAL,TMPOUTST,DEDISTAT
+          GOTO      OVERCOND IF OVER
+          MOVE      DTMPNO,TMPNO
+          MOVE      TMPTOTAL,INVTOTAL
+          MOVE      TMPOUTST,OUTTOTAL
+          MOVE      DEDISTAT,EDISTAT 
+          RETURN
+.
+RKTEMP1A  MOVE      ZERO,OVRCD
+          READKS    TEMP1A;DTMPNO,TMPINVN,TMPADMN,TMPINVDT,TMPNAME:
+                           TMPTOTAL,TMPOUTST,DEDISTAT
+          GOTO      OVERCOND IF OVER
+          MOVE      DTMPNO,TMPNO
+          MOVE      TMPTOTAL,INVTOTAL
+          MOVE      TMPOUTST,OUTTOTAL
+          MOVE      DEDISTAT,EDISTAT 
+          RETURN
+.
+RPTEMP1A  MOVE      ZERO,OVRCD
+          READKP    TEMP1A;DTMPNO,TMPINVN,TMPADMN,TMPINVDT,TMPNAME:
+                           TMPTOTAL,TMPOUTST,DEDISTAT
+          GOTO      OVERCOND IF OVER
+          MOVE      DTMPNO,TMPNO
+          MOVE      TMPTOTAL,INVTOTAL
+          MOVE      TMPOUTST,OUTTOTAL
+          MOVE      DEDISTAT,EDISTAT 
+          RETURN
+.
+UPTEMP1A  MOVE      TMPNO,DTMPNO
+          MOVE      INVTOTAL,TMPTOTAL
+          MOVE      OUTTOTAL,TMPOUTST
+          MOVE      EDISTAT,DEDISTAT
+          UPDATE    TEMP1A;DTMPNO,TMPINVN,TMPADMN,TMPINVDT,TMPNAME:
+                           TMPTOTAL,TMPOUTST,DEDISTAT
+          RETURN
+.
+WRTEMP1A  RESET     KEY3
+          MOVE      TMPNO,DTMPNO
+          MOVE      INVTOTAL,TMPTOTAL
+          MOVE      OUTTOTAL,TMPOUTST
+          MOVE      EDISTAT,DEDISTAT
+          WRITE     TEMP1A,KEY3;DTMPNO,TMPINVN,TMPADMN,TMPINVDT,TMPNAME:
+                                TMPTOTAL,TMPOUTST,DEDISTAT
+          RETURN
+.
+DETEMP1A  RESET     KEY3
+          DELETE    TEMP1A,KEY3
+          RETURN
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+          INC       CALCAGE
+          INC       CLPATDSC
+          INC       PATALERT
+          INC       PATHEAD
+          INC       PMIHEAD
+          INC       TFILENAM                     * Generate Temp File Name
+.
+          INC       IBAPASIO/INC
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       OUTBB1IO/INC                                       *I-90201
+          INC       PATALRIO/INC
+          INC       PATCODIO/INC
+          INC       PATEBHIO/INC
+          INC       PATEBIIO/INC
+          INC       PATEDAIO/INC
+          INC       PATDO1IO/INC
+          INC       PATDSCIO/INC
+          INC       PATINVIO/INC
+          INC       PATMA1IO/INC
+          INC       PATMI1IO/INC
+          INC       PMSPX2IO/INC
+          INC       PMSVX1IO/INC
+          INC       PATNOBIO/INC
+          INC       PATVISIO/INC                                       *I-90201
+          INC       PATWR1IO/INC
+          INC       WEBERRIO/INC                 * Web Server Error Logging

@@ -1,0 +1,204 @@
+.*****************************************************************************
+.* System    :   Allied Health                                               *
+.* Program   :   FX272756                                                    *
+.* Desc      :   Data fix for table allrefaf.                                *
+.*****************************************************************************
+.* Date      :   12/09/2012                                                  *
+.* Author    :   Ania Pietrusewicz                                           *
+.* Function  :   This program will add a priority to the specialist O/P      *
+.*               Master (Referral-IN) records. If blank, it will populate    *
+.*               the field based on getting the priority code from the first *
+.*               linked Specialist O/P Internal referral.                    *
+.* Mods      :                                                               *
+.*               V10.03.02 06/02/2014 Ebon Clements CAR 272756               *
+.*                         Added missing goto for PROC1000 loop.             *
+.*                         Added a menu option with continue question        *
+.*               V10.03.01 12/09/2012 Ania CAR 273211                        *
+.*                         Created Program                                   *
+.*****************************************************************************
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+.
+          INC       STD001FD
+          INC       ALLCONFD/INC       
+          INC       ALLENCFD/INC
+          INC       ALLREFFD/INC
+          INC       ALLRLNFD/INC
+          INC       PATCODFD/INC
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+MASTPRTY  DIM       3                      * Placeholder for internal priority
+MASTVISN  DIM       8                      * Placeholder for Master visit id
+TOTALCT   FORM      8                      * Total Master records found
+UPDATECT  FORM      8                      * Total Master records updated
+. 
+PRGID     INIT      "FX272756"
+PRGNAM    INIT      "Fixit for Specialist O/P - Clinical Urgency Code."
+VERSION   INIT      "V11.03.00"
+.
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN1000  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN2000       * proceed with clean up
+.
+MAIN2000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN3000:        * yes
+                          MAIN1000:        * no
+                          MAIN1000         * cancel
+.
+MAIN3000  CALL      PROC0000               * process
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             Initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                 
+.
+          DISPLAY   *P56:24,*EL,"Opening:":
+                    *P64:24,"allrefaf"
+          OPEN      ALLREFA1,"allrefaf"
+.   
+          DISPLAY   *P64:24,"allrlnaf"
+          OPEN      ALLRLNA1,"allrlnaf"
+.
+          DISPLAY   *P64:24,"patcodes"
+          OPEN      PATCODE1,"patcodes"
+.
+          MOVE      ZERO,TOTALCT
+          MOVE      ZERO,UPDATECT
+.
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run clean up                           *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run clean-up
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*   Finds Master Referral IN records with blank Specialist O/P prorities    *
+.*         Call RDIR0000 to try and populate these blank fields.             *
+.*****************************************************************************
+
+PROC0000  DISPLAY   *P1:24,"Processing:"
+.
+          PACK      KEY8,SP8
+          CALL      RSALREF1                  
+PROC1000  CALL      RKALREF1                  * Read referral record 
+          BRANCH    OVRCD,PROC9000
+.
+          DISPLAY   *P12:24,ALREVISN
+.
+          MATCH     "1",ALREUYN4              * Check if its a master record
+          GOTO      PROC1000 IF NOT EQUAL
+.          
+          MATCH     SP3,ALREPRTY              * Check that priority is blank
+          GOTO      PROC1000 IF NOT EQUAL
+.
+          MATCH     SP3,ALREDEPT
+          GOTO      PROC1000 IF EQUAL         * Check that dept code exists
+.
+          PACK      KEY5,ANSC,ANSG,ALREDEPT
+          CALL      RDCODE1
+          BRANCH    OVRCD,PROC1000
+.
+          MATCH     "O",TCINDC8               * Specialist Outpatient?
+          GOTO      PROC1000 IF NOT EQUAL
+.
+          MOVE      ALREVISN,MASTVISN         * Save the Master referral num.
+          CALL      RDIR0000
+          GOTO      PROC1000
+.
+PROC9000  DISPLAY   *P1:21,TOTALCT," records processed.":
+                    *P1:22,UPDATECT," records updated.",*N                    
+          CALL      HITENTER 
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                               RDIR0000              Called by: PROC0000   *
+.*    For each Master record, read corresponding Internal Referral records   *
+.*    until a record is found that has a non blank priority code. Return     *
+.*    this priority code so that the Master priority field can be populated. *
+.*****************************************************************************
+.
+RDIR0000  ADD       ONE,TOTALCT
+          PACK      KEY16,ALREVISN,SP8          
+          CALL      RSALRLN1
+RDIR1000  CALL      RKALRLN1
+          BRANCH    OVRCD,RDIR9000              * End of file
+.
+          MATCH     MASTVISN,ALRLVISN           * No more internal referrals
+          GOTO      RDIR9000 IF NOT EQUAL  
+.
+          PACK      KEY8,ALRLLNKV               * Get internal referral record
+          CALL      RDALREF1
+          GOTO      RDIR1000 IF OVER
+.
+          MATCH     SP3,ALREPRTY
+          GOTO      RDIR1000 IF EQUAL
+.
+          MOVE      ALREPRTY,MASTPRTY           * Found Priority!
+          PACK      KEY8,MASTVISN
+          CALL      RDALREF1                    * Position back on master rec
+          BRANCH    OVRCD,RDIR9000
+.
+          MOVE      MASTPRTY,ALREPRTY
+          CALL      UPALREF1                   
+          ADD       ONE,UPDATECT
+          GOTO      RDIR9999
+.
+RDIR9000  PACK      KEY8,MASTVISN
+          CALL      RDALREF1                    * Position back on master rec
+.
+RDIR9999  RETURN
++
+. ============================================================================
+.         I/O Includes
+. ============================================================================
+.
+          INC       STD001IO
+          INC       ALLENCIO/INC
+          INC       ALLREFIO/INC
+          INC       ALLRLNIO/INC
+          INC       PATCODIO/INC
+.

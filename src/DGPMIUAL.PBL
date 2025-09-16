@@ -1,0 +1,191 @@
+.**************************************************************************
+.*  DGPMIUAL  :  Update Alias details for a Datagate request              *
+.*               ~~~~~~~~~~~~~~~~~~~~~                                    *
+.*                                                                        *
+.*  Author    :  ROD   (11/12/95)                                         *
+.*  Mods      :                                                           *
+.*          V10.02.02  13/07/2011  Steve Armstrong   CAR 240722           *
+.*                     Further mods to cater for second given name as     *
+.*                     part PATGSRFD of keys                              *
+.*          V10.02.01  22/06/2011  Steve Armstrong   CAR 240722           *
+.*                     Mods to cater for changes to PATGSRFD:             *
+.*                       - GSRSNAM & GSRGNAM extended to 30 chars.        *
+.*                       - PTGSGNM2 added.                                *
+.*                       - all indexes changed in length.                 *
+.**************************************************************************
+.*           V9.02.01  08/09/2001  Glenn Saunders                         *
+.*                     Chg keys for patgsrn reads to reflect enhanced indx*
+.**************************************************************************
+.*           V9.00.00  18/06/2001  Mike Laming                            *
+.*                     Add Alias fields ALIASSEX & ALIASDOB               *
+.*                     (for RCH & SVHM)                                   *
+.**************************************************************************
+.*           V5.10.B01 29/03/2001  Glenn Saunders                         *
+.*                     Remove access to PTCNSNDX and associated processing*
+.**************************************************************************
+.*           V5.09.B01 03/01/2001  J.Tan                                  *
+.*                     Added Sex & Date of Birth to patgsrnf file         *
+.**************************************************************************
+.*            V5.04.01 16/04/1997  Steve Armstrong                        *
+.*                     Mods to use separate inbound & outbound comms      *
+.*                     clients for PMI requests (DGATEIN/DGATEOUT)        *
+.*                                                                        *
+.**************************************************************************
+          DEFPROC   DGPMIUAL
+ IFGE     $$VER,7
+.
+ADDORDEL  FORM      1     * 1=Add, 2=Delete Alias
+ALIASGIV  DIM       30    * Alias given name 1
+ALIASGV2  DIM       30    * Alias given name 2
+ALIASSUR  DIM       30    * Alias surname
+ALIASSEX  DIM       1     * Alias sex
+ALIASDOB  DIM       8     * Alias date-of-birth
+FOUNDREC  FORM      1
+.
+.
+DGPMIUAL  MOVE      "UAL",RPLYHEAD
+          READ      DGATEOUT;PURNO,ADDORDEL,ALIASSUR,ALIASGIV,ALIASGV2:
+                             ALIASSEX,ALIASDOB                           * I900
+.
+          CALL      VALID000                      * validate U/R number
+          BRANCH    EXIT,DGUPD900                 * error
+.
+          CALL      UPDAL000                      * get/write the alias's
+          BRANCH    EXIT,DGUPD900                 * error
+.
+. --- send back a successful response ---
+.     NB.  SP1 at end of reply has been added because the interpreter does
+.     not place a "|" after the last field, and Datagate requires this.  By
+.     putting an extra field on the end (which is blank), a "|" will then
+.     be added after the last field.
+.
+          MOVE      "00000",RPLYCODE
+          MOVE      SP50,RPLYDESC
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                          RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                          DGMISC3,SP1
+          ADD       ONE,SUCCPROC                  * increm # success transactns
+          GOTO      DGUPD999
+.
+. --- send back an Error response ---
+.
+DGUPD900  PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1,DGMISC2:
+                            DGMISC3,SP1
+          ADD       ONE,ERRRPROC                  * increm # error transactions
+.
+DGUPD999  GOTO      DGUPDEND                      * got end of procedure
++
+.***************************************************************************
+.*  VALID000  :  read patients details & make sure we have a valid patient *
+.*               Returns:  EXIT=0 --> Valid patient,   EXIT=1 --> ERROR    *
+.***************************************************************************
+VALID000  MOVE      PURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,VALID850                * no master details
+          CALL      RDPMPX21
+.
+          MOVE      ZERO,EXIT                     * we have a valid patient
+          GOTO      VALID999
+.
+VALID850  MOVE      "Patient Master details not found",RPLYDESC
+          MOVE      "01100",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      VALID999
+.
+VALID999  RETURN
++
+.***************************************************************************
+.*  UPDAL000  :  update the alias's of the patient                         *
+.***************************************************************************
+UPDAL000  MOVE      ZERO,FOUNDREC                 * assume surname rec not found
+.
+.        using given/surname file
+.
+UPDAL200  PACK      KEY115,PURNO,SP70,SP70
+          CALL      RSPTGSR1
+UPDAL210  CALL      RKPTGSR1
+          BRANCH    OVRCD,UPDAL400
+.
+          MATCH     GSRURNO,PURNO
+          GOTO      UPDAL400 IF NOT EQUAL
+.
+          MATCH     GSRSNAM,ALIASSUR              * same surname?
+          GOTO      UPDAL210 IF NOT EQUAL
+.
+          MATCH     GSRGNAM,ALIASGIV
+          GOTO      UPDAL210 IF NOT EQUAL
+.
+          MATCH     PTGSGNM2,ALIASGV2
+          GOTO      UPDAL210 IF NOT EQUAL
+.
+          MOVE      ONE,FOUNDREC                  * found the surname record
+.
+UPDAL400  BRANCH    ADDORDEL,UPDAL500,UPDAL600    * add or delete request?
+.
+. - we have a request to ADD an alias -
+.
+UPDAL500  COMPARE   ONE,FOUNDREC                  * name already exists?
+          GOTO      UPDAL800 IF EQUAL
+.
+          MOVE      ONE,NZIBOLDA        * keep old name as alias flag (NZHIS)
+.
+.     add to new surname/given name file
+.
+UPDAL550  MOVE      ALIASSUR,GSRSNAM      * New surname
+          MOVE      ALIASGIV,GSRGNAM      * New given name 1
+          MOVE      ALIASGV2,PTGSGNM2     * New given name 2
+          MOVE      ALIASSEX,GSRSEX       * New sex                        I900
+          MOVE      ALIASDOB,GSRDOB       * New date-of-birth              I900
+          MOVE      PURNO,GSRURNO
+          MOVE      ZERO,GSRBILL
+          CALL      SOUNDEX             * Calculate new sound-ex key
+          CALL      SOUNDX2
+.
+          PACK      KEY115,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                           GSRSEX
+          CALL      WRPTGSR1            * Write new surname index record
+          MOVE      ZERO,EXIT
+          GOTO      UPDAL999            * Finished.
+.
+. - we have a request to DELETE an alias -
+.
+UPDAL600  COMPARE   ZERO,FOUNDREC                 * name not found to delete?
+          GOTO      UPDAL810 IF EQUAL
+.
+UPDAL650  PACK      KEY115,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                           GSRSEX
+          CALL      DEPTGSR1
+          MOVE      ZERO,EXIT
+          GOTO      UPDAL999
+.
+. error messages
+.
+UPDAL800  MOVE      "Supplied alias already exists",RPLYDESC
+          MOVE      "01150",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      UPDAL999
+.
+UPDAL810  MOVE      "Alias for deletion does not exist",RPLYDESC
+          MOVE      "01151",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      UPDAL999
+.
+UPDAL999  RETURN
+.
+.
+.
+OVERCOND  MOVE      ONE,OVRCD
+          RETURN
+.
+OVERLOCK  MOVE      TWO,OVRCD
+          RETURN
+.
+.
+. IO's go in here
+.
+.
+ XIF
+DGUPDEND  ENDPROC

@@ -1,0 +1,445 @@
+.*****************************************************************************
+.* System    :   Patient Management                                          *
+.* Program   :   FX301689                                                    *
+.* Desc      :   Program to retrigger CUP messages for a list of U/R numbers *
+.*****************************************************************************
+.* Date      :   23/06/2014                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will read a list of U/R numbers from a text    *
+.*               file and for each U/R read, it will send a CUP message      *
+.*               for the patient's current PMI details.                      *
+.*               Messages are sent in batches where the batch size is        *
+.*               input by the user and each batch has a user defined delay   *
+.*               between sending, which is also input by the user.           *
+.* Mods      :                                                               *
+.*                                                                           *
+.*        V10.06.01 12/03/2015  Steve Armstrong  CAR 314108                  *
+.*                  Removed reference to PATCGPFD (No Longer in use)         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       IBACONFD/INC
+          INC       NHIMASFD/INC
+          INC       PATCONFD/INC
+          INC       PATMA1FD/INC
+          INC       PATNIDFD/INC
+          INC       PMSPX2FD/INC
+          INC       WEBSECFD/INC
+.
+.         Text File for Patient list
+.
+MESSGFIL  FILE      HL7, FIXED=2000         * Pipe delimited upload file
+.                                             4096 is maximum
+.
+.         Fields must be pipe delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+MESSURNO  DIM       8             * U/R Number                  (patma1af.purno)
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+BATCHCNT  FORM      2
+BATCHDLY  FORM      4
+BATCHSIZ  FORM      2
+.
+DIM4      DIM       4
+.
+ERORDESC  DIM       114
+.
+FILENAME  DIM       8
+.
+NMPNUMB   DIM       20
+.
+RECCOUNT  FORM      8
+.
+SNTCOUNT  FORM      8
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+PIPE      INIT      "|"
+.
+.
+.
+PRGID     INIT      "FX301689"
+PRGNAM    INIT      "Re-trigger CUP Messages from a List of Patients"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN0200       * proceed with fixit
+.
+MAIN0200  CALL      GFIL0000               * get the file name and open file
+          BRANCH    EXIT,MAIN0100          * nothing entered
+.
+MAIN0300  CALL      GBSZ0000               * get batch size
+          BRANCH    EXIT,MAIN0200          * nothing entered
+.
+MAIN0400  CALL      GDLY0000               * get delay between batches
+          BRANCH    EXIT,MAIN0300          * nothing entered
+.
+MAIN1000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0400:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      PROC0000               * process
+          GOTO      MAIN0100
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"pmspx2af";
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run fixit                               *
+.*                        TRUE  (1)  Exit option selected                    *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Fixit"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run fixit
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                            GFIL0000             Called by: MAIN0000       *
+.*         Get the ascii file name which contains the Patient U/R list       *
+.*         and open the file.                                                *
+.* Returns: FILENAME - text file name for patient list                       *
+.*          EXIT  0 = Filename input, ok to continue                         *
+.*                1 = Nothing input, don't continue                          *
+.*****************************************************************************
+.
+GFIL0000  KEYIN     *P1:10,*EF,"Filename           :":
+                    *P22:10,*V2LON,FILENAME
+.
+          PACK      FILENAME,FILENAME,SP8
+          MATCH     SP8,FILENAME                 * anything entered ?
+          GOTO      GFIL9100 IF EQUAL            * no - finished
+.
+          STRIP     FILENAME
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      MESSGFIL,FILENAME
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"File not found.  ";
+            CALL      HITENTER
+            GOTO      GFIL0000
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      GFIL9999
+.
+GFIL9100  MOVE      ONE,EXIT
+.
+GFIL9999  RETURN
++
+.*****************************************************************************
+.*                               GBSZ0000              Called by: MAIN0000   *
+.*               Get the batch size for messages                             *
+.* Returns: BATCHSIZ - Number of message sent at one time in a batch         *
+.*          EXIT  0 = Valid number input, ok to continue                     *
+.*                1 = Zero input, don't continue                             *
+.*****************************************************************************
+.
+GBSZ0000  KEYIN     *P1:11,*EF,"Batch Size         :":
+                    *P22:11,*V2LON,BATCHSIZ
+.
+          COMPARE   ZERO,BATCHSIZ
+          GOTO      GBSZ9100 IF EQUAL
+.
+          MOVE      ZERO,EXIT
+          GOTO      GBSZ9999
+.
+GBSZ9100  MOVE      ONE,EXIT
+.
+GBSZ9999  RETURN
++
+.*****************************************************************************
+.*                               GDLY0000              Called by: MAIN0000   *
+.*                Get the delay between sending each batch of messages       *
+.* Returns: BATCHDLY - delay (secs) between sending message batches          *
+.*          EXIT  0 = Valid number input, ok to continue                     *
+.*                1 = Nothing input, don't continue                          *
+.*****************************************************************************
+.
+GDLY0000  KEYIN     *P1:12,*EF,"Batch Delay (secs) :":
+                    *P22:12,*V2LON,*DE,*JR,DIM4
+.
+          PACK      DIM4,DIM4,SP4
+          MATCH     SP4,DIM4
+          GOTO      GDLY9100 IF EQUAL
+.
+          MOVE      DIM4,BATCHDLY
+.
+          MOVE      ZERO,EXIT
+          GOTO      GDLY9999
+.
+GDLY9100  MOVE      ONE,EXIT
+.
+GDLY9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*            Process the list of U/R's and send the messages                *
+.* Requires: BATCHSIZ - number of messages to send in each batch             *
+.*           BATCHDLY - the delay (secs) between sending batches             *
+.*           MESSGFIL - text file containg list of patient U/R numbers       *
+.*****************************************************************************
+.
+PROC0000  DISPLAY   *P1:15,"Processing    :":
+                    *P1:16,"Total         :";
+          MOVE      ZERO,BATCHCNT                * initialise batch count
+          MOVE      ZERO,RECCOUNT                * initialise total record count
+          MOVE      ZERO,SNTCOUNT                * initialise sent record count
+.
+          MOVE      ZERO,CPAGENO                  * set print variables
+          MOVE      ZERO,CNOUNDLN
+          CALL      IBACLOCK
+.
+          CALL      HEAD0000
+.
+.         Loop through upload file records
+.
+PROC0500  READ      MESSGFIL,SEQ;MESSURNO
+          GOTO      PROC9000 IF OVER
+.
+          ADD       ONE,RECCOUNT                 * increment records read
+          DISPLAY   *P17:15,*V2LON,MESSURNO:
+                    *P17:16,RECCOUNT;
+.
+          PACK      MESSURNO,MESSURNO,SP8
+          RJUSTIFY  MESSURNO
+.
+          MATCH     SP8,MESSURNO
+          IF        @EQUAL
+            MOVE      "U/R number missing",ERORDESC
+            CALL      EROR0000
+            GOTO      PROC0500
+          ENDIF
+.
+          MOVE      MESSURNO,KEY8
+          CALL      RDMAST1
+          IF        OVRCD = 1
+            MOVE      "Patient Master record missing",ERORDESC
+            CALL      EROR0000
+            GOTO      PROC0500
+          ENDIF
+.
+          COMPARE   ONE,PSTAT
+          IF        @EQUAL
+            MOVE      "U/R is merged to ",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PPSNAME,ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      PROC0500
+          ENDIF
+.
+          MOVE      MESSURNO,KEY8
+          CALL      RDPMPX21
+          IF        OVRCD = 1
+            MOVE      "Patient Master extension record missing",ERORDESC
+            CALL      EROR0000
+            GOTO      PROC0500
+          ENDIF
+.
+.         Valid PMI record found
+.
+          CALL      PMIGTNID                * get national id for message
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      ONE,HL7TRGID
+          MOVE      SP8,HL7INCLD
+          PROC      DGCLICUP                * send CUP message
+.
+.         Check if the batch size has been reached and if so, delay sending
+.         the next message for the required time period
+.
+          ADD       ONE,BATCHCNT            * increment batch count
+.
+          COMPARE   BATCHCNT,BATCHSIZ
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,"Waiting to send next batch....",*WBATCHDLY:
+                      *P1:24,*EL;
+            MOVE      ZERO,BATCHCNT         * reset batch count
+          ENDIF
+.
+          ADD       ONE,SNTCOUNT            * increment sent count
+.
+          GOTO      PROC0500
+.
+PROC9000  CALL      LINE0000
+          PRINT     *N,*1,"Total records processed: ",RECCOUNT:
+                    *N,*1,"Total messages sent    : ",SNTCOUNT:
+                    *N,*N,*1,"*** End of Report ***"
+.
+          DISPLAY   *P1:23,*EF,"Program completed.":
+                    *P1:24,*V2LON,SNTCOUNT,*HOFF," messages triggered.  ";
+          CALL      HITENTER
+.
+PROC9999  RETURN
++
+.****************************************************************************
+.*                            EROR0000                 Called by: PROC0000  *
+.*                  Error record so print it                                *
+.****************************************************************************
+.
+EROR0000  PRINT     *1,PIPE,*3,MESSURNO,*14,PIPE,*16,ERORDESC,*132,PIPE
+.
+          ADD       ONE,CLNO                     * increment line count
+.
+EROR9999  RETURN
++
+.****************************************************************************
+.*                            HEAD0000                 Called by: PROC0000  *
+.*                       print page heading                                 *
+.****************************************************************************
+.
+HEAD0000  CALL      HEAD132                      * display page header
+.
+          PRINT     *40,"Filename: ",*+,FILENAME,*-,".txt"
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"U/R Number",*14,PIPE,*16,"Error Description":
+                    *132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      SEVEN,CLNO                   * set line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: PROC0000  *
+.*                      Draw line across page                     HEAD0000  *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.*****************************************************************************
+.*                               DGCLICUP                                    *
+.*        Write a CUP (PMI Update) message to the holding tables             *
+.*  Note: This is a copy of the DGCLICUP external procedure which has been   *
+.*        changed to only send IBA Proprietary messages.                     *
+.*****************************************************************************
+.
+          DEFPROC   DGCLICUP
+.
+          INC       HL7CISFD/INC
+          INC       HL7INBFD/INC
+          INC       PMSQPTFD/INC
+.
+CISMFLAG  FORM      1
+IBAMFLAG  FORM      1             * IBA proprietary message flag
+.                                    0 = don't send IBA proprietary message
+.                                    1 = send IBA proprietary message
+MESSAGID  DIM       20
+.
+DGCLI000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*133,IBCNUCIS
+          READ      CONTROLF,SEVENTY9;*115,PTCNDGUP
+.
+.         Check if we are sending any messages.
+.
+          COMPARE   ONE,PTCNDGUP
+          GOTO      DGCLI999 IF NOT EQUAL
+.
+.         We are sending IBA Proprietary and/or CIS HL7 messages, so
+.         first open the relevant holding tables
+.
+          OPEN      HL7INB01,"hl7inbaf"
+          OPEN      PMSQPTA1,"pmsqptaf"
+.
+          CALL      DGMESSID                    * Get Message ID, Date & Time
+.
+.         Write a record to pmsqptaf (holding patient details)
+.
+          MOVE      WBSEHOSP,PMPXLUBH            * load hospital id for user
+          MOVE      MESSAGID,PMQPMESI
+          MOVE      SP8,PMQPOURN
+          PACK      PMQPSPAR,SP30,SP30,SP20
+          CALL      WRPMQPT1
+.
+          MOVE      "CUP",H7INMETP
+          CALL      WRINB000
+.
+          CLOSE     HL7INB01
+          CLOSE     PMSQPTA1
+.
+DGCLI999  GOTO      DGCLIEND                        * end procedure
+.
+.         I/O Routines
+.
+          INC       BRHLCOMN
+.
+          INC       HL7CISIO/INC
+          INC       HL7INBIO/INC
+          INC       IBAOVRIO/INC
+          INC       PMSQPTIO/INC
+.
+DGCLIEND  ENDPROC
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       PMIGTNID
+.
+          INC       NHIMASIO/INC
+          INC       PATMA1IO/INC
+          INC       PATNIDIO/INC
+          INC       PMSPX2IO/INC
+          INC       WEBSECIO/INC

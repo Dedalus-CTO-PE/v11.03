@@ -1,0 +1,46 @@
+create table pmsltfaf
+(
+  pmltseid    varchar2(4) default ' ' not null,
+  pmltsedc    varchar2(35) default ' ' not null,
+  pmltvdfr    varchar2(8) default ' ' not null,
+  pmltvdto    varchar2(8) default ' ' not null,
+  pmltddfr    varchar2(8) default ' ' not null,
+  pmltddto    varchar2(8) default ' ' not null,
+  pmltsnfr    varchar2(20) default ' ' not null,
+  pmltsnto    varchar2(20) default ' ' not null,
+  pmltllfr    varchar2(3) default ' ' not null,
+  pmltllto    varchar2(3) default ' ' not null,
+  pmltldfr    varchar2(8) default ' ' not null,
+  pmltldto    varchar2(8) default ' ' not null,
+  pmltfcfr    varchar2(3) default ' ' not null,
+  pmltfcto    varchar2(3) default ' ' not null,
+  pmltfdfr    varchar2(8) default ' ' not null,
+  pmltfdto    varchar2(8) default ' ' not null,
+  pmltccfr    varchar2(3) default ' ' not null,
+  pmltccto    varchar2(3) default ' ' not null,
+  pmltatfr    varchar2(3) default ' ' not null,
+  pmltatto    varchar2(3) default ' ' not null,
+  pmltoamt    number(9,2) default 0 not null,
+  pmltiiin    varchar2(1) default ' ' not null,
+  pmltpdfr    varchar2(8) default ' ' not null,
+  pmltpdto    varchar2(8) default ' ' not null,
+  pmltdstt    varchar2(1) default ' ' not null,
+  pmltsyst    varchar2(1) default ' ' not null,
+  pmltlcod    varchar2(3) default ' ' not null,
+  pmltldat    varchar2(8) default ' ' not null,
+  pmltrcnt    varchar2(5) default ' ' not null,
+  pmltmhos    varchar2(3) default ' ' not null,
+  pmlthfun    varchar2(6) default ' ' not null,
+  pmltinsr    varchar2(6) default ' ' not null,
+  pmltmisc    varchar2(9) default ' ' not null,
+  pmltppln    varchar2(1) default ' ' not null,
+  pmltudat    varchar2(8) default ' ' not null,
+  pmltutim    varchar2(8) default ' ' not null,
+  pmltspar    varchar2(80) default ' ' not null,
+  lf          varchar2(1) default ' ' not null,
+constraint pmsltfa1 primary key( 
+pmltseid)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 

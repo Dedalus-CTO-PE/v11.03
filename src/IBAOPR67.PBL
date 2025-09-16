@@ -1,0 +1,663 @@
+.******************************************************************************
+.* System   : Operating Room System                                           *
+.* Program  : IBAOPR67                                                        *
+.* Desc     : MBS/ICD9CM Exception report                                     *
+.*                                                                            *
+.*          : Outputs a list of URs that have blank operation field(s)        *
+.*                                                                            *
+.******************************************************************************
+.* Date     :  02/01/1991                                                     *
+.* Author   :  Peter Eddey (Whirlpool)                                        *
+.* Mods.    :                                                                 *
+.*                                                                            *
+.******************************************************************************
+.* V11.03.02 19/04/2023   Thanh T       TSK 0909393                           *
+.*           Changed PRNT0000 to use RSOPDEA6 instead of RSOPDEA1             * 
+.* V11.03.01 20/03/2023  PJ Le Febour   TSK 0909393a                          *
+.*           Amended KEY19 to KEY22 for theatre index changes                 *
+.* V11.01.02 27/04/2021  Thanh T        TSK 0895165                           *
+.*           Recompiled for OPRARDFD changes                                  *
+.* V11.01.01 16/02/2021  Tracey Nguyen  TSK 0888639                           *
+.*           FD changed - oprpmbaf.OPRPMBA1 from KEY13 to KEY14               *
+.******************************************************************************
+.*        V10.11.01 23/11/2017  Davin          TSK 0846231                    *
+.*                  Recompiled for OPRPMBFD - added oppmrefn                  *
+.*        V10.07.01 27/11/2015  Ania P            CAR 321025                  *
+.*                  Removed SRGFLAG and associated code as oprdecaf is no     *
+.*                  longer in use                                             *
+.*        V10.01.01 03/02/2011  Jill Parkinson CAR 233088                     *
+.*                  Added PMSVX1FD                                            *
+.*        V9.09.01  23/10/2007  Steve Armstrong   CAR 150869                  *
+.*                  Added multi-hospital functionality                        *
+.******************************************************************************
+.*        V9.02.03  13/03/2003  Tonii CAR 37274                               *
+.*                  Problem: If no record exist in oprpmbaf, program doesnt   *
+.*                           count that usage record as exception             *
+.*                  Fix: Added in counter to look out for above condition,    *
+.*                       if ovrcd on first record consider as an exception    *
+.*        V9.02.02  12/03/2003  Tonii CAR 37220                               *
+.*                  Fixed to only display operation usage records with        *
+.*                  no procedure codes for new tables.                        *
+.*                  Program was branching on wrong value                      *
+.*        V9.02.01  17/02/2003  Tonii SRS No: 36667                           *
+.*                  Mods to use new operation tables if record exists         *
+.*                  in oprsrgaf                                               *
+.******************************************************************************
+.*        V5.08.01  28/08/2000  Caleb Sharman                                 *
+.*                  Changed Health Fund variables to be 8 chars               *
+.*             V5.07.00 28/10/98 Jim Stathopoulos                             *
+.*                      507 Changes                                           *
+.******************************************************************************
+.*             V5.01.02 20/02/91 Graeme Williams                              *
+.*                      Fixed so it would display sessions when loopng        *
+.*             V5.01.03 25/07/91 ROD                                          *
+.*                      Recompiled for OPRSESFD                               *
+.*             V5.01.04 13/08/91 J.Tan   SRF 109296                           *
+.*                      Fixed to check for cancelled booking                  *
+.*             V5.01.05 03/06/92 ROD                                          *
+.*                      Fixed bug in displaying Theatre code                  *
+.******************************************************************************
+.
+          INC       STD001FD
+          INC       BOKRC1FD/INC
+          INC       OPRCONFD/INC
+          INC       OPRARDFD/INC
+          INC       OPRCLIFD/INC
+          INC       OPRDEAFD/INC
+          INC       OPROPRFD/INC
+          INC       OPRPMBFD/INC
+          INC       OPRSESFD/INC
+          INC       OPRSRGFD/INC
+          INC       PATDO1FD/INC
+          INC       PATHSPFD/INC
+          INC       PATMA1FD/INC
+          INC       PATMI1FD/INC
+          INC       PMSVX1FD/INC
+          INC       PATPR1FD/INC
+.
+PRGID     INIT      "IBAOPR67"
+VERSION   INIT      "V11.03.02"
+PRGNAM    DIM       25
+.
+.**********************************************************************
+.*                     Data variables required                        *
+.**********************************************************************
+.
+CLSUDESC  DIM       20
+DIM54     DIM       54
+ENDDATE   DIM       8
+IBCNMHOS  FORM      1
+NAME25    DIM       25
+OPSURGDX  DIM       40
+PRTSTART  DIM       10
+PRTEND    DIM       10
+RECCOUNT  FORM      5
+SESSDATE  DIM       10
+SP54      DIM       54
+STRTDATE  DIM       8
+THETCODE  DIM       6
+TODAY     DIM       8
+.
+.**********************************************************************
+.*                         ML0000                                     *
+.*                      Main Line Code                                *
+.**********************************************************************
+.
+ML0000    CALL      INIT0000             * initialisation
+.
+ML1000    CALL      MENU0000
+          BRANCH    EXIT,ML9999          * exit selected
+.
+ML2000    CALL      TODY0000             * format todays date
+          CALL      SCRN0000             * display date entry screen
+.
+          CALL      KSDT0000             * keyin the start date
+          BRANCH    EXIT,ML1000
+.
+          CALL      KEDT0000             * keyin the end date
+          BRANCH    EXIT,ML1000
+.
+          CALL      KHOS0000             * keyin hospital (multi-campus only)
+          BRANCH    EXIT,ML1000
+.
+ML4000    CALL      CONTQST              * ok to continue
+          BRANCH    CEXIT,ML5000,ML2000,ML1000
+          GOTO      ML4000
+.
+ML5000    CALL      PRNT0000             * print the report
+.
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM
++
+.********************************************************************
+.*                        INIT0000                                  *
+.*                   Initialisation section                         *
+.********************************************************************
+.
+INIT0000  DISPLAY   *P50:24,*EL,"Opening ":
+                    *P60:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,FORTY;*81,OPCNODSC,*96,OPCNCDSC,*111,OPCNCLSU:
+                    *112,OPCNCODE
+          BRANCH    OPCNCODE,INIT1000
+          MOVE      "ICD9CM EXCEPTION REPORT",PRGNAM
+          GOTO      INIT2000
+.
+INIT1000  MOVE      "M.B.S EXCEPTION REPORT",PRGNAM
+.
+INIT2000  CALL      DISPHEAD
+.
+          DISPLAY   *P60:24,"oprardaf";
+          OPEN      OPRARDA1,"oprardaf"
+.
+          DISPLAY   *P60:24,"oprdetaf";
+          OPEN      OPRDETA6,"oprdetaf"
+.
+          DISPLAY   *P60:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P60:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+.
+          DISPLAY   *P60:24,"patmx1af";
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P60:24,"patpramf";
+          OPEN      PATPR1A1,"patpr1af"
+          OPEN      PATPX1A1,"patpx1af"
+.
+          DISPLAY   *P60:24,"bokrc1af";
+          OPEN      BOKRC1A1,"bokrc1af"
+.
+          DISPLAY   *P60:24,"oprpmbaf";
+          OPEN      OPRPMBA1,"oprpmbaf"
+.
+          DISPLAY   *P60:24,"oprsrgaf";
+          OPEN      OPRSRGA1,"oprsrgaf"
+.
+          DISPLAY   *P60:24,"opropraf";
+          OPEN      OPROPRA1,"opropraf"
+.
+          DISPLAY   *P60:24,"oprcliaf";
+          OPEN      OPRCLIA1,"oprcliaf"
+.
+          DISPLAY   *P60:24,"oprsesaf";
+          OPEN      OPRSESA1,"oprsesaf"
+.
+          DISPLAY   *P60:24,"patdo1af";
+          OPEN      PATDO1A1,"patdo1af"
+          OPEN      PATDO1A2,"patdo1af"
+.
+          IF        IBCNMHOS = 1
+            DISPLAY   *P64:24,"pathspaf";
+            OPEN      PATHSPA1,"pathspaf"
+          ENDIF
+.
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                  KHOS0000       Called by:                 *
+.*                For multi-hospital, get the hospital code                   *
+.******************************************************************************
+.
+KHOS0000  COMPARE   ONE,IBCNMHOS                 * using multi-hospital ?
+          GOTO      KHOS9999 IF NOT EQUAL        * no - finished
+.
+          DISPLAY   *P5:8,*EL,"Hospital Id   : ";
+          MOVE      TWENTY1,ECOL
+          MOVE      "8",EVERT
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND                * Not Mandatory
+.
+          CALL      PATHSPKY                     * get code
+          BRANCH    EXIT,KHOS2000:               * nothing input
+                         KHOS9500                * exitchar input
+          GOTO      KHOS3000
+.
+KHOS2000  MOVE      "All Hospitals",PTHSNAME
+          MOVE      SP10,PTHSHOSP
+          MOVE      ZERO,EXIT
+.
+KHOS3000  DISPLAY   *P21:8,*V2LON,PTHSNAME;
+          GOTO      KHOS9999
+.
+KHOS9500  MOVE      ONE,EXIT
+.
+KHOS9999  RETURN
++
+.*********************************************************************
+.*                        MENU0000                                   *
+.*                  Handle the program menu                          *
+.*********************************************************************
+.
+MENU0000  MOVE      ZERO,EXIT
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,"0",*HOFF," = Exit":
+                    *P1:5,*V2LON,"1",*HOFF," = Produce Report":
+                    *P1:7,"Select Option : "
+.
+MENU1000  KEYIN      *P17:7,*DV,UNDLN1:
+                     *P17:7,*V2LON,MOPTION:
+                     *P17:7,*DV,MOPTION
+.
+          COMPARE    ZERO,MOPTION        * test for exit
+          GOTO       MENU9000 IF EQUAL
+.
+          BRANCH     MOPTION,MENU9999
+          BEEP
+          GOTO       MENU1000
+.
+MENU9000  MOVE      ONE,EXIT
+.
+MENU9999  RETURN
++
+.********************************************************************
+.*                        TODY0000                                  *
+.*                 Format todays date                               *
+.********************************************************************
+.
+TODY0000  CALL      IBACLOCK
+          PACK      TODAY,CCC,CYY,CMM,CDD
+          REP       " 0",TODAY 
+.
+TODY9999  RETURN
++
+.********************************************************************
+.*                        SCRN0000                                  *
+.*                  Display the date prompt screen                  *
+.********************************************************************
+.
+SCRN0000  DISPLAY   *P1:3,*EF:
+                    *P5:4,"Starting Date : ":
+                    *P5:6,"Ending Date   : " 
+SCRN9999  RETURN  
++
+.*******************************************************************
+.*                        KSDT0000                                 *
+.*                  Keyin the start date                           *
+.*******************************************************************
+.
+KSDT0000  MOVE      ZERO,EXIT
+          MOVE      SP2,CDAY
+          MOVE      SP2,CMON
+          MOVE      SP2,CYEAR
+          MOVE      CCC,CCENT
+.
+          MOVE      TWENTY1,CCOL
+          MOVE      FOUR,CVERT
+	  MOVE      ZERO,CHIGHLT
+.
+          CALL      KEYDATE
+          BRANCH    CQUEST,KSDT0000
+          BRANCH    OVRCD,KSDT9000
+          
+          PACK      CDAY,CDAY,SP2
+          MATCH     SP2,CDAY
+          GOTO      KSDT9000 IF EQUAL
+.
+          PACK      STRTDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",STRTDATE
+.
+          MATCH     STRTDATE,TODAY
+          GOTO      KSDT8000 IF LESS
+.
+          DISPLAY   *P21:4,*V2LON,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR
+.
+          GOTO      KSDT9999
+.
+KSDT8000  BEEP
+          DISPLAY  *P1:24,*EL,"Date must be < or = to today's date. ";
+          CALL     HITENTER
+          GOTO     KSDT0000
+.
+KSDT9000  MOVE      ONE,EXIT
+.
+KSDT9999  RETURN
++
+.*******************************************************************
+.*                        KEDT0000                                 *
+.*                  Keyin the end date                             *
+.*******************************************************************
+.
+KEDT0000  MOVE      ZERO,EXIT
+          MOVE      ONE,CDEFDTE
+          UNPACK    STRTDATE,CCENT,CYEAR,CMON,CDAY
+.
+          MOVE      TWENTY1,CCOL
+          MOVE      SIX,CVERT
+          MOVE      ONE,CCANLDTE
+	  MOVE      ZERO,CHIGHLT
+.
+          CALL      KEYDATE
+          BRANCH    CQUEST,KSDT0000
+          BRANCH    OVRCD,KEDT0000
+.
+          PACK      ENDDATE,CCENT,CYEAR,CMON,CDAY
+.
+          MATCH     STRTDATE,ENDDATE
+          GOTO      KEDT7000 IF LESS
+.
+          MATCH     ENDDATE,TODAY
+          GOTO      KEDT8000 IF LESS
+.
+          GOTO      KEDT9999
+.
+KEDT7000  BEEP
+          DISPLAY   *P1:24,*EL,"Date must be > than the starting date. ";
+          CALL      HITENTER
+          GOTO      KEDT0000
+.
+KEDT8000  BEEP
+          DISPLAY   *P1:24,*EL,"Date must be < or = to today's date. ";
+          CALL      HITENTER
+          GOTO      KEDT0000
+.
+KEDT9000  MOVE      ONE,EXIT
+.
+KEDT9999  RETURN
++
+.********************************************************************
+.*                        PRNT0000                                  *
+.*                    Print the Report                              *
+.********************************************************************
+.
+PRNT0000  DISPLAY   *P1:24,*EL,*V2LON,"Scanning Session :";
+          MOVE      ZERO,CNOUNDLN
+          MOVE      ZERO,RECCOUNT
+          MOVE      ZERO,CPAGENO
+          CALL      HEAD0000
+          PACK      KEY26,STRTDATE,SP70
+          CALL      RSOPDEA6
+PRNT1000  CALL      RKOPDEA6
+          BRANCH    OVRCD,PRNT9000
+.
+          MATCH     OPDADATE,ENDDATE     * test if within req'd period
+          GOTO      PRNT9000 IF LESS  
+.
+          COMPARE   THREE,OPDASTAT       * Cancelled booking ?
+          GOTO      PRNT1000 IF EQUAL    * Yes.
+.
+.         Check for multi hospital
+.
+          COMPARE   ONE,IBCNMHOS                 * using multi-hospital ?
+          GOTO      PRNT1500 IF NOT EQUAL        * no - ignore check
+.
+          MATCH     SP10,PTHSHOSP                * all hospitals ?
+          GOTO      PRNT1500 IF EQUAL            * yes - ignore check
+.
+          PACK      KEY22,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN
+          CALL      RDOPSES1                     * session record found ?
+          BRANCH    OVRCD,PRNT1000               * no - ignore record
+.
+          MATCH     OPSEHOSP,PTHSHOSP            * same hospital ?
+          GOTO      PRNT1000 IF NOT EQUAL        * no - ignore record
+.
+PRNT1500  UNPACK    OPDADATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          UNPACK    OPDADATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          DISPLAY   *P20:24,CPCDATE,SP1,OPDACLIN,SP1,OPDACASE;
+.
+          PACK      KEY10,OPDAUNIQ
+          CALL      RDOPARD1
+          BRANCH    OVRCD,PRNT1000
+.
+          PACK      KEY11,OPDAUNIQ,SP20
+          CALL      RSOPSRG1
+PRNT2000  CALL      RKOPSRG1
+          BRANCH    OVRCD,PRNT1000
+.
+          MATCH     OPDAUNIQ,OPSGUNID
+          GOTO      PRNT1000 IF NOT EQUAL
+.
+          CALL      TBOP0000
+          BRANCH    EXIT,PRNT2000        * no blank items
+.
+          CALL      SVAR0000             * set up variables for print
+.
+          CALL      PLIN0000             * print the line
+.
+          ADD       ONE,CLNO
+          ADD       ONE,RECCOUNT
+.
+          COMPARE   SIXTY,CLNO
+          CALL      HEAD0000 IF EQUAL
+.
+          GOTO      PRNT2000
+.
+PRNT9000  CALL      UND132
+          PRINT     *N,"Total number of bookings without operation ":
+                       "codes = ",RECCOUNT,*N,*N:
+                       "*** End of Report ***"
+.
+PRNT9999  DISPLAY   *P1:24,*EL
+          RETURN
++
+.********************************************************************
+.*                        HEAD0000                                  *
+.*                displays the page headings                        *
+.******************************************************************** 
+.
+HEAD0000  UNPACK    STRTDATE,CCENT,CYEAR,CMON,CDAY
+          PACK      PRTSTART,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR
+.
+          UNPACK    ENDDATE,CCENT,CYEAR,CMON,CDAY
+          PACK      PRTEND,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR
+
+          CALL      HEAD132
+          IF        IBCNMHOS =1
+            PRINT     *40,"Hospital: ",PTHSNAME,*N;
+          ENDIF
+.
+          PRINT     *40,"For Date Range : ",PRTSTART," to ",PRTEND,*N
+.
+          CALL      UND132
+          PRINT     "|",*5,"Date",*14,"|",*16,"Time",*22,"|":
+                    *25,"Adm No.",*33,"|",*36,"U/R No.",*44,"|":
+                    *46,"Patients Name",*73,"|",*75,OPCNCDSC:
+                    *104,"|",*106,OPCNODSC,*132,"|"
+          CALL      UND132
+.
+          IF        IBCNMHOS = 1
+            MOVE      TEN,CLNO
+          ELSE
+            MOVE      NINE,CLNO
+          ENDIF
+.
+HEAD9999  RETURN
++
+.********************************************************************
+.*                        PLIN0000                                  *
+.*                     Print a line                                 *
+.********************************************************************
+.
+PLIN0000  PRINT     "|",*3,SESSDATE,*14,"|",*16,OPDATIME,*22,"|":
+                    *24,OPDAADMN,*33,"|",*35,AURNO,*44,"|":
+                    *46,NAME25,*73,"|",*75,OPDACLIN,*82,CLSUDESC:
+                    *104,"|",*106,THETCODE,*113,DIM19,*132,"|"
+PLIN9999  RETURN
++
+.********************************************************************
+.*                        TBOP0000                                  *
+.*               Test for blank Operation codes                     *
+.********************************************************************
+.
+TBOP0000  MOVE      ZERO,EXIT
+          PACK      KEY14,OPSGUNID,OPSGTMNO,SP20
+          CALL      RSOPPMB1
+TBOP1000  CALL      RKOPPMB1
+          BRANCH    OVRCD,TBOP9999
+.
+          MATCH     OPSGUNID,OPPMUNID
+          GOTO      TBOP9999 IF NOT EQUAL
+.
+          MATCH     OPSGTMNO,OPPMTMNO
+          GOTO      TBOP9999 IF NOT EQUAL
+.
+          MATCH     SP9,OPPMCMBS
+          IF        @EQUAL
+            MOVE      ZERO,EXIT
+            GOTO      TBOP9999
+          ELSE
+            MOVE      ONE,EXIT
+            GOTO      TBOP1000
+          ENDIF
+.
+TBOP9999  RETURN
++
+.********************************************************************
+.*                        SVAR0000                                  *
+.*              set up variables for printing                       *
+.********************************************************************
+.
+SVAR0000  CLEAR     SESSDATE
+          CLEAR     NAME25  
+          CLEAR     CLSUDESC
+          MOVE      ZEROUR,AURNO  
+          UNPACK    OPDADATE,CCENT,CYEAR,CMON,CDAY
+.
+.-- set up session date
+.
+          PACK      SESSDATE,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR
+.
+          CALL      GPMI0000             * get patient name
+.
+.-- get clinic or surgeon description depending on parameter OPCNCLSU
+.
+          MOVE      OPDACLIN,KEY6
+.
+          COMPARE   ZERO,OPCNCLSU
+          GOTO      SVAR5000 IF EQUAL
+.
+SVAR0100  CALL      RDDOCT1
+          BRANCH    OVRCD,SVAR9999
+.
+          MOVE      DTITL,CLSUDESC
+          ENDSET    CLSUDESC
+          CALL      SVAR0250
+          LENSET    CLSUDESC
+          MOVE      DGNAME,DIM1
+          APPEND    SP1,CLSUDESC
+          APPEND    DSNAME,CLSUDESC
+          RESET     CLSUDESC
+          GOTO      SVAR7000
+.
+SVAR0250  CMATCH    SP1,CLSUDESC                    * get rid of spaces
+          RETURN    IF NOT EQUAL                   * in doctors desc
+          BUMP      CLSUDESC BY -1
+          RETURN    IF EOS
+          GOTO      SVAR0250
+.
+SVAR5000  CALL      RDOPCLI1
+          PACK      OPCLDESC,OPCLDESC,SP30
+          MATCH     OPCLDESC,SP30
+          GOTO      SVAR6000 IF NOT EQUAL
+          MOVE      OPDACLIN,KEY6
+          GOTO      SVAR0100
+
+SVAR6000  MOVE      OPCLDESC,CLSUDESC
+.
+.-- get theatre description
+.
+SVAR7000  MOVE      SP6,THETCODE
+          CLEAR     DIM19    
+          PACK      KEY6,OPDATHET
+          CALL      RDOPOPR1
+          BRANCH    OVRCD,SVAR7100
+          MOVE      OPRMDESC,DIM19
+          MOVE      OPDATHET,THETCODE
+          GOTO      SVAR9999
+.
+SVAR7100  PACK      KEY22,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN
+          CALL      RDOPSES1
+          BRANCH    OVRCD,SVAR9999
+.
+          MOVE      OPSETHET,KEY6
+          CALL      RDOPOPR1
+          BRANCH    OVRCD,SVAR9999
+          MOVE      OPSETHET,THETCODE
+          MOVE      OPRMDESC,DIM19
+.
+SVAR9999  RETURN
++ 
+.********************************************************************
+.*                        GPMI0000                                  *
+.*                      Get patient name                            *
+.********************************************************************
+.
+GPMI0000  MOVE      OPDAADMN,AADMNO
+          MOVE      TWO,PACFRMT
+.
+          PACK      KEY8,OPDAADMN
+          CALL      RDMISS1              * read admissions file
+          BRANCH    OVRCD,GPMI5000       * if not there try booking file
+.
+          MATCH     ZEROUR,AURNO         * test if u/r is 0
+          GOTO      GPMI7000 IF EQUAL    * read pre-ad file if zero
+.
+.----- Valid read on the admissions file & u/r is not zero
+.
+GPMI2000  PACK      KEY8,AURNO
+          CALL      RDMAST1              * read master file
+          BRANCH    OVRCD,GPMI9500       * error if over
+.
+          GOTO      GPMI9000             * set up name
+.
+.--- try bookings file
+.
+GPMI5000  PACK      KEY8,OPDAADMN
+          CALL      RDBKREC1             * read bookings file
+          BRANCH    OVRCD,GPMI9500
+.
+          MOVE      BKREURNO,AURNO       * read master file
+.
+          MATCH     ZEROUR,BKREURNO      * test if u/r is zero
+          GOTO      GPMI6900 IF EQUAL    * read pre-ad file if zero
+.
+          GOTO      GPMI2000
+.
+GPMI6900  MOVE      BKREBOOK,AADMNO
+.
+.----  Read the pre-admissions file 
+.
+GPMI7000  PACK      KEY8,AADMNO
+          CALL      RDPRAM1
+          BRANCH    OVRCD,GPMI9500
+.
+GPMI9000  MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+.
+          CALL      PACNAME
+          MOVE      PACFNAME,NAME25
+          GOTO      GPMI9999
+.
+GPMI9500  MOVE      ZEROUR,AURNO
+.
+GPMI9999  RETURN
++
+.********************************************************************
+.*                   IO  and other includes                         *
+.********************************************************************
+.
+          INC       STD001IO
+          INC       PATHSPKY
+.
+          INC       BOKRC1IO/INC
+          INC       OPRARDIO/INC
+          INC       OPRCLIIO/INC
+          INC       OPRDEAIO/INC
+          INC       OPROPRIO/INC
+          INC       OPRPMBIO/INC
+          INC       OPRSESIO/INC
+          INC       OPRSRGIO/INC
+          INC       PATDO1IO/INC
+          INC       PATHSPIO/INC
+          INC       PATMA1IO/INC
+          INC       PATMI1IO/INC
+          INC       PMSVX1IO/INC
+          INC       PATPR1IO/INC

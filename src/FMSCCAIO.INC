@@ -1,0 +1,190 @@
+.
+. FMSCCAIO
+. --------
+. Filename     : fmsccaaf.dat
+.
+RSFMCC1   RESET     KEY14
+          READ      FMSCCAA1,KEY14;;
+          RETURN
+.
+RAFMCC1   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      FMSCCAA1,KEY14;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMCC1   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      FMSCCAA1,KEY14;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                                   FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                                   FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMCC1   MOVE      ZERO,OVRCD
+          READKS    FMSCCAA1;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMCC1   MOVE      ZERO,OVRCD
+          READKP    FMSCCAA1;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMCC1   UPDATE    FMSCCAA1;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          RETURN
+.
+WRFMCC1   RESET     KEY14
+          WRITE     FMSCCAA1,KEY14;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                                   FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                                   FMCCIDAY,FMCCSTAT,FMCCSPAR
+          RETURN
+.
+DEFMCC1   RESET     KEY14
+          DELETE    FMSCCAA1,KEY14
+          RETURN
+.
+RLFMCC1   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READL     FMSCCAA1,KEY14;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                                   FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                                   FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+KLFMCC1   MOVE      ZERO,OVRCD
+          READLKS   FMSCCAA1;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+PLFMCC1   MOVE      ZERO,OVRCD
+          READLKP   FMSCCAA1;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+UUFMCC1   RESET     KEY14
+          UNLOCK    FMSCCAA1
+          RETURN
+.
+RSFMCC2   RESET     KEY49
+          READ      FMSCCAA2,KEY49;;
+          RETURN
+.
+RAFMCC2   RESET     KEY49
+          MOVE      ZERO,OVRCD
+          READ      FMSCCAA2,KEY49;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMCC2   RESET     KEY49
+          MOVE      ZERO,OVRCD
+          READ      FMSCCAA2,KEY49;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                                   FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                                   FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMCC2   MOVE      ZERO,OVRCD
+          READKS    FMSCCAA2;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMCC2   MOVE      ZERO,OVRCD
+          READKP    FMSCCAA2;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMCC2   UPDATE    FMSCCAA2;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          RETURN
+.
+WRFMCC2   RESET     KEY49
+          WRITE     FMSCCAA2,KEY49;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                                   FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                                   FMCCIDAY,FMCCSTAT,FMCCSPAR
+          RETURN
+.
+DEFMCC2   RESET     KEY49
+          DELETE    FMSCCAA2,KEY49
+          RETURN
+.
+RLFMCC2   RESET     KEY49
+          MOVE      ZERO,OVRCD
+          READL     FMSCCAA2,KEY49;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                                   FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                                   FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+KLFMCC2   MOVE      ZERO,OVRCD
+          READLKS   FMSCCAA2;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+PLFMCC2   MOVE      ZERO,OVRCD
+          READLKP   FMSCCAA2;FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          RETURN
+.
+UUFMCC2   RESET     KEY49
+          UNLOCK    FMSCCAA2
+          RETURN
+.
+.
+ASFMCC    RESET     KEY19
+          READ      FMSAUDCC,KEY19;;
+          RETURN
+.
+AUFMCC    UPDATE    FMSAUDCC;FMCCAUDD,FMCCAUDT,FMCCAUDP:
+                             FMCCAUDR,FMCCAUDS,FMCCAUDO:
+                             FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          RETURN
+.
+AKFMCC    MOVE      ZERO,OVRCD
+          READKS    FMSAUDCC;FMCCAUDD,FMCCAUDT,FMCCAUDP:
+                             FMCCAUDR,FMCCAUDS,FMCCAUDO:
+                             FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                             FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                             FMCCIDAY,FMCCSTAT,FMCCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+AWFMCC    RESET     KEY19
+          WRITE     FMSAUDCC,KEY19;FMCCAUDD,FMCCAUDT,FMCCAUDP:
+                                   FMCCAUDR,FMCCAUDS,FMCCAUDO:
+                                   FMCCLEDG,FMCCCOCE,FMCCDESC,FMCCADES:
+                                   FMCCPPOS,FMCCSECC,FMCCTELE,FMCCCONT:
+                                   FMCCIDAY,FMCCSTAT,FMCCSPAR
+          RETURN
+.
+ADFMCC    RESET     KEY19
+          DELETE    FMSAUDCC,KEY19;
+          RETURN
+.

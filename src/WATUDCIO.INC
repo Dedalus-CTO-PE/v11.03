@@ -1,0 +1,49 @@
+.
+.         INCLUDE NAME : WATUDCIO.INC
+.
+.         FILE  I/O REQUESTS FOR WAITING LISTS UNIT/DOCTOR CODES FILE
+.
+.OVRCD  FORM            1             0 = NOT OVER
+.                                     1 = OVER
+.
+.KEY21    DIM          21             KEY FOR WATUDCA1
+.
+.         NOTE  OVRCD = 1   RECORD DOES NOT EXIST
+.                       2   RECORD IS LOCKED
+.
+RDAUDCA1 RESET     KEY21
+         MOVE      ZERO,OVRCD
+         READ      WATUDCA1,KEY21;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSUDCA1 RESET     KEY21
+         READ      WATUDCA1,KEY21;;
+         RETURN  
+.
+RDUDCA1  MOVE      ZERO,OVRCD
+         RESET     KEY21
+         READ      WATUDCA1,KEY21;WTUCDATE,WTUCUNIT,WTUCDOCT,WTUCPRTY:
+                                  WTUCCCOD,WTUCNUMB,WTUCSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDKUDCA1 MOVE      ZERO,OVRCD
+         READKS    WATUDCA1;WTUCDATE,WTUCUNIT,WTUCDOCT,WTUCPRTY:
+                                  WTUCCCOD,WTUCNUMB,WTUCSPAR
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+WRUDCA1
+         RESET     KEY21
+         WRITE     WATUDCA1,KEY21;KEY21,WTUCNUMB,WTUCSPAR
+         RETURN  
+.
+UPUDCA1
+         UPDATE    WATUDCA1;WTUCDATE,WTUCUNIT,WTUCDOCT,WTUCPRTY:
+                                  WTUCCCOD,WTUCNUMB,WTUCSPAR
+         RETURN  
+.
+DEUDCA1  RESET     KEY21
+         DELETE    WATUDCA1,KEY21
+         RETURN  

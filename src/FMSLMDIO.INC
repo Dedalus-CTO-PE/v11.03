@@ -1,0 +1,42 @@
+RSFMLD1   RESET     KEY11
+          READ      FMSLMDA1,KEY11;;
+          RETURN
+.
+RAFMLD1   RESET     KEY11
+          MOVE      ZERO,OVRCD
+          READ      FMSLMDA1,KEY11;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMLD1   RESET     KEY11
+          MOVE      ZERO,OVRCD
+          READ      FMSLMDA1,KEY11;FMLDLEDG,FMLDYEAR,FMLDPERD,FMLDLNO:
+                                  FMLDLINE,FMLDSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMLD1   MOVE      ZERO,OVRCD
+          READKS    FMSLMDA1;FMLDLEDG,FMLDYEAR,FMLDPERD,FMLDLNO:
+                                  FMLDLINE,FMLDSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMLD1   MOVE      ZERO,OVRCD
+          READKP    FMSLMDA1;FMLDLEDG,FMLDYEAR,FMLDPERD,FMLDLNO:
+                                  FMLDLINE,FMLDSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMLD1   UPDATE    FMSLMDA1;FMLDLEDG,FMLDYEAR,FMLDPERD,FMLDLNO:
+                                  FMLDLINE,FMLDSPAR
+          RETURN
+.
+WRFMLD1   RESET     KEY11
+          WRITE     FMSLMDA1,KEY11;FMLDLEDG,FMLDYEAR,FMLDPERD,FMLDLNO:
+                                  FMLDLINE,FMLDSPAR
+          RETURN
+.
+DEFMLD1   RESET     KEY11
+          DELETE    FMSLMDA1,KEY11
+          RETURN
+.

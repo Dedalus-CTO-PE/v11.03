@@ -1,0 +1,890 @@
+.***************************************************************************
+.* System   :   CASH RECEIPTING                                            *
+.* Program  :   IBARCP68                                                   *
+.* Desc     :   Suspense Allocation Enquiry List                           *
+.***************************************************************************
+.* Date     :   08/03/2011                                                 *
+.* Author   :   Mike Laming                                                *
+.* Mods     :                                                              *
+.*        V10.14.01  20/03/2019  J.Tan            TSK 0857392              *
+.*                  Changed RCP Transaction count from DIM3 to DIM5        *
+.*        V10.08.01 30/08/2016  J.Tan         TSK 0819992                  *
+.*                  Mods RCDTALLO to 2 instead of 0 for Suspense register  *
+.*        V10.04.01 15/04/2014  J.Tan          CAR 261630                  *
+.*                  Removed port number from temp file name                *
+.*        V10.01.00 08/03/2011  Mike Laming  233901                        *
+.*                  New Program                                            *
+.***************************************************************************
++
+          INC       STD001FD
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+          INC       RCPBNKFD/INC   * bank deposit header file
+          INC       RCPDTEFD/INC   * receipt details file
+          INC       RCPSRTFD/INC   * suspense receipt table
+          INC       RCPREGFD/INC   * register file
+          INC       WEBSECFD/INC
+.
+.***************************************************************************
+.
+ALOFRDAT  DIM       8
+ALOFRDTL  DIM       10
+ALOTODAT  DIM       8
+ALOTODTL  DIM       10
+ALOCITEM  DIM       1
+UNALITEM  DIM       1
+CMDLINE   DIM       80
+DIM3A     DIM       1
+DIM36A    DIM       36
+DIM36B    DIM       36
+DIM60A    DIM       60
+DIM60B    DIM       60
+DIM150A   DIM       150
+FORM12    FORM      12
+KEY9B     DIM       9
+KYINDATE  DIM       8
+KYINDTDS  DIM       10
+MTHNAM3   DIM       3
+RECCNT    FORM      7
+RECFRDAT  DIM       8
+RECFRDTL  DIM       10
+RECTODAT  DIM       8
+RECTODTL  DIM       10
+RCPTNUMB  DIM       12
+SUSTYPE   DIM       1
+TMPFNAME  DIM       8
+
+.
+.
+. ----- Tempfile Definitions -----
+.
+SUSTEMP1  IFILE     SQL, FIXED=250, KEY="U1-12,13-17"
+.
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+XRECN     DIM       12       12       1       Receipt No.
+XTCNT     DIM       5        5        13      Transaction Count
+XTDAT     DIM       8        8        18      Transaction (Receipt) Date
+XRECT     DIM       1        1        26      Record Type (1=Orig 2=Resid 3=Aloc
+XREGD     DIM       8        8        27      Register Description
+XSAMT     DIM       15       15       35      Suspense Record amount
+XDETL     DIM       76       76       50      Details line
+XREFR     DIM       17       17       126     Reference
+XAAMT     DIM       15       15       143     Suspense Allocated amount
+XASTR     DIM       1        1        158     Not Released asterisk
+XALBY     DIM       16       16       159     Allocated By
+XALDT     DIM       16       16       175     Allocated Date/Time
+XRELS     DIM       8        8        191     Release Date
+XSPAR     DIM       51       51       199
+.                 ** End-of-recd **   250
+.
+SP16      INIT      "                "
+SP17      INIT      "                 "
+SLS       INIT      "/"
+JAN       INIT      "January"
+FEB       INIT      "February"
+MAR       INIT      "March"
+APR       INIT      "April"
+MAY       INIT      "May"
+JUN       INIT      "June"
+JUL       INIT      "July"
+AUG       INIT      "August"
+SEP       INIT      "September"
+OCT       INIT      "October"
+NOV       INIT      "November"
+DEC       INIT      "December"
+.
+.******************************************************************************
+PRGID     INIT      "IBARCP68"
+PRGNAM    INIT      "Suspense Allocation"
+VERSION   INIT      "V11.03.00"
+.******************************************************************************
+.*                              ML0000                                        *
+.*                      Controlling Logic (Mainline code)                     *
+.******************************************************************************
+.
+ML0000    CALL      INIT0000               * initialisation and open files
+.
+ML1000    CALL      OPTN0000               * select options
+          BRANCH    EXIT,ML9999            * EXIT = 1 if 0 chosen in menu
+.         
+          CALL      CREA0000               * create/open temp files
+.
+ML2000    CALL      EXTR0000               * Extract data
+          CALL      PRNT0000               * Print Report
+.
+          CALL      KILL0000               * delete the tempfiles
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+          CALL      IBACLOCK
+.
+          DISPLAY   *P60:24,"opening controlf"
+          OPEN      CONTROLF,"controlf"
+...       READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          OPEN      RCPBNKA1,"rcpbnkaf"
+          OPEN      RCPDTEA1,"rcpdteaf"
+          OPEN      RCPDTEA4,"rcpdteaf"
+          OPEN      RCPSRTA1,"rcpsrtaf"
+          OPEN      RCPSRTA2,"rcpsrtaf"
+          OPEN      RCPSRTA3,"rcpsrtaf"
+          OPEN      RCPREGA1,"rcpregaf"
+          OPEN      WEBSECA1,"websecaf"
+.
+          CALL      TFILENAM                * Get temp file name
+          MOVE      TFILNAME,TMPFNAME
+
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run clean up                           *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Print Daily Inpatient Report"
+.
+OPTN0500  KEYIN     *P1:8,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN1000             * read in options
+.
+          BEEP
+          GOTO      OPTN0500
+.
+.                                                * Key in all selections
+OPTN1000  DISPLAY   *P1:4,*EF," Receipt No.         :":
+                    *P1:5," Receipt Date From   : ":
+                    *P1:6,"              To     : ":
+                    *P1:7," Allocated Date From : ":
+                    *P1:8,"                To   : ":
+                    *P1:9," Allocated Items     :      (Yes/No)":
+                    *P1:10," Unallocated Items   :      (Yes/No)";
+.
+          UNPACK    SP70,RECFRDAT,RECTODAT,ALOFRDAT,ALOTODAT,ALOCITEM,UNALITEM
+          UNPACK    SP70,KYINDATE,KYINDTDS,KEY12,RCPTNUMB
+.
+OPTN1100  KEYIN     *P24:4,*EL,*V2LON,*JR,KEY12;   * Receipt No.
+          PACK      RCPTNUMB,KEY12,SP20
+          MATCH     SP20,RCPTNUMB
+          GOTO      OPTN1200 IF EQUAL
+.
+          PACK      KEY17,RCPTNUMB,SP20
+          CALL      RSRCDTE1
+          CALL      RKRCDTE1
+          BRANCH    OVRCD,OPTN1110
+          MATCH     RCPTNUMB,RCDTRECN
+          GOTO      OPTN1200 IF EQUAL
+.
+OPTN1110  DISPLAY   *P1:24," Invalid Receipt Number - ignored",*W2
+          MOVE      SP20,RCPTNUMB
+          DISPLAY   *P24:3,RCPTNUMB,*P1:24,*EL;
+.
+OPTN1200  UNPACK    SP20,CCENT,CYEAR,CMON,CDAY        * Receipt Date - From
+          MOVE      "24",CCOL
+          MOVE      "5",CVERT
+          MOVE      ZERO,FORM1
+          MOVE      SP20,KYINDATE
+          CALL      KYIN0000
+          MOVE      KYINDATE,RECFRDAT
+          MOVE      KYINDTDS,RECFRDTL
+.
+OPTN1300  MOVE      "24",CCOL                         * Receipt Date - To
+          MOVE      "6",CVERT
+          UNPACK    SP20,CCENT,CYEAR,CMON,CDAY
+          CALL      KYIN0000
+          MOVE      KYINDATE,RECTODAT
+          MOVE      KYINDTDS,RECTODTL
+.
+OPTN1400  UNPACK    SP20,CCENT,CYEAR,CMON,CDAY        * Allocated Date - From
+          MOVE      "24",CCOL
+          MOVE      "7",CVERT
+          CALL      KYIN0000
+          MOVE      KYINDATE,ALOFRDAT
+          MOVE      KYINDTDS,ALOFRDTL
+.
+OPTN1500  MOVE      "24",CCOL                         * Allocated Date - To  
+          MOVE      "8",CVERT
+          UNPACK    SP20,CCENT,CYEAR,CMON,CDAY
+          CALL      KYIN0000
+          MOVE      KYINDATE,ALOTODAT
+          MOVE      KYINDTDS,ALOTODTL
+.
+OPTN1600  KEYIN     *P24:9,*V2LON,ANS;                * Select Allocated Items
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+          DISPLAY   *P24:9,*V2LON,ANS;
+          MOVE      ANS,KEY1
+          REP       "Y-N- -",KEY1
+          MATCH     "-",KEY1
+          GOTO      OPTN1600 IF NOT EQUAL
+          REP       "Y1N0 0",ANS
+          MOVE      ANS,ALOCITEM
+.
+OPTN1700  KEYIN     *P24:10,*V2LON,ANS;               * Select Allocated Items
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS      
+          DISPLAY   *P24:10,*V2LON,ANS;
+          MOVE      ANS,KEY1
+          REP       "Y-N- -",KEY1
+          MATCH     "-",KEY1
+          GOTO      OPTN1700 IF NOT EQUAL
+          REP       "Y1N0 0",ANS
+          MOVE      ANS,UNALITEM
+.
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.****************************************************************************
+.*                               KYIN0000                                   *
+.****************************************************************************
+.                                           * to handle Oracle temp tables
+KYIN0000  MOVE      ZERO,EXIT
+          UNPACK    SP70,KYINDATE,KYINDTDS
+          MOVE      ZERO,CHIGHLT
+          MOVE      ONE,CCANLDTE
+          MOVE      ONE,CDEFDTE             * <=== for front end
+.
+          CALL      KEYDATE                 * keyin the "Date"
+          BRANCH    OVRCD,KYIN1000
+          PACK      KYINDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,KYINDTDS
+          GOTO      KYIN2000
+.
+KYIN1000  IF        CVERT = 5 | CVERT = 7
+            MOVE      "Start ",KYINDTDS
+          ELSE
+            MOVE      "Finish",KYINDTDS
+          ENDIF
+          MOVE      SP8,KYINDATE
+.
+KYIN2000  DISPLAY   *PCCOL:CVERT,*EL,KYINDTDS
+.
+KYIN9999  RETURN
++
+.****************************************************************************
+.*                        Create Temporary Files                            *
+.****************************************************************************
+.                                           * to handle Oracle temp tables
+CREA0000  MOVE      ZERO,EXIT
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      SUSTEMP1,TMPFNAME
+          BRANCH    OVRCD,CREA2000
+          TRAPCLR   IO
+          CALL      CLER0000                * clear existing temp file
+          GOTO      CREA9000
+.
+CREA2000  PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TMPFNAME,CMDLINE
+          APPEND    " 250 UC1-12,13-17",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+
+CREA9000  OPEN      SUSTEMP1,TMPFNAME
+.
+CREA9999  RETURN
+.
+.****************************************************************************
+.*                               KILL0000                                   *
+.*                        Remove Temporary Files                            *
+.****************************************************************************
+.
+KILL0000  CLOSE     SUSTEMP1
+          PACK      CMDLINE,SP30,SP30
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TMPFNAME,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          MATCH     "0",TASKID
+          GOTO      KILL9999 IF EQUAL
+.
+          CALL      CLER0000                * to handle Oracle temp tables
+.
+KILL9999  RETURN
++
+.******************************************************************************
+.*                             CLER0000                 Called by:            *
+.*               delete all records in existing temp file                     *
+.******************************************************************************
+.
+CLER0000  PACK      KEY17,SP20
+          CALL      RSTMSUS1
+          CALL      RKTMSUS1
+          BRANCH    OVRCD,CLER9999
+.
+          PACK      KEY17,XRECN,XTCNT,SP20
+          CALL      DETMSUS1
+.
+          GOTO      CLER0000
+.
+CLER9999  RETURN
++
+.****************************************************************************
+.*                               EXTR0000                                   *
+.*                  Extract Suspense Receipt data                           *
+.****************************************************************************
+.
+EXTR0000  MOVE      ZERO,EXIT
+          MOVE      SP3,DIM3A
+.
+          MATCH     SP20,RCPTNUMB
+          IF        !@EQUAL
+            MOVE      RCPTNUMB,FORM12
+            MOVE      FORM12,RCPTNUMB
+          ENDIF
+.
+          MATCH     "1",UNALITEM
+          GOTO      EXTR3000 IF NOT EQUAL   * if Unallocated not selected
+.
+.                                           * Process Unallocated Suspense
+          MATCH     SP20,RCPTNUMB
+          IF        @EQUAL | @EOS
+            MATCH     SP8,RECFRDAT
+            GOTO      EXTR3000 IF EQUAL     * if RECFRDAT & RCPTNUMB blank, end
+          ENDIF
+.                                           * read unallocated Suspense Receipts
+.                                           * - these will only be in "rcpdteaf"
+EXTR1000  MOVE      "DTE",DIM3A
+          MATCH     SP20,RCPTNUMB
+          IF        !@EQUAL
+            PACK      KEY17,RCPTNUMB,SP20
+            CALL      RSRCDTE1
+          ELSE
+            PACK      KEY18,TWO,SP70
+            CALL      RSRCDTE4
+          ENDIF
+.
+EXTR2000  MATCH     SP20,RCPTNUMB
+          IF        !@EQUAL
+            CALL      RKRCDTE1
+          ELSE
+            CALL      RKRCDTE4
+          ENDIF
+          BRANCH    OVRCD,EXTR3000
+.
+          MATCH     "2",RCDTALLO
+          GOTO      EXTR2000 IF NOT EQUAL
+.
+          MATCH     SP20,RCPTNUMB
+          IF        !@EQUAL
+            MATCH     RCPTNUMB,RCDTRECN
+            GOTO      EXTR3000 IF NOT EQUAL
+          ENDIF
+.
+          MOVE      RCDTRECN,KEY12          * read Bank Record for this Receipt
+          CALL      RDRCBNK1
+          BRANCH    OVRCD,EXTR2000
+.
+          MATCH     "1",RCBNSTAT
+          GOTO      EXTR2000 IF EQUAL       * Cancelled
+.
+          MATCH     SP8,RECFRDAT
+          IF        !@EQUAL
+            MATCH     RECFRDAT,RCBNTDAT     * is it selected Receipt date ?
+            GOTO      EXTR2000 IF LESS
+          ENDIF
+          MATCH     SP8,RECTODAT
+          IF        !@EQUAL
+            MATCH     RCBNTDAT,RECTODAT     * is it selected Receipt date ?
+            GOTO      EXTR2000 IF LESS
+          ENDIF
+.
+          MATCH     SP8,ALOFRDAT
+          IF        !@EQUAL
+            MATCH     ALOFRDAT,RCBNTDAT     * is it selected Receipt date ?
+            GOTO      EXTR2000 IF LESS
+          ENDIF
+          MATCH     SP8,ALOTODAT
+          IF        !@EQUAL
+            MATCH     RCBNTDAT,ALOTODAT     * is it selected Receipt date ?
+            GOTO      EXTR2000 IF LESS
+          ENDIF
+.
+          PACK      KEY3,RCDTREGI,SP70
+          CALL      RDREGA1
+          IF        OVRCD<>1
+            COMPARE   "99",REGIBACD         * dont duplicate Suspense Receipts
+.                                           * that appear in both Allocated and
+.                                           * Unallocated lists
+            GOTO      EXTR2000 IF NOT EQUAL
+            MATCH     "1",ALOCITEM
+            IF        @EQUAL
+              MATCH     SP8,RCDTSPDT
+              GOTO      EXTR2000 IF NOT EQUAL
+            ENDIF
+          ENDIF
+.
+          CALL      WRTEMP00
+          GOTO      EXTR2000
+.
+.
+.                                           * read allocated Suspense Receipts
+.                                           * - these are in "rcpsrtaf" only
+EXTR3000  MOVE      SP3,DIM3A
+          MATCH     "1",ALOCITEM
+          GOTO      EXTR9999 IF NOT EQUAL   * if Allocated is not selected, end
+.
+          MATCH     SP20,RCPTNUMB
+          IF        @EQUAL | @EOS
+            MATCH     SP8,RECFRDAT
+            GOTO      EXTR6000 IF NOT EQUAL    * use "rcpsrtaf" Index 2
+            MATCH     SP8,ALOFRDAT
+            GOTO      EXTR8000 IF NOT EQUAL    * use "rcpsrtaf" Index 3
+            GOTO      EXTR9999
+          ENDIF
+.
+          PACK      KEY12,RCPTNUMB,SP20
+          CALL      RDRCBNK1                * read Bank Record for this Receipt
+          BRANCH    OVRCD,EXTR9999
+.
+          MATCH     "1",RCBNSTAT
+          GOTO      EXTR9999 IF EQUAL       * Cancelled - end
+.
+.                                           * Process Allocated by Receipt Date
+          PACK      KEY17,RCPTNUMB,SP20
+          CALL      RSRCSRT1
+EXTR4000  CALL      RKRCSRT1                * read by Receipt Number
+          BRANCH    OVRCD,EXTR9999
+.
+          MATCH     RCPTNUMB,RCSRRECN
+          GOTO      EXTR9999 IF NOT EQUAL
+.
+          MATCH     SP8,RECFRDAT
+          IF        !@EQUAL
+            MATCH     RECFRDAT,RCSRTDAT     * check start Receipt Date range
+            GOTO      EXTR4000 IF LESS
+          ENDIF
+          MATCH     SP8,RECTODAT
+          IF        !@EQUAL
+            MATCH     RCSRTDAT,RECTODAT     * check end Receipt Date range
+            GOTO      EXTR4000 IF LESS
+          ENDIF
+.
+          MATCH     SP8,ALOFRDAT
+          IF        !@EQUAL
+            MATCH     ALOFRDAT,RCSRALDT     * check start Allocation Date range
+            GOTO      EXTR4000 IF LESS
+          ENDIF
+          MATCH     SP8,ALOTODAT
+          IF        !@EQUAL
+            MATCH     RCSRALDT,ALOTODAT     * check end Allocation Date range
+            GOTO      EXTR4000 IF LESS
+          ENDIF
+.
+          CALL      WRTEMP00
+          GOTO      EXTR4000
+.                                           * Process Allocated by Receipt Date
+EXTR6000  MATCH     SP8,RECFRDAT
+          GOTO      EXTR8000 IF EQUAL
+.
+          PACK      KEY25,RECFRDAT,SP20
+          CALL      RSRCSRT2
+EXTR7000  CALL      RKRCSRT2                * read by Receipt Date
+          BRANCH    OVRCD,EXTR9999
+.
+          MATCH     SP8,RECTODAT
+          IF        !@EQUAL
+            MATCH     RCSRTDAT,RECTODAT     * check if in Receipt Date range
+            GOTO      EXTR9999 IF LESS
+          ENDIF
+.
+          MOVE      RCSRRECN,KEY12          * read Bank Record for this Receipt
+          CALL      RDRCBNK1
+          BRANCH    OVRCD,EXTR7000
+.
+          MATCH     "1",RCBNSTAT
+          GOTO      EXTR7000 IF EQUAL       * Cancelled
+.
+          MATCH     SP8,ALOFRDAT
+          IF        !@EQUAL
+            MATCH     ALOFRDAT,RCSRALDT     * check start Allocation Date range
+            GOTO      EXTR7000 IF LESS
+          ENDIF
+          MATCH     SP8,ALOTODAT
+          IF        !@EQUAL
+            MATCH     RCSRALDT,ALOTODAT     * check end Allocation Date range
+            GOTO      EXTR7000 IF LESS
+          ENDIF
+.
+          CALL      WRTEMP00
+          GOTO      EXTR7000
+.
+.                                        * Process "Allocated" by Allocated Date
+EXTR8000  MATCH     SP8,ALOFRDAT
+          GOTO      EXTR9999 IF EQUAL
+.                                           * Process Allocated by allocated dat
+          PACK      KEY25,ALOFRDAT,SP20
+          CALL      RSRCSRT3
+EXTR9000  CALL      RKRCSRT3                * read by Allocated Date
+          BRANCH    OVRCD,EXTR9999
+.
+          MATCH     RCSRALDT,ALOTODAT
+          GOTO      EXTR9999 IF LESS
+.
+          MOVE      RCSRRECN,KEY12          * read Bank Record for this Receipt
+          CALL      RDRCBNK1
+          BRANCH    OVRCD,EXTR9000
+.
+          MATCH     "1",RCBNSTAT
+          GOTO      EXTR9000 IF EQUAL       * Cancelled
+.
+          CALL      WRTEMP00
+          GOTO      EXTR9000
+.
+EXTR9999  RETURN
++
+.------------------------------------------------------------------------------
+. Suspense Row
+.------------------------------------------------------------------------------
+WRTEMP00  MOVE      SP1,ANS
+          MOVE      RCSRRECT,SUSTYPE
+          UNPACK    SP70,REGDESC,KEY17,KEY20
+          UNPACK    SP70,DIM60A
+          CALL      CLRTEMP0
+.
+          MATCH     "DTE",DIM3A
+          GOTO      WRTEMP20 IF NOT EQUAL
+.                                           * move data to common fields
+WRTEMP10  MOVE      "0",SUSTYPE
+          MOVE      RCDTRECN,RCSRRECN
+          MOVE      RCDTTCNT,RCSRTCNT
+          MOVE      RCDTTDAT,RCSRTDAT
+          MOVE      RCDTREGI,RCSRREGI
+          MOVE      RCDTINVN,RCSRINVN
+          MOVE      RCDTVIST,RCSRVIST
+          MOVE      RCDTNAME,RCSRNAME
+          MOVE      RCDTADD1,RCSRADD1
+          MOVE      RCDTADD2,RCSRADD2
+          MOVE      RCDTADD3,RCSRADD3
+          MOVE      RCDTADD4,RCSRADD4
+          MOVE      RCDTPOST,RCSRPCOD
+          MOVE      RCDTREFR,RCSRREFR
+          MOVE      RCDTAMNT,RCSRAMNT
+          MOVE      RCDTSPDT,RCSRCDAT
+          MOVE      RCDTSPTM,RCSRCTIM
+          MOVE      RCDTSPUI,RCSRCUID
+
+WRTEMP20  PACK      KEY3,RCSRREGI,SP70      * Type, Suspense Amount, Details
+          CALL      RDREGA1
+          STRIP     REGDESC
+.
+          STRIP     RCSRNAME
+          STRIP     RCSRADD1
+          STRIP     RCSRADD2
+          STRIP     RCSRADD3
+          STRIP     RCSRADD4
+          STRIP     RCSRPCOD
+.
+.                                           * set up the Temp file record
+          MOVE      RCSRRECN,XRECN
+          MOVE      RCSRTCNT,XTCNT
+          PACK      XREFR,RCSRREFR,SP20
+          MOVE      SUSTYPE,XRECT
+.
+          MOVE      ZERO,F1
+          MOVE      SUSTYPE,F1              * 1=Original 2=Residual 3=Allocation
+          BRANCH    F1,WRTEMP40,WRTEMP40,WRTEMP60
+.
+.                                           * setup unallocated Suspense recds
+WRTEMP30  PACK      XREGD,REGDESC,SP70
+          MOVE      "SUS ACCT",KEY8
+          PACK      KEY8,REGDESC,SP70
+          GOTO      WRTEMP50
+.
+.                                           * setup allocated Suspense header
+WRTEMP40  MATCH     "1",SUSTYPE
+          IF        @EQUAL
+            MOVE      "Original",XREGD
+          ELSE
+            MOVE      "Residual",XREGD
+          ENDIF
+
+WRTEMP50  MOVE      RCSRAMNT,XSAMT
+          PACK      XDETL,RCSRNAME,SP1,RCSRADD1,SP1,RCSRADD2,SP1,RCSRADD3:
+                       SP1,RCSRADD4,SP1,RCSRPCOD,SP70
+          UNPACK    RCSRTDAT,CCENT,CYEAR,CMON,CDAY
+          PACK      XTDAT,CDAY,SLS,CMON,SLS,CYEAR
+          GOTO      WRTEMP70
+.
+. ----------------------------------------------------------------------------
+.                                           * set up allocated detail records
+WRTEMP60  CLEAR     DIM150A
+          COMPARE   "99",REGIBACD
+          IF        @EQUAL
+            APPEND    REGDESC,DIM150A
+            APPEND    " - ",DIM150A
+            APPEND    RCSRNAME,DIM150A
+            APPEND    SP1,DIM150A
+            PACK      DIM60B,RCSRADD1,SP1,RCSRADD2,SP1,RCSRADD3,SP1,RCSRADD4:
+                         SP1,RCSRPCOD
+            APPEND    DIM60B,DIM150A
+          ELSE
+            PACK      KEY17,RCSRRECN,RCSRTCNT,SP20
+            CALL      RDRCDTE1
+            IF        OVRCD = 0
+              MATCH     SP8,RCDTRELD
+              IF        @EQUAL
+                MOVE      "*",XASTR
+              ELSE
+                UNPACK    RCDTRELD,CCENT,CYEAR,CMON,CDAY
+                PACK      XRELS,CDAY,SLS,CMON,SLS,CYEAR
+              ENDIF
+            ENDIF
+            MOVE      SP20,KEY17
+            APPEND    REGDESC,DIM150A
+            APPEND    " - ",DIM150A
+            MATCH     SP8,RCSRINVN
+            IF        !@EQUAL
+              SQUEEZE   RCSRINVN
+              APPEND    "Inv. ",DIM150A
+              APPEND    RCSRINVN,DIM150A
+              APPEND    SP1,DIM150A
+            ENDIF
+            APPEND    "- ",DIM150A
+            APPEND    RCSRNAME,DIM150A
+          ENDIF
+          RESET     DIM150A
+          PACK      XDETL,DIM150A,SP70,SP70
+          MOVE      RCSRAMNT,XAAMT
+          MOVE      ANS,XASTR
+.
+          MATCH     SP8,RCSRALDT
+          IF        !@EQUAL
+            MOVE      SP30,WBSENAM
+            MOVE      "Unknown ",WBSENAM
+            PACK      KEY10,RCSRCUID,SP10
+            CALL      RDWBSE1
+            MOVE      WBSENAM,XALBY
+.
+            UNPACK    RCSRCDAT,CCENT,CYEAR,CMON,CDAY
+            PACK      KEY8,CDAY,SLS,CMON,SLS,CYEAR
+            MOVE      " @ ",KEY3
+            PACK      XALDT,KEY8,KEY3,RCSRCTIM,SP20
+          ENDIF
+.
+          PACK      KEY17,RCSRRECN,RCSRTCNT,SP20
+          CALL      RDRCDTE1
+          BRANCH    OVRCD,WRTEMP70
+          MATCH     SP8,RCDTRELD
+          GOTO      WRTEMP70 IF EQUAL
+          UNPACK    RCDTRELD,CCENT,CYEAR,CMON,CDAY
+          PACK      XRELS,CDAY,SLS,CMON,SLS,CYEAR
+.
+WRTEMP70  PACK      KEY17,RCSRRECN,RCSRTCNT,SP20
+          CALL      WRTMSUS1
+.
+WRTEMP99  RETURN
++
+.****************************************************************************
+.*                               CLRTEMP0                                   *
+.*                         Clear Temp file record                           *
+.****************************************************************************
+.
+CLRTEMP0  MOVE      ZERO,EXIT
+          MOVE      SP70,XRECN
+          MOVE      SP70,XTCNT
+          MOVE      SP70,XTDAT
+          MOVE      SP70,XRECT
+          MOVE      SP70,XREGD
+          MOVE      SP70,XSAMT
+          PACK      XDETL,SP70,SP70
+          MOVE      SP70,XREFR
+          MOVE      SP70,XAAMT
+          MOVE      SP70,XASTR
+          MOVE      SP70,XALBY
+          MOVE      SP70,XALDT
+          MOVE      SP70,XRELS
+          MOVE      SP70,XSPAR
+CLRTEMP9  RETURN
++
+.****************************************************************************
+.*                               PRNT0000                                   *
+.*                  Print Report from Temp file                             *
+.****************************************************************************
+.
+PRNT0000  MOVE      ZERO,RECCNT
+          MOVE      "99",CLNO
+.
+          PACK      KEY17,SP20
+          CALL      RSTMSUS1
+PRNT0100  CALL      RKTMSUS1
+          BRANCH    OVRCD,PRNT9000
+.
+          COMPARE   "56",CLNO
+          CALL      HEAD0000 IF NOT LESS    * Print the report header
+          ADD       ONE,RECCNT
+.
+          MOVE      ZERO,F1
+          MOVE      XRECT,F1
+          IF        F1 < 3
+            UNPACK    XRECN,KEY3,KEY9
+            UNPACK    XSAMT,KEY5,KEY10
+            UNPACK    XDETL,DIM36A,DIM36B
+            PRINT     *1,"|",KEY9,"|",XTDAT,"|",XREGD,"|",KEY10,"|",DIM36A:
+                      "|",XREFR,"|",SP10,"|",SP16,"|",SP8,"|"
+            MATCH     SP20,DIM36B
+            IF        !@EQUAL
+              PRINT   *1,"|",SP9,"|",SP8,"|",SP8,"|",SP10,"|",DIM36B:
+                      "|",SP17,"|",SP10,"|",SP16,"|",SP8,"|"
+              ADD     ONE,CLNO
+            ENDIF
+            ADD     ONE,CLNO
+          ELSE                              * print the Allocated records
+            UNPACK    XAAMT,KEY6,KEY9
+            UNPACK    XDETL,DIM36A,DIM36B
+            PRINT     *1,"|",SP9,"|",SP8,"|",SP8,"|",SP10,"|",DIM36A:
+                      "|",XREFR,"|",KEY9,XASTR,"|",XALBY,"|",SP8,"|"
+            PRINT     *1,"|",SP9,"|",SP8,"|",SP8,"|",SP10,"|",DIM36B:
+                      "|",SP17,"|",SP10,"|",XALDT,"|",XRELS,"|"
+            ADD      TWO,CLNO
+           ENDIF
+.
+           GOTO      PRNT0100
+.
+PRNT9000  CALL      UND132
+          IF        RECCNT = 0
+            CALL      HEAD0000
+            PRINT     *1,"No information found"
+          ENDIF
+          PRINT       *1,"*** End of Report ***"
+.
+PRNT9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000                                  *
+.*                           Print The Report Header                          *
+.******************************************************************************
+HEAD0000  MOVE      ONE,CNOUNDLN
+          MOVE      ZERO,CLNO
+          MOVE      "Report",CPHDROPT
+          CALL      HEAD132                 * Print the report header
+          IF        CPAGENO = 1
+            MATCH     SP20,RCPTNUMB
+            IF        !@EQUAL
+              MOVE      RCPTNUMB,KEY12
+              SQUEEZE   KEY12
+              PRINT     *30,"Receipt No. : ",KEY12," only"
+              ADD       ONE,CLNO
+            ELSE 
+              PRINT     *30,"Receipt Date Range - From ",RECFRDTL,"   To ":
+                        RECTODTL
+              ADD       ONE,CLNO
+            ENDIF
+            MATCH     SP8,ALOFRDAT
+            IF        !@EQUAL
+              PRINT     *30,"Allocated Date Range - From ",ALOFRDTL,"   To ":
+                        ALOTODTL
+              ADD       ONE,CLNO
+            ENDIF
+            PACK     DIM60A,SP70
+            CLEAR    DIM60A
+            APPEND   "Select ",DIM60A
+            MOVE     ZERO,F1
+            MATCH    "1",ALOCITEM
+            IF       @EQUAL
+              APPEND   "Allocated Items ",DIM60A
+              MOVE     ONE,F1
+            ENDIF
+            MATCH    "1",UNALITEM
+            IF       @EQUAL
+              MATCH     SP8,ALOFRDAT
+              IF        !@EQUAL
+                IF       F1 = 0
+                  APPEND   "Unallocated Suspense Items",DIM60A
+                ELSE
+                  APPEND   " and Unallocated Items",DIM60A
+                ENDIF
+              ENDIF
+            ENDIF
+            RESET     DIM60A
+            PRINT     *30,DIM60A
+            ADD       ONE,CLNO
+          ENDIF
+.
+          PRINT     *N;
+          CALL      UND132
+          PRINT     *1,"| Receipt | Receipt|Suspense| Suspense | Deta":
+                       "ils                            | Reference       |":
+                       "Allocated | Allocated By   | Release|"
+          PRINT     *1,"| Number  | Date   | Type   |  Amount  |     ":
+                       "                               |                 |":
+                       " Amount   |                | Date   |"
+.
+          CALL      UND132
+          ADD       "8",CLNO
+.
+HEAD9999  RETURN    
++
+.******************************************************************************
+RSTMSUS1  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READ      SUSTEMP1,KEY17;;
+          RETURN
+.
+RKTMSUS1  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READKS    SUSTEMP1;XRECN,XTCNT,XTDAT,XRECT,XREGD:
+                             XSAMT,XDETL,XREFR,XAAMT,XASTR,XALBY,XALDT:
+                             XRELS,XSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTMSUS1  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          READ      SUSTEMP1,KEY17;XRECN,XTCNT,XTDAT,XRECT,XREGD:
+                             XSAMT,XDETL,XREFR,XAAMT,XASTR,XALBY,XALDT:
+                             XRELS,XSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTMSUS1  MOVE      ZERO,OVRCD
+          RESET     KEY17
+          WRITE     SUSTEMP1,KEY17;XRECN,XTCNT,XTDAT,XRECT,XREGD:
+                             XSAMT,XDETL,XREFR,XAAMT,XASTR,XALBY,XALDT:
+                             XRELS,XSPAR
+          RETURN
+.
+DETMSUS1  DELETE    SUSTEMP1,KEY17
+          RETURN
+.
+.******************************************************************************
+.
+          INC       TFILENAM                * Generate Temp File Name
+          INC       IBASEQIO/INC            * Sequential Numbers File
+          INC       WEBERRIO/INC            * Web Server Error Logging
+.
+          INC       RCPBNKIO/INC
+          INC       RCPDTEIO/INC
+          INC       RCPSRTIO/INC
+          INC       RCPREGIO/INC
+          INC       WEBSECIO/INC
+.
+          INC       STD001IO

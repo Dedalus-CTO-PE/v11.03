@@ -1,0 +1,517 @@
+.*****************************************************************************
+.* Procedure Name: PTDRCHRG                                        
+.* Function      : Calculate Doctor Charge for Inpatient
+.*
+.*          IF PROGFLAG = 0  - Calculate doctor charges for Current Invoice
+.*          IF PROGFLAG = 1  - Calculate doctor charges for Invoice Estimate
+.*
+.* Mods:
+.*        V11.01.02 10/11/2021 J.Tan           TSK 0880410
+.*                  Mod for System Health fund on hold invoice
+.*        V11.01.01 18/02/2021  J.Tan          TSK 0888639
+.*                  Added PMMITMNO - Theatre Team no
+.*        V10.13.03 23/10/2018  Tracey Nguyen  TSK 0859743
+.*                  Added PMMIHOSI - Hopsital Indicator on PMSMTIFD
+.*        V10.13.02 19/09/2018  J.Tan          TSK 0863727
+.*                  Added Restrictive Override code
+.*        V10.13.01 21/08/2017  J.Tan        TSK 0859742
+.*                  Added ECLIPSE new fields from pmsmtiaf
+.*        V10.11.01 31/08/2017  J.Tan         TSK 0837479
+.*                  Added PMMICTYP - Consumption Type
+.*        V10.08.01 10/07/2016  J.Tan         TSK 0822042
+.*                  Mods checking CFEETYP before opening pmsmteaf
+.*        V10.05.01 05/08/2014  Peter Vela   CAR 302164
+.*                  Added PMMIRBRS - Rebate Reason CAT Rr
+.*        V10.04.01 17/01/2014  J.Tan        CAR 295008
+.*                  Mods to set PMMIDTCR,PMMITMCR,PMMIIDCR
+.*                  20/01/2014  J.Tan        CAR 249828   
+.*                  Added PMMIPMBS - Patient MBS Team and Counter
+.*        V10.03.02 15/05/2012 J.Tan             CAR 255708
+.*                  Mods checking for Hold Invoices From Date
+.*        V10.01.01 07/12/2010  Ebon Clements     CAR 233927
+.*                  Added reason for hold update to invoice pending
+.*                  07/12/2010  Mike Laming   CAR 233046
+.*                  Mods for PATMCHFD using Table Type (replacing H/F Table)
+.*        V10.00.01 30/04/2010  J.Tan     CAR 220887
+.*                  Mods checking for Active/Inactive of Misc.charge
+.*        V9.12.01  17/12/2009  Peter McMullen CAR 210130
+.*                  Convert to newer Dr name format routine DOCNM000
+.*        V9.09.01  14/06/2007  Mike Laming   CAR 119158
+.*                  Changes to fix RDMCHG1 for Misc.Charges Effective Date
+.*        V9.08.06  07/05/2007 Peter Vela CAR SJOG ED Billing
+.*                  Initialised new pmsmtiaf variables
+.*        V9.08.05  08/05/2007  J.Tan        CAR 140240
+.*                  Fixed doctor charge for first day of period
+.*        V9.08.04  28/03/2007  J.Tan        CAR 137169
+.*                  Fixed doctor charge for patient with more than one doctor
+.*                  change on same date
+.*        V9.08.03  08/02/2007  Mike Laming  CAR 130473
+.*                  Added WORKDATE (DATE) at UPCHR300 to add 1 to Invoice date
+.*        V9.08.02  10/10/2006    J.Tan      CAR 124083
+.*                  Fixed Invoice Estimate to calculate doc.charge to CHNGDATE
+.*        V9.08.01  26/10/2006    J.Tan      CAR 122541
+.*                  Mods to set alternate item group catg FN
+.*        V9.08.00  12/10/2006    J.Tan      CAR 121323
+.*                  Mods to remove existing doctor fees before re-calculating
+.*        V9.07.00  21/08/2006    J.Tan      CAR 107626
+.*                  New routine to calculate Doctor Charges
+.*
+.*****************************************************************************
+PTDRCHRG  READ      CONTROLF,HUND05;*238,PTCNDCHR     * Doctor Misc.charge code
+          READ      CONTROLF,TEN9;*212,CFEETYP
+.
+          COMPARE   NINE,CFEETYP
+          GOTO      DRCH9999 IF NOT EQUAL       * Not using Johns Hopkins Bedfee
+          MATCH     SP70,PTCNDCHR
+          GOTO      DRCH9999 IF EQUAL           * No doctor charge
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS,*85,IBCNUGST
+          READ      CONTROLF,SEVENTY9;*248,PTCNIPEN
+          READ      CONTROLF,NINTY8;*130,PTCNAGST
+.
+          MOVE      ADMISSNO,KEY8
+          CALL      RDVISA1
+          BRANCH    OVRCD,DRCH9999
+          BRANCH    PVITYPE,DRCH9999,DRCH9999,DRCH3000
+          GOTO      DRCH9999
+.
+DRCH3000  MOVE      PVIBILL,KEY8            * Inpatient
+          CALL      RDMISS1
+          BRANCH    OVRCD,DRCH9999
+.
+          BRANCH    ADSCHI,DRCH9999         * Discharged and invoiced already
+.
+          IF        PROGFLAG=1
+            OPEN      PMSMTEA1,"pmsmteaf"   * Invoice estimate
+          ELSE
+            CALL      RMDOC000              * Remove any current doctor charges
+          ENDIF
+.
+          CALL      UPCHR000                * Update doctor charge
+.
+          BRANCH    PROGFLAG,DRCH9999       * Invoice estimate only
+.
+.  Add a new entry,the Invoices Pending file if there not already there.
+.
+          IF        PTCNIPEN=0
+            MOVE      PVIBILL,IPADMNO
+            MOVE      PVITYPE,IPSYSTM
+            MOVE      PVISITE,IPSITE
+.
+            MOVE      SP70,PENDHOSP
+            IF        IBCNMHOS=1
+              MOVE      IPADMNO,KEY8
+              CALL      RDPMVX11
+              IF        OVRCD=0
+                MOVE      PMVXMHOS,PENDHOSP         * Hospital ID
+              ENDIF
+            ENDIF
+            MOVE      " 3",PENDSYST                 * Inpatient
+.
+            MOVE      ADATE,PENDSDAT             * as at date
+            MOVE      ADATE,PENDADAT             * admission date
+            MOVE      SP70,PENDDDAT
+            IF        ASTAT=3
+              CALL      RDDSCH1
+              IF        OVRCD=0
+                MOVE      DDATE,PENDDDAT         * discharged date
+              ENDIF
+            ENDIF
+            MOVE      AFUNDH,PENDFUND        
+            MOVE      ACLAIM,PENDCLAM         
+            CALL      IPRH0000                 
+            MOVE      ONE,PTIPRSTA             
+            MOVE      SP70,PTIPSVAR            
+.
+            PACK      KEY8,IPADMNO,SP70
+            CALL      RDIPEN1
+            IF        OVRCD=1
+              CALL      WRIPEN1
+            ELSE
+              CALL      UPIPEN1
+            ENDIF
+          ENDIF
+.
+DRCH9999  RETURN              
++
+.**************************************************************************
+.         Doctor Fees charging
+.**************************************************************************
+UPCHR000  MOVE      SP70,NDATE
+          MOVE      SP70,STADOCT
+          MOVE      SP70,STDATE
+          UNPACK    SP70,FROMDATE,TODATE,STMOVE
+          PACK      KEY30,ADMISSNO,SP70
+          CALL      RDSTRAN2
+UPCHR100  CALL      RDKTRAN2
+          BRANCH    OVRCD,UPCHR800
+          MATCH     DTADMN,ADMISSNO        * same admission no?
+          GOTO      UPCHR800 IF NOT EQUAL
+.
+          MOVE      TDATE,STDATE
+          MATCH     ALACDTE,TDATE          * check with last date invoiced
+          GOTO      UPCHR300 IF EQUAL
+          GOTO      UPCHR300 IF LESS
+.
+          MATCH     SP70,STADOCT
+          GOTO      UPCHR400 IF EQUAL      * First record
+.
+          MATCH     ANSR,TMOVE
+          GOTO      UPCHR400 IF EQUAL      * Return from leave record
+.
+          MOVE      TDATE,TODATE
+          CALL      GDFEE000               * Generate doctor fees
+          MATCH     ANSD,TMOVE
+          GOTO      UPCHR999 IF EQUAL 
+.
+          GOTO      UPCHR400
+.
+UPCHR300  MOVE      ALACDTE,FROMDATE       * Last date invoice raised
+          COMPARE   ZERO,AINVPRT
+          GOTO      UPCHR500 IF EQUAL
+.
+          COMPARE   ZERO,CINV1ST
+          GOTO      UPCHR380 IF EQUAL      * parameter not set
+.
+.         Check if the alacdte is the first date of period
+.
+          MOVE      FROMDATE,CPTDATE
+          REP       " 0",CPTDATE
+          CALL      GPERD
+          BRANCH    EXIT,UPCHR380
+.
+          UNPACK    DRGFDTE,D8DATE            * set first day of period
+          REP       " 0",D8DATE
+          MATCH     D8DATE,FROMDATE
+          GOTO      UPCHR380 IF NOT EQUAL     * not first date of period
+.
+.         Doctor charge for first date of period wasn't invoiced, so
+.         need to have doctor charge from the alacdte
+.
+          GOTO      UPCHR500
+.
+UPCHR380  MOVE      ALACDTE,WORKDATE
+          ADD       ONE,WORKDATE
+          MOVE      WORKDATE,FROMDATE      * set Fromdate to day after last Inv.
+          GOTO      UPCHR500
+.
+UPCHR400  MOVE      TDATE,FROMDATE         * Transfer date
+.
+UPCHR500  MOVE      TADOCT,STADOCT
+          MOVE      TMOVE,STMOVE
+          GOTO      UPCHR100
+.
+.         Last record
+.
+UPCHR800  MATCH     ANSL,STMOVE
+          GOTO      UPCHR999 IF EQUAL      * patient on leave
+          MATCH     ANSD,STMOVE
+          GOTO      UPCHR999 IF EQUAL      * patient discharged
+.
+          MOVE      ANSC,TMOVE
+          IF        PROGFLAG=1
+            MOVE      CHNGDATE,TODATE
+          ELSE
+            PACK      TODATE,CCC,CYY,CMM,CDD
+          ENDIF
+          REP       " 0",TODATE
+          CALL      GDFEE000               * Generate doctor fees
+.
+UPCHR999  RETURN
++
+.**************************************************************************
+.         Generate doctor fee
+.**************************************************************************
+GDFEE000  CMATCH    ANSA,TMOVE
+          GOTO      GDFEE300 IF EQUAL          * Charge admission date
+.
+          MATCH     FROMDATE,TODATE
+          GOTO      GDFEE200 IF EQUAL
+.
+          MOVE      FROMDATE,NDATE
+.
+GDFEE100  MATCH     TODATE,NDATE
+          GOTO      GDFEE600 IF LESS
+          GOTO      GDFEE999 IF NOT EQUAL
+.
+.         Charge Doctor fee on discharge and Leave date
+.
+GDFEE200  MATCH     ANSC,TMOVE
+          GOTO      GDFEE300 IF NOT EQUAL
+.                                              * Dr Fee if not discharged
+          PACK      DIM8,CCC,CYY,CMM,CDD
+          REP       " 0",DIM8
+          MOVE      DIM8,NDATE
+          MATCH     TODATE,DIM8                * is this today ?
+          GOTO      GDFEE600 IF EQUAL
+          GOTO      GDFEE999
+.
+GDFEE300  MOVE      TADOCT,STADOCT         * Treating doctor
+          MOVE      TDATE,NDATE
+.
+.         Write record for doctor fee
+.
+GDFEE600  CALL      STMTI000               * Set fields
+          CALL      UNGST000
+.
+.         Work out the next date
+.
+          UNPACK    NDATE,XCENT,XYEAR,XMON,XDAY
+          MOVE      XCENT,CC
+          MOVE      XYEAR,YY
+          MOVE      XMON,MM
+          MOVE      XDAY,DD
+          CALL      DMYCON
+.
+          ADD       ONE,JULDAY
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON
+          PACK      NDATE,CC,YY,MM,DD
+          REP       " 0",NDATE
+.
+          GOTO      GDFEE100
+.
+GDFEE999  RETURN
++
+.**************************************************************************
+.         Get attending doctor name
+.**************************************************************************
+DOCTN000  MOVE      STADOCT,KEY6
+          CALL      RDDOCT1
+          IF        OVRCD=0
+            MOVE      DTITL,FMTTITLE
+            MOVE      DGNAME,FMTGNAME
+            MOVE      DSNAME,FMTSNAME
+            CALL      DOCNM000
+          ELSE
+            CLEAR     DOCFNAME
+            APPEND    "Invalid Doctor - ",DOCFNAME
+            APPEND    STADOCT,DOCFNAME
+            RESET     DOCFNAME
+          ENDIF
+DOCTN999  RETURN
+.
+.**************************************************************************
+.         STMTI000 - Set up pmsmtiaf record
+.**************************************************************************
+STMTI000  MOVE      ZERO,EXIT
+.                                                                     *I-119158
+          CALL      DCHRG000           * get new charges using NDATE for Eff.dat
+.
+STMTI100  MOVE      PVITRAN,PMMITRAN   * Transaction Number
+          MOVE      ADMISSNO,PMMIVISN  * Visit number
+          MOVE      URNUMBER,PMMIURNO  * U/R Number
+          MOVE      PVISYST,PMMISYST   * System
+          MOVE      PTCNDCHR,PMMIITEM  * Item Number
+.
+          MOVE      STADOCT,PMMITDOC     * Treating doctor
+          CALL      DOCTN0000
+          MOVE      MDESC,PMMIDESC     * Description
+          STRIP     PMMIDESC
+          MOVE      ZERO,FORM2
+          MOVELPTR  PMMIDESC,FORM2
+          RESET     PMMIDESC,FORM2
+          IF        FORM2 > 15
+            RESET     PMMIDESC,15
+          ENDIF
+          APPEND    " by ",PMMIDESC
+          APPEND    DOCFNAME,PMMIDESC
+          APPEND    SP70,PMMIDESC
+          RESET     PMMIDESC
+          MOVE      SP70,PMMIDES2     * Description 2
+.
+          MOVE      NDATE,PMMITDAT    * Transaction date
+          REP       " 0",PMMITDAT
+          MOVE      "4",PMMIRTYP      * Record type
+          MOVE      SP70,PMMIREFN     * Reference
+          MOVE      ZERO,PMMIAMTG     * Government Portion
+          MOVE      ZERO,PMMIAMTH     * Orig rate before any disc.allowance
+          MOVE      MPATPOR,PMMIAMTP  * Patient portion amount
+          MOVE      MHFPOR,PMMIRBAT   * Estimate Rebate amount
+          MOVE      ONE,PMMISERV      * Number of Services
+.
+          MOVE      PMMIAMTP,PMMIAMTT
+          ADD       PMMIRBAT,PMMIAMTT * Gross Total amount
+          MOVE      SP70,PMMIODOC     * Operating docotr
+          MOVE      SP70,PMMISESS     * Session (Theatre only)
+.
+          MOVE      PTMCALGR,PMMIMGRP  * Misc.Group (cat FN)
+          PACK      PMMIBTCH,MMSCGRP,SP70  * Misc.Group (cat FI)
+.
+          MOVE      MNINV,PMMIINVN    * No of Invoices
+          MOVE      ONE,PMMIGSTA      * GST Applicable
+          MOVE      PTCNAGST,PMMIGSTC * GST Payable code
+          MOVE      ZERO,PMMIGSTM     * GST Amount
+          CALL      PGST0000          * Get doct charge GST rate
+          MOVE      PMMIAMTT,PMMIGSTM     
+          MULT      IBGEAMNT,PMMIGSTM * GST amount
+          DIV       "100.00",PMMIGSTM * Divide by 100 to get wanted fig.
+          MOVE      WBSEUID,PMMIWUSR  * WEB User ID
+          MOVE      SP70,PMMIMVBR     * Mech.Vent.Billing Record? 1=Yes
+          MOVE      SP70,PMMIUNIQ     * Unique id for theatre booking
+          MOVE      SP70,PMMISPAR     * Spare variable
+.
+          CALL      WRMTI0000
+STMTI999  RETURN
++
+.******************************************************************************
+.* PGST0000 : Get percentage of Doctor Charge GST                             *
+.******************************************************************************
+PGST0000  MOVE     ZERO,IBGEAMNT            * Initialise GST percentage amount
+          OPEN     IBAGEDA1,"ibagedaf"
+          MOVE     ZERO,IBGEAMNT             * zero GST percentage
+          PACK     KEY8,CCC,CYY,CMM,CDD
+          REP      " 0",KEY8
+          PACK     KEY14,PTCNAGST,KEY8
+          CALL     RDIBGE1
+          COMPARE  ZERO,OVRCD
+          GOTO     PGST9000 IF EQUAL         * found GST amount for current date
+.
+          CALL     RPIBGE1                   * read previous record
+          BRANCH   OVRCD,PGST8000
+.
+          MATCH    PTCNAGST,IBGECODE         * Same code ?
+          GOTO     PGST9000 IF EQUAL
+.
+PGST8000  MOVE     ZERO,IBGEAMNT
+.
+PGST9000  CLOSE    IBAGEDA1
+PGST9999  RETURN
++
+.**************************************************************************
+.         Write record to pmsmtiaf
+.**************************************************************************
+WRMTI000  BRANCH    PROGFLAG,WRMTI4000
+.
+          PACK      KEY14,PMMIVISN,PMMITRAN
+          CALL      RAPMMTI1
+          IF        OVRCD=0
+            MOVE      PMMIVISN,KEY8
+            CALL      TRVISA1
+            MOVE      PVITRAN,PMMITRAN
+            MOVE      PMMITRAN,ATRANNO
+            GOTO      WRMTI000
+          ENDIF
+          UNPACK    SP70,PMMICNTR,PMMISUNQ
+          MOVE      SP70,PMMIINCT
+          MOVE      SP70,PMMISUBN
+          MOVE      SP70,PMMIEDAD
+          MOVE      SP70,PMMISVTM
+          MOVE      SP70,PMMIDUPD
+          MOVE      SP70,PMMITUPD
+          MOVE      SP70,PMMIWUSR
+          PACK      PMMIDTCR,CCC,CYY,CMM,CDD
+          REP       " 0",PMMIDTCR
+          CALL      IBACLOCK
+          MOVE      CTIMEIS,PMMITMCR
+          MOVE      WBSEUID,PMMIIDCR  * WEB User ID
+          MOVE      SP70,PMMITMNO
+          MOVE      SP70,PMMIPMBS
+          MOVE      SP70,PMMIRBRS
+          MOVE      SP70,PMMICTYP
+          PACK      PMMIACOI,SP70       * After Care Override Indicator
+          PACK      PMMIDSOV,SP70       * Duplicate Service Override
+          PACK      PMMISTXT,SP70       * Service Text
+          PACK      PMMILSPN,SP70       * Location Specific Practice No(LSPN)
+          PACK      PMMIMPOV,SP70       * Multi Procedure Override
+          PACK      PMMINMPT,SP70       * Number of Patients Seen
+          PACK      PMMISDCD,SP70       * Self Deem Code (Cat Sd)
+          PACK      PMMITDUR,SP70       * Time Duration (Mins)
+          PACK      PMMIROVR,SP70       * Restricted Override Code (Cat Ro)
+          PACK      PMMIHOSI,SP70       * Hospital Indicator         *T0859743
+          PACK      PMMISPAR,SP70,SP70
+          CALL      WRPMMTI1             * write a new item  record
+          GOTO      WRMTI999
+.
+WRMTI400  PACK      KEY14,PMMIVISN,PVITRAN
+          CALL      RAPMMTE1
+          IF        OVRCD=0
+            ADD       ONE,PVITRAN
+            GOTO      WRMTI400
+          ENDIF
+          MOVE      PVITRAN,PMMITRAN
+          CALL      WRPMMTE1
+.
+WRMTI999  RETURN
++
+.******************************************************************************
+.         Subroutine to get the appropriate miscellaneous charges record
+.******************************************************************************
+DCHRG000  MOVE      ZERO,EXIT
+          MOVE      NDATE,KEY8              * check for Eff.date      *I-11915
+.
+          MOVE      SP3,PTHFBCAT       * convert "H/F Table" to "Table Type"
+          PACK      KEY14,AFUNDH,AFNDTB,SP20
+          CALL      RDFUND1            * "Table Type code" now in PTHFBCAT
+.
+          PACK      KEY29,ACLAIM,AFUNDH,PTHFBCAT,PTCNDCHR,NDATE,SP10
+          CALL      PATMCHRD                * read Misc.Charges file
+          COMPARE   ZERO,EXIT
+          GOTO      DCHRG999 IF EQUAL
+.
+.         No record with health fund details - try a blank health fund
+.
+          PACK      KEY29,ACLAIM,SP6,SP3,PTCNDCHR,NDATE,SP10
+          CALL      PATMCHRD                * read Misc.Charges file
+          COMPARE   ZERO,EXIT
+          GOTO      DCHRG999 IF EQUAL
+.         
+.         No record with health fund details - last chance, try claim 0
+.           
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,TWENTY;*193,PTCNDCLM
+          CALL      DCLM0000        * Check Hospital claim code charging
+.
+          PACK      KEY29,PTCNDCLM,SP6,SP3,PTCNDCHR,NDATE,SP10
+          CALL      PATMCHRD                * read Misc.Charges file
+.
+DCHRG999 RETURN
++
+.**********************************************************************
+.*                              UNGST000                              *
+.*                   Write/Update unknown GST file if necessary       *
+.**********************************************************************
+UNGST000  BRANCH    PROGFLAG,UNGST999       * Invoice estimate only
+.
+          COMPARE   TWO,PMMIGSTA
+          GOTO      UNGST999 IF NOT EQUAL   * Not unknown
+.
+          MOVE      "2",PTMCGSTA            * Unknown GST Applicable flag
+          MOVE      SP8,PTMCGSTC
+          MOVE      PMMIVISN,PTGTADMN
+          PACK      KEY8,PMMIVISN
+          CALL      RDPTGTU1                * Check if a record exists
+          IF        OVRCD=0
+            MOVE      ONE,PTGTGSTM          * set up unknown GST misc.
+            CALL      UPPTGTU1
+          ELSE
+            MOVE      ZERO,PTGTGSTA
+            MOVE      ONE,PTGTGSTM          * set up unknown GST misc.
+            CALL      WRPTGTU1
+          ENDIF
+UNGST999  RETURN
++
+.**************************************************************************
+.         Remove any current Doctor Fees charging
+.**************************************************************************
+RMDOC000  OPEN      PMSMTIA2,"pmsmtiaf"
+RMDOC100  MOVE      "4",PMMIRTYP
+          PACK      KEY15,ADMISSNO,PMMIRTYP,SP70
+          CALL      RSPMMTI2
+          CALL      RKPMMTI2
+          BRANCH    OVRCD,RMDOC999
+.
+          MATCH     PMMIVISN,ADMISSNO       * Same visit number?
+          GOTO      RMDOC999 IF NOT EQUAL
+.
+          MATCH     "4",PMMIRTYP            * Doctor fees record?
+          GOTO      RMDOC999 IF NOT EQUAL
+.
+          PACK      KEY15,PMMIVISN,PMMIRTYP,PMMITRAN,SP70
+          CALL      DEPMMTI2
+          GOTO      RMDOC100
+.
+RMDOC999  RETURN
++

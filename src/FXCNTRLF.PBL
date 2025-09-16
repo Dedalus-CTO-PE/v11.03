@@ -1,0 +1,531 @@
+.*****************************************************************************
+.* System    :   Common                                                      *
+.* Program   :   FXCNTRLF                                                    *
+.* Desc      :   Create Zero Filled Sectors                                  *
+.*****************************************************************************
+.* Date      :   25/05/2010                                                  *
+.* Author    :   Steve Armstrong     (CAR 223682)                            *
+.* Function  :   This program will determine the last sector of controlf,    *
+.*               and allow the user to create zero filled sectors from the   *
+.*               next sector through to a sector keyed in by the user (based *
+.*               on instructions from the release notes).                    *
+.*               Prior to writing the sectors, the program provides an       *
+.*               integrity report on the existing sectors.                   *
+.* Mods      :                                                               *
+.*        V10.00.01  Steve Armstrong   CAR 223682                            *
+.*                   Mods to cater for blank last sectors.                   *
+.*                   Also added error report.                                *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DEFINITIONS
+. ----------------
+ IFGE     $$VER,7
+SECFILE   SFILE     ASCII,FIXED=256
+ XIF
+ IFEQ     $$VER,6
+SECFILE   FILE      ASCII,FIXED=256
+ XIF
+.
+.
+. LOCAL VARIABLES
+. ---------------
+.
+BLNKSECS  FORM      6
+DIM60     DIM       60
+DIM250    DIM       250
+.
+EFORM6    FORM      6
+EEOFSECS  FORM      6
+ENDSECTR  DIM       6
+ERORFLAG  FORM      1             * Error Flag
+.                                     0 = no more than two pages of errors
+.                                     1 = more than two pages of errors
+ERORTYPE  FORM      1             * Error type
+.                                     1 = null sector
+.                                     2 = non-blank eof sector
+.                                     3 = blank sector
+.
+FILENAME  DIM       8
+FORM3     FORM      3
+.
+LVALSECT  DIM       6             * last valid sector
+.
+NEOFSECS  FORM      6
+NULLSECS  FORM      6
+.
+SFORM6    FORM      6
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+FIL50     INIT      "00000000000000000000000000000000000000000000000000"
+PIPE      INIT      "|"
+SP247     INIT      "                                                  ":
+                    "                                                  ":
+                    "                                                  ":
+                    "                                                  ":
+                    "                                               "
+SUBCHAR   INIT      032           * substitute (^Z)
+.
+.
+PRGID     INIT      "FXCNTRLF"
+PRGNAM    INIT      "Control File Maintenance"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+.
+          CALL      GNAM0000               * get filename
+          BRANCH    EXIT,MAIN0100          * nothing entered
+.
+          CALL      OFIL0000               * open the file
+          BRANCH    EXIT,MAIN0100          * file not found/created
+.
+          CALL      GSEC0000               * get the end sector
+          BRANCH    EXIT,MAIN0100          * nothing entered
+.
+          CALL      IREP0000               * process & display integrity report
+          BRANCH    EXIT,MAIN0100          * not continuing
+.
+          CALL      WSEC0000               * write zero filled sectors
+          GOTO      MAIN0100               * get next option
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                     * display std heading
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  continue with zero fill                 *
+.*                        TRUE  (1)  Exit option selected                    *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Create Zero Filled Sectors"
+.
+OPTN0500  KEYIN     *P1:7,*EF,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * zero fill sectors
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               GNAM0000              Called by: MAIN0000   *
+.*                   Get the filename                                        *
+.* Returns:   EXIT  0 = valid filename entered                               *
+.*                  1 = nothing or spaces entered                            *
+.*            FILENAME - file name                                           *
+.*****************************************************************************
+.
+GNAM0000  MOVE      "controlf",FILENAME
+          GOTO      GNAM9000
+.
+.>>>>>    To use a file other than controlf, comment out the two lines of code
+.>>>>>    above
+.
+.         KEYIN     *P1:9,*EF,"File name :":
+.                   *P13:9,*V2LON,FILENAME
+.         PACK      FILENAME,FILENAME,SP8
+.
+.         MATCH     SP8,FILENAME                 * anything entered ?
+.         GOTO      GNAM9100 IF EQUAL            * no - finished
+.
+GNAM9000  MOVE      ZERO,EXIT
+          GOTO      GNAM9999
+.
+GNAM9100  MOVE      ONE,EXIT
+.
+GNAM9999  RETURN
++
+.*****************************************************************************
+.*                               OFIL0000              Called by: MAIN0000   *
+.*                           Open the file                                   *
+.* Requires:  FILENAME - file name                                           *
+.* Returns:   SFORM6   - starting sector number if file is created (always 0)*
+.*            EXIT  0 = file exists and was opened successfully              *
+.*                  1 = file not found and user doesn't want to create it    *
+.*                  2 = file not found and user wants to create it           *
+.*****************************************************************************
+.
+OFIL0000  MOVE      ZERO,OVRCD                   * initialise OVERCOND flag
+          TRAP      OVERCOND IF IO               * set IO trap
+          OPEN      SECFILE,FILENAME             * open file
+          TRAPCLR   IO                           * clear trap
+.
+          COMPARE   ZERO,OVRCD                   * file opened ok ?
+          GOTO      OFIL9000 IF EQUAL            * yes
+.
+OFIL1000  DISPLAY   *P1:24,*EL,*B,"File not found.  ";
+          CALL      HITENTER
+          GOTO      OFIL9100
+.
+.>>>>>    The code below can be used to create a sector based file.
+.>>>>>    Just remove the two lines of code above.
+.
+.         KEYIN     *P18:24,"Create it (",*V2LON,*DV,ANSY,*HOFF:
+.                   *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+.                   *P36:24,ANS
+.         PACK      ANS,ANS,SP1
+.         REP       UPPLOW,ANS
+.
+.         MATCH     "N",ANS
+.         GOTO      OFIL9100 IF EQUAL
+.
+.         MATCH     "Y",ANS
+.         GOTO      OFIL8000 IF EQUAL
+.
+.         BEEP                                   * invalid input
+.         GOTO      OFIL1000
+.
+.         Create the file and set the first sector to zero
+.
+.FIL8000  PREP      SECFILE,FILENAME
+.         MOVE      ZERO,SFORM6                  * reset starting sector to 0
+.         DISPLAY   *P1:11,*EL,"Starting Sector Number: ",*V2LON,SFORM6
+.
+OFIL9000  MOVE      ZERO,EXIT
+          GOTO      OFIL9999
+.
+OFIL9100  MOVE      ONE,EXIT
+          GOTO      OFIL9999
+.
+OFIL9999  RETURN
++
+.*****************************************************************************
+.*                               IREP0000              Called by: MAIN0000   *
+.*           Loop through the file to find the last sector                   *
+.* Returns:   EXIT  0 = valid filename entered                               *
+.*                  1 = nothing or spaces entered                            *
+.*            SFORM6 - starting sector number                                *
+.*****************************************************************************
+.         
+IREP0000  MOVE      ZERO,CPAGENO                 * initialise print variables
+          MOVE      ZERO,CNOUNDLN
+          CALL      IBACLOCK
+          MOVE      ZERO,ERORFLAG
+.
+          CALL      HEAD0000                     * print header
+.
+          MOVE      ZERO,BLNKSECS                * initialise blank sector count
+          MOVE      ZERO,EEOFSECS                * init. empty eof sector count
+          MOVE      ZERO,NEOFSECS                * init. non-empty eof sec count
+          MOVE      ZERO,NULLSECS                * initialise null sector count
+          MOVE      ZERO,SFORM6                  * initialise sector number
+          MOVE      SP6,LVALSECT                 * initialise last valid sector
+.
+          DISPLAY   *P1:24,*EL,"Processing sector:";
+.
+IREP0500  READ      SECFILE,SFORM6;*1,DIM250     * read sector
+          GOTO      IREP5000 IF OVER             * eof
+.
+          DISPLAY   *P20:24,*EL,*V2LON,SFORM6;
+.
+          MOVELPTR  DIM250,FORM3                 * get sector length
+.
+.         Check for null sector
+.
+          IF        FORM3 = 0 
+            ADD       ONE,NULLSECS
+            MOVE      ONE,ERORTYPE               * null sector error
+            CALL      PRIN0000                   * print error
+            GOTO      IREP1000
+          ENDIF
+.
+.         Check for 1 character sector (eof sector contains hex 1A)
+.
+          COMPARE   ONE,FORM3                    * only 1 character segment ?
+          IF        @EQUAL
+            MATCH     SUBCHAR,DIM250             * yes - eof sector ?
+            IF        @EQUAL
+              ADD       ONE,EEOFSECS             * yes - increment counter
+              GOTO      IREP1000
+            ENDIF
+          ENDIF
+.
+.         The sector has more than 1 character, so check if it is blank
+.
+          MATCH     SP247,DIM250                 * blank segment ?
+          IF        @EQUAL
+            ADD       ONE,BLNKSECS               * yes - increment counter
+            MOVE      THREE,ERORTYPE             * blank sector error
+            CALL      PRIN0000                   * print error
+            GOTO      IREP1000
+          ENDIF
+.
+.         The sector has more than 1 character, so assume that this is a valid
+.         segment and save the sector number as the last valid sector.
+.
+          MOVE      SFORM6,LVALSECT              * save last valid sector read
+.
+.         Check if the first character is an eof sector character
+.
+          MATCH     SUBCHAR,DIM250               * eof first character ?
+          IF        @EQUAL
+            ADD       ONE,NEOFSECS               * yes - increment counter
+            MOVE      TWO,ERORTYPE               * non-blank eof sector error
+            CALL      PRIN0000                   * print error
+          ENDIF
+.
+IREP1000  ADD       ONE,SFORM6                   * increment sector number
+          GOTO      IREP0500                     * get previous sector
+.
+.         The last sector has been read
+.
+IREP5000  CALL      DISP0000
+.
+          MATCH     SP6,LVALSECT                 * any valid sectors found ?
+          GOTO      IREP6000 IF EQUAL            * no
+.
+          MOVE      LVALSECT,SFORM6              * re-load last valid sector
+          ADD       ONE,SFORM6                   * incr. sector for next write
+.
+          IF        SFORM6 > EFORM6
+            DISPLAY   *P1:24,*EL,*B,"Last sector previously created was: ":
+                      *V2LON,LVALSECT,".  ";
+            CALL      HITENTER
+            CALL      ENDR0000                   * print end of report
+            GOTO      IREP9100
+          ENDIF
+.
+IREP6000  DISPLAY   *P1:20,*EF,"Zero filled sectors will be written:":
+                    *P1:21,"From Sector: ",*V2LON,SFORM6,*HOFF:
+                    *P1:22,"To   Sector: ",*V2LON,EFORM6:
+                    *P1:24;
+          CALL      HITENTER
+.
+          CALL      ENDR0000                     * print end of report
+.
+          CALL      CONTQST                      * ok to continue ?
+          BRANCH    CEXIT,IREP9000:              * yes
+                          IREP9100:              * no
+                          IREP9100               * cancel
+.
+IREP9000  MOVE      ZERO,EXIT
+          GOTO      IREP9999
+.
+IREP9100  MOVE      ONE,EXIT
+.
+IREP9999  RETURN
++
+.*****************************************************************************
+.*                               ENDR0000              Called by: IREP0000   *
+.*                        Print end of report                                *
+.*****************************************************************************
+.
+ENDR0000  CALL      LINE0000
+.
+          IF        ERORFLAG = 1
+            PRINT     *N,*1,"*** Warning: There were more than 2 pages of ":
+                            "errors"
+          ENDIF
+          PRINT     *N,*1,"*** End of Report ***"
+.
+ENDR9999  RETURN
++
+.*****************************************************************************
+.*                               WSEC0000              Called by: MAIN0000   *
+.*                          Write the zero filled sectors                    *
+.* Requires:  SFORM6   - starting sector number                              *
+.*            EFORM6   - ending sector number                                *
+.*****************************************************************************
+.
+WSEC0000  REPEAT
+          DISPLAY   *P1:24,*EL,"Writing Sector: ",*V2LON,SFORM6;
+          WRITE     SECFILE,SFORM6;FIL50,FIL50,FIL50,FIL50,FIL50
+.
+          ADD       ONE,SFORM6                   * increment sector
+          UNTIL     SFORM6 > EFORM6
+.
+.         The last sector has been written, so write an end of file record
+.
+          DISPLAY   *P1:24,*EL,"Writing end-of-file in sector ",SFORM6
+          WEOF      SECFILE,SFORM6
+.
+WSEC9000  CLOSE     SECFILE
+          DISPLAY   *P1:24,*EL,"Sectors successfully created.  ";
+          CALL      HITENTER
+.
+WSEC9999  RETURN
++
+.****************************************************************************
+.*                            DISP0000                 Called by: IREP0000  *
+.*             Display the file statistics                                  *
+.****************************************************************************
+.
+DISP0000  DISPLAY   *P1:13,"Blank Sector Count                : ":
+                    *P37:13,*V2LON,BLNKSECS
+          IF        BLNKSECS > 0
+            DISPLAY  *P50:13,*BLINKON,"Warning"
+          ENDIF
+.
+          DISPLAY   *P1:14,"Non-empty End-of-File Sector Count: ":
+                    *P37:14,*V2LON,NEOFSECS
+          IF        NEOFSECS > 0
+            DISPLAY  *P50:14,*BLINKON,"Warning"
+          ENDIF
+.
+          DISPLAY   *P1:15,"Null Sector Count                 : ":
+                    *P37:15,*V2LON,NULLSECS
+          IF        NULLSECS > 0
+            DISPLAY  *P50:15,*BLINKON,"Warning"
+          ENDIF
+.
+          DISPLAY   *P1:16,"Empty End-of-File Sector Count    : ":
+                    *P37:16,*V2LON,EEOFSECS
+          IF        EEOFSECS > 1
+            DISPLAY  *P50:15,*BLINKON,"Warning"
+          ENDIF
+.
+DISP9999  RETURN
++
+.*****************************************************************************
+.*                            GSEC0000                 Called by: IREP0000   *
+.*             Get the Ending Sector that will be written to                 *
+.* Returns:   EXIT  0 = valid sector entered                                 *
+.*                  1 = nothing or spaces entered                            *
+.*            EFORM6   - ending sector number                                *
+.*****************************************************************************
+.
+GSEC0000  KEYIN     *P1:11,*EL,"Ending Sector: ",*V2LON,*DE,*JR,ENDSECTR
+          PACK      ENDSECTR,ENDSECTR,SP6
+.
+          MATCH     SP6,ENDSECTR                 * anything entered ?
+          GOTO      GSEC9100 IF EQUAL            * no - finished
+.
+          TYPE      ENDSECTR
+          IF        !@EQUAL
+            DISPLAY   *P1:24,*EL,*B,"Sector not numeric.  ";
+            CALL      HITENTER
+            GOTO      GSEC0000
+          ENDIF
+.
+          MOVE      ENDSECTR,EFORM6              * save end sector
+.
+          MOVE      ZERO,EXIT
+          GOTO      GSEC9999
+.
+GSEC9100  MOVE      ONE,EXIT
+.
+GSEC9999  RETURN
++
+.****************************************************************************
+.*                            PRIN0000                 Called by: IREP0000  *
+.*                  Error found, so print it                                *
+.* Requires:  ERORTYPE - type of error                                      *
+.*                       1 = null sector                                    *
+.*                       2 = non-blank eof sector                           *
+.*                       3 = blank sector                                   *
+.****************************************************************************
+.
+PRIN0000  COMPARE   SIXTY,CLNO                   * page full ?
+          GOTO      PRIN0500 IF LESS             * no
+.
+          IF        CPAGENO = 1
+            CALL      HEAD0000                   * yes - print page header
+            GOTO      PRIN0700
+          ENDIF
+.
+          IF        CPAGENO = 2
+            MOVE      ONE,ERORFLAG               * set error flag
+            MOVE      ZERO,CLNO                  * reset page line count
+            MOVE      THREE,CPAGENO              * increment page number
+          ENDIF
+.
+.         We are only printing the first two pages of errors.  If there are
+.         more than this, then it's likely the file is corrupted and will
+.         need to be investigated manually.  In this case set a flag which
+.         is used for printing a warning at the end of the report.
+.
+PRIN0500  IF        CPAGENO > 2
+            GOTO      PRIN9999                   * finished
+          ENDIF
+.
+PRIN0700  PRINT     *1,PIPE,*3,SFORM6,*12,PIPE;
+          BRANCH    ERORTYPE,PRIN1000:           * null sector
+                             PRIN2000:           * non-blank eof sector
+                             PRIN3000            * blank sector
+.
+.         Null sector error
+.
+PRIN1000  PRINT     *14,"Null sector";
+          GOTO      PRIN5000
+.
+.         Non-blank eof sector error
+.
+PRIN2000  PRINT     *14,"Non-blank eof sector";
+          GOTO      PRIN5000
+.
+.         Blank sector error
+.
+PRIN3000  PRINT     *14,"Blank sector";
+.
+PRIN5000  PRINT     *80,PIPE
+          ADD       ONE,CLNO                     * increment line count
+.
+PRIN9999  RETURN
++
+.****************************************************************************
+.*                            HEAD0000                 Called by: IREP0000  *
+.*                       Print page heading                       PRIN0000  *
+.****************************************************************************
+.
+HEAD0000  CALL      HEAD80                       * display page header
+.
+          PRINT     *20,"Integrity report for: ",FILENAME,*N
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3," Sector ",*12,PIPE,*14,"Error Description":
+                    *80,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      EIGHT,CLNO                   * increment line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: IREP0000  *
+.*                      Draw line across page                     HEAD0000  *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "-------------------------------*"
+.
+LINE9999  RETURN
++
+.*****************************************************************************
+.*                  I/O Includes                                             *
+.*****************************************************************************
+.
+          INC       STD001IO

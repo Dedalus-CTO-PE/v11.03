@@ -1,0 +1,95 @@
+create table legdoctf
+(
+  ldcode      char(6) default ' ' not null,
+  ldtitl      char(9) default ' ' not null,
+  ldgname     char(25) default ' ' not null,
+  ldsname     char(20) default ' ' not null,
+  ldrtype     char(3) default ' ' not null,
+  ldrname     char(25) default ' ' not null,
+  ldsadd1     char(35) default ' ' not null,
+  ldsadd2     char(35) default ' ' not null,
+  ldsadd3     char(35) default ' ' not null,
+  ldsadd4     char(35) default ' ' not null,
+  ldspost     char(8) default ' ' not null,
+  lpdoseml    char(80) default ' ' not null,
+  ldteles     char(20) default ' ' not null,
+  ldtelep     char(20) default ' ' not null,
+  ldpager     char(20) default ' ' not null,
+  ldassoc1    char(25) default ' ' not null,
+  ldassoc2    char(25) default ' ' not null,
+  ldassoc3    char(25) default ' ' not null,
+  ldassoc4    char(25) default ' ' not null,
+  ldassoc5    char(25) default ' ' not null,
+  ldprov      char(10) default ' ' not null,
+  ldteleh     char(20) default ' ' not null,
+  ldhadd1     char(35) default ' ' not null,
+  ldhadd2     char(35) default ' ' not null,
+  ldhadd3     char(35) default ' ' not null,
+  ldhadd4     char(35) default ' ' not null,
+  ldhpost     char(8) default ' ' not null,
+  lpdoheml    char(80) default ' ' not null,
+  ldafirst    char(8) default ' ' not null,
+  ldalast     char(8) default ' ' not null,
+  ldayears    decimal(2,0) default 0 not null,
+  ldaccred    char(3) default ' ' not null,
+  ldrtype2    char(3) default ' ' not null,
+  ldrtype3    char(3) default ' ' not null,
+  ldrtype4    char(3) default ' ' not null,
+  ldrtype5    char(3) default ' ' not null,
+  ldfspare    char(2) default ' ' not null,
+  ldbirth     char(8) default ' ' not null,
+  ldhcscod    decimal(3,0) default 0 not null,
+  ldalevel    char(3) default ' ' not null,
+  ldrstat     decimal(1,0) default 0 not null,
+  lpdofaxn    char(12) default ' ' not null,
+  lpdohfax    char(12) default ' ' not null,
+  lpdomobl    char(12) default ' ' not null,
+  lpdoglcc    char(5) default ' ' not null,
+  lpdowhdp    char(6) default ' ' not null,
+  lpdomreg    char(10) default ' ' not null,
+  lpdonhsn    char(10) default ' ' not null,
+  llupddte    char(8) default ' ' not null,
+  llupdtme    char(8) default ' ' not null,
+  lpdoudf1    char(3) default ' ' not null,
+  lpdoudf2    char(3) default ' ' not null,
+  lpdoudf3    char(3) default ' ' not null,
+  lpdoudf4    char(3) default ' ' not null,
+  lpdoudf5    char(3) default ' ' not null,
+  lpdoinsc    char(6) default ' ' not null,
+  lpdoinsn    char(20) default ' ' not null,
+  lpdoinsf    char(8) default ' ' not null,
+  lpdoinst    char(8) default ' ' not null,
+  lpdoregn    char(20) default ' ' not null,
+  lpdoregf    char(8) default ' ' not null,
+  lpdoregt    char(8) default ' ' not null,
+  lpdovisa    char(8) default ' ' not null,
+  lpdocomt    char(3) default ' ' not null,
+  lpdopref    char(30) default ' ' not null,
+  lpdoabnn    char(11) default ' ' not null,
+  lpdodina    char(8) default ' ' not null,
+  lpdodact    char(8) default ' ' not null,
+  lpdodaco    char(8) default ' ' not null,
+  lpdopro2    char(10) default ' ' not null,
+  lpdopro3    char(10) default ' ' not null,
+  lpdopro4    char(10) default ' ' not null,
+  lpdopro5    char(10) default ' ' not null,
+  ldaspare    char(30) default ' ' not null,
+  lf          char(1)
+);
+create unique index legdoct1 on legdoctf
+(
+ldcode
+);
+create unique index legdoct2 on legdoctf
+(
+ldsname,
+ldcode
+);
+create unique index legdoct3 on legdoctf
+(
+ldalevel,
+ldsname,
+ldcode
+);
+revoke all on legdoctf from public ; 
+grant select on legdoctf to public ; 

@@ -1,0 +1,745 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   CONVLINK                                                    *
+.* Desc      :   Data Migration Program to upload Mother/Child link data     *
+.*               from a third party legacy system into the PMI webPAS module.*
+.*****************************************************************************
+.* Date      :   15/03/2011                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through the convlink.txt file and    *
+.*               for each valid record found, it will write a new patlinkf   *
+.*               record for the patient.                                     *
+.* Mods      :                                                               *
+.*        V10.04.01  17/03/2014  Steve Armstrong   CAR 296128                *
+.*                   Added display of warning message if error records found.*
+.*****************************************************************************
+.*        V10.02.01  20/06/2011  Steve Armstrong   CAR 240682                *
+.*                   Fixed error handling merged U/R numbers causing the     *
+.*                   program to go into an infinite loop.                    *
+.*        V10.02.00  15/03/2011  Steve Armstrong   CAR 240682                *
+.*                   Created program                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       PATCODFD/INC
+          INC       PATLINFD/INC
+          INC       PATMA1FD/INC
+.
+.         Mother/Child link upload file layout - convlink.txt
+.
+MCLNKUPL  FILE      HL7, FIXED=4000         * Pipe delimited upload file
+.                                             4096 is maximum
+.
+.         Fields must be pipe delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+LINKFRUR  DIM       8     1       * Linked from U/R            (linkfur)
+LINKTOUR  DIM       8     9       * Linked to U/R              (linktur)
+LINKDATE  DIM       8    17       * Linked Date (ccyymmdd)     (linkdat)
+.
+. End of Record          25
+.
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+ADDCOUNT  FORM      8             * added record count
+.
+CURRCENT  FORM      2             * current century
+CURRDATE  DIM       8             * current date
+.
+DATEFLG1  FORM      1             * Date Type flag
+.                                     0 = full date (ccyymmdd)
+.                                     1 = partial date (ccyymm)
+DATEFLG2  FORM      1             * Dates Allowed flag
+.                                     0 = any date allowed
+.                                     1 = future dates not allowed
+DIM2C     DIM       2
+DIM2D     DIM       2
+DIM2M     DIM       2
+DIM2Y     DIM       2
+DIM3      DIM       3             * default mother/child link code (Cat LU)
+DIM4      DIM       4
+DIM8      DIM       8
+DTECOUNT  FORM      8             * date error record count
+DUPCOUNT  FORM      8             * duplicate record count
+.
+ERORDESC  DIM       70
+ERORFLAG  FORM      1             * Field Validation Error Flag
+.                                     0 = No Errors on Field Validations
+.                                     1 = Errors on Field Validations
+.
+FORM10    FORM      10
+.
+RECCOUNT  FORM      8             * record read counter
+.
+TEMPDATE  DIM       8
+TMPFIELD  DIM       8             * Field name
+.
+UNKCOUNT  FORM      8             * unknown U/R counter
+URNUMFLG  FORM      1             * U/R number flag
+.                                     0 = from U/R number
+.                                     1 = to U/R number
+.
+VCHKFLAG  FORM      1             * Validation flag
+.                                     0 = writing data to database
+.                                     1 = only validating import data file
+.
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+PIPE      INIT      "|"
+.
+.
+.
+PRGID     INIT      "CONVLINK"
+PRGNAM    INIT      "Upload Mother/Child PMI Links"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+          BRANCH    EXIT,MAIN9999          * mother/child link code not set up
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with upload
+.
+MAIN1000  CALL      OPEN0000               * open upload file
+          BRANCH    EXIT,MAIN0100          * file not found
+.
+          CALL      ASKQ0000               * validation run only ?
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      UPLD0000               * process upload
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.* Returns:  EXIT   0 = Mother/child link code set up                        *
+.*                  1 = Mother/child link code not set up                    *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patlinkf";
+          OPEN      PATLINK1,"patlinkf"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          CALL      GLIN0000                     * get mother/child link code
+          BRANCH    EXIT,INIT9100                * code not set up
+.
+          DISPLAY   *P64:24,"controlf"
+          OPEN      CONTROLF,"controlf"
+.
+          MOVE      ONE,CNOUNDLN
+.
+          MOVE      ZERO,EXIT
+          GOTO      INIT9999
+.
+INIT9100  MOVE      ONE,EXIT
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run data upload                         *
+.*                        TRUE  (1)  Exit selected                           *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Data Upload"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run data upload
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000              Called by: MAIN0000   *
+.*                  Open upload file (convlink.txt)                          *
+.*****************************************************************************
+.
+OPEN0000  MOVE      ZERO,OVRCD
+.
+          TRAP      OVERCOND IF IO
+          OPEN      MCLNKUPL,"convlink"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,*B,"Upload file - convlink.txt - not found.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.*****************************************************************************
+.*                               ASKQ0000              Called by: MAIN0000   *
+.*                  Ask if running validation only                           *
+.* Returns: VCHKFLAG  - validation flag                                      *
+.*                       0 = normal mode                                     *
+.*                       1 = validation only mode                            *
+.*****************************************************************************
+.
+ASKQ0000  MOVE      ANSY,ANS
+          KEYIN     *P1:10,*EL,"Validation only (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+                    *P25:10,*V2LON,*RV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS                     * Y input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DYES,*HOFF:
+                      *P35:10,"(No data will be uploaded)"
+            MOVE      ONE,VCHKFLAG               * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          MATCH     ANSN,ANS                     * N input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DNO,*HOFF:
+                      *P35:10,"(Data will be uploaded)"
+            MOVE      ZERO,VCHKFLAG              * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          GOTO      ASKQ0000                     * invalid input
+.
+ASKQ9999  RETURN
++
+.******************************************************************************
+.*                                  UPLD0000              Called by: MAIN0000 *
+.*                  Process the Patient Mother-Child Link upload records      *
+.******************************************************************************
+.
+UPLD0000  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      CCC,CURRCENT
+.
+          DISPLAY   *P1:13,"Processing ",*V2LON,"convlink.txt",*HOFF:
+                    *P1:15,"Started    : ",*V2LON,CTIMEIS,*HOFF:
+                    *P1:17,"From U/R   : ":
+                    *P1:18,"To U/R     : ":
+                    *P1:19,"Records    : "
+.
+          MOVE      ZERO,RECCOUNT                * initialise records read
+          MOVE      ZERO,ADDCOUNT                * initialise added record count
+          MOVE      ZERO,DUPCOUNT                * initialise dup. record count
+          MOVE      ZERO,DTECOUNT                * init. date error record count
+          MOVE      ZERO,UNKCOUNT                * init. unknown pt record count
+.
+          CALL      HEAD0000                     * Print the report header
+.
+.         Loop through upload file records
+.
+UPLD1000  READ      MCLNKUPL,SEQ;LINKFRUR,LINKTOUR,LINKDATE
+          GOTO      UPLD9000 IF OVER
+.
+          ADD       ONE,RECCOUNT                 * increment records read
+          IF        (RECCOUNT%1000) = 0 | RECCOUNT = 1
+            DISPLAY   *P14:17,*V2LON,LINKFRUR:
+                      *P14:18,LINKTOUR:
+                      *P14:19,RECCOUNT;
+          ENDIF
+.
+          CALL      POUT0000                     * pad out fields with spaces
+.
+          CALL      CLER0000                     * clear database variables
+          CALL      CLPATMAS                     * clear patient master vars.
+.
+          CALL      VURN0000                     * validate U/R
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      DVAL0000                     * date validation
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      SETV0000                     * set up file variables
+.           
+          PACK      KEY16,LINKFUR,LINKTUR
+          CALL      RDALINK1
+          IF        OVRCD = 1
+            PACK      KEY16,LINKTUR,LINKFUR
+            CALL      RDALINK1
+            IF        OVRCD = 1
+              BRANCH    VCHKFLAG,UPLD1000        * error checking only
+              PACK      KEY16,LINKFUR,LINKTUR
+              CALL      WRLINK1                  * write new record (x2)
+              ADD       TWO,ADDCOUNT             * increment added record count
+              GOTO      UPLD1000                 * get next record
+            ENDIF
+          ENDIF
+.
+          MOVE      "Link record already exists ",ERORDESC
+          CALL      PERR0000                     * print error line
+          ADD       ONE,DUPCOUNT                 * increment dupl. record count
+          GOTO      UPLD1000                     * get next record
+.
+.         Upload completed
+.
+UPLD9000  ASSIGN    (DUPCOUNT+DTECOUNT+UNKCOUNT),FORM10
+          IF        FORM10 > 0
+            CALL      LINE0000                   * print bottom line if errors
+          ENDIF
+.
+          COMPARE   CLNO,FIFTY7                  * room for stats ?
+          CALL      HEAD0000 IF LESS             * no - new page req'd.
+.
+          CLOCK     TIME,CTIMEIS
+          DISPLAY   *P14:19,*V2LON,RECCOUNT,*HOFF:
+                    *P1:21,"Finished   : ",*V2LON,CTIMEIS
+.
+.         Warn the user if there were any records with errors
+.
+          IF        FORM10 > 0
+            DISPLAY   *P1:22,*V2LON,*BLINKON,"Warning:  Records found with ":
+                      "errors.  Refer to error report."
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,*B,"Upload complete.  ";
+          CALL      HITENTER
+.
+          PRINT     *N:
+                    *1,"Total records read                    - ",RECCOUNT,*N:
+                    *1,"Records added                         - ",ADDCOUNT,*N:
+                    *1,"Duplicate Records detected            - ",DUPCOUNT,*N:
+                    *1,"Records with unknown U/R numbers      - ",UNKCOUNT,*N:
+                    *1,"Records with invalid dates detected   - ",DTECOUNT:
+                    *N,*N,*1,"*** End of Report ***"
+.
+UPLD9999  RETURN
++
+.******************************************************************************
+.*                                  CLER0000              Called by: UPLD0000 *
+.*                    Clear all the database fields                           *
+.******************************************************************************
+.
+CLER0000  MOVE      SP8,LINKFUR
+          MOVE      SP8,LINKTUR
+          MOVE      SP8,LINKDAT
+          MOVE      SP3,LINKREA
+          MOVE      SP30,LINKSPR
+.
+CLER9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000              Called by: UPLD0000 *
+.*                           Print The Report Header                 PERR0000 *
+.******************************************************************************
+.
+HEAD0000  MOVE      "- Error Report",CPHDROPT
+          CALL      HEAD132                 * Print the report header
+.
+          PRINT     *1,"< convlink.txt >"
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"From U/R No.",*16,PIPE,*18,"To U/R No.":
+                    *59,PIPE,*61,"Error Description",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      SEVEN,CLNO                   * initialise line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: HEAD0000  *
+.*                      Draw line across page                               *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.******************************************************************************
+.*                                  SETV0000              Called by: UPLD0000 *
+.*                       Load the record variables                            *
+.******************************************************************************
+.
+SETV0000  MATCH     SP8,LINKDATE
+          IF        @EQUAL
+            MOVE      CURRDATE,LINKDAT           * use current date as default
+          ELSE
+            MOVE      LINKDATE,LINKDAT           * date provided
+          ENDIF
+          MOVE      DIM3,LINKREA                 * link reason
+.
+SETV9999  RETURN
++
+.*****************************************************************************
+.*                            POUT0000             Called by: UPLD0000       *
+.*            Pad out all the record fields with spaces given that we        *
+.*            are dealing with pipe delimited records                        *
+.*****************************************************************************
+.
+POUT0000  PACK      LINKFRUR,LINKFRUR,SP8
+          RJUSTIFY  LINKFRUR
+          PACK      LINKTOUR,LINKTOUR,SP8
+          RJUSTIFY  LINKTOUR
+          PACK      LINKDATE,LINKDATE,SP8
+.
+POUT9999  RETURN
++
+.*****************************************************************************
+.*                              DVAL0000           Called by: UPLD0000       *
+.*                  Validate all date fields                                 *
+.* Returns:  EXIT - 0 = No date validation errors                            *
+.*                  1 = Date validation errors                               *
+.*          DTECOUNT - updated count of records with date field errors       *
+.*****************************************************************************
+.
+DVAL0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MOVE      LINKDATE,TEMPDATE
+          MOVE      ZERO,DATEFLG1                * ccyymmdd
+          MOVE      ONE,DATEFLG2                 * future date not allowed
+          MOVE      "LINKDATE",TMPFIELD
+          CALL      VDAT0000
+.
+          BRANCH    ERORFLAG,DVAL9100            * errors on date validation
+.
+          MOVE      ZERO,EXIT                    * no errors on date validation
+          GOTO      DVAL9999
+.
+DVAL9100  ADD       ONE,DTECOUNT                 * incr. date error record count
+          MOVE      ONE,EXIT
+.
+DVAL9999  RETURN
++
+.*****************************************************************************
+.*                              VDAT0000           Called by: DVAL0000       *
+.*                  Validate a date field                                    *
+.* Requires:  TEMPDATE - Date in format ccyymmdd                             *
+.*            DATEFLG1 - Date Type flag                                      *
+.*                          0 = full date (ccyymmdd)                         *
+.*                          1 = partial date (ccyymm)                        *
+.*            DATEFLG2 - Dates Allowed flag                                  *
+.*                          0 = any date allowed                             *
+.*                          1 = no future dates allowed                      *
+.*            TMPFIELD - Date field name                                     *
+.* Returns:   ERORFLAG = 1 if an error in date validation occurs.            *
+.*****************************************************************************
+.
+VDAT0000  MATCH     SP8,TEMPDATE                 * blank date ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+.         Validate that the date has been fully populated
+.
+          SQUEEZE   TEMPDATE
+          MOVELPTR  TEMPDATE,FORM1
+          IF        DATEFLG1 = 0 & FORM1 <> 8 | DATEFLG1 = 1 & FORM1 <> 6
+            MOVE      "Insufficient digits ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate that the date is numeric
+.
+VDAT0100  TYPE      TEMPDATE
+          IF        !@EQUAL
+            MOVE      "Not numeric ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          UNPACK    TEMPDATE,DIM2C,DIM2Y,DIM2M,DIM2D
+.
+.         Validate the century is >= 18 and <= current century
+.
+          MOVE      DIM2C,FORM2
+          IF        FORM2 < 18 | FORM2 > CURRCENT
+            MOVE      "Century not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate the month
+.
+          MOVE      DIM2M,FORM2
+          IF        FORM2 < 1 | FORM2 > 12
+            MOVE      "Month not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          COMPARE   ONE,DATEFLG1                 * short date (ccyymm) ?
+          GOTO      VDAT9999 IF EQUAL            * yes - finished
+.
+.         Validate the day is:
+.              < 32 for January, March, May, July, August, October & December
+.              < 31 for April, June, September & November
+.              < 29 for February, except in a leap year where it is < 30
+.
+          BRANCH    FORM2,VDAT1000:              * Jan
+                          VDAT3000:              * Feb
+                          VDAT1000:              * Mar
+                          VDAT2000:              * Apr
+                          VDAT1000:              * May
+                          VDAT2000:              * Jun
+                          VDAT1000:              * Jul
+                          VDAT1000:              * Aug
+                          VDAT2000:              * Sep
+                          VDAT1000:              * Oct
+                          VDAT2000:              * Nov
+                          VDAT1000               * Dec
+.
+.         Validate days for month of 31 days
+.
+VDAT1000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 31
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for month of 30 days
+.
+VDAT2000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 30
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for February
+.         A leap year is one where:
+.           1. Every year divisible by 4 is a leap year.
+.           2. But every year divisible by 100 is NOT a leap year
+.           3. Unless the year is also divisible by 400, then it is still a
+.              leap year.
+.
+VDAT3000  MOVE      DIM2D,FORM2
+          PACK      DIM4,DIM2C,DIM2Y
+          MOVE      DIM4,FORM4
+          IF        (FORM4%4) = 0
+            IF        (FORM4%100) = 0
+              IF        (FORM4%400) = 0
+                GOTO      VDAT3200
+              ENDIF
+            ELSE
+              GOTO      VDAT3200
+            ENDIF
+          ENDIF
+.
+.         Check for normal Feb days
+.
+VDAT3100  IF        FORM2 < 1 | FORM2 > 28
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Check for leap year Feb days
+.
+VDAT3200  IF        FORM2 < 1 | FORM2 > 29
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+VDAT3900  MOVE      "Day not valid ",ERORDESC
+          CALL      DERR0000
+          GOTO      VDAT9999
+.
+VDAT4000  COMPARE   ZERO,DATEFLG2                * any date allowed ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+.         Make sure the date is not in the future
+.
+          MATCH     TEMPDATE,CURRDATE
+          IF        @LESS
+            MOVE      "Cannot be in the future ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+VDAT9999  RETURN
++
+.*****************************************************************************
+.*                            DERR0000             Called by: VDAT0000       *
+.*                    Process date error                                     *
+.* Requires: TMPFIELD - field name                                           *
+.*           ERORDESC - error description                                    *
+.* Returns:  ERORFLAG = 1 if an error in date validation occurs.             *
+.*****************************************************************************
+.
+DERR0000  ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set date error flag
+.
+DERR9999  RETURN
++
+.*****************************************************************************
+.*                              PERR0000           Called by: UPLD0000       *
+.*                   Print an error detail line               CHKM0000       *
+.* Requires: Valid read on PMI records (for name fields)      DERR0000       *
+.*           ERORDESC - error description                     VURN0000       *
+.*           CLNO - current page line count                                  *
+.* Returns:  CLNO - updated page line count                                  *
+.*****************************************************************************
+.
+PERR0000  COMPARE   CLNO,SIXTY3                  * page full ?
+          IF        @LESS
+            CALL      LINE0000                   * yes - print bottom line
+            CALL      HEAD0000                   * print header
+          ENDIF
+.
+          PRINT     *1,PIPE,*3,LINKFRUR,*16,PIPE,*18,LINKTOUR,*59,PIPE:
+                    *61,ERORDESC,*132,PIPE
+          ADD       ONE,CLNO                     * increment page line count
+.
+PERR9999  RETURN
++
+.*****************************************************************************
+.*                              VURN0000           Called by: UPLD0000       *
+.*                        Validate U/R Number                                *
+.* Requires: LINKFRUR - linked from U/R (right justified)                    *
+.*           LINKTOUR - linked to U/R (right justified)                      *
+.* Returns:  Valid read on PMI data                                          *
+.*           EXIT  0 = PMI record found - ok to continue                     *
+.*                 1 = PMI record not found - ignore record                  *
+.*          UNKCOUNT - updated count of unknown U/R numbers                  *
+.*          LINKFUR  - from U/R number right justified                       *
+.*          LINKTUR  - to U/R number right justified                         *
+.*****************************************************************************
+.
+VURN0000  MOVE      ZERO,URNUMFLG
+          MOVE      LINKFRUR,DIM8
+.
+VURN0500  MATCH     SP8,DIM8                     * blank U/R ?
+          IF        @EQUAL
+            MOVE      "U/R missing ",ERORDESC    * yes
+            GOTO      VURN9150
+          ENDIF
+.
+          MOVE      DIM8,KEY8
+          CALL      RDMAST1                      * U/R on file ?
+          BRANCH    OVRCD,VURN9100               * no - error
+.
+          COMPARE   ONE,PSTAT                    * merged U/R ?
+          GOTO      VURN9000 IF NOT EQUAL        * no
+.
+.         We have a merged U/R record, so get the new U/R
+.
+          MATCH     PPSNAME,SP20                 * blank previous name field ?
+          GOTO      VURN9100 IF EQUAL            * yes - error
+.
+          MOVE      PPSNAME,DIM8                 * no - new U/R
+          GOTO      VURN0500                     * get new pmi record
+.
+VURN9000  IF        URNUMFLG = 0
+            MOVE      DIM8,LINKFUR               * load from U/R number
+            MOVE      ONE,URNUMFLG
+            MOVE      LINKTOUR,DIM8
+            GOTO      VURN0500
+          ELSE
+            MOVE      DIM8,LINKTUR               * load to U/R number
+          ENDIF
+.
+          MATCH     LINKFUR,LINKTUR
+          IF        @EQUAL
+            MOVE      "U/R's identical ",ERORDESC
+            GOTO      VURN9150
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      VURN9999
+.
+VURN9100  MOVE      "PMI Record not found ",ERORDESC
+VURN9150  CALL      PERR0000                     * print error line
+          ADD       ONE,UNKCOUNT                 * increment unknown U/R count
+          MOVE      ONE,EXIT
+.
+VURN9999  RETURN
++
+.*****************************************************************************
+.*                              GLIN0000           Called by: INIT0000       *
+.* Get the first Mother/Child link code (where Cat LU ind. 1 is set to "M"). *
+.* Returns:  EXIT   0 = Valid mother/child link code found                   *
+.*                  1 = Mother/child link code not found                     *
+.*           DIM3   - patcodes Cat LU code                                   *
+.*****************************************************************************
+.
+GLIN0000  PACK      KEY5,ANSL,ANSU,SP3
+          CALL      RDSCODE1                     * position on Cat LU
+GLIN0500  CALL      RDKCODE1                     * read next record
+          BRANCH    OVRCD,GLIN9100               * eof - finished
+.
+          MATCH     "LU",TCODE                   * same category still ?
+          GOTO      GLIN9100 IF NOT EQUAL        * no - finished
+.
+          MATCH     ANSM,TCINDC1                 * is Indicator 1 = "M" ?
+          GOTO      GLIN0500 IF NOT EQUAL        * no - get next record
+.
+          MOVE      ACODE,DIM3                   * save mother/child link code
+          MOVE      ZERO,EXIT
+          GOTO      GLIN9999
+.
+GLIN9100  DISPLAY   *P1:24,*EL,*B,"Mother/Child link code (Cat LU) not set ":
+                    "up.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+GLIN9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       CLPATMAS
+.
+          INC       PATCODIO/INC
+          INC       PATLINIO/INC
+          INC       PATMA1IO/INC

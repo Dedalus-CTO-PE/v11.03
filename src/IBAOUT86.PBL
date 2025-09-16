@@ -1,0 +1,695 @@
+.******************************************************************************
+.* System         : Outpatients                                               *
+.* Program        : IBAOUT86.PBL                                              *
+.* Name           : Waiting Times for Non-Urgent Appointments                 *
+.******************************************************************************
+.* Date           : 07/07/1993                                                *
+.* Author         : Justin 'The Pom' Coates                                   *
+.* Function       : To provide dates and waiting times for the next available *
+.*                  non-urgent available booking                              *
+.* Modifications  :                                                           *
+.******************************************************************************
+.*        V11.02.01 09/02/2022  Thanh T          TSK 0905641                  *
+.*                  Recompiled as OUTMA1FD changes                            *
+.*        V10.07.01 30/10/2015  Ebon Clements CAR 268970                      *
+.*                  Change to use OUTCLIFD index 1 instead of index 2         *
+.*        V10.05.01 18/12/2014  Ebon Clements CAR 261630                      *
+.*                  Removed port number from temp file name                   *
+.*        V9.09.02  04/03/2008  Peter Vela    CAR 162914                      *
+.*                  Recompiled for KYOUTCLI - readk of outcliaf               *
+.*        V9.09.01  28/07/2007  Jill Habasque CAR 103645                      *
+.*                  Recompiled for KYOUTCLI - read of pmshcpaf                *
+.*        V9.02.01  26/10/2001  Dean Cramer                                   *
+.*                  Change terminolgies as requested.                         *
+.*        V5.08.01  19/09/2000  Steve Armstrong   srf 647263                  *
+.*                  Recompiled for changes to OUTDSCLN                        *
+.*        V5.08.B01 15/03/2000  Steve Armstrong    5.08 Mods                  *
+.*                  Mods for changes to OUTCLIFD (effective date)             *
+.******************************************************************************
+.*        V5.01.02  24/05/1995  Matt Surridge                                 *
+.*                  Fixed bugs for global recompile.                          *
+.******************************************************************************
+.
+.$$$$$$
+.      this report will find the first of a succession of open sessions with 
+.      all the most vacant non-urgent new slots empty 
+.      (Cat CV - Ind1 = "N" and Ind2 <> "1")
+.      eg:
+.        12/7  19/7  26/7  02/8  09/8  16/8
+. avail   10    10    10    10    10    10
+. booked   1     2     0     1     0     0
+.      in the above case, 09/8 should be selected as this the first totally
+.      empty session after the last session with bookings  
+.$$$$$$
+          INC       STD001FD
+          INC       IBASEQFD/INC
+          INC       OUTBOAFD/INC
+          INC       OUTCLIFD/INC
+          INC       OUTCONFD/INC            * system parameters
+          INC       OUTCTYFD/INC
+          INC       OUTMA1FD/INC
+          INC       OUTOSFFD/INC
+          INC       PATCODFD/INC
+          INC       PATDO1FD/INC
+          INC       PMSHCPFD/INC            * National HCP file
+          INC       PATHSPFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+.         temp files
+.
+TEMPA     IFILE     SQL, FIXED=43, KEY="U1-3,4-9,10-15,16-21"
+KEYA      INIT      " 43 U1-3,4-9,10-15,16-21"
+.Name     Type      Length  Phys.  Start  Description
+.-------  ------    ------  -----  -----  -------------------------------
+XHOSP     DIM       3           3      1  Hospital
+XCTYP     DIM       6           6      4  Clinic type
+XSNID     DIM       6           6     10  Session Id
+XCLIN     DIM       6           6     16  Clinic Id
+DXSLOTS   DIM       3           3     22  Number of vacant slots
+XRQDATE   DIM       8           8     25  Required date
+XWTIME    DIM       6           6     33  Waiting time in days 
+XTOTAL    DIM       3           3     39  Total number of slots
+XDONE     DIM       1           1     42  Finished for details 1=Yes
+.end of record                        43
+XSLOTS    FORM      3
+.
+.         program variables
+.
+CDFRCTYP  DIM       6
+CDFRDATE  DIM       8
+CDFRSNID  DIM       6
+CDTOCTYP  DIM       6
+CDTOSNID  DIM       6
+CDYSDAYS  FORM      6
+CDYSFDTE  DIM       8
+CDYSTDTE  DIM       8
+CDYSYEAR  FORM      3
+CFNAMEA   DIM       8
+CMDLINE   DIM       80
+CURRHOSP  DIM       3
+DIM14     DIM       14
+DIM3      DIM       3
+DIM40     DIM       40
+DOCCODE   DIM       6
+FORM6     FORM      6
+FREESLOT  FORM      3         * number of free slots in session
+PRFRCTYP  DIM       6
+PRFRDATE  DIM       10
+PRFRSNID  DIM       6
+PRTOCTYP  DIM       6
+PRTOSNID  DIM       6
+PTCNDCQS  FORM      1
+TOTLSLOT  FORM      3         * total number of slots in session
+TOVRCD    FORM      1         * temp file ovrcd
+.
+.         program constants
+.
+CATCV     INIT      "CV"
+COLUMN    FORM      "20"
+FINISH    INIT      "Finish"
+INVCLIN   INIT      "Invalid Clinic : "
+INVDOCT   INIT      "Invalid Doctor : "
+ISBUILD   INIT      "isbuild "
+ISERASE   INIT      "iserase "
+START     INIT      "Start "
+Z6        INIT      "zzzzzz"
+Z20       INIT      "zzzzzzzzzzzzzzzzzzzz"
+Z34       INIT      "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+.
+PRGID     INIT      "IBAOUT86"
+PRGNAM    INIT      "Waiting Times For Non-urgent Appointments"
+VERSION   INIT      "V11.03.00"
++
+.*********************************************************************
+.         mainline code
+.*********************************************************************
+ML0000    CALL      INIT0000                * initilisation
+.
+ML1000    CALL      OPTN0000                * run report ??
+          BRANCH    EXIT,ML9999             * exit
+.
+          CALL      RNGE0000                * enter search ranges
+          BRANCH    EXIT,ML1000             * cancel
+.
+          CALL      GDAT0000                * get the data
+          CALL      REPT0000                * produce the report
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM
++
+.*********************************************************************
+.         initilisation
+.*********************************************************************
+INIT0000  CALL      DISPHEAD
+.
+          DISPLAY   *P58:24,"patdo1af"
+          OPEN      PATDO1A1,"patdo1af"
+          OPEN      PATDO1A2,"patdo1af"
+.
+          DISPLAY   *P64:24,"pmshcpaf";
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          PACK      CFNAME,UID,FILBOKA2
+          DISPLAY   *P58:24,CFNAME
+          OPEN      OUTBOKA1,CFNAME
+.
+          PACK      CFNAME,UID,FILCLIA1
+          DISPLAY   *P58:24,CFNAME
+          OPEN      OUTCLIA1,CFNAME
+.
+          PACK      CFNAME,UID,FILCTYA1
+          DISPLAY   *P58:24,CFNAME
+          OPEN      OUTCTYA1,CFNAME
+.
+          PACK      CFNAME,UID,FILMA1A1
+          DISPLAY   *P58:24,CFNAME
+          CALL      OPOTMA11
+.
+          DISPLAY   *P58:24,"outosfaf"
+          OPEN      OUTOSFA3,"outosfaf"
+.
+          DISPLAY   *P58:24,"pathspaf"
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P58:24,"patcodes"
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P58:24,"controlf"
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,TWENTY1;*247,PTCNDCQS
+.
+          CALL      TFILENAM * Get temp file name in create
+          MOVE      TFILNAME,CFNAMEA
+.
+INIT9999  RETURN
++
+.*********************************************************************
+.         run the option ??
+.*********************************************************************
+OPTN0000  DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,"0",*HOFF," = Exit":
+                    *P1:5,*V2LON,"1",*HOFF," = Run report":
+                    *P1:7,"Select option : ";
+OPTN1000  KEYIN     *P17:7,*V2LON,MOPTION
+          MOVE      ONE,EXIT
+          COMPARE   ZERO,MOPTION
+          GOTO      OPTN9999 IF EQUAL
+          MOVE      ZERO,EXIT
+          BRANCH    MOPTION,OPTN9999
+          BEEP
+          GOTO      OPTN1000
+OPTN9999  RETURN
++
+.*********************************************************************
+.         enter the ranges
+.*********************************************************************
+RNGE0000  DISPLAY   *P1:8,*EF:
+                    *P1:10,"From Clinic Type : ":
+                    *P1:11,"To   Clinic Type : ":
+                    *P1:13,"From Session Id  : ":
+                    *P1:14,"To   Session Id  : ":
+                    *P1:16,"As at Date       : "
+.
+          CALL      CTYP0000                * enter clinic type range
+          BRANCH    EXIT,RNGE9100
+.
+RNGE2000  CALL      SNID0000                * enter session id range
+          BRANCH    EXIT,RNGE9100
+.
+          CALL      KDAT0000                * enter date range
+          BRANCH    EXIT,RNGE2000
+.
+          CALL      CONTQST
+          BRANCH    CEXIT,RNGE9000,RNGE0000,RNGE9100
+.
+RNGE9000  MOVE      ZERO,EXIT
+          GOTO      RNGE9999
+RNGE9100  MOVE      ONE,EXIT
+RNGE9999  RETURN
++
+.*********************************************************************
+.         get the data for the report
+.*********************************************************************
+GDAT0000  DISPLAY   *P1:24,*EL,"Obtaining information..."
+          CLOCK     TIME,CTIMEIS
+          CALL      CTPA0000
+.
+. --------------------------------------------------------------
+. ------- loop over all open sessions until entered date -------
+. --------------------------------------------------------------
+.
+          MOVE      Z34,KEY34
+          CALL      RSOTOSF3
+.
+GDAT1000  CALL      RPOTOSF3
+          BRANCH    OVRCD,GDAT9999          * end of file
+          MATCH     CDFRDATE,OTOSDATE
+          GOTO      GDAT9999 IF LESS        * finished
+.
+          DISPLAY   *P41:24,OTOSCLID,OTOSDATE,OTOSTIME
+          MATCH     IDDD,OTOSSITE
+          GOTO      GDAT1000 IF NOT EQUAL   * different site
+.
+          MATCH     CDFRCTYP,OTOSCTYP
+          GOTO      GDAT1000 IF LESS        * before start clinic type
+          MATCH     OTOSCTYP,CDTOCTYP
+          GOTO      GDAT1000 IF LESS        * after end clinic type
+.
+          MATCH     CDFRSNID,OTOSSESS
+          GOTO      GDAT1000 IF LESS        * before start clinic type
+          MATCH     OTOSSESS,CDTOSNID
+          GOTO      GDAT1000 IF LESS        * after end clinic type
+.
+. ----------------------------------------------------------------------
+. ------- check temp file to see if already finished for details -------
+. ----------------------------------------------------------------------
+.
+          MOVE      ZERO,XDONE
+          PACK      KEY21,OTOSHOSP,OTOSCTYP,OTOSSESS,OTOSCLID
+          CALL      RDTEMPA
+          MATCH     "1",XDONE
+          GOTO      GDAT1000 IF EQUAL       * finished for details
+          MOVE      OVRCD,TOVRCD            * temp file ovrcd
+.
+. --------------------------------------------------------
+. ------- loop over booking file to get number of  -------
+. ------- vacant non-urgent new slots for session  -------
+. --------------------------------------------------------
+.
+          MOVE      ZERO,FREESLOT
+          MOVE      ZERO,TOTLSLOT
+          PACK      KEY28,OTOSSITE,OTOSCLID,OTOSDATE,OTOSTIME,SP3
+          CALL      RDSBOKA1
+.
+GDAT2000  CALL      RDKBOKA1
+          BRANCH    OVRCD,GDAT4000          * end of session
+          PACK      KEY25,OBASITE,OBACLIN,OBADATE,OBASTRT
+          MATCH     KEY25,KEY28
+          GOTO      GDAT4000 IF NOT EQUAL   * different session
+.
+.         see if the correct visit type
+.
+          PACK      KEY5,CATCV,OBAVISIT
+          CALL      RDCODE1
+          BRANCH    OVRCD,GDAT2000
+.
+          MATCH     ANSN,TCINDC1
+          GOTO      GDAT2000 IF NOT EQUAL   * not a new slot
+          MATCH     "1",TCINDC2
+          GOTO      GDAT2000 IF EQUAL       * an urgent slot
+.
+          DISPLAY   *P65:24,OBASLOT
+          ADD       ONE,TOTLSLOT            * add to available slots
+          IF        OBASTAT = ZERO 
+            ADD       ONE,FREESLOT            * add to free slots
+          ENDIF
+          GOTO      GDAT2000
+.
+.         get the number of days if any empty slots
+.
+GDAT4000  COMPARE   ZERO,FREESLOT
+          GOTO      GDAT1000 IF EQUAL       * no free slots so ignore
+.
+          MOVE      CDFRDATE,CDYSFDTE
+          MOVE      OTOSDATE,CDYSTDTE
+          CALL      CALCDAYS
+.
+          BRANCH    TOVRCD,GDAT5000         * nothing on temp file
+.
+.         we have a record on file already
+.         if the number of free slots < total slots available, then the
+.         current temp file record is the one wanted
+.
+          IF        FREESLOT < TOTLSLOT
+            MOVE      ONE,XDONE               * set as finished
+          ELSE
+            MOVE      FREESLOT,XSLOTS         * number of free slots
+            MOVE      OTOSDATE,XRQDATE        * date of session
+            MOVE      CDYSDAYS,XWTIME         * waiting time
+            MOVE      TOTLSLOT,XTOTAL         * total available slots
+            MOVE      ZERO,XDONE              * preliminary record
+          ENDIF
+          CALL      UPTEMPA
+          GOTO      GDAT1000
+.
+.         write a new record
+.
+GDAT5000  PACK      KEY21,OTOSHOSP,OTOSCTYP,OTOSSESS,OTOSCLID
+          UNPACK    KEY21,XHOSP,XCTYP,XSNID,XCLIN
+          MOVE      FREESLOT,XSLOTS         * number of free slots
+          MOVE      OTOSDATE,XRQDATE        * date of session
+          MOVE      CDYSDAYS,XWTIME         * waiting time
+          MOVE      TOTLSLOT,XTOTAL         * total available slots
+          MOVE      ZERO,XDONE              * preliminary record
+          CALL      WRTEMPA
+          GOTO      GDAT1000
+.
+GDAT9999  RETURN
++
+.*********************************************************************
+.         produce the report
+.*********************************************************************
+REPT0000  DISPLAY   *P1:24,*EL,"Printing report - ",*V2LON,*BLINKON:
+                    "Please wait";
+          MOVE      ZERO,CPAGENO
+          MOVE      "70",CLNO
+          MOVE      "***",CURRHOSP
+          MOVE      SP3,XHOSP
+          MOVE      SP30,KEY21
+          CALL      RSTEMPA
+.
+REPT1000  CALL      RKTEMPA
+          BRANCH    OVRCD,REPT9000
+.
+          CALL      PLIN0000                * print a line of the report
+          GOTO      REPT1000
+.
+REPT9000  IF        CPAGENO = ZERO
+            CALL      HEAD0000
+          ELSE
+            CALL      UND80
+          ENDIF
+.         
+          PRINT     *N,"*** End of Report ***",*N
+          CALL      DTPA0000
+.
+REPT9999  RETURN
++
+.*********************************************************************
+.         keyin clinic type ranges
+.*********************************************************************
+CTYP0000  DISPLAY   *PCOLUMN:10,*EL,*PCOLUMN:11,*EL;
+.
+.         enter the from code
+.
+          MOVE      ZERO,CKYIMAND           * mandatory ??
+          MOVE      SP6,CKYIDEF6            * default value
+          MOVE      "10",EVERT
+          MOVE      COLUMN,ECOL
+          CALL      KYOUTCTY
+          COMPARE   TWO,EXIT
+          GOTO      CTYP9100 IF EQUAL       * exitchar entered
+.
+          MOVE      OCTCTYP,CDFRCTYP        * from code
+          MOVE      OCTCTYP,PRFRCTYP        * from print code
+          MATCH     SP6,OCTCTYP
+          IF        @EQUAL
+            DISPLAY   *PECOL:EVERT,*V2LON,START
+            MOVE      START,PRFRCTYP
+          ELSE
+            DISPLAY   *PECOL:EVERT,*V2LON,OCTCTYP,*HOFF,SP3,OCTDESC
+          ENDIF
+.
+.         enter the to code
+.
+CTYP2000  MOVE      ZERO,CKYIMAND           * mandatory ??
+          MOVE      CDFRCTYP,CKYIDEF6       * default value
+          MOVE      "11",EVERT
+          MOVE      COLUMN,ECOL
+          CALL      KYOUTCTY
+          COMPARE   TWO,EXIT
+          GOTO      CTYP9100 IF EQUAL       * exitchar entered
+.
+          MOVE      OCTCTYP,CDTOCTYP        * set the value
+          MOVE      OCTCTYP,PRTOCTYP        * to   print code
+          MATCH     SP6,OCTCTYP
+          IF        @EQUAL
+            DISPLAY   *PECOL:EVERT,*V2LON,FINISH
+            MOVE      Z6,CDTOCTYP
+            MOVE      FINISH,PRTOCTYP
+          ELSE
+            DISPLAY   *PECOL:EVERT,*V2LON,OCTCTYP,*HOFF,SP3,OCTDESC
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          MATCH     CDFRCTYP,CDTOCTYP
+          GOTO      CTYP9999 IF NOT LESS    * end >= start so OK
+.
+          DISPLAY   *P1:24,*B,"Invalid range.  ",*EL;
+          CALL      HITENTER
+          GOTO      CTYP0000
+.
+CTYP9100  MOVE      ONE,EXIT
+CTYP9999  RETURN
++
+.*********************************************************************
+.         keyin session id ranges
+.*********************************************************************
+SNID0000  DISPLAY   *PCOLUMN:13,*EL,*PCOLUMN:14,*EL;
+.
+.         enter from code
+.
+          MOVE      ZERO,CKYIMAND           * mandatory ??
+          MOVE      SP6,CKYIDEF6            * default value
+          MOVE      "13",EVERT
+          MOVE      COLUMN,ECOL
+          CALL      KYOUTCLI
+          COMPARE   TWO,EXIT
+          GOTO      SNID9100 IF EQUAL       * exitchar entered
+.
+          PACK      OCACLIN,OCACLIN,SP6
+          MOVE      OCACLIN,CDFRSNID        * from code
+          MOVE      OCACLIN,PRFRSNID        * from print code
+          MATCH     SP6,OCACLIN
+          IF        @EQUAL
+            DISPLAY   *PECOL:EVERT,*V2LON,START
+            MOVE      START,PRFRSNID
+          ELSE
+            DISPLAY   *PECOL:EVERT,*V2LON,OCACLIN,*HOFF,SP3,OCADESC
+          ENDIF
+.
+.         enter the to code
+.
+SNID2000  MOVE      ZERO,CKYIMAND           * mandatory ??
+          MOVE      CDFRSNID,CKYIDEF6       * default value
+          MOVE      "14",EVERT
+          MOVE      COLUMN,ECOL
+          CALL      KYOUTCLI
+          COMPARE   TWO,EXIT
+          GOTO      SNID9100 IF EQUAL       * exitchar entered
+.
+          PACK      OCACLIN,OCACLIN,SP6
+          MOVE      OCACLIN,CDTOSNID        * set the value
+          MOVE      OCACLIN,PRTOSNID        * to print code
+          MATCH     SP6,OCACLIN
+          IF        @EQUAL
+            DISPLAY   *PECOL:EVERT,*V2LON,FINISH
+            MOVE      Z6,CDTOSNID
+            MOVE      FINISH,PRTOSNID
+          ELSE
+            DISPLAY   *PECOL:EVERT,*V2LON,OCACLIN,*HOFF,SP3,OCADESC
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          MATCH     CDFRSNID,CDTOSNID
+          GOTO      SNID9999 IF NOT LESS    * end >= start so OK
+.
+          DISPLAY   *P1:24,*B,"Invalid range.  ",*EL;
+          CALL      HITENTER
+          GOTO      SNID0000
+.
+SNID9100  MOVE      ONE,EXIT
+SNID9999  RETURN
++
+.*********************************************************************
+.         Enter the date
+.*********************************************************************
+KDAT0000  MOVE      ONE,CCANLDTE            * blank cancel default
+          MOVE      ONE,CDEFDTE             * enter once for default
+          MOVE      ZERO,CHIGHLT            * use highlight
+.
+.         enter as at date
+.
+KDAT1000  MOVE      "16",CVERT              * row
+          MOVE      COLUMN,CCOL             * column
+          PACK      KEY6,CYY,CMM,CDD
+          REP       " 0",KEY6
+          UNPACK    KEY6,CYEAR,CMON,CDAY
+          MOVE      CCC,CCENT
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,KDAT9000          * nothing entered
+          BRANCH    CQUEST,KDAT1000
+.
+          PACK      CDFRDATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",CDFRDATE           * set up start date
+          CALL      PACDATE
+          MOVE      CPCDATE,PRFRDATE         * formatted start date
+.
+KDAT8000  MOVE      ZERO,EXIT               * valid dates
+          GOTO      KDAT9999
+KDAT9000  MOVE      ONE,EXIT                * exit selected
+.
+KDAT9999  RETURN
++
+.*********************************************************************
+.         print a line of the report
+.*********************************************************************
+PLIN0000  DISPLAY   *P41:24,XHOSP,XCTYP,XSNID
+          MATCH     CURRHOSP,XHOSP
+          CALL      HEAD0000 IF NOT EQUAL   * need a new page
+.
+          MOVE      "Invalid Code",OCTDESC
+          PACK      KEY12,IDDD,XCTYP
+          CALL      RDCTYA1
+          MOVE      OCTDESC,KEY20    
+          CALL      FNAM0000                * format conslutant name
+          UNPACK    XRQDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      XWTIME,CDYSDAYS
+          ASSIGN    CDYSDAYS/7,FORM6
+.
+          PRINT     *1,"| ",KEY20," | ",KEY34,"| ":
+                       CPDATE," | ",FORM6," |"
+          ADD       ONE,CLNO
+          MOVE      XHOSP,CURRHOSP
+.
+PLIN9999  RETURN
++
+.*********************************************************************
+.         print a new page
+.*********************************************************************
+HEAD0000  CALL      HEAD80
+          PRINT     *20,"Clinic Type : ",PRFRCTYP," to ",PRTOCTYP
+          PRINT     *20,"Session Id  : ",PRFRSNID," to ",PRTOSNID
+          PRINT     *20,"As at Date  : ",PRFRDATE
+.
+          PACK      PTHSNAME,SP30,SP20
+          MOVE      XHOSP,KEY3
+          CALL      RDPTHSP1
+          PRINT     *N,"Hospital : ",XHOSP,SP5,PTHSNAME
+          CALL      UND80
+          PRINT     *1,"| Clinic ID            | Clinic Session               ":
+                       "     | Next Date| Time   |"
+          CALL      UND80
+          MOVE      TEN,CLNO
+.
+HEAD9999  RETURN
++
+.*********************************************************************
+.*        Format Clinic/Surgeon name                                 *
+.*********************************************************************
+FNAM0000  PACK      KEY34,INVCLIN,XCLIN
+          MOVE      XCLIN,KEY6
+.
+          PACK      KEY20,IDDD,XCLIN,XRQDATE
+          CALL      RDCLIA1
+          IF        OVRCD = 1
+            CALL      RDPCLIA1
+            IF        OVRCD = 0
+              MATCH     IDDD,OCASITE
+              IF        !@EQUAL
+                MOVE      ONE,OVRCD
+              ELSE
+                MATCH     XCLIN,OCACLIN
+                IF        !@EQUAL
+                  MOVE      ONE,OVRCD
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+          IF        OVRCD = 1
+            MOVE      "Unknown clinic",OCADESC
+            PACK      OCADESC,OCADESC,SP30
+            PACK      KEY34,OCADESC,SP4
+          ENDIF
+          BRANCH    OVRCD,FNAM9999          * invalid code
+.
+          PACK      KEY34,OCADESC,SP30
+          MATCH     SP6,OCADOCT 
+          GOTO      FNAM9000 IF EQUAL       * no doctor code to use
+          MOVE      OCADOCT,KEY6            * use the doctor code
+.
+.         validate using doctors file
+.
+FNAM5000  PACK      KEY34,INVDOCT,KEY6
+          CALL      RDDOCT1                 * read docs file
+          BRANCH    OVRCD,FNAM9999          * invalid code
+.
+          MOVE      DSNAME,PACSNAME         * surname
+          MOVE      DGNAME,PACGNAME         * given name
+          MOVE      DTITL,PACTITLE          * title
+          MOVE      TWO,PACFRMT             * SURNAME, TITLE GIVEN
+          CALL      PACNAME                 * format the name
+          MOVE      PACFNAME,KEY34          * set name
+.
+FNAM9000  RESET     KEY34,25
+          APPEND    " (",KEY34
+          APPEND    XCLIN,KEY34
+          APPEND    ")",KEY34
+          RESET     KEY34
+.
+FNAM9999  RETURN
++
+.*********************************************************************
+.         Create a temp file
+.*********************************************************************
+CTPA0000  CALL      DTPA0000                * delete temp file
+          CLEAR     CMDLINE                 * clear command line
+          PACK      CMDLINE,ISBUILD,CFNAMEA,KEYA,SP30      * set command
+          RESET     CMDLINE                 * reset FP
+          EXECUTE   CMDLINE,TASKID          * build the temp file
+          OPEN      TEMPA,CFNAMEA           * open the temp file
+CTPA9999  RETURN
++
+.*********************************************************************
+.         Delete temp file A
+.*********************************************************************
+DTPA0000  CLOSE     TEMPA                   * close temp file
+          CLEAR     CMDLINE                 * clear command line
+          PACK      CMDLINE,ISERASE,CFNAMEA * set command line for erase
+          RESET     CMDLINE                 * reset FP
+          EXECUTE   CMDLINE,TASKID          * delete the temp file
+DTPA9999  RETURN
++
+.*********************************************************************
+.         temp file I/O
+.*********************************************************************
+RSTEMPA   READ      TEMPA,KEY21;;
+          RETURN
++
+RDTEMPA   MOVE      ZERO,OVRCD
+          READ      TEMPA,KEY21;XHOSP,XCTYP,XSNID,XCLIN:
+                                DXSLOTS,XRQDATE,XWTIME,XTOTAL,XDONE
+          GOTO      OVERCOND IF OVER
+          MOVE      DXSLOTS,XSLOTS
+          RETURN
++
+RKTEMPA   MOVE      ZERO,OVRCD
+          READKS    TEMPA;XHOSP,XCTYP,XSNID,XCLIN:
+                          DXSLOTS,XRQDATE,XWTIME,XTOTAL,XDONE
+          GOTO      OVERCOND IF OVER
+          MOVE      DXSLOTS,XSLOTS
+          RETURN
++
+WRTEMPA   MOVE      XSLOTS,DXSLOTS
+          WRITE     TEMPA,KEY21;XHOSP,XCTYP,XSNID,XCLIN:
+                                DXSLOTS,XRQDATE,XWTIME,XTOTAL,XDONE
+          RETURN
++
+UPTEMPA   MOVE      XSLOTS,DXSLOTS
+          UPDATE    TEMPA;XHOSP,XCTYP,XSNID,XCLIN:
+                          DXSLOTS,XRQDATE,XWTIME,XTOTAL,XDONE
+          RETURN
++
+          INC       STD001IO
+          INC       CALCDAYS
+          INC       KYOUTCLI
+          INC       KYOUTCTY
+          INC       IBASEQIO/INC
+          INC       OUTDSCLN
+          INC       OUTDSCTY
+          INC       OUTBOAIO/INC
+          INC       OUTCLIIO/INC
+          INC       OUTCTYIO/INC
+          INC       OUTMA1IO/INC
+          INC       OUTOSFIO/INC
+          INC       PATDOCKY
+          INC       PATHSPIO/INC
+          INC       PATCODIO/INC
+          INC       PATDO1IO/INC
+          INC       PMSHCPIO/INC            * National HCP file
+          INC       TFILENAM
+          INC       WEBERRIO/INC
+............................................................................

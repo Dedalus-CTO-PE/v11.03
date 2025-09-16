@@ -1,0 +1,45 @@
+.
+. AAEGDLIO.INC
+. ------------
+. Filenames       : aaegdlio
+. Description     : A&E Diagnosis Main sub-analysis codes file
+.
+. ******* INDEX ONE *******
+.
+RSAEGDL1  RESET     KEY3
+          READ      AAEGDLA1,KEY3;;
+          RETURN
+.
+RAAEGDL1  RESET     KEY3
+          MOVE      ZERO,OVRCD
+          READ      AAEGDLA1,KEY3;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDAEGDL1  RESET     KEY3
+          MOVE      ZERO,OVRCD
+          READ      AAEGDLA1,KEY3;AEDLMAIN,AEDLCODE,AEDLDESC,AEDLSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKAEGDL1  MOVE      ZERO,OVRCD
+          READKS    AAEGDLA1;AEDLMAIN,AEDLCODE,AEDLDESC,AEDLSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPAEGDL1  MOVE      ZERO,OVRCD
+          READKP    AAEGDLA1;AEDLMAIN,AEDLCODE,AEDLDESC,AEDLSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPAEGDL1  UPDATE    AAEGDLA1;AEDLMAIN,AEDLCODE,AEDLDESC,AEDLSPAR
+          RETURN
+.
+WRAEGDL1  RESET     KEY3
+          WRITE     AAEGDLA1,KEY3;AEDLMAIN,AEDLCODE,AEDLDESC,AEDLSPAR
+          RETURN
+.
+DEAEGDL1  RESET     KEY3
+          DELETE    AAEGDLA1,KEY3
+          RETURN
+.

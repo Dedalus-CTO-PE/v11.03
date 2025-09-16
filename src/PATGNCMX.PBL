@@ -1,0 +1,754 @@
+.
+.        V10.03.02  09/11/2012 J.Tan             CAR 262673
+.                   Mods checking for Qualified days
+.        V10.03.01  09/01/2012  J.Tan  CAR 257430
+.                   Replaced RDPTHLFA1 with RDPTHLF1
+.         V9.12.01  03/09/2009  J.Tan            CAR 205303
+.                   Added Contract ID
+.         V9.11.00  24/03/2009  J.Tan            CAR 188102
+.                   Mods checking if accommodation had been charged
+.
+.PATGNCMX.PBL
+.
+          DEFPROC   PATGNCMX
+.
+          INC       PATTRNFD/INC
+          INC       PATCMXFD/INC         * casemix files
+          INC       PATAFEFD/INC
+          INC       PATASDFD/INC
+          INC       PATHDFFD/INC
+          INC       PATHLFFD/INC
+          INC       PATLDFFD/INC
+          INC       PATLSDFD/INC
+          INC       PATFN1FD/INC
+          INC       PATDTRFD/INC
+.         INC       PATCMXVR/INC
+.
+CODEBT    INIT      "BT"
+DIM27     DIM       27
+SDIM27    DIM       27
+DIM30     DIM       30
+SDIM30    DIM       30
+SAVDES1   DIM       30
+SAVDES2   DIM       35
+.
+.*******************************************************************************
+.     PATGNCMX : Generate Casemix funding rates for Admissions, bed transfer,
+.                on leave programs and patient status adjustment
+.
+.     Parameter: ACLAIM   - Claim code
+.                AFUNDH   - Health fund
+.                AFNDTB   - Health fund table
+.                CMDRG    - DRG Code
+.                ATYPE    - Admission type
+.                SAVBTYP  - Bed type
+.                BDAYS    - Number of bed days for normal charge
+.                ADMFLAG  - 1 = called from admission program,
+.                               generate rate from first column of high outliers
+.                           0 = called from bed transfer/on leave programs,
+.                               will check the current bed days
+.                LOWFLAG  - Low outliers/high outliers for discharged patient
+.                MSGFLAG  - Display error messages flag
+.
+.     Return   : DAYPAT - Daily charge for patient portion
+.                DAYHF  - Daily charge for health fund portion
+.                ADDPAT - Additional charge for patient portion
+.                ADDHF  - Additional charge for health fund portion
+.                LUMPAT - Patient portion of lumpsum amount
+.                LUMHF  - Health fund portion of lumpsum amount
+.                DAYEND - Ending day for daily charge
+.                ADDEND - Ending day for additional charge
+.                NOFEE  - No fee set up
+.
+.                SAVDES1 - Description 1 for daily charge
+.                SAVDES2 - Description 2 for additional charge
+.
+.
+.     Modifications :
+.     V9.11.01 06/10/2008 J.Tan  CAR 180188
+.              Mods to set CASMXKEY
+.     V9.08.01 15/03/2007 J.Tan  CAR 136149
+.              Mods to default claim code from system parameter
+.     V9.03.03 21/06/2002 J.Tan  CAR 42846
+.              Mods to include no of hospitalisation days
+.     V9.03.02 24/05/2004  J.Tan CAR 49644
+.              Mods not to close C/P files 
+.     V9.03.01 17/09/2003  J.Tan 
+.              Mods for WEB Billing
+.*******************************************************************************
+.     V5.08.01 07/12/2000  Tonii  509 mods
+.              Removed occurances of Episode Flag, program no longer uses it to
+.              determine whether or not patient is casemix payable
+.*******************************************************************************
+.     V6.04.01 29/01/98 J.Tan   SRF 623233
+.              Fixed daycase patient for MSO to have bed days equal to one
+.
+.*******************************************************************************
+.
+.     This include will generate casemix funding rates if the patient is to be 
+.     funded by casemix funding.
+.
+CSMX0000  MOVE      ZERO,DAYPAT
+          MOVE      ZERO,DAYHF
+          MOVE      ZERO,ADDPAT
+          MOVE      ZERO,ADDHF
+          MOVE      ZERO,LUMPAT
+          MOVE      ZERO,LUMHF
+          MOVE      ZERO,DAYEND
+          MOVE      ZERO,ADDEND
+          MOVE      SP70,CASMXKEY
+          PACK      SAVDES1,SP20,SP20
+          PACK      SAVDES2,SP20,SP20
+          MOVE      ZERO,NOFEE
+          MOVE      ZERO,DAYCOL             * column no for daily charge
+          MOVE      ZERO,ADDCOL             * Column no for additional charge
+.
+          MOVE      SP10,PTHFBCAT           * Initialise table type
+          MATCH     SP6,AFUNDH
+          IF        !@EQUAL
+            OPEN      PATFN1A1,"patfn1af"
+            PACK      KEY14,AFUNDH,AFNDTB,SP10
+            CALL      RDFUND1                 * read health fund file 
+          ENDIF
+.
+          PACK      KEY5,CODEBT,SAVBTYP
+          CALL      RDCODE1
+.         MOVE      TDESC,DANS7
+.
+.         Generate casemix funding rates
+.
+          IF        ASTAT=3
+            MOVE      ZERO,EXIT
+            MATCH     ADATE,DDATE
+            GOTO      CSMX2000 IF NOT EQUAL
+            CALL      DCAS0000
+            GOTO      CSMX9999
+          ENDIF
+.
+CSMX2000  CALL      IPAT0000
+.
+CSMX9999  GOTO      ENDP9999
++
+.*******************************************************************************
+.         DCAS0000 - Generate rates for Day cases
+.*******************************************************************************
+.         Lumpsum amount for day case - only for admission program
+.
+DCAS0000  MOVE      ZERO,FORM2
+          CLEAR     DSCITEM
+          COMPARE   ZERO,AINVPRT
+          GOTO      DCAS1000 IF EQUAL
+.
+          CALL      CHKACCM0           * Check if accommodation has been charged
+          BRANCH    EXIT,DCAS2000      * Found accommodation record
+.
+DCAS1000  CALL      LUMD0000              * generate lumpsum for daycase
+          BRANCH    NOFEE,DCAS9000
+          ADD       NOFEE,FORM2
+.
+.         Additional charge for day case
+.
+DCAS2000  CALL      GADD0000                * generate addition charge
+          ADD       NOFEE,FORM2
+.
+.         Check if any of rates was setup
+.
+          MOVE      ZERO,NOFEE
+          IF        FORM2 = 2 
+            MOVE      ONE,NOFEE
+            BRANCH    MSGFLAG,DCAS9000        * no error message
+            MATCH     "PATWEB",PRGID
+            IF        @EQUAL
+              CLEAR     WEBTITLE
+              APPEND    "Sameday Rates not Setup for: ",WEBTITLE
+              APPEND    "Claim Code : ",WEBTITLE
+              APPEND    ACLAIM,WEBTITLE
+              APPEND    "Health Fund : ",WEBTITLE
+              APPEND    AFUNDH,WEBTITLE
+              APPEND    "Table : ",WEBTITLE
+              APPEND    PTHFBCAT,WEBTITLE
+              APPEND    "Casemix Code: ",WEBTITLE
+              APPEND    CMDRG,WEBTITLE
+              RESET     WEBTITLE
+              CALL      WEBERR00
+              MOVE      ONE,EXIT
+            ENDIF
+          ENDIF
+.
+DCAS9000  APPEND    SP70,DSCITEM
+          RESET     DSCITEM
+DCAS9999  RETURN
++
+.*******************************************************************************
+.         LUMD0000 - Generate lumpsum for daycase
+.*******************************************************************************
+LUMD0000  MOVE      ZERO,NOFEE
+          MOVE      SP70,CASMXKEY
+          OPEN      PATLSDA1,"patlsdaf"   * open Day case file
+          PACK      KEY27,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG  
+          CALL      RDPTLSD1
+          IF        OVRCD = 1
+            PACK      KEY27,CONTRCID,ACLAIM,SP6,SP3,CMDRG  
+            CALL      RDPTLSD1
+            IF        OVRCD = 1
+              READ      CONTROLF,TWENTY;*193,PTCNDCLM
+              CALL      GDCL0000
+              PACK      KEY27,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG
+              CALL      RDPTLSD1
+              BRANCH    OVRCD,LUMD9000        * no lumpsum charge
+            ENDIF
+          ENDIF
+.
+          MOVE      KEY27,CASMXKEY
+          ADD       PTLSLREB,LUMHF
+          ADD       PTLSLPAT,LUMPAT
+          GOTO      LUMD9999
+.
+LUMD9000  MOVE      ONE,NOFEE
+          APPEND    "Sameday Rates not Setup for: ",DSCITEM
+          APPEND    KEY27,DSCITEM
+          APPEND    SP70,DSCITEM
+LUMD9999  RETURN
++
+.*******************************************************************************
+.         GADD0000 - Generate additional charge for sameday
+.*******************************************************************************
+GADD0000  MOVE      ZERO,NOFEE
+          OPEN      PATASDA1,"patasdaf"   * open additional charge file
+          PACK      KEY30,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG,SAVBTYP
+          PACK      CASMXKEY,CASMXKEY,SP70
+          MATCH     SP70,CASMXKEY
+          IF        !@EQUAL
+            PACK      KEY30,CASMXKEY,CMDRG,SAVBTYP
+          ENDIF
+          CALL      RDPTASD1
+          IF        OVRCD = 1
+            MATCH     SP70,CASMXKEY
+            GOTO      GADD9000 IF NOT EQUAL
+            PACK      KEY30,CONTRCID,ACLAIM,SP6,SP3,CMDRG,SAVBTYP
+            CALL      RDPTASD1
+            IF        OVRCD = 1
+              READ      CONTROLF,TWENTY;*193,PTCNDCLM
+              CALL      GDCL0000
+              PACK      KEY30,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG,SAVBTYP
+              CALL      RDPTASD1
+              BRANCH    OVRCD,GADD9000        * no additional charge
+            ENDIF
+          ENDIF
+.
+          MOVE      PTADDES1,SAVDES2
+.
+          ADD       PTADDREB,ADDHF
+          ADD       PTADDPAT,ADDPAT
+          GOTO      GADD9999
+.
+GADD9000  MOVE      ONE,NOFEE
+          APPEND    "Sameday Rates not Setup for: ",DSCITEM
+          APPEND    KEY30,DSCITEM
+          APPEND    SP70,DSCITEM
+          RESET     DSCITEM
+.
+GADD9999  RETURN
++
+.*******************************************************************************
+.         IPAT0000 - Generate rates for Overnight
+.*******************************************************************************
+.         Lumpsum amount for overnight
+.
+IPAT0000  MOVE      ZERO,FORM2
+          CLEAR     DSCITEM
+          COMPARE   ZERO,AINVPRT
+          GOTO      IPAT1000 IF EQUAL  * no invoice raised
+.
+          CALL      CHKACCM0           * Check if accommodation has been charged
+          BRANCH    EXIT,IPAT1200      * Found accommodation record
+.
+IPAT1000  CALL      VLUM0000              * generate overnight lumpsum
+          BRANCH    NOFEE,IPAT9999
+          ADD       NOFEE,FORM2
+.
+IPAT1200  COMPARE     THREE,ASTAT
+          GOTO        IPAT2000 IF NOT EQUAL * not discharged, use highoutliers
+.
+.         Low or high outliers ?
+.
+          COMPARE     ONE,LOWFLAG           * Low outliers ?
+          GOTO        IPAT2000 IF NOT EQUAL * No, High outliers
+.
+.         Low outliers - don't have lumpsum
+.
+          MOVE      ZERO,LUMHF
+          MOVE      ZERO,LUMPAT
+.
+.         Daily fee for low outliers
+.
+          CALL      LOWC0000              * generate daily fee for lowoutliers
+          ADD       NOFEE,FORM2
+          GOTO      IPAT3000
+.
+.         Lumpsum fee for Inlier/high outliers
+.
+IPAT2000  MOVE      PTHLLREB,LUMHF
+          MOVE      PTHLLPAT,LUMPAT
+.
+.         Daily fee for outliers
+.
+          CALL      IHGH0000              * generate daily fee for outliers
+          ADD       NOFEE,FORM2
+.
+.         Additional fee for overnight
+.
+IPAT3000  CALL      VADD0000              * generate overnight additional fee
+          ADD       NOFEE,FORM2
+          APPEND    SP70,DSCITEM
+          RESET     DSCITEM
+.
+.         Check if any of rates was setup
+.
+          MOVE      ZERO,NOFEE
+          IF        FORM2 = 3
+            MOVE      ONE,NOFEE
+            BRANCH    MSGFLAG,IPAT9999        * no error message
+            MATCH     "PATWEB",PRGID
+            IF        @EQUAL
+              CLEAR     WEBTITLE
+              APPEND    "Overnight Rates not Setup for: ",WEBTITLE
+              APPEND    "Claim : ",WEBTITLE
+              APPEND    ACLAIM,WEBTITLE
+              APPEND    "Health Fund : ",WEBTITLE
+              APPEND    AFUNDH,WEBTITLE
+              APPEND    "Table : ",WEBTITLE
+              APPEND    PTHFBCAT,WEBTITLE
+              APPEND    "Casemix Code: ",WEBTITLE
+              APPEND    CMDRG,WEBTITLE
+              RESET     WEBTITLE
+              CALL      WEBERR00
+              MOVE      ONE,EXIT
+            ELSE
+              DISPLAY   *P1:22,*B,*EL,*V2LON,"Overnight ",*HOFF:
+                        "Rates not Setup for: ":
+                        *P1:23,"Claim Code : ",*V2LON,ACLAIM,*HOFF:
+                        "Health Fund: ",*V2LON,AFUNDH,*HOFF,"Table: ":
+                        *V2LON,PTHFBCAT:
+                        *HOFF,"Casemix Code: ",*V2LON,CMDRG,*P1:24;
+              CALL      HITENTER
+            ENDIF
+          ENDIF
+.
+IPAT9999  RETURN
++
+.*******************************************************************************
+.         VLUM0000 - Overnight lumpsum
+.*******************************************************************************
+VLUM0000  MOVE      ZERO,NOFEE
+          MOVE      ZERO,PTHLLREB
+          MOVE      ZERO,PTHLLPAT
+          MOVE      SP70,CASMXKEY
+          OPEN      PATHLFA1,"pathlfaf"
+          PACK      KEY27,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG
+          CALL      RDPTHLF1
+          IF        OVRCD = 1
+            PACK      KEY27,CONTRCID,ACLAIM,SP6,SP3,CMDRG
+            CALL      RDPTHLF1
+            IF        OVRCD = 1
+              READ      CONTROLF,TWENTY;*193,PTCNDCLM
+              CALL      GDCL0000
+              PACK      KEY27,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG
+              CALL      RDPTHLF1
+              BRANCH    OVRCD,VLUM9000        * no lumpsum charges
+            ENDIF
+          ENDIF
+          MOVE      KEY27,CASMXKEY
+          GOTO      VLUM9999
+.
+VLUM9000  MOVE      ONE,NOFEE
+          APPEND    "Overnight Rates not Setup for: ",DSCITEM
+          APPEND    KEY27,DSCITEM
+          APPEND    SP70,DSCITEM
+          RESET     DSCITEM
+VLUM9999  RETURN
++
+.*******************************************************************************
+.         IHGH0000 - Generate daily fee for inliers/high outliers
+.*******************************************************************************
+IHGH0000  MOVE      ZERO,NOFEE
+          OPEN      PATHDFA1,"pathdfaf"
+          PACK      SDIM27,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG
+          PACK      CASMXKEY,CASMXKEY,SP70
+          MATCH     SP70,CASMXKEY
+          IF        !@EQUAL
+            PACK      SDIM27,CASMXKEY,CMDRG,SP70
+          ENDIF
+.
+          MOVE      ZERO,FORM1
+IHGH2000  PACK      KEY31,SDIM27,SP10
+          CALL      RSPTHDF1
+IHGH3000  CALL      RKPTHDF1
+          BRANCH    OVRCD,IHGH4000
+          PACK      DIM27,PTHDCNID,PTHDCLMN,PTHDHFND,PTHDTABT,PTHDCASM
+          MATCH     DIM27,SDIM27
+          GOTO      IHGH7000 IF EQUAL
+.
+IHGH4000  MATCH     SP70,CASMXKEY
+          GOTO      IHGH4200 IF NOT EQUAL
+          ADD       ONE,FORM1
+          BRANCH    FORM1,IHGH5000,IHGH6000
+IHGH4200  MOVE      ONE,NOFEE               * No fee setup
+          APPEND    "Overnight Rates not Setup for: ",DSCITEM
+          APPEND    SDIM27,DSCITEM
+          GOTO      IHGH9999
+.
+IHGH5000  PACK      SDIM27,CONTRCID,ACLAIM,SP6,SP3,CMDRG
+          GOTO      IHGH2000
+.
+IHGH6000  READ      CONTROLF,TWENTY;*193,PTCNDCLM
+          CALL      GDCL0000
+          PACK      SDIM27,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG
+          GOTO      IHGH2000
+.
+IHGH7000  ADD       ONE,DAYCOL            * Add one to no of column
+          BRANCH    ADMFLAG,IHGH7400      * Adm.program use the first column
+.
+          COMPARE   BDAYS,PTHDEDAY        * Check the bed days against the
+          GOTO      IHGH3000 IF LESS      * ending day
+          GOTO      IHGH8000
+.
+IHGH7400  COMPARE   ZERO,ADYHOSP
+          GOTO      IHGH8000 IF EQUAL
+          COMPARE   ADYHOSP,PTHDEDAY
+          GOTO      IHGH3000 IF LESS
+.
+IHGH8000  MOVE      PTHDDES1,SAVDES1
+.
+          ADD       PTHDDREB,DAYHF
+          ADD       PTHDDPAT,DAYPAT
+          MOVE      PTHDEDAY,DAYEND       * ending day of daily charge
+.
+IHGH9999  RETURN
++
+.*******************************************************************************
+.           LOWC0000 - Generate daily charge for low outliers
+.*******************************************************************************
+LOWC0000  MOVE      ZERO,NOFEE
+          OPEN      PATLDFA1,"patldfaf"
+          PACK      SDIM27,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG
+          PACK      CASMXKEY,CASMXKEY,SP70
+          MATCH     SP70,CASMXKEY
+          IF        !@EQUAL
+            PACK      SDIM27,CASMXKEY,CMDRG,SP70
+          ENDIF
+.
+          MOVE      ZERO,FORM1
+LOWC2000  PACK      KEY31,SDIM27,SP10
+          CALL      RSPTLDF1
+LOWC3000  CALL      RKPTLDF1
+          BRANCH    OVRCD,LOWC4000
+          PACK      DIM27,PTLDCNID,PTLDCLMN,PTLDHFND,PTLDTABT,PTLDCASM
+          MATCH     DIM27,SDIM27
+          GOTO      LOWC7000 IF EQUAL
+.
+LOWC4000  MATCH     SP70,CASMXKEY
+          GOTO      LOWC4200 IF NOT EQUAL
+          ADD       ONE,FORM1
+          BRANCH    FORM1,LOWC5000,LOWC6000
+LOWC4200  MOVE      ONE,NOFEE               * No fee setup
+          APPEND    "Overnight Rates not Setup for: ",DSCITEM
+          APPEND    SDIM27,DSCITEM
+          GOTO      LOWC9999
+.
+LOWC5000  PACK      SDIM27,CONTRCID,ACLAIM,SP6,SP3,CMDRG
+          GOTO      LOWC2000
+.
+LOWC6000  READ      CONTROLF,TWENTY;*193,PTCNDCLM
+          CALL      GDCL0000
+          PACK      SDIM27,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG
+          GOTO      LOWC2000
+.
+LOWC7000  ADD       ONE,DAYCOL            * Add one to no of column
+          COMPARE   BDAYS,PTLDEDAY        * check the bed days against endingday
+          GOTO      LOWC3000 IF LESS      * get next rate
+.
+          MOVE      PTLDDREB,DAYHF
+          MOVE      PTLDDPAT,DAYPAT
+          MOVE      PTLDEDAY,DAYEND       * ending day of daily charge
+          MOVE      PTLDDES1,SAVDES1
+.
+LOWC9999  RETURN
++
+.*******************************************************************************
+.           VADD0000 - Generate additional charge for overnight
+.*******************************************************************************
+VADD0000  MOVE      ZERO,NOFEE
+          MOVE      SAVBTYP,STRBTYP
+          CALL      DBTP0000              * Calculate bed days for the bedtype
+          MATCH     ADATE,DDATE
+          IF        !@EQUAL
+            ADD       ONE,NBRDAYS
+          ENDIF
+.
+          OPEN      PATAFEA1,"patafeaf"
+          PACK      SDIM30,CONTRCID,ACLAIM,AFUNDH,PTHFBCAT,CMDRG,SAVBTYP,SP10
+          PACK      CASMXKEY,CASMXKEY,SP70
+          MATCH     SP70,CASMXKEY
+          IF        !@EQUAL
+            PACK      SDIM30,CASMXKEY,CMDRG,SAVBTYP,SP70
+          ENDIF
+.
+          MOVE      ZERO,FORM1
+VADD2000  PACK      KEY34,SDIM30,SP10
+          CALL      RSPTAFE1
+VADD3000  CALL      RKPTAFE1
+          BRANCH    OVRCD,VADD4000        * no additional charge
+.
+          PACK      DIM30,PTFECNID,PTFECLMN,PTFEHFND,PTFETABT,PTFECASM,PTFEBTYP
+          MATCH     DIM30,SDIM30
+          GOTO      VADD7000 IF EQUAL
+.
+VADD4000  MATCH     SP70,CASMXKEY
+          GOTO      VADD4200 IF NOT EQUAL
+          ADD       ONE,FORM1
+          BRANCH    FORM1,VADD5000,VADD6000  * try no hf, try no claim code
+VADD4200  MOVE      ONE,NOFEE               * No fee setup
+          APPEND    "Overnight Rates not Setup for: ",DSCITEM
+          APPEND    SDIM30,DSCITEM
+          MOVE      ZERO,ADDCOL
+          GOTO      VADD9999                 * no addition charge
+.
+.         Try with no health fund
+.
+VADD5000  PACK      SDIM30,CONTRCID,ACLAIM,SP6,SP3,CMDRG,SAVBTYP,SP10
+          GOTO      VADD2000
+.
+.         Try with no claim code
+.
+VADD6000  READ      CONTROLF,TWENTY;*193,PTCNDCLM
+          CALL      GDCL0000
+          PACK      SDIM30,CONTRCID,PTCNDCLM,SP6,SP3,CMDRG,SAVBTYP,SP10
+          GOTO      VADD2000
+.
+.         Get the first column of the rate
+.
+VADD7000  ADD       ONE,ADDCOL            * Add one to no of column
+          BRANCH    ADMFLAG,VADD8000      * Adm.program use the first column
+.
+          COMPARE   NBRDAYS,PTFEEDAY      * Check the bed days against the
+          GOTO      VADD3000 IF LESS      * ending day
+.
+VADD8000  ADD       PTFEDREB,ADDHF
+          ADD       PTFEDPAT,ADDPAT
+          MOVE      PTFEEDAY,ADDEND        * Ending day of additional charge
+.
+VADD9999  RETURN
+.
+.*******************************************************************************
+.        PATDBTYP : Calculate the number of bed days for a given bed type
+.*******************************************************************************
+DBTP0000 OPEN       PATTRAN2,"pattranf"
+         MOVE       SP10,WDATE1             * initialise the start date
+         MOVE       SP10,WDATE2             * initialise the end date
+         MOVE       ZERO,NBRDAYS
+.
+         COMPARE    THREE,ASTAT             * discharged ?
+         GOTO       DBTP1000 IF NOT EQUAL   * no.
+.
+         MATCH      ADATE,DDATE             * day case patient ?
+         GOTO       DBTP1000 IF NOT EQUAL   * no.
+.
+         PACK       KEY30,AADMNO,Z70
+         CALL       RDSTRAN2
+         CALL       RDPTRAN2
+         BRANCH     OVRCD,DBTP9000
+         COMPARE    TADMN,AADMNO            * same admission ?
+         GOTO       DBTP9000 IF NOT EQUAL  * No.
+.
+         MATCH      SAVBTYP,TRBTYP          * same bed type ?
+         GOTO       DBTP9000 IF NOT EQUAL
+.
+         PACK       KEY5,ANSA,SP1,TATYPE
+         CALL       RDCODE1
+         IF         OVRCD=0
+           MATCH      SP70,TCINDC12         * Qualified days?
+           GOTO       DBTP9000 IF NOT EQUAL
+         ENDIF
+.
+         MATCH      ADATE,TODATE
+         GOTO       DBTP9000 IF LESS
+.
+         MOVE       ONE,NBRDAYS             * no of bed days is one for daycase
+         GOTO       DBTP9000
+.
+DBTP1000 PACK       KEY30,AADMNO,SP20,SP10
+         CALL       RDSTRAN2
+DBTP1200 CALL       RDKTRAN2
+         BRANCH     OVRCD,DBTP4000
+.
+         COMPARE    TADMN,AADMNO            * same admission ?
+         GOTO       DBTP4000 IF NOT EQUAL
+.
+         REP        " 0",TDATE
+         MOVE       TDATE,STDATE
+         MATCH      ANSA,TMOVE              * Admission record ?
+         GOTO       DBTP2000 IF EQUAL
+.
+         MATCH      ANSR,TMOVE              * Return record ?
+         GOTO       DBTP2000 IF EQUAL
+.
+         CMATCH     ANSC,TMOVE              * Change record ?
+         GOTO       DBTP2200 IF EQUAL
+         GOTO       DBTP3000
+.
+.        Admission/Return record
+.
+DBTP2000 MATCH      TDATE,TODATE
+         GOTO       DBTP9000 IF LESS
+         MATCH      SAVBTYP,TRBTYP          * same bed type ?
+         GOTO       DBTP1200 IF NOT EQUAL
+.
+         PACK       KEY5,ANSA,SP1,TATYPE
+         CALL       RDCODE1
+         IF         OVRCD=0
+           MATCH      SP70,TCINDC12         * qualified days ?
+           GOTO       DBTP1200 IF NOT EQUAL
+         ENDIF
+.
+         MOVE       TDATE,WDATE1            * set from date
+         GOTO       DBTP1200                * get next trans record
+.
+.        Change
+.
+DBTP2200 MATCH      TDATE,TODATE
+         IF         @LESS
+           MATCH      SP6,WDATE1              * Check with the fromdate
+           GOTO       DBTP9000 IF EQUAL
+           MOVE       TODATE,WDATE2           * set to date
+           CALL       CBDY0000                * Calculate bed days
+           GOTO       DBTP9000
+         ENDIF
+.
+         MATCH      SAVBTYP,TRBTYP          * check if it's the selected bedtype
+         GOTO       DBTP2400 IF NOT EQUAL
+.
+         PACK       KEY5,ANSA,SP1,TATYPE
+         CALL       RDCODE1
+         IF         OVRCD=0
+           MATCH      SP70,TCINDC12         * qualified days
+           GOTO       DBTP2400 IF NOT EQUAL
+         ENDIF
+.
+.        Change to the selected bed type
+.
+         MATCH      SP8,WDATE1            * check if it was a real change of
+         GOTO       DBTP1200 IF NOT EQUAL   * bed type
+.
+         MOVE       TDATE,WDATE1          * set fromdate of the change bedtype
+         GOTO       DBTP1200
+.
+.        Change to a different bed type, check if it was from selected bedtype
+.
+DBTP2400 MATCH      SP8,WDATE1           
+         GOTO       DBTP1200 IF EQUAL
+.
+         MOVE       TDATE,WDATE2
+         CALL       CBDY0000                * Calculate bed days
+         GOTO       DBTP1200                * get next trans record
+.
+.        Discharge/Leave record always on the same bed type as previous record
+.
+DBTP3000 MATCH      SP8,WDATE1
+         GOTO       DBTP3200 IF EQUAL       * Was not on selected bed type
+.
+         MATCH      TDATE,TODATE
+         IF         @LESS
+           MOVE       TODATE,WDATE2         * set to end date
+         ELSE
+           MOVE       TDATE,WDATE2          * Set to date
+         ENDIF
+         REP        " 0",WDATE2
+         CALL       CBDY0000                * Calculate bed days
+.
+DBTP3200 CMATCH     "D",TMOVE
+         GOTO       DBTP1200 IF NOT EQUAL   * get next record
+         GOTO       DBTP9000
+.
+.        check the last record
+.
+DBTP4000 MATCH      SP8,WDATE1
+         GOTO       DBTP9000 IF EQUAL       * Was not on selected bed type
+.
+         MOVE       TODATE,WDATE2
+         REP        " 0",WDATE2
+         CALL       CBDY0000                * Calculate bed days
+.
+DBTP9000 
+DBTP9999 RETURN
++
+.*******************************************************************************
+.         Get the default charging claim code for multi hospital
+.*******************************************************************************
+GDCL0000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          IF        IBCNMHOS=1
+            OPEN      PATHSPA1,"pathspaf"
+            MOVE      PMVXMHOS,KEY3
+            CALL      RDPTHSP1
+            IF        OVRCD=0
+              MOVE      PTHSDCLM,PTCNDCLM     * default claim code charging
+            ENDIF
+          ENDIF
+          MATCH     SP70,PTCNDCLM
+          IF        @EQUAL
+            MOVE      "0  ",PTCNDCLM          * use zero claim code
+          ENDIF
+GDCL9999  RETURN
++
+.******************************************************************************
+.        CBDY0000 - Calculate dates difference
+.******************************************************************************
+CBDY0000 PACK       CDYSFDTE,WDATE1
+         PACK       CDYSTDTE,WDATE2
+         CALL       CALCDAYS
+         MOVE       CDYSDAYS,CALDAYS
+         SUB        ONE,CALDAYS
+         ADD        CALDAYS,NBRDAYS
+         MOVE       SP10,WDATE1
+         MOVE       SP10,WDATE2
+CBDY9999 RETURN
++
+.******************************************************************************
+.        Check if accommodation is being charged
+.******************************************************************************
+CHKACCM0  BRANCH    APURGE,CHKACCM2,CHKACCM2
+.
+          OPEN      PATDTRA1,"patdtraf"
+          MOVE      ZERO,EXIT
+          PACK      KEY22 WITH AADMNO,SP20
+          CALL      RDSDTRN1
+CHKACCM1  CALL      RDKDTRN1
+          BRANCH    OVRCD OF CHKACCM3
+.
+          COMPARE   AADMNO TO TADMNO
+          GOTO      CHKACCM3 IF NOT EQUAL
+.
+          MATCH     "1",PTDTCRST
+          GOTO      CHKACCM1 IF EQUAL  * fully credited
+.
+          BRANCH    TRECTYPE,CHKACCM2  * Found an accommodation record
+          GOTO      CHKACCM1
+.
+CHKACCM2  MOVE      ONE,EXIT
+CHKACCM3  RETURN
+.
+          INC       IBAOVRIO/INC
+          INC       PATTRNIO/INC
+          INC       PATFN1IO/INC
+          INC       PATCMXIO/INC         * casemix files
+          INC       PATAFEIO/INC
+          INC       PATASDIO/INC
+          INC       PATHDFIO/INC
+          INC       PATHLFIO/INC
+          INC       PATLDFIO/INC
+          INC       PATLSDIO/INC
+          INC       PATDTRIO/INC
+.
+ENDP9999  ENDPROC
++

@@ -1,0 +1,1666 @@
+.******************************************************************************
+.* #########################################################################  *
+.* # Note : any changes to CCC account creation will have to be changed    #  *
+.* #        in IBAFMS69 + IBAFMS24 to ensure accounts update correctly     #  *
+.* #########################################################################  *
+.******************************************************************************
+.
+.         FMSACCCD  (Neeriem Dye)
+.
+.         Used in IBAFMS08 IBAFMS09 IBAFMS10 FIXACCTS
+.
+.         WARNING - This is twisted, confusing, and ugly code so
+.                   all modifications should be made by me !!
+.                   How's that for job security ?!
+.
+.         Code to create subjective/cost centre related accounts
+.
+.         Main Routines
+.         -------------
+.         WREC0000  write data  (given LEDGER, SUBJCODE, COSTCODE)
+.                   SKIPFMTU    (1=no total account update required)
+.                   WRECLEV     (must be set to zero)
+.                   FMCOSTPO    (1=write stat-post to rsf file)
+.                   UTYPE       (update type blank=all years/budgets)
+.
+.         DREC0000  delete data (given LEDGER, SUBJCODE, COSTCODE)
+.                   DELALL      (1=delete to top of tree (only used
+.                                  when key details have changed))
+.                   OLDDCOST    (1=use old cc data)
+.                   OLDDSUBJ    (1=use old subj data)
+.                   SKIPFMTU    (1=no total account update required)
+.
+.******************************************************************************
+.* Modifications  :    11.06.91 Neeriem Dye                                   *
+.*                     Changed so stat-post records are not put on reports    *
+.*                     automatically                                          *
+.*                     Only write records to FMSTUPAF if required             *
+.*                     Fixed delete routines to use old subj and cc print pos *
+.*                                                                            *
+.*                     26.06.91 Neeriem Dye                                   *
+.*                     Fixed so initial subjective will be reread after       *
+.*                     WREC or DREC is completed                              *
+.*                                                                            *
+.*                     12.07.91 Neeriem Dye                                   *
+.*                     Added write stat-post recs to RSF file if FMCOSTPO=1   *
+.*                     srf 109475                                             *
+.*                                                                            *
+.*                     17.07.91 Neeriem Dye                                   *
+.*                     Fixed to update print code of stat-post recs           *
+.*                     srf 109544                                             *
+.*                                                                            *
+.*                     24.07.91 Neeriem Dye                                   *
+.*                     Modified to handle consolidated cost centres           *
+.*                     srf 109591                                             *
+.*                                                                            *
+.*                     31.07.91 Neeriem Dye                                   *
+.*                     Modified to only delete from fmsrsfaf for subj+cc      *
+.*                     reports when removing accounts                         *
+.*                     srf 109591                                             *
+.*                                                                            *
+.*                     05.09.91 Neeriem Dye                                   *
+.*                     Modified to handle stat posting recs correctly         *
+.*                     srf 110448                                             *
+.*                                                                            *
+.*                     19.09.91 Neeriem Dye                                   *
+.*                     Modified to write level to new FMSTUPAF layout         *
+.*                     srf 110636                                             *
+.*                                                                            *
+.*                     06.10.91 Neeriem Dye                                   *
+.*                     Added level to default acct details for total subj's   *
+.*                     srf 110702                                             *
+.*                                                                            *
+.*                     31.10.91 Neeriem Dye                                   *
+.*                     Fix update of prt pos for stat accounts on rsf file    *
+.*                     srf 110705                                             *
+.*                                                                            *
+.*                     18.11.91 Neeriem Dye                                   *
+.*                     Added warning for cc level                             *
+.*                     srf 111774                                             *
+.*                                                                            *
+.*                     20.11.91 Neeriem Dye                                   *
+.*                     Fix update of prt pos for stat accounts on rsf file    *
+.*                     srf 111859                                             *
+.*                                                                            *
+.*                     17.12.91 Neeriem Dye                                   *
+.*                     Change warning message for cc level                    *
+.*                     Add more writes to fmstupaf (SETU0000)                 *
+.*                     srf 112021                                             *
+.*                                                                            *
+.*                     18.02.92 Neeriem Dye                                   *
+.*                     For CCC, don't use print code for norm + stat-post subj*
+.*                     srf 113155                                             *
+.*                                                                            *
+.*                     22.09.92 Neeriem Dye                                   *
+.*                     Fix handling of CCC and ensure accounts set for update *
+.*                     when deleted                                           *
+.*                     srf 117151                                             *
+.*                                                                            *
+.*                     12.10.92 Neeriem Dye                                   *
+.*                     Dont update suspension flag of each CC/Subj acc        *
+.*                     srf 116999                                             *
+.*                                                                            *
+.*                     15.09.93 Neeriem Dye                                   *
+.*                     Add check for stat-total sub cost centre level         *
+.*                     Use Subjective Description Type for Consol Cost Centres*
+.*                     for heading and total subjectives                      *
+.*                     srf 600463                                             *
+.*                                                                            *
+.*                     19.10.93 Neeriem Dye                                   *
+.*                     Modify CC sequence between CC and all CCC's if         *
+.*                     CC print position modified                             *
+.*                     srf 125762                                             *
+.*                                                                            *
+.*                     21.10.93 Neeriem Dye                                   *
+.*                     Modified for new committed expenditure field           *
+.*                     srf HWK                                                *
+.*                                                                            *
+.*                     14.05.96 Sandra Barcham                                *
+.*                     Fixed problem with updating fte's                      *
+.*                     srf 641454                                             *
+.*                                                                            *
+.*                     06.08.96 Sandra Barcham                                *
+.*                     Fixed problem updating fmamtype for stat accounts      *
+.*                     srf 641858                                             *
+.*                                                                            *
+.******************************************************************************
+. FD's Required for FMSACCCD
+. --------------------------
+.          INC       FMSAMAFD/INC
+.          INC       FMSBTYFD/INC
+.          INC       FMSCCAFD/INC
+.          INC       FMSCCCFD/INC
+.          INC       FMSCONFD/INC
+.          INC       FMSLEVFD/INC
+.          INC       FMSLMAFD/INC
+.          INC       FMSLBUFD/INC
+.          INC       FMSRSFFD/INC
+.          INC       FMSSBAFD/INC
+.          INC       FMSSLBFD/INC
+.          INC       FMSTCFFD/INC
+.          INC       FMSSSCFD/INC
+.          INC       FMSTUPFD/INC
+.          INC       FMSXCSFD/INC
+.
+. IO's Required for FMSACCCD
+. --------------------------
+.          INC       FMSAMAIO/INC
+.          INC       FMSBTYIO/INC
+.          INC       FMSCCAIO/INC
+.          INC       FMSCCCIO/INC
+.          INC       FMSCONIO/INC
+.          INC       FMSLEVIO/INC
+.          INC       FMSLMAIO/INC
+.          INC       FMSLBUIO/INC
+.          INC       FMSRSFIO/INC
+.          INC       FMSSBAIO/INC
+.          INC       FMSSLBIO/INC
+.          INC       FMSTCFIO/INC
+.          INC       FMSSSCIO/INC
+.          INC       FMSTUPIO/INC
+.          INC       FMSXCSIO/INC
+.
+. Files opened for FMSACCCD
+. --------------------------
+.          DISPLAY   *P50:24,"Opening controlf";
+.          OPEN      CONTROLF,"controlf"
+.          CALL      RDFMCO50
+.          CALL      RDFMCO51
+.          CALL      RDFMCO52
+.
+.          DISPLAY   *P50:24,"Opening fmsamaaf";
+.          OPEN      FMSAMAA1,"fmsamaaf"
+..
+.          DISPLAY   *P50:24,"Opening fmsbtyaf";
+.          OPEN      FMSBTYA1,"fmsbtyaf"
+..
+.          DISPLAY   *P50:24,"Opening fmsccaaf";
+.          OPEN      FMSCCAA1,"fmsccaaf"
+..
+.          DISPLAY   *P50:24,"Opening fmscccaf";
+.          OPEN      FMSCCCA1,"fmscccaf"
+.          OPEN      FMSCCCA2,"fmscccaf"
+..
+.          DISPLAY   *P50:24,"Opening fmslevaf";
+.          OPEN      FMSLEVA1,"fmslevaf"
+..
+.          DISPLAY   *P50:24,"Opening fmslmaaf";
+.          OPEN      FMSLMAA1,"fmslmaaf"
+..
+.          DISPLAY   *P50:24,"Opening fmsrsfaf";
+.          OPEN      FMSRSFA1,"fmsrsfaf"
+.          OPEN      FMSRSFA2,"fmsrsfaf"
+..
+.          DISPLAY   *P50:24,"Opening fmssbaaf";
+.          OPEN      FMSSBAA1,"fmssbaaf"
+..
+.          DISPLAY   *P50:24,"Opening fmstcfaf";
+.          OPEN      FMSTCFA1,"fmstcfaf"
+..
+.          DISPLAY   *P50:24,"Opening fmssscaf";
+.          OPEN      FMSSSCA1,"fmssscaf"
+..
+.          DISPLAY   *P50:24,"Opening fmstupaf";
+.          OPEN      FMSTUPA1,"fmstupaf"
+.          OPEN      FMSTUPA2,"fmstupaf"
+.          OPEN      FMSTUPA3,"fmstupaf"
+..
+.          DISPLAY   *P50:24,"Opening fmsxcsaf";
+.          OPEN      FMSXCSA1,"fmsxcsaf"
+..
+.
+. Data Definitions for FMSACCCD
+. -----------------------------
+.DSIX      INIT      "6"
+.DSEVEN    INIT      "7"
+.DEIGHT    INIT      "8"
+.DNINE     INIT      "9"
+.FMSO      INIT      "fmso"
+.FMSL      INIT      "fmsl"
+..
+.ACCOUNT   DIM       12       * account code
+.COSTCODE  DIM       12       * cc code
+.CCLEV     DIM       3        * cc level
+.DELALL    FORM      1        * 1=delete to top of tree
+.DIMA14    DIM       14       * params for CCON0000
+.DIMB14    DIM       14
+.DIMC5     DIM       5
+.DIMD35    DIM       35
+.DIME5     DIM       5
+.FILENAME  DIM       8        * filename
+.LBUNAME   DIM       8        * filename
+.LEDGER    DIM       2        * ledger
+.OLDADDT   DIM       12       * old add to account
+.OLDDCOST  FORM      1        * 1=use old cc data
+.OLDPPOS   DIM       5        * old print pos
+.OLDDSUBJ  FORM      1        * 1=use old subj data
+.OLDSTAT   FORM      2        * old status type
+.POSTACCT  DIM       12       * account
+.RESTFMSA  DIM       14       * restore subjective key
+.SAVECCC   DIM       50       * field to ccc data
+.SAVEDATA  DIM       50       * field to save data
+.SFMTS01   DIM       43
+.SFMTS02   DIM       43
+.SFMTS03   DIM       43
+.SFMTS04   DIM       43
+.SFMTS05   DIM       43
+.SFMTS06   DIM       43
+.SFMTS07   DIM       43
+.SFMTS08   DIM       43
+.SFMTS09   DIM       43
+.SFMTS10   DIM       43
+.SKEY27    DIM       27
+.SKEY31    DIM       31       * key save
+.SKEY43    DIM       43       * key save
+.SKIPFMTU  FORM      1        * 1=no total account update req
+.SLBNAME   DIM       8        * filename
+.SUBJCODE  DIM       12       * subj code
+.TEMPACCT  DIM       12       * cc
+.TEMPCOST  DIM       12       * cc
+.TEMPCPOS  DIM       5        * cc print position
+.TEMPSPOS  DIM       5        * subj print position
+.TEMPSUBJ  DIM       12       * subj
+.TOTACCNT  DIM       12       * account
+.TOTLEDG   DIM       12       * ledger
+.UTYPE     INIT      "    "   * Update Type
+.WRECLEV   FORM      1        * must be set to zero
+.
+.**********************************************************************
+. WREC - write cc/subj records                       Called By lots
+.        Requires - LEDGER, SUBJCODE, COSTCODE
+.**********************************************************************
+WREC0000  PACK      RESTFMSA,FMSALEDG,FMSASUBJ,SP70
+.
+          CALL      WACC0000           * make accounts
+.
+          PACK      KEY14,RESTFMSA,SP70
+          CALL      RDFMSA1            * restore original subjective
+.
+WREC9999  RETURN
+.**********************************************************************
+. DREC - delete cc/subj records                     Called By lots
+.        Requires - LEDGER, SUBJCODE, COSTCODE
+.**********************************************************************
+DREC0000  PACK      RESTFMSA,FMSALEDG,FMSASUBJ,SP70
+.
+          CALL      DACC0000           * delete accounts
+.
+          PACK      KEY14,RESTFMSA,SP70
+          CALL      RDFMSA1            * restore original subjective
+.
+DREC9999  RETURN
+.**********************************************************************
+. WACC - write records for screen c                  Called By WREC
+.        Requires - LEDGER, SUBJCODE, COSTCODE
+.**********************************************************************
+WACC0000  PACK      KEY14,LEDGER,COSTCODE,SP70
+          CALL      RDFMCC1            * get cost centre data
+          BRANCH    OVRCD,WACC9999     * no such cost centre ?
+.
+          PACK      KEY14,LEDGER,COSTCODE,SP70
+          CALL      RDFMAM1            * get default account data
+          BRANCH    OVRCD,WACC9999     * no such account ?
+          MOVE      FMAMCLEV,CCLEV
+.
+          PACK      KEY14,LEDGER,SUBJCODE,SP70
+          CALL      RDFMAM1            * get default account data
+          BRANCH    OVRCD,WACC9999     * no such account ?
+.
+          CALL      RDFMSA1            * get default account data
+          BRANCH    OVRCD,WACC9999     * no such subjective ?
+.
+          MATCH     "1",FMSASTYP
+          GOTO      WACC9999 IF EQUAL  * total type
+.
+          MOVE      FMSAPPOS,TEMPSPOS
+          MOVE      FMCCPPOS,TEMPCPOS
+          MOVE      SUBJCODE,TEMPSUBJ
+          MOVE      COSTCODE,TEMPCOST
+          CALL      BCOD0000
+.
+.                                           * save parameters for CCC
+          PACK      SAVECCC,LEDGER,SUBJCODE,COSTCODE,FMSAPPOS
+.
+          PACK      KEY26,LEDGER,SUBJCODE,COSTCODE,SP70
+          UNPACK    KEY26,FMXCLED,FMXCSUB,FMXCCOS
+          MOVE      FMSAPPOS,FMXCSPR
+          MOVE      FMCCPPOS,FMXCCPR
+          CALL      DEFMXC1
+          CALL      WRFMXC1
+.
+          MATCH     "2",FMSASTYP
+          GOTO      WACC1000 IF NOT EQUAL   * heading type
+.
+.---- create heading record ----
+.
+          CALL      WHED0000           * make heading records
+          GOTO      WACC9100
+.
+.---- create posting record ----
+.
+WACC1000  
+          MOVE      FMSASTAT,FMAMSTAT  * keep old status if record exists
+          PACK      KEY14,LEDGER,ACCOUNT,SP70
+          CALL      RDFMAM1
+          MOVE      FMAMSTAT,FMSASTAT
+.
+          MOVE      ZERO,F1                      * use subj desc unless typ 1or2
+          MOVE      FMSASTYP,F1
+          BRANCH    F1,WACC1100,WACC1100
+..........MOVE      "1",FMSADTYP                          * srf 128065
+.
+WACC1100  CALL      BDES0000           * build description
+.         MOVE      ZERO,F1            * not required as called bdes0000
+.         MOVE      FMSADTYP,F1
+.         LOAD      FMAMDESC,F1,FMSADESC,FMCCDESC
+          MOVE      FMSATYPE,FMAMTYPE
+          MOVE      ZERO,F1                               * srf 128065
+          MOVE      FMSASTYP,F1
+          LOAD      FMAMTYPE,F1,DSIX,DSEVEN,DEIGHT,DNINE  * srf 641858
+.
+          CALL      GDEF0000           * get default details
+.
+          PACK      KEY14,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY14,FMAMLEDG,FMAMACCT
+          CALL      DEFMAM1            * delete old record
+          CALL      WRFMAM1            * write new record
+          CALL      WSET0000           * add new rec
+.
+.---- stat subjective ----
+.
+          MATCH     "3",FMSASTYP
+          GOTO      WACC2000 IF LESS
+          CALL      WSTA0000           * write stat record
+          GOTO      WACC9000
+.
+WACC2000  PACK      KEY33,LEDGER,TEMPSUBJ,TEMPCPOS,LEDGER,ACCOUNT,SP70 * subj
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          MOVE      ZERO,FMTCADDT
+          CALL      DEFMTC1            * delete old record
+          CALL      WRFMTC1            * write new record
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+          MOVE      ONE,FMTCPOST
+          MOVE      TEMPCOST,POSTACCT
+          CALL      WTOT0000           * make total recs of rec
+.
+          PACK      KEY33,LEDGER,TEMPCOST,TEMPSPOS,LEDGER,ACCOUNT,SP70 * cc
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          MOVE      ZERO,FMTCADDT
+          CALL      DEFMTC1            * delete old record
+          CALL      WRFMTC1            * write new record
+.
+WACC9000  MOVE      LEDGER,TOTLEDG
+          MOVE      POSTACCT,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+WACC9100  
+          UNPACK    SAVECCC,LEDGER,SUBJCODE,COSTCODE,FMSAPPOS
+          CALL      WCCC0000                     * add any CCC accounts
+.
+WACC9999  RETURN
+.**********************************************************************
+.  WSTA - write statistical records                    Called by WACC
+.**********************************************************************
+WSTA0000  PACK      POSTACCT,ACCOUNT,SP70
+          MATCH     "4",FMSASTYP
+          GOTO      WSTA0100 IF EQUAL            * stat-total subjective ?
+.
+          PACK      KEY33,LEDGER,SUBJCODE,FMSAPPOS,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          MOVE      ZERO,FMTCADDT
+          CALL      DEFMTC1
+          CALL      WRFMTC1
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+          COMPARE   "1",FMCOSTPO
+          GOTO      WSTA0100 IF EQUAL            * writ to rsf for stat-post ?
+          GOTO      WSTA1000
+.
+.
+WSTA0100  PACK      FMRFREP,FMSUUD7A,SP70        * get print code from subj rep
+          REP       " 0",FMRFREP
+          UNPACK    SP70,FMRFPRT,FMRFCRP
+          PACK      KEY26,LEDGER,SUBJCODE,FMRFREP,SP70
+          CALL      RSFMRF2
+          CALL      RKFMRF2
+          BRANCH    OVRCD,WSTA0200
+          PACK      KEY16,FMRFLED,FMRFACC,FMRFREP,SP70
+.
+          MATCH     KEY26,KEY16
+          GOTO      WSTA0200 IF EQUAL  * desired code
+          UNPACK    SP70,FMRFPRT,FMRFCRP
+.
+WSTA0200  PACK      FMRFREP,FMSUUD8A,SP70        * write to report seq file
+          REP       " 0",FMRFREP
+          PACK      KEY26,LEDGER,POSTACCT,FMRFREP,FMCCPPOS,FMSAPPOS,SP70
+          UNPACK    KEY26,FMRFLED,FMRFACC,FMRFREP,FMRFPOS,FMRFSEQ
+          CALL      DEFMRF2
+          CALL      WRFMRF2
+          CALL      WSBL0000
+.
+WSTA1000  PACK      SKEY31,LEDGER,TEMPSUBJ,SP70
+          MOVE      FMTSSUBJ,DIM1E
+.
+WSTA1100  PACK      KEY31,SKEY31,SP70
+          CALL      RSFMTS1
+          CALL      RKFMTS1
+          BRANCH    OVRCD,WSTA9000               * no more records
+          MATCH     FMTSTLED,LEDGER
+          GOTO      WSTA9000 IF NOT EQUAL        * at end of valid records
+          MATCH     FMTSTACC,TEMPSUBJ
+          GOTO      WSTA9000 IF NOT EQUAL        * at end of valid records
+          PACK      SKEY31,FMTSTLED,FMTSTACC,FMTSASEQ,FMTSSACC,SP70
+.
+          CALL      WLNK0000                     * create link
+          GOTO      WSTA1100
+.
+WSTA9000  PACK      ACCOUNT,POSTACCT,SP70
+          MOVE      DIM1E,FMTSSUBJ
+.
+WSTA9999  RETURN
+.**********************************************************************
+.  DSTA - delete statistical records                    Called by DACC
+.**********************************************************************
+DSTA0000  PACK      POSTACCT,ACCOUNT,SP70
+          MATCH     "4",FMSASTYP
+          GOTO      DSTA0100 IF EQUAL            * stat-total subjective ?
+.
+          PACK      KEY33,LEDGER,SUBJCODE,FMSAPPOS,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          CALL      DEFMTC1
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+DSTA0100  PACK      FMRFREP,FMSUUD8A,SP70        * report seq file
+          REP       " 0",FMRFREP
+          PACK      KEY26,LEDGER,POSTACCT,FMRFREP,FMCCPPOS,FMSAPPOS,SP70
+          UNPACK    KEY26,FMRFLED,FMRFACC,FMRFREP,FMRFPOS,FMRFSEQ
+          CALL      DEFMRF2
+          CALL      DSBL0000
+.
+DSTA1000  PACK      KEY31,LEDGER,TEMPSUBJ,SP70
+          CALL      RSFMTS1
+.
+DSTA1100  CALL      RKFMTS1
+          BRANCH    OVRCD,DSTA9000               * no more records
+          MATCH     FMTSTLED,LEDGER
+          GOTO      DSTA9000 IF NOT EQUAL        * at end of valid records
+          MATCH     FMTSTACC,TEMPSUBJ
+          GOTO      DSTA9000 IF NOT EQUAL        * at end of valid records
+.
+          CALL      DLNK0000                     * delete link
+          GOTO      DSTA1100
+.
+DSTA9000  PACK      ACCOUNT,POSTACCT,SP70
+.
+DSTA9999  RETURN
+.**********************************************************************
+.  WLNK - Create link                                  Called By WREC
+.         Requires - FMSSSCAF rec
+.                    COSTCODE
+.**********************************************************************
+WLNK0000  MATCH     "2",FMTSSUBJ
+          GOTO      WLNK0100 IF NOT EQUAL
+          PACK      FMTSSACC,COSTCODE,SP70
+.
+WLNK0100  PACK      KEY14,LEDGER,FMTSSACC,SP70
+          CALL      RDFMAM1
+          BRANCH    OVRCD,WLNK9999
+.
+          MOVE      FMAMTYPE,F1
+          LOAD      FMTCPOST,F1,ZERO,ZERO,ZERO,ZERO,ZERO,ONE,ZERO,ZERO,ONE
+.
+          PACK      ACCOUNT,FMTSSACC,SP70        * set up default account
+          PACK      SUBJCODE,FMTSSACC,SP70
+          MATCH     "1",FMTSSUBJ                 * subjective code
+          CALL      BCOD0000 IF EQUAL
+          MATCH     "2",FMTSSUBJ                 * cost centre ?
+          GOTO      WLNK1000 IF EQUAL
+.
+          PACK      KEY33,FMTSTLED,POSTACCT,FMTSASEQ,FMTSTLED,ACCOUNT,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          MOVE      FMTSADDT,FMTCADDT
+          CALL      DEFMTC1
+          CALL      WRFMTC1
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+          GOTO      WLNK2000
+.
+.         ---- write for cost centre ----
+.
+WLNK1000  PACK      KEY33,FMTSTLED,POSTACCT,FMTSASEQ,FMTSTLED,COSTCODE,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          MOVE      FMTSADDT,FMTCADDT
+          CALL      DEFMTC1
+          CALL      WRFMTC1
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+          PACK      KEY33,FMTSTLED,TEMPSUBJ,FMTSASEQ,FMTSTLED,COSTCODE,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          MOVE      FMTSADDT,FMTCADDT
+          CALL      DEFMTC1
+          CALL      WRFMTC1
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+          CALL      PLEB0000           * check cc level
+          GOTO      WLNK2000
+.
+.---- check sub accounts exist ----
+.
+WLNK2000  MATCH     "1",FMTSSUBJ            * subjective code ?
+          GOTO      WLNK9999 IF NOT EQUAL
+.
+          PACK      KEY14,FMTCSLED,FMTCSACC,SP70
+          CALL      RDFMAM1                 * check if cc-subj account exists
+          COMPARE   ONE,OVRCD
+          GOTO      WLNK9999 IF NOT EQUAL
+.
+          ADD       ONE,WRECLEV
+          PACK      SKEY43,SKEY31,POSTACCT,SP70  * save KEY31 and POSTACCT
+          STORE     SKEY43,WRECLEV,SFMTS01,SFMTS02,SFMTS03,SFMTS04,SFMTS05:
+                                   SFMTS06,SFMTS07,SFMTS08,SFMTS09,SFMTS10
+          COMPARE   "11",WRECLEV            * check no more than 10 levels deep
+          CALL      WACC0000 IF LESS        * write new records for cc-subj
+          LOAD      SKEY43,WRECLEV,SFMTS01,SFMTS02,SFMTS03,SFMTS04,SFMTS05:
+                                   SFMTS06,SFMTS07,SFMTS08,SFMTS09,SFMTS10
+          UNPACK    SKEY43,SKEY31,POSTACCT
+          UNPACK    SKEY31,LEDGER,TEMPSUBJ
+          SUB       ONE,WRECLEV
+.
+WLNK9999  RETURN
+.**********************************************************************
+.  DLNK - delete link                                  Called By DREC
+.         Requires - FMSSSCAF rec
+.                    COSTCODE
+.**********************************************************************
+DLNK0000  MATCH     "2",FMTSSUBJ
+          GOTO      DLNK0100 IF NOT EQUAL
+          PACK      FMTSSACC,COSTCODE,SP70
+.
+DLNK0100  PACK      ACCOUNT,FMTSSACC,SP70        * set up default account
+          PACK      SUBJCODE,FMTSSACC,SP70
+          MATCH     "1",FMTSSUBJ                 * subjective code
+          CALL      BCOD0000 IF EQUAL
+          MATCH     "2",FMTSSUBJ                 * cost centre ?
+          GOTO      DLNK1000 IF EQUAL
+.
+          PACK      KEY33,FMTSTLED,POSTACCT,FMTSASEQ,FMTSTLED,ACCOUNT,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          CALL      DEFMTC1
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+          GOTO      DLNK2000
+.
+.         ---- delete for cost centre ----
+.
+DLNK1000  PACK      KEY33,FMTSTLED,POSTACCT,FMTSASEQ,FMTSTLED,COSTCODE,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          CALL      DEFMTC1
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+          PACK      KEY33,FMTSTLED,TEMPSUBJ,FMTSASEQ,FMTSTLED,COSTCODE,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          CALL      DEFMTC1
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+          GOTO      DLNK2000
+.
+DLNK2000  
+.
+DLNK9999  RETURN
+.**********************************************************************
+.  WSBL - write to budget link file                    Called By WSTA
+.**********************************************************************
+WSBL0000  PACK      KEY4,SP70
+          CALL      RSFMBT1
+.
+WSBL0100  CALL      RKFMBT1
+          BRANCH    OVRCD,WSBL9999
+.
+          PACK      FILENAME,FMSO,FMBTCODE,SP70  * get subj budg link file
+          REP       " 0",FILENAME
+          MATCH     SLBNAME,FILENAME
+          GOTO      WSBL0200 IF EQUAL            * correct file already open ?
+.
+          PACK      SLBNAME,FILENAME,SP70
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO               * look for file opening error
+          OPEN      FMSSLBA2,FILENAME            * open file (if possible)
+          TRAPCLR   IO
+          LOAD      SLBNAME,OVRCD,SP70
+          BRANCH    OVRCD,WSBL0100
+.
+WSBL0200  PACK      FILENAME,FMSL,FMBTCODE,SP70  * get budg link file
+          REP       " 0",FILENAME
+          MATCH     LBUNAME,FILENAME
+          GOTO      WSBL0300 IF EQUAL            * correct file already open ?
+.
+          PACK      LBUNAME,FILENAME,SP70
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO               * look for file opening error
+          OPEN      FMSLBUA1,FILENAME            * open file (if possible)
+          TRAPCLR   IO
+          LOAD      LBUNAME,OVRCD,SP70
+          BRANCH    OVRCD,WSBL0100
+.
+WSBL0300  PACK      KEY26,LEDGER,TEMPSUBJ,SP70
+          CALL      RSFMSL2
+.
+WSBL0400  CALL      RKFMSL2
+          BRANCH    OVRCD,WSBL0100               * linked to subjectives ?
+          MATCH     LEDGER,FMSLTLED
+          GOTO      WSBL0100 IF NOT EQUAL
+          MATCH     TEMPSUBJ,FMSLFSUB
+          GOTO      WSBL0100 IF NOT EQUAL
+.
+          PACK      SUBJCODE,FMSLFSUB,SP70       * get link from account
+          CALL      BCOD0000
+          PACK      KEY14,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY14,FMBLFLED,FMBLFACC
+.
+          PACK      SUBJCODE,FMSLTSUB,SP70       * get link to account
+          CALL      BCOD0000
+          PACK      KEY14,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY14,FMBLTLED,FMBLTACC
+.
+          CALL      DEFMBL1                      * write to budget link file
+          CALL      WRFMBL1
+          GOTO      WSBL0400
+.
+WSBL9999  RETURN
+.**********************************************************************
+.  DSBL - delete to budget link file                    Called By DSTA
+.**********************************************************************
+DSBL0000  PACK      KEY4,SP70
+          CALL      RSFMBT1
+.
+DSBL0100  CALL      RKFMBT1
+          BRANCH    OVRCD,DSBL9999
+.
+          PACK      FILENAME,FMSO,FMBTCODE,SP70  * get subj budg link file
+          REP       " 0",FILENAME
+          MATCH     SLBNAME,FILENAME
+          GOTO      DSBL0200 IF EQUAL            * correct file already open ?
+.
+          PACK      SLBNAME,FILENAME,SP70
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO               * look for file opening error
+          OPEN      FMSSLBA2,FILENAME            * open file (if possible)
+          TRAPCLR   IO
+          LOAD      SLBNAME,OVRCD,SP70
+          BRANCH    OVRCD,DSBL0100
+.
+DSBL0200  PACK      FILENAME,FMSL,FMBTCODE,SP70  * get budg link file
+          REP       " 0",FILENAME
+          MATCH     LBUNAME,FILENAME
+          GOTO      DSBL0300 IF EQUAL            * correct file already open ?
+.
+          PACK      LBUNAME,FILENAME,SP70
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO               * look for file opening error
+          OPEN      FMSLBUA1,FILENAME            * open file (if possible)
+          TRAPCLR   IO
+          LOAD      LBUNAME,OVRCD,SP70
+          BRANCH    OVRCD,DSBL0100
+.
+DSBL0300  PACK      KEY26,LEDGER,TEMPSUBJ,SP70
+          CALL      RSFMSL2
+.
+DSBL0400  CALL      RKFMSL2
+          BRANCH    OVRCD,DSBL0100               * linked to subjectives ?
+          MATCH     LEDGER,FMSLTLED
+          GOTO      DSBL0100 IF NOT EQUAL
+          MATCH     TEMPSUBJ,FMSLFSUB
+          GOTO      DSBL0100 IF NOT EQUAL
+.
+          PACK      SUBJCODE,FMSLTSUB,SP70       * get link to account
+          CALL      BCOD0000
+          PACK      KEY14,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY14,FMBLTLED,FMBLTACC
+.
+          CALL      DEFMBL1                      * delete budget link
+          GOTO      DSBL0400
+.
+DSBL9999  RETURN
+.**********************************************************************
+.  WTOT - Make total records                           Called By WACC
+.        Requires - FMTCTOT  (current record type 1=post)
+.                   ACCOUNT  (current account)
+.                   FMSSBAAF (current subjective record)
+.**********************************************************************
+WTOT0000  MATCH     SP70,FMSAADDT
+          GOTO      WTOT9999 IF EQUAL
+.
+          PACK      KEY14,LEDGER,FMSAADDT,SP70
+          CALL      RDFMAM1                      * get subj ama file info (lev)
+          BRANCH    OVRCD,WTOT9999
+.
+          PACK      KEY26,LEDGER,FMSAADDT,SP70
+          CALL      RSFMRF2                      * get subj rsf file info (prtc)
+          CALL      RKFMRF2
+          BRANCH    OVRCD,WTOT9999
+          PACK      KEY14,FMRFLED,FMRFACC,SP70
+          MATCH     KEY14,KEY26
+          GOTO      WTOT9999 IF NOT EQUAL        * corrent account ?
+.
+          MOVE      ACCOUNT,TEMPACCT
+          MOVE      FMSAADDT,SUBJCODE
+.
+          PACK      KEY14,LEDGER,FMSAADDT,SP70
+          CALL      RDFMSA1                      * get next subj
+          BRANCH    OVRCD,WTOT9999               * subjective not found ?
+.
+          CALL      BCOD0000                     * get next account
+          CALL      BDES0000                     * build description
+          MOVE      ZERO,F1
+          MOVE      FMSADTYP,F1
+          LOAD      FMAMDESC,F1,FMSADESC,FMCCDESC
+          MOVE      DSIX,FMAMTYPE
+          PACK      KEY14,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY14,FMAMLEDG,FMAMACCT
+          CALL      GDEF0000                     * get default details
+          CALL      CLEV0000                     * check cc level
+          CALL      DEFMAM1                      * delete old record
+          CALL      WRFMAM1                      * write new record
+          CALL      WSET0000                     * add new rec
+.
+          PACK      FMRFREP,FMSUUD8A,SP70        * report seq file
+          REP       " 0",FMRFREP
+          PACK      KEY26,LEDGER,ACCOUNT,FMRFREP,TEMPCPOS,FMSAPPOS,SP70
+          UNPACK    KEY26,FMRFLED,FMRFACC,FMRFREP,FMRFPOS,FMRFSEQ
+          CALL      DEFMRF2
+          CALL      WRFMRF2
+.
+          PACK      KEY26,LEDGER,SUBJCODE,COSTCODE,SP70
+          UNPACK    KEY26,FMXCLED,FMXCSUB,FMXCCOS
+          MOVE      TEMPCPOS,FMXCCPR
+          MOVE      FMSAPPOS,FMXCSPR
+          CALL      DEFMXC1
+          CALL      WRFMXC1
+.
+          PACK      KEY33,LEDGER,ACCOUNT,TEMPSPOS,LEDGER,TEMPACCT,SP70 * cc
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          MOVE      ZERO,FMTCADDT
+          CALL      DEFMTC1                      * delete old record
+          CALL      WRFMTC1                      * write new record
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+          PACK      KEY33,LEDGER,SUBJCODE,SP5,LEDGER,ACCOUNT,SP70 * subj
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          MOVE      ZERO,FMTCADDT
+          CALL      DEFMTC1                      * delete old record
+          CALL      WRFMTC1                      * write new record
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+          LOAD      POSTACCT,FMTCPOST,ACCOUNT    * save post acct "add to acct"
+          MOVE      ZERO,FMTCPOST                * clear posting indicator
+          MOVE      SP70,TEMPSPOS                * clear sequence for tot acc
+.
+          CALL      WCCC0000                     * add any CCC accounts
+.
+          GOTO      WTOT0000
+.
+WTOT9999  RETURN
+.**********************************************************************
+.  WHED - Make heading records                         Called By WACC
+.        Requires - ACCOUNT  (current account)
+.                   FMSSBAAF (current subjective record)
+.**********************************************************************
+WHED0000  CALL      BDES0000           * build description
+.
+          PACK      KEY26,LEDGER,SUBJCODE,SP70
+          CALL      RSFMRF2            * get subj rsf file info (print code)
+          CALL      RKFMRF2
+          BRANCH    OVRCD,WHED9999
+          PACK      KEY14,FMRFLED,FMRFACC,SP70
+          MATCH     KEY14,KEY26
+          GOTO      WHED9999 IF NOT EQUAL   * delete account ?
+.
+          CALL      BDES0000                * build description
+          MOVE      ZERO,F1
+          MOVE      FMSADTYP,F1
+          LOAD      FMAMDESC,F1,FMSADESC,FMCCDESC
+          MOVE      DSEVEN,FMAMTYPE
+          PACK      KEY14,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY14,FMAMLEDG,FMAMACCT
+          CALL      GDEF0000                * get default values
+          CALL      DEFMAM1
+          CALL      WRFMAM1
+.
+          PACK      FMRFREP,FMSUUD8A,SP70   * report seq file
+          REP       " 0",FMRFREP
+          PACK      KEY26,LEDGER,ACCOUNT,FMRFREP,TEMPCPOS,FMSAPPOS,SP70
+          UNPACK    KEY26,FMRFLED,FMRFACC,FMRFREP,FMRFPOS,FMRFSEQ
+          CALL      DEFMRF2
+          CALL      WRFMRF2
+.
+WHED9999  RETURN
+.**********************************************************************
+.  GDEF - get default details                          Called By lots
+.**********************************************************************
+GDEF0000  PACK      FMAMSEC,FMSASEC,SP70
+          PACK      FMAMREF1,FMSAREF1,SP70
+          PACK      FMAMREF2,FMSAREF2,SP70
+          PACK      FMAMREF3,FMSAREF3,SP70
+          PACK      FMAMREF4,FMSAREF4,SP70
+          PACK      FMAMDAT1,FMSADAT1,SP70
+          PACK      FMAMDAT2,FMSADAT2,SP70
+          PACK      FMAMDAT3,FMSADAT3,SP70
+          PACK      FMAMDAT4,FMSADAT4,SP70
+          PACK      FMAMCOD1,FMSACOD1,SP70
+          PACK      FMAMCOD2,FMSACOD2,SP70
+          PACK      FMAMCOD3,FMSACOD3,SP70
+          PACK      FMAMCOD4,FMSACOD4,SP70
+          MOVE      FMSAAMT1,FMAMAMT1
+          MOVE      FMSAAMT2,FMAMAMT2
+          MOVE      FMSAAMT3,FMAMAMT3
+          MOVE      FMSAAMT4,FMAMAMT4
+          MOVE      FMSASTAT,FMAMSTAT
+          MOVE      FMSACTRL,FMAMCTRL
+          MOVE      FMSAASST,FMAMASST
+          MOVE      FMSAPPT,FMAMPPT
+          MOVE      FMSAONC,FMAMONC
+          MOVE      FMSAONCC,FMAMONCC
+          MOVE      FMSACHEQ,FMAMCHEQ
+          PACK      FMAMDPLA,FMSADPLA,SP70
+          PACK      FMAMUNIT,FMSAUNIT,SP70
+          MOVE      FMSAAYTD,FMAMAYTD
+          MOVE      FMSAMULT,FMAMMULT
+          MOVE      FMSADIV,FMAMDIV
+          MOVE      ZERO,FMAMOBAL
+          PACK      FMAMBDAT,CCC,CYY,CMM,CDD,SP70
+          REP       " 0",FMAMBDAT
+          MOVE      SP70,FMAMLOCK
+.
+          PACK      FMAMCLEV,FMSADLEV,SP70
+          MATCH     "1",FMSASTYP
+          GOTO      GDEF9999 IF EQUAL  * keep old level if total type
+          MATCH     "2",FMSASTYP
+          GOTO      GDEF9999 IF EQUAL  * keep old level if head type
+          MATCH     "4",FMSASTYP
+          GOTO      GDEF9999 IF EQUAL  * keep old level if stat-tot type
+.
+          MOVE      "00000",FMAMCLEV
+.
+GDEF9999  RETURN
+.**********************************************************************
+. DACC - del  records for screen c                  Called By DREC
+.        Requires - LEDGER, SUBJCODE, COSTCODE
+.**********************************************************************
+DACC0000  PACK      KEY14,LEDGER,COSTCODE,SP70
+          CALL      RDFMCC1            * get cost centre data
+          BRANCH    OVRCD,DACC9999     * no such cost centre ?
+.
+          PACK      KEY14,LEDGER,SUBJCODE,SP70
+          CALL      RDFMSA1            * get default account data
+          BRANCH    OVRCD,DACC9999     * no such subjective ?
+.
+          LOAD      FMSASTAT,OLDDSUBJ,OLDSTAT
+          LOAD      FMSAADDT,OLDDSUBJ,OLDADDT
+          LOAD      FMSAPPOS,OLDDSUBJ,OLDPPOS
+          LOAD      FMCCPPOS,OLDDCOST,OLDPPOS
+          MOVE      FMSAPPOS,TEMPSPOS
+          MOVE      FMCCPPOS,TEMPCPOS
+          MATCH     "1",FMSASTYP
+          GOTO      DACC9999 IF EQUAL  * total type
+.
+          MOVE      SUBJCODE,TEMPSUBJ
+          MOVE      COSTCODE,TEMPCOST
+          CALL      BCOD0000
+.
+          PACK      KEY26,LEDGER,SUBJCODE,COSTCODE,SP70
+          UNPACK    KEY26,FMXCLED,FMXCSUB,FMXCCOS
+          CALL      RDFMXC1
+          CALL      DEFMXC1
+.
+          CALL      DCCC0000                     * remove any CCC accounts
+.
+          MATCH     "2",FMSASTYP
+          GOTO      DACC1000 IF NOT EQUAL   * heading type
+.
+.---- delete heading record ----
+.
+          CALL      DHED0000           * delete heading records
+          GOTO      DACC9999
+.
+.---- delete posting record ----
+.
+DACC1000  MOVE      FMSASTAT,FMAMSTAT
+          PACK      KEY14,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY14,FMAMLEDG,FMAMACCT
+          CALL      RDFMAM1
+.
+          COMPARE   FMAMSTAT,FMSASTAT
+          CALL      DEFMAM1 IF EQUAL   * delete old record if identical status
+          CALL      DSET0000           * delete new rec
+.
+.---- stat subjective ----
+.
+          MATCH     "3",FMSASTYP
+          GOTO      DACC2000 IF LESS
+          CALL      DSTA0000           * delete stat record
+          GOTO      DACC9000
+.
+DACC2000  PACK      KEY33,LEDGER,TEMPSUBJ,TEMPCPOS,LEDGER,ACCOUNT,SP70 * subj
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          PACK      KEY28,FMTCSLED,FMTCSACC,FMTCTLED,FMTCTACC
+          CALL      DETC0000           * delete for KEY28
+.
+          MOVE      ONE,FMTCPOST
+          MOVE      TEMPCOST,POSTACCT
+          CALL      DTOT0000           * delete total recs of rec
+          BRANCH    EXIT,DACC9000      * deleted to top of tree ?
+.
+          PACK      KEY33,LEDGER,TEMPCOST,TEMPSPOS,LEDGER,ACCOUNT,SP70 * cc
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          PACK      KEY28,FMTCSLED,FMTCSACC,FMTCTLED,FMTCTACC
+          CALL      DETC0000           * delete for KEY28
+.
+DACC9000  MOVE      LEDGER,TOTLEDG
+          MOVE      ACCOUNT,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+DACC9999  RETURN
+.**********************************************************************
+.  DTOT - Delete total records                         Called By DACC
+.        Requires - FMTCTOT  (current record type 1=post)
+.                   ACCOUNT  (current account)
+.                   FMSSBAAF (current subjective record)
+.**********************************************************************
+DTOT0000  MATCH     SP70,FMSAADDT
+          GOTO      DTOT9000 IF EQUAL
+.
+          MOVE      ACCOUNT,TEMPACCT
+          MOVE      FMSAADDT,SUBJCODE
+.
+          PACK      KEY14,LEDGER,FMSAADDT,SP70
+          CALL      RDFMSA1                      * get next subj
+          BRANCH    OVRCD,DTOT9999               * subjective not found ?
+.
+          CALL      BCOD0000                     * get next account
+.
+          BRANCH    DELALL,DTOT1000              * delete to top of tree ?
+          PACK      KEY33,LEDGER,ACCOUNT,SP70    * check for sub accounts
+          CALL      RSFMTC1
+.
+DTOT0500  CALL      RKFMTC1
+          BRANCH    OVRCD,DTOT1000
+          PACK      KEY14,FMTCTLED,FMTCTACC,SP70
+          MATCH     TEMPACCT,FMTCSACC
+          GOTO      DTOT0500 IF EQUAL            * current account to delete ?
+          MATCH     KEY14,KEY33
+          GOTO      DTOT9500 IF EQUAL            * existing sub accounts ?
+.
+DTOT1000  CALL      DCCC0000                     * remove any CCC accounts
+.
+          PACK      KEY14,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY14,FMAMLEDG,FMAMACCT
+          CALL      DEFMAM1                      * delete old record
+          CALL      DSET0000                     * delete new rec
+.
+          PACK      FMRFREP,FMSUUD8A,SP70        * report seq file
+          REP       " 0",FMRFREP
+          PACK      KEY26,LEDGER,ACCOUNT,FMRFREP,TEMPCPOS,FMSAPPOS,SP70
+          UNPACK    KEY26,FMRFLED,FMRFACC,FMRFREP,FMRFPOS,FMRFSEQ
+          CALL      DEFMRF2
+.
+          PACK      KEY26,LEDGER,SUBJCODE,COSTCODE,SP70
+          UNPACK    KEY26,FMXCLED,FMXCSUB,FMXCCOS
+          CALL      DEFMXC1
+.
+          PACK      KEY33,LEDGER,ACCOUNT,TEMPSPOS,LEDGER,TEMPACCT,SP70 * cc
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          PACK      KEY28,FMTCSLED,FMTCSACC,FMTCTLED,FMTCTACC
+          CALL      DETC0000                     * delete for KEY28
+.
+          PACK      KEY33,LEDGER,SUBJCODE,SP5,LEDGER,ACCOUNT,SP70 * subj
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          PACK      KEY28,FMTCSLED,FMTCSACC,FMTCTLED,FMTCTACC
+          CALL      DETC0000                     * delete for KEY28
+.
+          LOAD      POSTACCT,FMTCPOST,ACCOUNT    * save post acct "add to acct"
+          MOVE      ZERO,FMTCPOST                * clear posting indicator
+          MOVE      SP70,TEMPSPOS                * clear sequence for tot acc
+          GOTO      DTOT0000
+.
+DTOT9000  MOVE      ZERO,EXIT
+          GOTO      DTOT9999
+.
+DTOT9500  PACK      KEY33,LEDGER,ACCOUNT,TEMPSPOS,LEDGER,TEMPACCT,SP70 * cc
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          PACK      KEY28,FMTCSLED,FMTCSACC,FMTCTLED,FMTCTACC
+          CALL      DETC0000                     * delete for KEY28
+.
+          MOVE      ONE,EXIT
+.
+DTOT9999  RETURN
+.**********************************************************************
+.  DHED - Make heading records                         Called By DACC
+.        Requires - ACCOUNT  (current account)
+.                   FMSSBAAF (current subjective record)
+.**********************************************************************
+DHED0000  PACK      KEY14,LEDGER,ACCOUNT,SP70
+          UNPACK    KEY14,FMAMLEDG,FMAMACCT
+          CALL      DEFMAM1
+.
+          PACK      FMRFREP,FMSUUD8A,SP70   * report seq file
+          REP       " 0",FMRFREP
+          PACK      KEY26,LEDGER,ACCOUNT,FMRFREP,TEMPCPOS,TEMPSPOS,SP70
+          UNPACK    KEY26,FMRFLED,FMRFACC,FMRFREP,FMRFPOS,FMRFSEQ
+          CALL      DEFMRF2
+.
+DHED9999  RETURN
+.**********************************************************************
+.  WCCC - write to consolidated cost centres         Called By lots
+.        Requires - LEDGER, SUBJCODE, COSTCODE, FMSAPPOS
+.**********************************************************************
+WCCC0000  PACK      SAVEDATA,LEDGER,SUBJCODE,COSTCODE,ACCOUNT,SP70
+          PACK      KEY14,LEDGER,SUBJCODE,SP70
+          CALL      RDFMSA1
+          PACK      KEY26,LEDGER,COSTCODE,SP70
+          CALL      RSFMCF2
+.
+WCCC1000  CALL      RKFMCF2            * get any relevent CCC's
+          BRANCH    OVRCD,WCCC9000
+          MATCH     LEDGER,FMCFLEDG
+          GOTO      WCCC9000 IF NOT EQUAL
+          MATCH     COSTCODE,FMCFSCOS
+          GOTO      WCCC9000 IF NOT EQUAL
+.
+WCCC1100  PACK      KEY28,FMCFLEDG,FMCFSCOS,FMCFLEDG,FMCFCCOS,SP70
+          PACK      KEY33,KEY28,SP70
+          CALL      RSFMTC2
+          CALL      RKFMTC2
+          BRANCH    OVRCD,WCCC1200
+          PACK      KEY33,FMTCSLED,FMTCSACC,FMTCTLED,FMTCTACC,FMTCASEQ,SP70
+          MATCH     KEY33,KEY28
+          GOTO      WCCC1200 IF NOT EQUAL
+          CALL      DEFMTC2
+          GOTO      WCCC1100
+.
+WCCC1200  PACK      KEY33,FMCFLEDG,FMCFCCOS,FMCCPPOS,FMCFLEDG,FMCFSCOS,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          MOVE      ZERO,FMTCADDT
+          MOVE      ZERO,FMTCPOST
+          CALL      DEFMTC1
+          CALL      WRFMTC1
+.
+          PACK      KEY14,FMCFLEDG,FMCFCCOS,SP70
+          UNPACK    KEY14,TOTLEDG,TOTACCNT
+          CALL      SETU0000                * set ccc for update
+.
+          CALL      UPDT0000
+          UNPACK    SAVEDATA,LEDGER,SUBJCODE,COSTCODE,ACCOUNT
+          PACK      KEY14,LEDGER,COSTCODE,SP70
+          CALL      RDFMCC1
+          GOTO      WCCC1000
+.
+WCCC9000  
+.
+WCCC9999  RETURN
+.**********************************************************************
+.  UPDT - Write CCC data                               Called By WCCC
+.**********************************************************************
+UPDT0000  PACK      COSTCODE,FMCFSCOS,SP70
+          CALL      BCOD0000                     * build old code
+          PACK      DIMA14,LEDGER,ACCOUNT,SP70   * account to get defaults from
+.
+          PACK      COSTCODE,FMCFCCOS,SP70
+          CALL      BCOD0000                     * build new code
+          PACK      DIMB14,LEDGER,ACCOUNT,SP70   * account to write
+.
+          MOVE      SP70,FMCFDESC                * get ccc description
+          MOVE      SP70,FMCFPPOS                * get ccc print pos
+          PACK      KEY26,LEDGER,FMCFCCOS,SP70
+          CALL      RDFMCF1
+          PACK      DIME5,FMCFPPOS,SP70
+.
+          PACK      FMCCADES,FMCFDESC,SP70       * get description
+          PACK      FMCCDESC,FMCFDESC,SP70
+          CALL      BDES0000
+.
+          PACK      DIMD35,FMAMDESC,SP70         * account description
+          PACK      DIMC5,FMSAPPOS,SP70          * account sequence
+.
+          CALL      CCON0000                     * create account
+.
+          MATCH     "7",FMAMTYPE
+          GOTO      UPDT9999 IF EQUAL            * heading account ?
+.
+          MOVE      FMAMTYPE,F1                  * write total calc rec
+          LOAD      FMTCPOST,F1,ZERO,ZERO,ZERO,ZERO,ZERO,ONE,ZERO,ZERO,ONE
+          MOVE      ZERO,FMTCADDT
+          PACK      KEY33,DIMB14,DIMC5,DIMA14,SP70
+          UNPACK    KEY33,FMTCTLED,FMTCTACC,FMTCASEQ,FMTCSLED,FMTCSACC
+          CALL      DEFMTC1
+          CALL      WRFMTC1
+.
+          MOVE      FMTCTLED,TOTLEDG
+          MOVE      FMTCTACC,TOTACCNT
+          CALL      SETU0000           * write record for total account update
+.
+UPDT9999  RETURN
+.**********************************************************************
+.  CCON - Create accounts                              Called By UPDT
+.        Requires - DIMA14   (account to get defaults from)
+.                   DIMB14   (account to write)
+.                   DIMC5    (account sequence)
+.                   DIMD35   (account description)
+.**********************************************************************
+CCON0000  
+          MOVE      FMSASTYP,F2
+          MOVE      ONE,F1
+          LOAD      F1,F2,SIX,SEVEN,EIGHT,NINE
+          MOVE      F1,FMAMTYPE
+          MOVE      "000",FMAMCLEV
+          PACK      KEY14,DIMA14,SP70            * get account level
+          CALL      RDFMAM1
+          MATCH     "7",FMAMTYPE
+          GOTO      CCON1000 IF EQUAL            * keep current level if heading
+.
+          PACK      KEY3,FMAMCLEV,SP70           * otherwise get next level
+          MOVE      "999",FMLVCODE
+          CALL      RSFMLV1
+          CALL      RKFMLV1
+          MOVE      FMLVCODE,FMAMCLEV
+.
+CCON1000  MOVE      SP70,FMRFPRT                 * get account print code
+          MOVE      SP70,FMRFCRP                 * get account print code
+          PACK      FMRFREP,FMSUUD8A,SP70
+          REP       " 0",FMRFREP
+          PACK      KEY26,DIMA14,FMRFREP,SP70
+          CALL      RSFMRF2
+          CALL      RKFMRF2
+          BRANCH    OVRCD,CCON1100
+.
+          PACK      KEY14,FMRFLED,FMRFACC,SP70
+          MATCH     KEY14,KEY26
+          GOTO      CCON1100 IF EQUAL
+.
+          MOVE      SP70,FMRFPRT
+          MOVE      SP70,FMRFCRP
+.
+CCON1100  PACK      KEY14,DIMB14,SP70
+          PACK      KEY26,FMSUUD8A,DIME5,DIMC5,DIMB14,SP70
+          MOVE      DIMD35,FMAMDESC
+          MOVE      FMAMTYPE,F1
+          LOAD      F1,F1,SIX,SIX,SIX,SIX,SIX,SIX,SEVEN,NINE,NINE
+          MOVE      F1,FMAMTYPE
+          CALL      CACC0000                     * create account
+.
+CCON9999  RETURN
+.**********************************************************************
+.  CACC - Create account                              Called By lots
+.        Requires - KEY14         (key for fmsamaaf (ledger/account))
+.                   FMAMDESC      (account desc)
+.                   FMAMTYPE      (account type)
+.                   FMAMCLEV      (account report level)
+.               If not a posting account
+.                   KEY26         (report seq key for fmsrsfa1)
+.                   FMRFPRT       (print code for report seq)
+.**********************************************************************
+CACC0000  UNPACK    KEY14,FMAMLEDG,FMAMACCT
+          PACK      FMAMSEC,SP70
+          PACK      FMAMREF1,SP70
+          PACK      FMAMREF2,SP70
+          PACK      FMAMREF3,SP70
+          PACK      FMAMREF4,SP70
+          PACK      FMAMDAT1,CCC,SP70
+          PACK      FMAMDAT2,CCC,SP70
+          PACK      FMAMDAT3,CCC,SP70
+          PACK      FMAMDAT4,CCC,SP70
+          PACK      FMAMCOD1,SP70
+          PACK      FMAMCOD2,SP70
+          PACK      FMAMCOD3,SP70
+          PACK      FMAMCOD4,SP70
+          MOVE      ZERO,FMAMAMT1
+          MOVE      ZERO,FMAMAMT2
+          MOVE      ZERO,FMAMAMT3
+          MOVE      ZERO,FMAMAMT4
+          MOVE      ZERO,FMAMSTAT
+          MOVE      ZERO,FMAMCTRL
+          MOVE      ZERO,FMAMASST
+          MOVE      ZERO,FMAMPPT
+          MOVE      ZERO,FMAMONC
+          PACK      FMAMONCC,SP70
+          PACK      FMAMCHEQ,SP70
+          MOVE      ZERO,FMAMOBAL
+          PACK      FMAMBDAT,SP70
+          PACK      FMAMDPLA,TWO,SP70
+          PACK      FMAMUNIT,SP70
+          MOVE      ZERO,FMAMAYTD
+          MOVE      ONE,FMAMMULT
+          MOVE      ONE,FMAMDIV
+          PACK      FMAMDPRO,SP70
+          PACK      FMAMSPAR,SP70
+          PACK      FMAMLOCK,SP70
+.
+          PACK      KEY14,FMAMLEDG,FMAMACCT,SP70
+          CALL      DEFMAM1
+          CALL      WRFMAM1
+          CALL      WSET0000                * add new rec
+.
+          MOVE      FMAMTYPE,F1             * check not posting account
+          BRANCH    F1,CACC9000,CACC9000,CACC9000,CACC9000,CACC9000:
+                       CACC5000,CACC5000,CACC9000,CACC5000
+.
+CACC5000  UNPACK    KEY26,FMRFREP,FMRFPOS,FMRFSEQ,FMRFLED,FMRFACC
+          REP       " 0",FMRFREP
+          PACK      KEY26,FMRFREP,FMRFPOS,FMRFSEQ,FMRFLED,FMRFACC,SP70
+          CALL      RAFMRF1                 * write to report sequence file
+          IF        OVRCD=0
+            CALL      DEFMRF1                 * write to report sequence file
+          ENDIF
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          CALL      WRFMRF1
+          TRAPCLR   IO
+          IF        OVRCD=1
+            DISPLAY   *P1:18,*EL,"ERROR ON RSF WRITE CALL IBA":
+                      *P1:19,*EL,*DBON,KEY26:
+                      *P1:20,*EL,FMRFREP,FMRFPOS,FMRFSEQ:
+                      *P1:21,*EL,FMRFLED,FMRFACC:
+                      *P1:22,*EL,SP70:
+                      *P1:23,*EL,"**********  CALL IBA  ********* "
+            KEYIN     *P1:24,ANS
+            MATCH     "*",ANS
+            GOTO      CACC5000 IF NOT EQUAL
+          ENDIF
+.
+CACC9000  
+.
+CACC9999  RETURN
+.**********************************************************************
+.  DCCC - delete from consolidated cost centres         Called By lots
+.        Requires - LEDGER, SUBJCODE, COSTCODE
+.**********************************************************************
+DCCC0000  PACK      SAVEDATA,LEDGER,SUBJCODE,COSTCODE,ACCOUNT,SP70
+          PACK      KEY26,LEDGER,COSTCODE,SP70
+          CALL      RSFMCF2
+.
+DCCC1000  CALL      RKFMCF2                      * get any relevent CCC's
+          BRANCH    OVRCD,DCCC9000
+          MATCH     LEDGER,FMCFLEDG
+          GOTO      DCCC9000 IF NOT EQUAL
+          MATCH     COSTCODE,FMCFSCOS
+          GOTO      DCCC9000 IF NOT EQUAL
+.
+.---- check if another cc within this ccc has this subj ----
+.
+          PACK      SKEY27,FMCFLEDG,FMCFCCOS,FMCFSCOS
+          BRANCH    DELALL,DCCC3000    * delete to top of tree ? (FMS09 only)
+.
+          PACK      KEY26,FMCFLEDG,FMCFCCOS,SP70
+          CALL      RSFMCF1
+.
+DCCC2000  CALL      RKFMCF1
+          BRANCH    OVRCD,DCCC3000
+          PACK      KEY14,FMCFLEDG,FMCFCCOS,SP70
+          MATCH     SKEY27,KEY14
+          GOTO      DCCC3000 IF NOT EQUAL
+.
+          MATCH     COSTCODE,FMCFSCOS       * skip current cost centre
+          GOTO      DCCC2000 IF EQUAL
+.
+          PACK      KEY26,FMCFLEDG,SUBJCODE,FMCFSCOS,SP70
+          CALL      RDFMXC1                 * check if subj allocated to this cc
+          BRANCH    OVRCD,DCCC2000
+          GOTO      DCCC4000                * skip delete !!
+.
+.-- delete data if no other cc found with same subj or delete to top of tree --
+.
+DCCC3000  CALL      SDEL0000                * set for delete
+.
+          CALL      DEAC0000                * delete account
+          UNPACK    SAVEDATA,LEDGER,SUBJCODE,COSTCODE,ACCOUNT
+          GOTO      DCCC1000
+.
+.---- just delete link for this subj ----
+.
+DCCC4000  CALL      SDEL0000                * set for delete
+.
+          CALL      DETC0000                * delete for KEY28
+          UNPACK    SAVEDATA,LEDGER,SUBJCODE,COSTCODE,ACCOUNT
+          GOTO      DCCC1000
+.
+DCCC9000  
+.
+DCCC9999  RETURN
+.**********************************************************************
+.  SDEL - Set up for ccc delete
+.**********************************************************************
+SDEL0000  UNPACK    SKEY27,FMCFLEDG,FMCFCCOS,FMCFSCOS
+          PACK      KEY14,FMCFLEDG,FMCFCCOS,SP70
+          UNPACK    KEY14,TOTLEDG,TOTACCNT
+          CALL      SETU0000                * set ccc for update
+.
+          PACK      COSTCODE,FMCFSCOS,SP70  * set up to delete account
+          CALL      BCOD0000
+          PACK      DIMA14,LEDGER,ACCOUNT,SP70
+          PACK      COSTCODE,FMCFCCOS,SP70
+          CALL      BCOD0000
+          PACK      DIMB14,LEDGER,ACCOUNT,SP70
+          PACK      KEY28,DIMA14,DIMB14,SP70
+.
+SDEL9999  RETURN
+.**********************************************************************
+.  CLEV - Check cc level                               Called By lots
+.**********************************************************************
+CLEV0000  MATCH     CCLEV,FMAMCLEV     * cc level ok ?
+          GOTO      CLEV9999 IF LESS
+.
+          DISPLAY   *P1:22,*B,*EF:
+                    *P1:23,"WARNING - Cost Centre ":
+                    *V2LON,LEDGER,SLASH,COSTCODE,*HOFF," (",CCLEV:
+                    ") Doesn`t Have a Higher Level than the ":
+                    *P1:24,"Default Level of Subj ":
+                    *V2LON,LEDGER,SLASH,SUBJCODE,*HOFF," (",FMAMCLEV,") - ";
+          CALL      HITENTER
+          DISPLAY   *P1:23,*EF;
+.
+CLEV9999  RETURN
+.**********************************************************************
+.  PLEB - Check cc level for stat-tot sub accounts     Called By lots
+.**********************************************************************
+PLEB0000  MATCH     FMSADLEV,CCLEV     * cc level ok ?
+          GOTO      PLEB9999 IF LESS
+.
+          DISPLAY   *P1:22,*B,*EF:
+                    *P1:23,"WARNING - Cost Centre ":
+                    *V2LON,LEDGER,SLASH,SUBJCODE,*HOFF," (",CCLEV:
+                    ") Doesn`t Have a Lower Level than the ":
+                    *P1:24,"Default Level of Subj ":
+                    *V2LON,LEDGER,SLASH,TEMPSUBJ,*HOFF," (",FMSADLEV,") - ";
+          CALL      HITENTER
+          DISPLAY   *P1:23,*EF;
+.
+PLEB9999  RETURN
+.**********************************************************************
+.  DETC - delete from fmstcfaf for key 28  
+.        Requires - KEY28    (sub ledger/account/tot ledger/account)
+.**********************************************************************
+DETC0000  PACK      KEY33,KEY28,SP70
+          CALL      RSFMTC2
+          CALL      RPFMTC2
+.
+DETC0100  CALL      RKFMTC2
+          BRANCH    OVRCD,DETC9999
+          PACK      KEY33,FMTCSLED,FMTCSACC,FMTCTLED,FMTCTACC,FMTCASEQ,SP70
+          MATCH     KEY33,KEY28
+          GOTO      DETC9999 IF NOT EQUAL
+.
+          PACK      KEY14,FMTCTLED,FMTCTACC,SP70
+          UNPACK    KEY14,TOTLEDG,TOTACCNT
+          CALL      SETU0000                * set for update
+.
+          CALL      DEFMTC2
+          CALL      RSFMTC2
+          GOTO      DETC0100
+.
+DETC9999  RETURN
+.**********************************************************************
+.  DEAC - delete an account if not required              Called By DEDT
+.        Requires - DIMB14   (ledger/account)
+.                   KEY28    (sub ledger/account/tot ledger/account)
+.**********************************************************************
+DEAC0000  CALL      DETC0000                * delete for KEY28
+.
+          PACK      KEY14,DIMB14,SP70
+          CALL      DEFMAM1                 * delete account
+          CALL      DSET0000                * delete new rec
+          PACK      KEY26,KEY14,SP70
+.
+DEAC9100  CALL      RSFMRF2                 * delete from FMSRSFAF
+          CALL      RKFMRF2
+          BRANCH    OVRCD,DEAC9999
+          PACK      KEY26,FMRFLED,FMRFACC,FMRFREP,FMRFPOS,FMRFSEQ,SP70
+.
+          MATCH     KEY14,KEY26
+          GOTO      DEAC9999 IF NOT EQUAL
+.
+          MOVE      FMSUUD7A,KEY2           * delete from subj report
+          REP       " 0",KEY2
+          MATCH     KEY2,FMRFREP
+          GOTO      DEAC9200 IF EQUAL
+.
+          MOVE      FMSUUD8A,KEY2           * delete from cc report
+          REP       " 0",KEY2
+          MATCH     KEY2,FMRFREP
+          GOTO      DEAC9200 IF EQUAL
+          GOTO      DEAC9100
+.
+DEAC9200  CALL      DEFMRF2
+          GOTO      DEAC9100
+.
+DEAC9999  RETURN
+.******************************************************************************
+.* WSET - write record for total account update                               *
+.******************************************************************************
+WSET0000  UNPACK    KEY14,TOTLEDG,TOTACCNT
+          CALL      SETU0000
+.
+WSET9999  RETURN
+.******************************************************************************
+.* DSET - write record for total account update                               *
+.******************************************************************************
+DSET0000  BRANCH    SKIPFMTU,DSET9999  * no total update required ?
+          PACK      KEY33,KEY14,SP70
+          CALL      RSFMTC2
+.
+DSET1000  CALL      RKFMTC2
+          BRANCH    OVRCD,DSET9000
+          PACK      KEY14,FMTCSLED,FMTCSACC,SP70
+          MATCH     KEY14,KEY33
+          GOTO      DSET9000 IF NOT EQUAL
+.
+          PACK      KEY14,FMTCTLED,FMTCTACC,SP70
+          UNPACK    KEY14,TOTLEDG,TOTACCNT
+          CALL      SETU0000
+          GOTO      DSET1000
+.
+DSET9000  UNPACK    KEY33,KEY14        * restore key14
+.
+DSET9999  RETURN
+.******************************************************************************
+.* SETU - write record for total account update                               *
+.******************************************************************************
+SETU0000  BRANCH    SKIPFMTU,SETU9999  * no total update required ?
+          COMPARE   ONE,FMCOCALC
+          GOTO      SETU9999 IF NOT EQUAL
+.
+          PACK      KEY14,TOTLEDG,TOTACCNT,SP70
+          CALL      RDFMAM1            * account exists ?
+          BRANCH    OVRCD,SETU9999
+.
+          PACK      KEY20,PORT,UTYPE,TOTLEDG,TOTACCNT,SP70
+          CALL      RDFMTU1            * record exists ?
+          COMPARE   ZERO,OVRCD
+          GOTO      SETU9999 IF EQUAL
+          UNPACK    KEY20,FMTUPORT,FMTUSPEC,FMTUTLED,FMTUTACC
+          MOVE      FMAMCLEV,FMTULEV
+          MOVE      ZERO,FMTUACT
+          MOVE      ZERO,FMTUBUD
+          MOVE      SP70,FMTUSPAR
+          CALL      WRFMTU1            * Flag For Total Account Update
+.
+SETU9999  RETURN
+.****************************************************************************
+.  BDES - get account desc from subjective and cost codes    Called by lots
+.        Requires - FMSADTYP  (subjective desc type)
+.                   FMSAADES  (subjective code abbrev desc)
+.                   FMSADESC  (subjective code desc)
+.                   FMCCADES  (cost centre code abbrev desc)
+.                   FMCCDESC  (cost centre code desc)
+.                   FMSUUD6A  (subjective code desc length)
+.        Returns  - FMAMDESC  (account code desc)
+.****************************************************************************
+BDES0000  MOVE      ZERO,F1
+          MOVE      FMSADTYP,F1
+          BRANCH    F1,BDES1000,BDES2000
+.
+          SFORMAT   DESC1,FMSUUD6A                   * srf128065
+          MOVE      FMCCADES,DESC1                   * srf128065
+          PACK      FMAMDESC,DESC1,SP1,FMSAADES,SP70 * srf128065
+          GOTO      BDES9999
+.
+BDES1000  PACK      FMAMDESC,FMSADESC,SP70
+          GOTO      BDES9999
+.
+BDES2000  PACK      FMAMDESC,FMCCDESC,SP70
+.
+BDES9999  RETURN
+.****************************************************************************
+.  BCOD - get account code from subjective and cost codes    Called by lots
+.        Requires - SUBJCODE  (subjective code)
+.                   COSTCODE  (cost centre code)
+.                   FMSUUD2A  (separate CC/Subj 1=yes)
+.                   FMSUUD2B  (separater char)
+.                   FMSUUD4A  (cost centre code length)
+.        Returns  - ACCOUNT   (account code)
+.****************************************************************************
+BCOD0000  STORE     COSTCODE,FMSUUD4A,KEY1,KEY2,KEY3,KEY4,KEY5,KEY6:
+                                      KEY7,KEY8,KEY9,KEY10,KEY11,KEY12
+          LOAD      ACCOUNT,FMSUUD4A,KEY1,KEY2,KEY3,KEY4,KEY5,KEY6:
+                                     KEY7,KEY8,KEY9,KEY10,KEY11,KEY12
+          COMPARE   FMSUUD2A,ONE
+          GOTO      BCOD1000 IF NOT EQUAL         * separator char in use ?
+.
+          PACK      ACCOUNT,ACCOUNT,FMSUUD2B      * include sep. char
+.
+BCOD1000  PACK      ACCOUNT,ACCOUNT,SUBJCODE,SP70 * add subj code
+.
+BCOD9999  RETURN
+.****************************************************************************
+.  GCOD - get subjective and cost codes from account code    Called by lots
+.        Requires - ACCOUNT   (account code)
+.                   FMSUUD2A  (separate CC/Subj 1=yes)
+.                   FMSUUD4A  (cost centre code length)
+.        Returns  - SUBJCODE  (subjective code)
+.                   COSTCODE  (cost centre code)
+.****************************************************************************
+GCOD0000  UNPACK    SP70,SUBJCODE,COSTCODE       * clear old vars
+          BRANCH    FMSUUD4A,GCOD0100,GCOD0200,GCOD0300,GCOD0400:
+                             GCOD0500,GCOD0600,GCOD0700,GCOD0800:
+                             GCOD0900,GCOD1000,GCOD1100,GCOD1200
+.
+GCOD0100  BRANCH    FMSUUD2A,GCOD0110
+          UNPACK    ACCOUNT,KEY1,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0110  UNPACK    ACCOUNT,KEY1,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0200  BRANCH    FMSUUD2A,GCOD0210
+          UNPACK    ACCOUNT,KEY2,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0210  UNPACK    ACCOUNT,KEY2,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0300  BRANCH    FMSUUD2A,GCOD0310
+          UNPACK    ACCOUNT,KEY3,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0310  UNPACK    ACCOUNT,KEY3,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0400  BRANCH    FMSUUD2A,GCOD0410
+          UNPACK    ACCOUNT,KEY4,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0410  UNPACK    ACCOUNT,KEY4,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0500  BRANCH    FMSUUD2A,GCOD0510
+          UNPACK    ACCOUNT,KEY5,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0510  UNPACK    ACCOUNT,KEY5,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0600  BRANCH    FMSUUD2A,GCOD0610
+          UNPACK    ACCOUNT,KEY6,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0610  UNPACK    ACCOUNT,KEY6,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0700  BRANCH    FMSUUD2A,GCOD0710
+          UNPACK    ACCOUNT,KEY7,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0710  UNPACK    ACCOUNT,KEY7,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0800  BRANCH    FMSUUD2A,GCOD0810
+          UNPACK    ACCOUNT,KEY8,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0810  UNPACK    ACCOUNT,KEY8,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0900  BRANCH    FMSUUD2A,GCOD0910
+          UNPACK    ACCOUNT,KEY9,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD0910  UNPACK    ACCOUNT,KEY9,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD1000  BRANCH    FMSUUD2A,GCOD1010
+          UNPACK    ACCOUNT,KEY10,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD1010  UNPACK    ACCOUNT,KEY10,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD1100  BRANCH    FMSUUD2A,GCOD1110
+          UNPACK    ACCOUNT,KEY11,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD1110  UNPACK    ACCOUNT,KEY11,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD1200  BRANCH    FMSUUD2A,GCOD1210
+          UNPACK    ACCOUNT,KEY12,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD1210  UNPACK    ACCOUNT,KEY12,ANS,SUBJCODE
+          GOTO      GCOD90000
+.
+GCOD9000  LOAD      COSTCODE,FMSUUD4A,KEY1,KEY2,KEY3,KEY4:
+                                      KEY5,KEY6,KEY7,KEY8:
+                                      KEY9,KEY10,KEY11,KEY12
+          PACK      SUBJCODE,SUBJCODE,SP70
+          PACK      COSTCODE,COSTCODE,SP70
+.
+GCOD9999  RETURN

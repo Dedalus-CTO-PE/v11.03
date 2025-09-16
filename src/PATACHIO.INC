@@ -1,0 +1,54 @@
+.
+. PATACHIO.INC
+. ------------
+. Filename     : patachio
+. Description  : Patient Nursing Home/Hostel Additional Charging History I/O
+.                Subroutines
+. Variables    : OVRCD    FORM    1
+.                KEY16    DIM     16
+.
+RAPTAH1   MOVE      ZERO,OVRCD
+          RESET     KEY16
+          READ      PATACHA1,KEY16;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPTAH1   MOVE      ZERO,OVRCD
+          RESET     KEY16
+          READ      PATACHA1,KEY16;;
+          RETURN
+.
+RDPTAH1   MOVE      ZERO,OVRCD
+          RESET     KEY16
+          READ      PATACHA1,KEY16;DPTAHADM,PTAHDATE,PTAHANNI,PTAHTOTL,PTAHSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTAHADM,PTAHADMN
+          RETURN
+.
+RKPTAH1   MOVE      ZERO,OVRCD
+          RESET     KEY16
+          READKS    PATACHA1;DPTAHADM,PTAHDATE,PTAHANNI,PTAHTOTL,PTAHSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTAHADM,PTAHADMN
+          RETURN
+.
+RPPTAH1   MOVE      ZERO,OVRCD
+          RESET     KEY16
+          READKP    PATACHA1;DPTAHADM,PTAHDATE,PTAHANNI,PTAHTOTL,PTAHSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTAHADM,PTAHADMN
+          RETURN
+.
+WRPTAH1   MOVE      ZERO,OVRCD
+          MOVE      PTAHADMN,DPTAHADM
+          WRITE     PATACHA1,KEY16;KEY16,PTAHANNI,PTAHTOTL,PTAHSPAR
+          RETURN
+.
+UPPTAH1   MOVE      PTAHADMN,DPTAHADM
+          UPDATE    PATACHA1;DPTAHADM,PTAHDATE,PTAHANNI,PTAHTOTL,PTAHSPAR
+          RETURN
+.
+DEPTAH1   RESET     KEY16
+          DELETE    PATACHA1,KEY16
+          RETURN
+.

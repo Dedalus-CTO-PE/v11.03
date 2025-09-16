@@ -1,0 +1,327 @@
+RSPRBB1   RESET     KEY28
+          READ      PRIBULK1,KEY28;;
+          RETURN
+.
+RAPRBB1   RESET     KEY28
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK1,KEY28;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRBB1   RESET     KEY28
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK1,KEY28;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RKPRBB1   MOVE      ZERO,OVRCD
+          READKS    PRIBULK1;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RPPRBB1   MOVE      ZERO,OVRCD
+          READKP    PRIBULK1;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+UPPRBB1   MOVE      PRBBCLAM,DPRBBCLM
+          MOVE      PRBBSTAT,DPRBBSTA
+          MOVE      PRBBAMNT,PRBBAMOU
+          MOVE      PRBBPAID,PRBBPAYD
+          MOVE      PRBBDISC,PRBBDSCO
+          UPDATE    PRIBULK1;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          RETURN
+.
+WRPRBB1   RESET     KEY28
+          MOVE      PRBBSTAT,DPRBBSTA
+          MOVE      PRBBCLAM,DPRBBCLM
+          MOVE      PRBBAMNT,PRBBAMOU
+          MOVE      PRBBPAID,PRBBPAYD
+          MOVE      PRBBDISC,PRBBDSCO
+          WRITE     PRIBULK1,KEY28;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          RETURN
+.
+DEPRBB1   RESET     KEY28
+          DELETE    PRIBULK1,KEY28
+          RETURN
+.
+RSPRBB2   RESET     KEY47
+          READ      PRIBULK2,KEY47;;
+          RETURN
+.
+RAPRBB2   RESET     KEY47
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK2,KEY47;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRBB2   RESET     KEY47
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK2,KEY47;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RKPRBB2   MOVE      ZERO,OVRCD
+          READKS    PRIBULK2;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RPPRBB2   MOVE      ZERO,OVRCD
+          READKP    PRIBULK2;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RSPRBB3   RESET     KEY38
+          READ      PRIBULK3,KEY38;;
+          RETURN
+.
+RAPRBB3   RESET     KEY38
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK3,KEY38;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRBB3   RESET     KEY38
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK3,KEY38;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RKPRBB3   MOVE      ZERO,OVRCD
+          READKS    PRIBULK3;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RPPRBB3   MOVE      ZERO,OVRCD
+          READKP    PRIBULK3;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RSPRBB4   RESET     KEY47
+          READ      PRIBULK4,KEY47;;
+          RETURN
+.
+RAPRBB4   RESET     KEY47
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK4,KEY47;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRBB4   RESET     KEY47
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK4,KEY47;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RKPRBB4   MOVE      ZERO,OVRCD
+          READKS    PRIBULK4;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RPPRBB4   MOVE      ZERO,OVRCD
+          READKP    PRIBULK4;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RSPRBB5   RESET     KEY47
+          READ      PRIBULK5,KEY47;;
+          RETURN
+.
+RAPRBB5   RESET     KEY47
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK5,KEY47;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRBB5   RESET     KEY47
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK5,KEY47;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RKPRBB5   MOVE      ZERO,OVRCD
+          READKS    PRIBULK5;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RPPRBB5   MOVE      ZERO,OVRCD
+          READKP    PRIBULK5;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RSPRBB6   RESET     KEY38
+          READ      PRIBULK6,KEY38;;
+          RETURN
+.
+RAPRBB6   RESET     KEY38
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK6,KEY38;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRBB6   RESET     KEY38
+          MOVE      ZERO,OVRCD
+          READ      PRIBULK6,KEY38;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RKPRBB6   MOVE      ZERO,OVRCD
+          READKS    PRIBULK6;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.
+RPPRBB6   MOVE      ZERO,OVRCD
+          READKP    PRIBULK6;DPRBBCLM,PRBBINVN,PRBBDOCT,PRBBBULK:
+                                  PRBBCODE,PRBBDATE,DPRBBSTA,PRBBRDAT,PRBBREGR:
+                                  PRBBAMOU,PRBBPAYD,PRBBDSCO,PRBBMEDN,PRBBITMN:
+                                  PRBBGSTM,PRBBSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRBBCLM,PRBBCLAM
+          MOVE      DPRBBSTA,PRBBSTAT
+          MOVE      PRBBAMOU,PRBBAMNT
+          MOVE      PRBBPAYD,PRBBPAID
+          MOVE      PRBBDSCO,PRBBDISC
+          RETURN
+.

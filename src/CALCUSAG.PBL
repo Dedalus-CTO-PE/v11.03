@@ -1,0 +1,447 @@
+.------------------------------------------------------------------------
+. Include        :  CALCUSAG.PBL
+. Date Created   :  24/05/94
+. Author         :  Robert Sumsion
+. Modifications  :  
+.
+. V9.02.01 10.07.2002   G.Saunders  - Port to v9
+.          Update to include vF.09.02 (comments inserted below). Sandra approved
+. V9.02.00 02.05.2002   G.Saunders  - Port to v9
+.          Port from f.09 to v.9.02 
+.------------------------------------------------------------------------
+. VF.09.02 19.03.2002 Sai (HPS)          
+.          Unspecified change.                                          
+. VF.09.01 30.01.2001 Charles Handaya
+.          Pick Cost amount either included GST or excluded, according
+.          to a parameter SNCOPURC
+. VF.09.00 09.11.2000 Charles Handaya
+.          Modified for sincchaf change
+.------------------------------------------------------------------------
+. VF.00.00 05.11.1998 Sandra Barcham
+.          Year 2000 compliance
+.------------------------------------------------------------------------
+. V6.00.01 12.07.1994 Sandra Barcham
+.          Move HNONUSAG
+.------------------------------------------------------------------------
+.
+. Input Parameters
+. ----------------
+. FCOST     =   From Cost Centre
+. TCOST     =   To Cost Centre
+. SICHWAR   =   Warehouse - Blank if Non Stock and Non Catalog
+. FWAREHS   =   From Warehouse
+. TWAREHS   =   To Warehouse
+. FCATALOG  =   From Catalog Code
+. TCATALOG  =   To Catalog Code
+. FPRODGP   =   From Subjective/Product Group
+. TPRODGP   =   To Subjective/Product Group
+. FDESCRP   =   From Catalog Description
+. TDESCRP   =   To Catalog Description
+. HNONUSAG  =   System Parameter
+.                1 = Take Non-Stock/Catalog Usage at Receival Time
+.                2 = Take Non-Stock/Catalog Usage at Purchase Time
+. INCLTYPE  =   What type of Usage is required
+.                0 = All Stock and Non-Stock/Catalog
+.                1 = Stock Only
+.                2 = Non-Stock Only
+.                3 = Stock Only (Medical & Surgical)
+.                4 = Stock Only (Catering)
+.                5 = Stock Only (Domestic)
+.                6 = Stock Only (Engineering)
+.                7 = Stock Only (Printing)
+.                8 = Stock Only (Sundry Supplies)
+. SIPEYEAR   =   Usage Year
+. SIPEPER    =   Usage Period
+. RNGEWARE   =   Warehouse Range Flag
+.                0 = No,  Normal Warehouse Keyin with Spaces for all warehouses
+.                1 = Yes, standard Warehouse Range Keyin is being used
+.
+. Input Files Required
+. -------------------
+. SINPOCFD
+. SINPOCIO
+. SINPOFFD
+. SINPOFIO
+. SINPOAFD
+. SINPOAIO
+. SINCCHFD
+. SINCCHIO
+. SINCIHFD
+. SINCIHIO
+. SINWARFD
+. SINWARIO
+. SINALLFD        -        Temporary Usage File FD
+. SINALLCD        -        Temporary Usage File IO
+.
+. Returns
+. -------
+. Output index File:  sinallpp     (pp - port number)
+. Index            :  SINALLA1
+.------------------------------------------------------------------------
+. Calculate Usage
+.------------------------------------------------------------------------
+LOAD0000  READ      CONTROLF,SIXTY3;*240,SNCOPURC
+.
+          CALL      CRALL000                * Build Temp File
+          PACK      DAT6,SIPEYEAR,SIPEPER
+.
+          IF        INCLTYPE = 1 | INCLTYPE>=3
+            GOTO      LOAD4000               * Stock Cata Usage
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,"Loading Non-Stock/Catalog Usage Data.....";
+.
+          IF        HNONUSAG = 2
+            GOTO      LOAD2000
+          ENDIF
+.
+          PACK      KEY6,SIPEYEAR,SP70
+          CALL      RSSIPF3
+LOAD1000  CALL      RKSIPF3
+          BRANCH    OVRCD,LOAD4000
+.
+          ADD       ONE,SECTOR
+          IF        (SECTOR%100=0)
+             DISPLAY   *P1:24,"Scanning Receivals ",SECTOR," - ",SIPFPON,*EL;
+          ENDIF
+.
+          MATCH     SIPEYEAR,SIPFUDT   * only process desired date range
+          GOTO      LOAD4000 IF NOT EQUAL
+.
+          MATCH     SIPFUDT,DAT6       * only process desired date range
+          GOTO      LOAD4000 IF LESS     
+.
+          PACK      KEY7,SIPFPON,SP70
+          CALL      RDSIPA1
+          BRANCH    OVRCD,LOAD1000     * get header data (should be there)
+.
+          PACK      KEY10,SIPFPON,SIPFITM,SP70
+          CALL      RDSIPC1
+          BRANCH    OVRCD,LOAD1000     * get item data (should be there)
+.
+          MOVE      SIPCPRD,KEY5
+          CALL      RDSISA1
+          IF        OVRCD=1
+            DISPLAY   *P50:24,*EL,"Product Group Missing : ",KEY5;
+            CALL      HITENTER
+            GOTO      LOAD1000
+          ENDIF
+.
+          CALL      SNOL0000                 * Set up non variables
+.
+          MATCH     SP7,SIPCCAT
+          GOTO      LOAD1100 IF EQUAL
+.
+          PACK      KEY7,SIPCCAT,SP70
+          CALL      RDSIIA1
+          IF        OVRCD=1 | SIIANON=0
+            GOTO      LOAD1000
+          ELSE
+            MOVE      ONE,SIFACTOR
+            PACK      KEY30,SIIAISS,SIPFSUT
+            CALL      RDSIFA1
+          ENDIF
+.
+LOAD1100  MOVE      SIPCPRD,SICHSUB          * For Range Checking
+          MOVE      SIPCCST,SICHCST          * For Range Checking
+          MOVE      SP70,SICHWAR             * For Range Checking
+          CALL      SUBR0000                 * Check Ranges for SUB order
+          BRANCH    EXIT,LOAD1000            * Outside Chosen Range
+.
+          MOVE      SP5,SIPCWAR
+          PACK      KEY28,SIPCPRD,SIPCCAT,SIPCCST,SIPCWAR,SIPFUDT
+          CALL      RDSIAL1
+          IF        OVRCD=1
+            PACK      SIALDAT,SIPFUDT,SP70
+            PACK      SIALCAT,SIPCCAT,SP70
+            PACK      SIALSUB,SIPCPRD,SP70
+            PACK      SIALCST,SIPCCST,SP70
+            PACK      SIALWAR,SIPCWAR,SP70
+            IF        SNCOPURC=1
+              ASSIGN    SIPFCST*SIPFQTY,SIALUAM
+            ELSE
+              ASSIGN    (SIPFCST-SIPFGST)*SIPFQTY,SIALUAM
+            ENDIF
+            ASSIGN    SIPFQTY*SIFACTOR,SIALUQT
+            IF        SIALUQT<>0 | SIALUAM<>0
+              CALL      WRSIAL1
+            ENDIF
+          ELSE
+            IF        SNCOPURC=1
+              ASSIGN    (SIPFCST*SIPFQTY)+SIALUAM,SIALUAM
+            ELSE
+              ASSIGN    ((SIPFCST-SIPFGST)*SIPFQTY)+SIALUAM,SIALUAM
+            ENDIF
+            ASSIGN    SIPFQTY*SIFACTOR+SIALUQT,SIALUQT
+            CALL      UPSIAL1
+          ENDIF
+          GOTO        LOAD1000
+.
+LOAD2000  PACK      KEY6,SIPEYEAR,SP70
+          CALL      RSSIPC7
+LOAD2500  CALL      RKSIPC7
+          BRANCH    OVRCD,LOAD4000
+.
+          ADD       ONE,SECTOR
+          IF        (SECTOR%100=0)
+             DISPLAY   *P1:24,"Scanning Receivals ",SECTOR," - ",SIPFPON,*EL;
+          ENDIF
+.
+          MATCH     SIPEYEAR,SIPCDAT   * only process desired date range
+          GOTO      LOAD4000 IF NOT EQUAL
+.
+          MATCH     SIPCDAT,DAT6       * only process desired date range
+          GOTO      LOAD4000 IF LESS     
+.
+          PACK      KEY7,SIPCPON,SP70
+          CALL      RDSIPA1
+          BRANCH    OVRCD,LOAD2500     * get header data (should be there)
+.
+          MOVE      SIPCPRD,KEY5
+          CALL      RDSISA1
+          IF        OVRCD=1
+            DISPLAY   *P50:24,*EL,"Product Group Missing : ",KEY5;
+            CALL      HITENTER
+            GOTO      LOAD2500
+          ENDIF
+.
+          CALL      SNOL0000                 * Set up non variables
+.
+          MATCH     SP7,SIPCCAT
+          GOTO      LOAD2600 IF EQUAL
+.
+          PACK      KEY7,SIPCCAT,SP70
+          CALL      RDSIIA1
+          IF        OVRCD=1 | SIIANON=0
+            GOTO      LOAD2500
+          ENDIF
+.
+LOAD2600  MOVE      SIPCPRD,SICHSUB          * For Range Checking
+          MOVE      SIPCCST,SICHCST          * For Range Checking
+          MOVE      SP70,SICHWAR             * For Range Checking
+          CALL      SUBR0000                 * Check Ranges for SUB order
+          BRANCH    EXIT,LOAD2500            * Outside Chosen Range
+.
+          MOVE      SP5,SIPCWAR
+          PACK      KEY28,SIPCPRD,SIPCCAT,SIPCCST,SIPCWAR,SIPCDAT
+          CALL      RDSIAL1
+          IF        OVRCD=1
+            PACK      SIALDAT,SIPCDAT,SP70
+            PACK      SIALCAT,SIPCCAT,SP70
+            PACK      SIALSUB,SIPCPRD,SP70
+            PACK      SIALCST,SIPCCST,SP70
+            PACK      SIALWAR,SIPCWAR,SP70
+            IF        SNCOPURC=1
+              ASSIGN    SIPCECT*SIPCOQT,SIALUAM
+            ELSE
+              ASSIGN    (SIPCECT-SIPCGSTA)*SIPCOQT,SIALUAM
+            ENDIF
+            MOVE      SIPCOQT,SIALUQT
+            IF        SIALUQT<>0 | SIALUAM<>0
+              CALL      WRSIAL1
+            ENDIF
+          ELSE
+            IF        SNCOPURC=1
+              ASSIGN    (SIPCECT*SIPCOQT)+SIALUAM,SIALUAM
+            ELSE
+              ASSIGN    ((SIPCECT-SIPCGSTA)*SIPCOQT)+SIALUAM,SIALUAM
+            ENDIF
+            ADD       SIPCOQT,SIALUQT
+            CALL      UPSIAL1
+          ENDIF
+          GOTO        LOAD2500
+.
+. ------- Get Stock Usage
+LOAD4000  MOVE      DIM5,SIWAWAR
+          IF        INCLTYPE=2
+            GOTO      LOAD9999
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,"Loading Stock Usage Data.....";
+          PACK      KEY5,FCOST,SP70
+          CALL      RSSICA1
+          CALL      RPSICA1
+.
+LOAD6000  CALL      RKSICA1
+          BRANCH    OVRCD,LOAD9999
+.
+          PACK      KEY28,SICACODE,SIPEYEAR,SP70
+          CALL      RSSICH3
+.
+LOAD8000  CALL      RKSICH3
+          BRANCH    OVRCD,LOAD6000
+.
+          MATCH     SICACODE,SICHCST
+          GOTO      LOAD6000 IF NOT EQUAL
+.
+          MATCH     SICHDAT,DAT6
+          GOTO      LOAD6000 IF LESS         * Only Want Year to date
+.
+          PACK      SIIACAT,SICHCAT,SP70
+          PACK      KEY7,SICHCAT,SP70
+          CALL      RDSIIA1
+          IF        OVRCD=1 | SIIANON=1
+            GOTO      LOAD8000               * No Non-Stock, Stock only
+          ENDIF
+.
+          CALL      SUBR0000                 * Check Ranges for SUB order
+          BRANCH    EXIT,LOAD8000
+.
+          PACK      KEY28,SICHSUB,SICHCAT,SICHCST,SICHWAR,SICHDAT
+          CALL      RDSIAL1
+          IF        OVRCD=1
+            PACK      SIALDAT,SICHDAT,SP70
+            PACK      SIALCAT,SICHCAT,SP70
+            PACK      SIALSUB,SICHSUB,SP70
+            PACK      SIALCST,SICHCST,SP70
+            PACK      SIALWAR,SICHWAR,SP70
+            MOVE      SICHUAM,SIALUAM
+            MOVE      SICHUQT,SIALUQT
+            IF        SIALUQT<>0 | SIALUAM<>0
+              CALL      WRSIAL1
+            ENDIF
+          ELSE
+            PACK      SIALDAT,SICHDAT,SP70
+            PACK      SIALCAT,SICHCAT,SP70
+            PACK      SIALSUB,SICHSUB,SP70
+            PACK      SIALCST,SICHCST,SP70
+            PACK      SIALWAR,SICHWAR,SP70
+            ADD       SICHUAM,SIALUAM
+            ADD       SICHUQT,SIALUQT
+            CALL      UPSIAL1
+          ENDIF
+          GOTO     LOAD8000
+.
+LOAD9999  RETURN
+.----------------------------------------------------------
+. Set Non-Data up for calulations and printing
+. if not using sincchaf then warehouse is relavent
+.----------------------------------------------------------
+SNON0000  MOVE      "Non-Catalogued Item",SIIADES
+          PACK      SIIADES,SIIADES,SP70
+          MOVE      ZERO,SIIAAVC
+          MOVE      ONE,SIIAISS
+          MOVE      SP70,SIIACAT
+          MOVE      ONE,SIIANON
+          MOVE      " 1",SIIESID
+          MOVE      " 0",SIIASTI
+.
+SNON9999  RETURN
+.----------------------------------------------------------
+. Set Non-Data up for calulations and printing
+. if using sincchaf then warehouse is not relavent
+.----------------------------------------------------------
+SNOL0000  MOVE      "Non-Catalogued Item",SIIADES
+          PACK      SIIADES,SIIADES,SP70
+          MOVE      ZERO,SIIAAVC
+          MOVE      ONE,SIIAISS
+          MOVE      SP70,SIIACAT
+          MOVE      ONE,SIIANON
+          MOVE      " 1",SIIESID
+          MOVE      " 0",SIIASTI
+          MOVE      SP70,SIWAWAR
+.
+SNOL9999  RETURN
+.----------------------------------------------------------
+. Check Ranges for Report
+. Requires:      SIIACAT    match to FROM,TCATALOG
+.                SIIADES    match to FROM,TDESCRP
+.                SICHSUB    match to FROM,TPRODGP
+.                SICHWAR    match to FROM,TWAREHS
+.                SICHCST    match to FROM,TCOST
+.----------------------------------------------------------
+SUBR0000  MOVE      ZERO,EXIT
+.
+          MATCH     FCATALOG,SIIACAT
+          GOTO      SUBR9000 IF LESS
+          MATCH     SIIACAT,TCATALOG
+          GOTO      SUBR9000 IF LESS
+.
+          MATCH     FDESCRP,SIIADES
+          GOTO      SUBR9000 IF LESS
+          MATCH     SIIADES,TDESCRP
+          GOTO      SUBR9000 IF LESS
+.
+          MATCH     FPRODGP,SICHSUB
+          GOTO      SUBR9000 IF LESS
+          MATCH     SICHSUB,TPRODGP
+          GOTO      SUBR9000 IF LESS
+.
+          MATCH     FCOST,SICHCST
+          GOTO      SUBR9000 IF LESS
+          MATCH     SICHCST,TCOST
+          GOTO      SUBR9000 IF LESS
+.
+          MOVE      SP70,SIIESID
+          MATCH     SP70,SICHWAR
+          IF        !@EQUAL
+            IF        RNGEWARE=0
+              MATCH     SP70,SIWAWAR
+              IF        !@EQUAL
+                MATCH     SIWAWAR,SICHWAR
+                GOTO      SUBR9000 IF NOT EQUAL
+              ENDIF
+            ELSE
+              MATCH     FWAREHS,SICHWAR
+              GOTO      SUBR9000 IF LESS
+              MATCH     SICHWAR,TWAREHS
+              GOTO      SUBR9000 IF LESS
+            ENDIF
+            PACK      KEY9,PASSCODE,SICHWAR,SP70   * check warehouse security
+            CALL      RDSIWS1
+            BRANCH    OVRCD,SUBR9000
+.
+            PACK      KEY12,SIIACAT,SICHWAR
+            CALL      RDSIIE1
+            BRANCH    OVRCD,SUBR9000
+          ENDIF
+.
+SUBR1000  BRANCH    INCLTYPE,SUBR2000,SUBR3000,SUBR4000,SUBR4000,SUBR4000:
+                             SUBR4000,SUBR4000,SUBR4000
+          GOTO      SUBR9999
+.
+. SIIANON   FORM      1      Non-Stock Item 0=No
+.------------------------------------------------
+SUBR2000  COMPARE   ONE,SIIANON
+          GOTO      SUBR9000 IF EQUAL   * Stock Only
+          GOTO      SUBR9999
+.
+SUBR3000  COMPARE   ZERO,SIIANON
+          GOTO      SUBR9000 IF EQUAL   * Non-Stock Only
+          GOTO      SUBR9999
+.
+SUBR4000  ASSIGN    INCLTYPE-2,F2
+          MATCH     SP70,SIIESID
+          IF        @EQUAL
+            RESET     SIIASTI,F2
+            CMATCH    "1",SIIASTI
+            GOTO      SUBR9000 IF NOT EQUAL
+            GOTO      SUBR9999
+          ELSE
+            RESET     SIIESID,F2
+            CMATCH    "1",SIIESID
+            GOTO      SUBR9000 IF NOT EQUAL
+            GOTO      SUBR9999
+          ENDIF
+.
+SUBR9000  MOVE      ONE,EXIT
+.
+SUBR9999  RETURN
+.-------------------------------------------------------------------------
+. Preset the Variables to the largest possible range.
+.-------------------------------------------------------------------------
+SETVAR00  MOVE      SP70,FPRODGP
+          MOVE      Z70,TPRODGP
+          MOVE      SP70,FDESCRP
+          MOVE      Z70,TDESCRP
+          MOVE      SP70,FCATALOG
+          MOVE      Z70,TCATALOG
+          MOVE      SP70,SIWAWAR
+          MOVE      FROMCODE,FCOST
+          MOVE      TOCODE,TCOST
+.
+. ------- HNONUSAG   1-Receival 2-Purchase
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,SIXTY3;*143,HNONUSAG
+.
+SETVAR99  RETURN

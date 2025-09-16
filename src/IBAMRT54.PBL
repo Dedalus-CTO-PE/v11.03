@@ -1,0 +1,812 @@
+.******************************************************************************
+.* System         : Medical Records                                           *
+.* Program        : IBAMRT54.PBL                                              *
+.* Name           : Microfilm Update                                          *
+.******************************************************************************
+.* Date           : 21/05/2001                                                *
+.* Author         : Dean Cramer                                               *
+.* Function       : To read an external file and update MRTMAS with microfilm *
+.*                  location and volume data.                                 * 
+.*                                                                            *
+.* Modifications  :                                                           *
+.*       V11.02.01 09/08/2022  Ebon Clements     TSK 0923085                  *
+.*                 Added home hospital test to off site storage update        *
+.*                 HOMEHOSP - LOCC0000                                        *
+.*       V10.15.01 11/02/2020  Tracey Nguyen     TSK 0887605                  *
+.*                 Increased the length of the upload for Microfilm address   *
+.*                 from 10 to 25 (IMPBFILM/IMPBFIL3) and changed the Episode  *
+.*                 date (IMPBEPDT/IMPBEPD3) input format from ddmmyy to       *
+.*                 ddmmccyy                                                   *
+.*----------------------------------------------------------------------------*
+.*       V10.03.02 01/08/2013  Ebon Clements     CAR 277886                   *
+.*                 Added keyin of moved by for option 1                       *
+.*       V10.03.01 31/07/2013  Ebon Clements     CAR 277886                   *
+.*                 Removed keyin of hospital for option 1                     *
+.*                 Added record exists error to ERRA0000                      *
+.*       V10.02.03 28/07/2011  Ebon Clements     CAR 243582                   *
+.*                 Added using tracking receipt functionality                 *
+.*       V10.02.02 04/07/2011  Ebon Clements  CAR 240724                      *
+.*                 Mods for MRT hospital/location - Added hospital            *
+.*                 to location key                                            *
+.*       V10.02.01 11/05/2011  Mike Laming      CAR 240707                    *
+.*                 Mods to use CLMRTHIS - caused by MRTHISFD file change.     *
+.*       V10.01.01 15/02/2011  Steve Armstrong  CAR 234779                    *
+.*                 Fixed setting or MRMAFILM to be padded out with spaces.    *
+.*                 Changed FORM fields in text file to be DIM fields.         *
+.******************************************************************************
+.*        V9.08.01 25/01/2007  Peter Vela       CAR 127930                    *
+.*                 Added MRMADTCR MRMATMCR before WRTMAS1                     *
+.******************************************************************************
+.*        V9.04.01 29/04/2005 Peter Vela    CAR 55214                         *
+.*                 Recompiled for MRTCONFD                                    *
+.******************************************************************************
+.*        V9.03.03 01/07/2004 Ebon Clements CAR 50853                         *
+.*                 Fixed key pack in WHIS0000                                 *
+.*        V9.03.02 23/06/2004 Ebon Clements CAR 50853                         *
+.*                 Allow two character medical record version numbers         *
+.*                 in upload file                                             *
+.*        V9.03.01 18/12/2003 Peter Vela  CAR 43134                           *
+.*                 Recompiled for MRTCONFD                                    *
+.******************************************************************************
+.*        V9.02.10 09/12/2002 Dean Cramer srf 19735                           *
+.*                 Include date & volume on print for ST Vs                   *
+.*        V9.02.09 26/11/2002 Dean Cramer srf 19735                           *
+.*                 Include St Vs format for option 2                          *
+.*        V9.02.08 12/11/2002 Dean Cramer srf 19735                           *
+.*                 Include St Vs format for option 2                          *
+.*        V9.02.07 27/03/2002 Dean Cramer                                     *
+.*                 Change Current Location update from New Home Location      *
+.*                 screen input to Destination Location screen input          * 
+.*        V9.02.06 15/01/2002 Dean Cramer                                     *
+.*                 Fix where when volume numbers out of sequence wrong        *
+.*                 number extracted. Update current location.                 *
+.*        V9.02.05 21/12/2001 Dean Cramer                                     *
+.*                 Create interaction with external script.                   *
+.*        V9.02.04 19/12/2001 Dean Cramer                                     *
+.*                 Fix for control M characters at end of record.             *
+.*        V9.02.03 20/11/2001 Dean Cramer                                     *
+.*                 Fix in case varying length UR's encountered.               *
+.*        V9.02.02 03/11/2001 Dean Cramer                                     *
+.*                 Add the off site storage option.                           *
+.******************************************************************************
++
+          INC       STD001FD
+.
+          INC       IBACONFD/INC
+          INC       MRTMASFD/INC            * Medical Records Master file
+          INC       MRTLOCFD/INC            * Medical Records Location file
+          INC       MRTHISFD/INC            * Medical Records History file
+          INC       MRTCONFD/INC            * Medical Records Control file
+          INC       PATHSPFD/INC            * Hospital File
+.
+. ----- Tempfile Variables -----
+.
+IMPFILE1  FILE      ASCII, FIXED=26  
+.
+.Name     Type    Length    Start  Description
+.-------  ----    ------    -----  -----------
+IMPADETL  DIM       11        1    Input Detail  XXXXXXXX-YY  U/R-Volume
+.
+.End of Record                10
+.
+IMPFILE2  FILE      ASCII, FIXED=44  
+.
+.Name     Type    Length    Start  Description
+.-------  ----    ------    -----  -----------
+IMPBURNO  DIM       8         1    U/R number
+IMPBFILM  DIM       25        9    Microfilm Address
+IMPBEPDT  DIM       8         34   Episode To Date - ddmmccyy
+IMPBVOLN  DIM       2         42   Volume
+.
+.End of Record                44
+.
+.
+IMPFILE3  FILE      ASCII, FIXED=48  
+.
+.Name     Type    Length    Start  Description
+.-------  ----    ------    -----  -----------
+IMPBURN3  DIM       6         1    U/R number
+IMPBFIL3  DIM       25        7    Microfilm Address
+IMPBEPD3  DIM       8         32   Episode To Date - ddmmccyy
+IMPBVOL3  DIM       2         40   Volume
+IMPSPAR3  DIM       6         42   SPARE
+.
+.End of Record                48
+.
+. ----- Program Variables -----
+.
+ADOTY     DIM       3
+AHHOS     DIM       3
+AHLOC     DIM       4
+BDOTY     DIM       3
+BHLOC     DIM       7
+CHLOC     DIM       7
+DIM1A     DIM       1  
+DIM1B     DIM       1  
+DIM127    DIM       127
+EDDATE    DIM       10
+ERRIND    FORM      1
+ERRTYP    FORM      1
+HOSPCODE  DIM       3
+HOMEHOSP  DIM       3                  * Home hospital id
+IMPNAME   DIM       80
+LOCNTEST  DIM       7
+UVOLD     DIM       2
+WEBUSRID  DIM       10
+MICERR    FORM      1
+RECCOUNT  FORM      6
+SAVDD     DIM       2
+SAVMM     DIM       2
+SAVCC     DIM       2
+SAVYY     DIM       2
+SAVDETL1  DIM       11
+SAVDETL2  DIM       11
+SAVKEY20  DIM       20
+SAVURNO   DIM       8
+SAVVOLN   DIM       2 
+TOTLOAD   FORM      6
+TOTERR    FORM      6
+URDIM8    DIM       8
+USFILE    INIT      "ibamrt54.us1"
+VDIM2     DIM       2
+VDIM8     DIM       8
+.
+. ----- Program Constants -----
+.
+HYPH      INIT      "-"
+PRGID     INIT      "IBAMRT54"
+PRGNAM    INIT      "Microfilm Update       "
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                   ML0000                                   *
+.*                                Mainline Code                               *
+.******************************************************************************
+ML0000    CALL      OPTN0000                * Enter prompt         
+          BRANCH    EXIT,ML9999                            
+.
+          CALL      INIT0000                * Initialise variables & open files
+          BRANCH    EXIT,ML9999                            
+.
+          BRANCH    OPTION,ML1000,ML2000
+.
+ML1000    CALL      LOCC0000                * Location change to offsite   
+          GOTO      ML9999
+.
+ML2000    BRANCH    MRCNUFTY,ML2100,ML2200
+.
+ML2100    CALL      P2MP0000                * Upload microfilm address format 1
+          GOTO      ML9999
+.
+ML2200    CALL      P3MP0000                * Upload microfilm address format 2
+          CALL      T3MP0000                * format 2 upload totals
+.
+ML9999    CHAIN     PGM
++
+.******************************************************************************
+.*                                  INIT0000              Called by: ML0000   *
+.*                               Initialisation                               *
+.******************************************************************************
+INIT0000  CALL      DISPHEAD                * Display screen header
+          DISPLAY   *P56:24,"Opening mrtmasaf"
+          OPEN      MRTMASA1,"mrtmasaf"
+.
+          DISPLAY   *P56:24,"Opening mrthisaf"
+          OPEN      MRTHISA1,"mrthisaf"
+.
+          OPEN      MRTLOCA1,"mrtlocaf"
+          DISPLAY   *P56:24,"Opening mrtlocaf";
+.
+          STRIP     IMPNAME
+          PACK      DIM127,USFILE,SP1,IMPNAME,SP70,SP70
+          EXECUTE   DIM127,TASKID
+          MOVE      ZERO,OVRCD
+.
+          BRANCH    OPTION,INIT1000,INIT2000
+.
+INIT1000  TRAP      OVERCOND IF IO
+          OPEN      IMPFILE1,IMPNAME 
+          TRAPCLR   IO
+          BRANCH    OVRCD,INIT9000
+          CALL      IBACLOCK
+.
+          GOTO      INIT9999                 
+.
+INIT2000  READ      CONTROLF,SIXTY;*84,MRCNHLOC,*88,MRCNRCTY
+.
+          PACK      AHHOS,SP3
+          PACK      AHLOC,MRCNHLOC,SP3
+          PACK      ADOTY,MRCNRCTY,SP3
+.
+          IF        IBCNMHOS=1
+            PACK      KEY7,HOSPCODE,SP70
+            CALL      RDPTHSP1
+            IF        OVRCD<>1
+              PACK      AHHOS,PTHSHHOS,SP3
+              PACK      AHLOC,PTHSHLOC,SP3
+              PACK      ADOTY,PTHSRCTY,SP3
+            ENDIF
+          ENDIF
+.
+          READ      CONTROLF,NINTY7;*147,MRCNUFTY,*148,MRCNMSCD,*176,MRCNTREC
+          CALL      IBACLOCK
+          BRANCH    MRCNUFTY,INIT2100,INIT2200
+          GOTO      INIT9999                 
+.
+INIT2100  TRAP      OVERCOND IF IO
+          OPEN      IMPFILE2,IMPNAME 
+          TRAPCLR   IO
+          BRANCH    OVRCD,INIT9000
+.
+          GOTO      INIT9999                 
+.
+INIT2200  TRAP      OVERCOND IF IO
+          OPEN      IMPFILE3,IMPNAME 
+          TRAPCLR   IO
+          BRANCH    OVRCD,INIT9000
+.
+          GOTO      INIT9999                 
+.
+INIT9000  CALL      HEAD132
+          CALL      UND132
+          PRINT     *55,"******  Can't Open Import File ",IMPNAME," *****"
+          CALL      UND132
+          MOVE      ONE,EXIT
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                  OPTN0000              Called by: ML0000   *
+.*                             Choose Main Option                             *
+.******************************************************************************
+OPTN0000  DISPLAY   *P56:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          OPEN      PATHSPA1,"pathspaf"
+          DISPLAY   *P56:24,"Opening pathspaf";
+.
+          MOVE      ZERO,OPTION
+          MOVE      ZERO,COPTION
+          CALL      DISPHEAD   
+OPTN1000  DISPLAY   *P1:3,*EF:
+                    *P1:4,"1. Update Offsite Storage.":
+                    *P1:5,"2. Load Microfilm.":
+                    *P1:7,"Option : ";
+.
+          KEYIN     *P10:7,*V2LON,OPTION
+.
+          BRANCH    OPTION,OPTN2000,OPTN3000
+.
+          BEEP
+          GOTO      OPTN9500
+.
+OPTN2000  DISPLAY   *P1:9,*EF:
+                    *P1:10,"Home Location : ":
+                    *P1:11,"Document Type : ":
+                    *P1:12,"Destination   : ";
+.
+OPTN3000  DISPLAY   *P1:13,"File Name     : ";
+.
+          IF        OPTION = 1
+            DISPLAY   *P1:14,"Moved By      : ";
+          ENDIF
+.
+          IF        IBCNMHOS=1 & OPTION = 2
+            DISPLAY   *P1:14,"Hospital      : ";
+          ENDIF
+.
+          BRANCH    OPTION,OPTN4000,OPTN5000
+.
+OPTN4000  KEYIN     *P17:10,*V2LON,BHLOC
+          ENDSET    BHLOC
+          APPEND    SP70,BHLOC
+          RESET     BHLOC
+.
+          MATCH     SP7,BHLOC
+          GOTO      OPTN9500 IF EQUAL
+.         
+          KEYIN     *P17:11,*V2LON,BDOTY
+          ENDSET    BDOTY
+          APPEND    SP70,BDOTY
+          RESET     BDOTY
+          MATCH     SP3,BDOTY
+          GOTO      OPTN1000 IF EQUAL
+.         
+          KEYIN     *P17:12,*V2LON,CHLOC
+          ENDSET    CHLOC
+          APPEND    SP70,CHLOC
+          RESET     CHLOC
+.
+OPTN5000  KEYIN     *P17:13,*V2LON,IMPNAME
+          ENDSET    IMPNAME
+          APPEND    SP70,IMPNAME
+          RESET     IMPNAME
+          MATCH     SP20,IMPNAME
+          GOTO      OPTN1000 IF EQUAL
+.
+          IF        OPTION=1
+            KEYIN     *P17:14,*V2LON,WEBUSRID
+          ENDIF
+.
+OPTN5500  IF        IBCNMHOS=1 & OPTION = 2
+            KEYIN     *P17:14,*V2LON,HOSPCODE
+            PACK      HOSPCODE,HOSPCODE,SP70
+.
+            PACK      KEY3,HOSPCODE,SP70
+            CALL      RDPTHSP1
+            BRANCH    OVRCD,OPTN1000
+          ENDIF
+.         
+OPTN6000  CALL      CONTQST                 * Ok to Continue (Y/N/C) ?
+          BRANCH    CEXIT,OPTN9000,OPTN1000,OPTN9500
+.                         Yes      No       Cancel
+          GOTO      OPTN6000
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+OPTN9999  RETURN
++
+.******************************************************************************
+.*                                  LOCC0000              Called by: ML0000   *
+.*                         Location change to offsite storage                 *
+.******************************************************************************
+LOCC0000  CALL      PRHA0000
+.
+          MOVE      ZERO,RECCOUNT
+LOCC1000  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF FORMAT
+          READ      IMPFILE1,SEQ;IMPADETL                           
+          GOTO      LOCC9999 IF OVER
+.
+          ADD       ONE,RECCOUNT
+          TRAPCLR   FORMAT
+          BRANCH    OVRCD,LOCC8500
+.
+          PACK      SAVDETL1,IMPADETL,SP10 
+          MOVE      SAVDETL1,SAVDETL2
+          SCAN      HYPH,SAVDETL1
+          GOTO      LOCC1500 IF NOT EQUAL
+.
+          BUMP      SAVDETL1,-1
+          LENSET    SAVDETL1
+LOCC1500  RESET     SAVDETL1
+          MOVE      SAVDETL1,VDIM8   
+          CALL      RGHJ0000
+          MOVE      VDIM8,SAVURNO
+.
+          PACK      VDIM2,SP1,ONE
+          SCAN      HYPH,SAVDETL2
+          GOTO      LOCC1700 IF NOT EQUAL
+.
+          BUMP      SAVDETL2,1
+          MOVE      SAVDETL2,VDIM2   
+          SQUEEZE   VDIM2
+          MOVE      VDIM2,F2
+          MOVE      F2,VDIM2
+
+LOCC1700  PACK      SAVVOLN,VDIM2,SP70
+          UNPACK    BHLOC,HOMEHOSP          * Home Hospital from home location
+.
+          IF        IBCNMHOS=1
+            PACK      KEY20,SAVURNO,HOMEHOSP,SP10
+          ELSE
+            PACK      KEY20,SAVURNO,SP10
+          ENDIF
+.
+          MOVE      ONE,ERRTYP
+          CALL      RSMRMAS1
+LOCC2000  CALL      RKMRMAS1
+          BRANCH    OVRCD,LOCC9000
+.
+          MATCH     SAVURNO,MRMAURNO
+          GOTO      LOCC9000 IF NOT EQUAL
+.
+          IF        IBCNMHOS=1
+            MATCH     HOMEHOSP,MRMAHHOS     * Only move record from the same
+            GOTO      LOCC9000 IF NOT EQUAL * hospital as the new home location
+          ENDIF
+.
+          MOVE      TWO,ERRIND
+          CALL      ERRT0000 
+.
+          MATCH     BDOTY,MRMADOTY
+          GOTO      LOCC2000 IF NOT EQUAL  
+.
+          MOVE      THREE,ERRIND
+          CALL      ERRT0000 
+. 
+          MATCH     SAVVOLN,DMRMAVOL
+          IF        !@EQUAL
+             GOTO      LOCC2000 
+          ENDIF      
+.
+LOCC5000  PACK      LOCNTEST,MRMAHHOS,MRMAHLOC,SP70
+          MATCH     BHLOC,LOCNTEST          * Only test for duplicate if home
+          GOTO      LOCC5500 IF EQUAL       * location is changing
+. 
+          PACK      SAVKEY20,MRMAURNO,MRMAHHOS,MRMAHLOC,MRMADOTY,MRMAVOLN,SP70
+          PACK      KEY20,MRMAURNO,BHLOC,MRMADOTY,MRMAVOLN,SP70
+          CALL      RAMRMAS1                * Check if new MR exists
+          IF        OVRCD=0
+            MOVE      FIVE,ERRTYP           * Error new MR exists
+            GOTO      LOCC9000
+          ENDIF
+.
+          PACK      KEY20,SAVKEY20
+          CALL      RAMRMAS1              * Re read original MR
+          IF        OVRCD=1
+            MOVE      SIX,ERRTYP          * Error reading original MR
+            GOTO      LOCC9000
+          ENDIF
+.
+LOCC5500  CALL      PRTA0000
+.         
+          UNPACK    BHLOC,MRMAHHOS,MRMAHLOC
+          UNPACK    CHLOC,MRMACHOS,MRMACLOC
+          CALL      IBACLOCK
+          PACK      MRMADTUP,CCC,CYY,CMM,CDD
+          REP       " 0",MRMADTUP
+          MOVE      CTIMEIS,MRMATMUP
+.
+          CALL      UPMRMAS1            * Update MR
+.
+LOCC6000  CALL      WHIS0000
+.
+          GOTO      LOCC1000 
+.
+LOCC8500  MOVE      FOUR,ERRTYP
+.
+LOCC9000  CALL      ERRA0000
+          GOTO      LOCC1000
+.
+LOCC9999  RETURN
+.**********************************************************************
+. RGHJ0000 - Right justify alphanumeric U/R number                    *
+.**********************************************************************
+RGHJ0000  MOVE      VDIM8,URDIM8
+          MOVE      SP8,VDIM8
+          SQUEEZE   URDIM8
+          GOTO      RGHJ9999 IF EOS
+.
+          SETLPTR   VDIM8
+          GOTO      RGHJ9999 IF EOS
+          ENDSET    VDIM8
+          ENDSET    URDIM8
+.
+RGHJ1000  CMOVE     URDIM8,VDIM8
+          BUMP      URDIM8,-1
+          GOTO      RGHJ5000 IF EOS
+          BUMP      VDIM8,-1
+          GOTO      RGHJ9999 IF EOS
+.
+          GOTO      RGHJ1000
+.        .
+.        .-------- Pack with spaces
+.        .
+RGHJ5000  BUMP      VDIM8,-1
+          GOTO      RGHJ9999 IF EOS
+          CMOVE     SP1,VDIM8
+.
+          GOTO      RGHJ5000
+.
+RGHJ9999  RESET     VDIM8
+          SETLPTR   VDIM8
+          RETURN
+.******************************************************************************
+.*                                  WHIS0000                                  *
+.*                       Write history of Pickford's change                   *
+.******************************************************************************
+WHIS0000  CALL      CLMRTHIS
+          PACK      MRHIKEY,MRMAKEY,SP10
+          CALL      IBACLOCK
+          PACK      MRHIKEY,MRMAKEY,SP10
+          PACK      MRHIDATE,CCC,CYY,CMM,CDD
+          REP       " 0",MRHIDATE        * Date of Movement
+          PACK      MRHITIME,CTIMEIS,SP10
+          MOVE      WEBUSRID,MRHIUSID
+.
+          UNPACK    CHLOC,MRHIDHOS,MRHILOC
+.
+          CALL      CALSTA00             * Get Status
+.
+          UNPACK    SP70,MRHIRCST,MRHIRCUI,MRHIRCDT,MRHIRCTM
+.
+          MATCH     "1",MRCNTREC            * System Using Tracking Receipt
+          IF        @EQUAL
+            MATCH     "1",MRLOTREC          * Location Using Tracking Receipt
+            IF        @EQUAL
+              MOVE      "1",MRHIRCST        * In Transit
+            ELSE
+              MOVE      "3",MRHIRCST        * Sent Direct
+            ENDIF
+          ENDIF
+.
+          PACK      KEY26,MRMAKEY,MRHIDATE,MRHITIME,SP10
+          CALL      RAMRHIS1
+          IF        OVRCD=1
+            CALL      WRMRHIS1 
+          ENDIF
+.
+WHIS9999  RETURN
+.
+.-------------------------------------------------------------------------------
+. Calculate Status - returns MRHISTAT
+.-------------------------------------------------------------------------------
+CALSTA00  PACK      KEY7,MRMACHOS,MRMACLOC,SP70
+          CALL      RDMRLOC1        * Read Location File for Indicator
+          BRANCH    OVRCD,CALSTA99
+.
+          MATCH     "2",MRLOINDC
+          IF        @EQUAL
+            MOVE      ONE,MRHISTAT   * 1-Out
+          ELSE
+            MOVE      TWO,MRHISTAT   * 2-In
+          ENDIF
+.
+CALSTA99  RETURN
+.
+.******************************************************************************
+.*                                  PIMP0000              Called by: ML0000   *
+.*        RCH Input File     Upload Microfilm Address                         *
+.******************************************************************************
+P2MP0000  CALL      PRHB0000
+          MOVE      ZERO,RECCOUNT
+P2MP1000  READ      IMPFILE2,SEQ;IMPBURNO,IMPBFILM,IMPBEPDT,IMPBVOLN
+          GOTO      P2MP9999 IF OVER
+          ADD       ONE,RECCOUNT
+.
+          TYPE      IMPBVOLN
+          GOTO      P2MP9100 IF NOT EQUAL
+.
+          MOVE      IMPBVOLN,UVOLD
+          PACK      KEY20,IMPBURNO,AHHOS,AHLOC,ADOTY,UVOLD
+          CALL      RDMRMAS1
+          BRANCH    OVRCD,P2MP1200 
+.
+          GOTO      P2MP1500
+.
+P2MP1200  UNPACK    UVOLD,DIM1A,DIM1B
+          PACK      UVOLD,SP1,DIM1B
+          PACK      KEY20,IMPBURNO,AHHOS,AHLOC,ADOTY,UVOLD
+          CALL      RDMRMAS1
+          BRANCH    OVRCD,P2MP9200
+.
+P2MP1500  PACK      MRMAFILM,IMPBFILM,SP30
+          UNPACK    IMPBEPDT,SAVDD,SAVMM,SAVCC,SAVYY
+.
+P2MP1700  PACK      MRMAEPDT,SAVCC,SAVYY,SAVMM,SAVDD
+          CALL      PRTB0000
+          CALL      IBACLOCK
+          PACK      MRMADTUP,CCC,CYY,CMM,CDD
+          REP       " 0",MRMADTUP
+          MOVE      CTIMEIS,MRMATMUP
+          CALL      UPMRMAS1
+          GOTO      P2MP1000 
+.
+P2MP9100  ADD       ONE,CLNO
+          COMPARE   "55",CLNO
+          CALL      PRHB0000 IF NOT LESS
+          CALL      UND132
+          PRINT     "Line ",RECCOUNT," - Invalid Format."
+          CALL      UND132
+          GOTO      P2MP9999 
+.
+P2MP9200  ADD       ONE,CLNO
+          COMPARE   "55",CLNO
+          CALL      PRHB0000 IF NOT LESS
+          PRINT     "Line ",RECCOUNT," - No Medical Record for ",KEY20
+          GOTO      P2MP1000 
+.
+P2MP9999  RETURN
+.******************************************************************************
+.*                                  PIMP0000              Called by: ML0000   *
+.*        STV Input File     Upload Microfilm Address                         *
+.******************************************************************************
+P3MP0000  CALL      PRHB0000
+          MOVE      ZERO,RECCOUNT
+          MOVE      ZERO,TOTLOAD  
+          MOVE      ZERO,TOTERR   
+P3MP1000  READ      IMPFILE3,SEQ;IMPBURN3,IMPBFIL3,IMPBEPD3,IMPBVOL3,IMPSPAR3
+          GOTO      P3MP9999 IF OVER
+          ADD       ONE,RECCOUNT
+.
+          TYPE      IMPBVOL3
+          IF        !@EQUAL
+            MOVE      ONE,MICERR
+            GOTO      P3MP9200
+          ENDIF 
+.
+          MOVE      IMPBVOL3,UVOLD
+          PACK      KEY20,SP2,IMPBURN3,AHHOS,AHLOC,ADOTY,UVOLD
+          CALL      RDMRMAS1
+          BRANCH    OVRCD,P3MP1200 
+.
+          GOTO      P3MP1500
+.
+P3MP1200  UNPACK    UVOLD,DIM1A,DIM1B
+          PACK      UVOLD,SP1,DIM1B
+          PACK      KEY20,SP2,IMPBURN3,AHHOS,AHLOC,ADOTY,UVOLD
+          CALL      RDMRMAS1
+          IF        OVRCD=1
+            MOVE      TWO,MICERR
+            GOTO      P3MP9200
+          ENDIF 
+.
+P3MP1500  MATCH     SP25,MRMAFILM
+          IF        !@EQUAL
+            MOVE      THREE,MICERR
+            GOTO      P3MP9200
+          ENDIF 
+.
+          PACK      MRMAFILM,IMPBFIL3,SP30
+          UNPACK    IMPBEPD3,SAVDD,SAVMM,SAVCC,SAVYY
+.
+P3MP1700  PACK      MRMAEPDT,SAVCC,SAVYY,SAVMM,SAVDD
+          PACK      EDDATE,SAVDD,SLASH,SAVMM,SLASH,SAVCC,SAVYY
+          MOVE      EDDATE,MRMACOMM
+          MOVE      MRCNMSCD,MRMASTAT
+          CALL      PRTB0000
+          CALL      IBACLOCK
+          PACK      MRMADTUP,CCC,CYY,CMM,CDD
+          REP       " 0",MRMADTUP
+          MOVE      CTIMEIS,MRMATMUP
+          CALL      UPMRMAS1
+          ADD       ONE,TOTLOAD
+          GOTO      P3MP1000 
+.
+P3MP9200  ADD       ONE,CLNO
+          COMPARE   "55",CLNO
+          CALL      PRHB0000 IF NOT LESS
+          CALL      UND132
+.
+          ADD       ONE,TOTERR
+.
+          BRANCH    MICERR,P3MP9210,P3MP9220,P3MP9230
+.
+P3MP9210  PRINT     "Line ",RECCOUNT," - Invalid Format."
+          CALL      UND132
+          GOTO      P3MP9999 
+.
+P3MP9220  PRINT     "Line ",RECCOUNT," - No Medical Record for ",KEY20
+          GOTO      P3MP1000 
+.
+P3MP9230  PRINT     "Line ",RECCOUNT," - Microfilm address exists for ",KEY20
+          GOTO      P3MP1000 
+.
+P3MP9999  RETURN
+.
+.******************************************************************************
+.*                                  T3MP0000              Called by: ML0000   *
+.*        STV Input File     Totals Print                                     *
+.******************************************************************************
+T3MP0000  PRINT     *N,*N,*N,*1," Records Read     ",RECCOUNT:
+                    *N,*1," Records in Error ",TOTERR:
+                    *N,*1," Records Loaded   ",TOTLOAD 
+.
+T3MP9999  RETURN
+.------------------------------------------------------------
+.        Offsite Storage Home Location Update Heading  
+.------------------------------------------------------------
+PRHA0000  CLOCK     TIME,CTIMEIS
+.
+          IF        OPTION = 1
+            MOVE      "Off Site Storage Update",PRGNAM
+          ENDIF
+          CALL      HEAD132
+          MOVE      "3",CLNO
+          ADD       ONE,CPAGENO
+.
+          PRINT     *1,"|",*3,"Patient",*11,"|":
+                    *13,"OLD Home  Type  Vol",*33,"|":
+                    *36,"NEW Home  Type  Vol",*56,"|",*95,"|"
+          PRINT     *1,"-----------------------------------":
+                    *36,"------------------------------":
+                    *66,"------------------------------"
+.
+PRHA9999  RETURN
+.------------------------------------------------------------
+.        Microfilm Update Heading                      
+.------------------------------------------------------------
+PRHB0000  CLOCK     TIME,CTIMEIS
+.
+          CALL      HEAD132
+          MOVE      "3",CLNO
+          ADD       ONE,CPAGENO
+.
+          PRINT     *1,"---------------------------------------------------":
+                    *52,"---------------":
+                    *N,*1,"|",*3,"Patient",*11,"|":
+                    *13,"Microfilm Position",*47,"| Vol |",*58,"Date    |",*N:
+                    *1,"---------------------------------------------------":
+                    *52,"---------------"
+.
+PRHB9999  RETURN
+.------------------------------------------------------------
+.      Print Location Change Details (offsite storage)
+.------------------------------------------------------------
+PRTA0000  ADD       ONE,CLNO
+          COMPARE   "55",CLNO
+          CALL      PRHA0000 IF NOT LESS
+.
+          PRINT     *1,"|",*3,SAVURNO,*11,"|",*14,MRMAHHOS,*17,MRMAHLOC:
+                    *24,BDOTY,*30,SAVVOLN,*33,"|",*37,BHLOC:
+                    *47,BDOTY,*53,SAVVOLN,*56,"|":
+                    *58,"Home Location transferred",*95,"|"
+.
+PRTA9999  RETURN
+.------------------------------------------------------------
+.      Print Micrfilm Position                     
+.------------------------------------------------------------
+PRTB0000  ADD       ONE,CLNO
+          COMPARE   "55",CLNO
+          CALL      PRHB0000 IF NOT LESS
+.
+          BRANCH    MRCNUFTY,PRTB1000,PRTB2000
+. 
+PRTB1000  PRINT     *1,"|",*3,IMPBURNO,*11,"|",*13,IMPBFILM,*47,"|":
+                    *50,IMPBVOLN," |"
+          GOTO      PRTB9999
+.
+PRTB2000  PRINT     *1,"|",*3,IMPBURN3,*11,"|",*13,IMPBFIL3,*47,"|":
+                    *50,IMPBVOL3," | ",EDDATE," |"
+.
+PRTB9999  RETURN
+.------------------------------------------------------------
+.  Set error flag upward as each level of key found            
+.------------------------------------------------------------
+ERRT0000  COMPARE   ERRIND,ERRTYP
+          GOTO      ERRT9999 IF NOT LESS
+.
+          MOVE      ERRIND,ERRTYP
+ERRT9999  RETURN
+.
+.------------------------------------------------------------
+.  Print Errors in Location Change Details (offsite storage)
+.------------------------------------------------------------
+ERRA0000  ADD       ONE,CLNO
+          COMPARE   "55",CLNO
+          CALL      PRHA0000 IF NOT LESS
+.
+          BRANCH    ERRTYP,ERRA1000,ERRA2000,ERRA3000,ERRA4000,ERRA5000:
+                           ERRA6000
+.
+ERRA1000  PRINT     *1,"|",*3,SAVURNO,*11,"|",*24,ADOTY,*30,SAVVOLN:
+                    *33,"|",*56,"|",*58,"U/R No. not found",*95,"|"
+          GOTO      ERRA9999 
+.
+ERRA2000  PRINT     *1,"|",*3,SAVURNO,*11,"|",*24,ADOTY,*30,SAVVOLN:
+                    *33,"|",*56,"|",*58,"U/R does not have Search Type",*95,"|"
+          GOTO      ERRA9999 
+.
+ERRA3000  PRINT     *1,"|",*3,SAVURNO,*11,"|",*24,ADOTY,*30,SAVVOLN:
+                    *33,"|",*56,"|",*58,"U/R does not have correct Volume":
+                    *95,"|"
+          GOTO      ERRA9999 
+.
+ERRA4000  PRINT     *1,"|",*3,SAVURNO,*11,"|",*24,ADOTY,*30,SAVVOLN:
+                    *33,"|",*56,"|":
+                    *58," Line - ",RECCOUNT," indeterminate format",*95,"|"
+          GOTO      ERRA9999 
+.
+ERRA5000  PRINT     *1,"|",*3,SAVURNO,*11,"|",*14,BHLOC,*24,ADOTY,*30,SAVVOLN:
+                    *33,"|",*37,BHLOC,*47,BDOTY,*53,SAVVOLN,*56,"|":
+                    *58,"Medical Record already on file",*95,"|"
+          GOTO      ERRA9999 
+.
+ERRA6000  PRINT     *1,"|",*3,SAVURNO,*11,"|",*14,BHLOC,*24,ADOTY,*30,SAVVOLN:
+                    *33,"|",*37,BHLOC,*47,BDOTY,*53,SAVVOLN,*56,"|":
+                    *58,"Error Reading Original Medical Record",*95,"|"
+ERRA9999  RETURN
+.==============================================================================
+.
+          INC       STD001IO
+          INC       CLMRTHIS
+.
+          INC       MRTMASIO/INC            * Medical Records Master file
+          INC       MRTLOCIO/INC            * Medical Records Location file
+          INC       MRTHISIO/INC            * Medical Records History file
+          INC       PATHSPIO/INC            * Hospital File
++
+.

@@ -1,0 +1,47 @@
+.
+. WATRTDIO.INC
+. ------------
+. Filenames       : watrtdaf
+.
+RSWTRTD1  RESET     KEY19
+          READ      WATRTDA1,KEY19;;
+          RETURN
+.
+RAWTRTD1  RESET     KEY19
+          MOVE      ZERO,OVRCD
+          READ      WATRTDA1,KEY19;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTRTD1  RESET     KEY19
+          MOVE      ZERO,OVRCD
+          READ      WATRTDA1,KEY19;WTRTURNO,WTRTPROC,WTRTPCNT:
+                                   WTRTREFR,WTRTTDES,WTRTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKWTRTD1  MOVE      ZERO,OVRCD
+          READKS    WATRTDA1;WTRTURNO,WTRTPROC,WTRTPCNT:
+                             WTRTREFR,WTRTTDES,WTRTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPWTRTD1  MOVE      ZERO,OVRCD
+          READKP    WATRTDA1;WTRTURNO,WTRTPROC,WTRTPCNT:
+                             WTRTREFR,WTRTTDES,WTRTSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPWTRTD1  UPDATE    WATRTDA1;WTRTURNO,WTRTPROC,WTRTPCNT:
+                             WTRTREFR,WTRTTDES,WTRTSPAR
+          RETURN
+.
+WRWTRTD1  RESET     KEY19
+          WRITE     WATRTDA1,KEY19;WTRTURNO,WTRTPROC,WTRTPCNT:
+                                   WTRTREFR,WTRTTDES,WTRTSPAR
+          RETURN
+.
+DEWTRTD1  RESET     KEY19
+          DELETE    WATRTDA1,KEY19
+          RETURN
+.

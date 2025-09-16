@@ -1,0 +1,396 @@
+.*****************************************************************************
+.*        PMSQVIIO.INC                                                       *
+.*****************************************************************************
+.
+RSPMQVI1  RESET     KEY22
+          READ      PMSQVIA1,KEY22;;
+          RETURN
+.
+RAPMQVI1  RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PMSQVIA1,KEY22;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPMQVI1  RESET     KEY22
+          MOVE      ZERO,OVRCD
+          READ      PMSQVIA1,KEY22;DPMQVMES,DPMQVTRN,AADMNO,AURNO:
+                                  ADATE,ATIME,ASTAT,AINVPRT,ALACDTE:
+                                  ACANCEL,ADOCTR,ADOCTA,ADOCTL,ASRCE:
+                                  ATYPE,ACLSS,ACARE,AFUNDH,AFNDTB:
+                                  AFNDMM,AELIG,AVISIT,AALERG,AILLN:
+                                  ADIAG1,ADIAG2,ADISC,ADOCTT,ACLSSFT:
+                                  AALLOW,AMBS,ACLAIM,ADIET,APLOCCR:
+                                  ASTAY,ADYHOSP,AMEMB,AMEMBNO,ACOMM1:
+                                  ACOMM2,APLUR,APURGE,AUSR1,AUSR2:
+                                  AUSR3,AUSR4,AUSR5,AUSR6,AUSR7:
+                                  ADSCHI,ARDRNAM,AFNDYY,AFNDCG,AOCCDTE:
+                                  ACODDTE,ARETDTE,AMUMADM,PTMIPVIS,ABWGHT:
+                                  PTMSRFGP,PTMSGPPC,PTMSFHAN,PTMSECRA,PTMSMGIN:
+                                  PTMIDDIG,PTMIGPPT,PTMIDOFR,PTMIREFD,PTMIDFCN:
+                                  PTMIPHPU,PTMIAGNC,PTMIESSF,PTMIUSR8,PTMIUSR9:
+                                  PTMIUSR0,PTMIPDRG,PTMIOPER,PTMIXWRD,PTMIADOC:
+                                  PTMIREGS,PTMIUYN1,PTMIUYN2,PTMIPANO,PTMIPADT:
+                                  PTMIPCMX,PTMIGSTA,PTMICMXP,PTMIEBED,PTMIDMOV:
+                                  PTMIDFAS,PTMICRCD,PTMIFINV,PTMICONB,PTMIDATC:
+                                  PTMITIMC,PTMIWEBC,PTMIDATU,PTMITIMU,PTMIWEBU:
+                                  PTMI3BDY,PTMI3BAD,PTMILSDN,PTMIOGNO,TWARD:
+                                  TBED,TDATE,TTIME,TURNO,TADMN:
+                                  TRATEF,TRATEG,TDISC,TALLW,TATYPE:
+                                  TADOCT,TRATEH,TEXTRA,PTTRITFS,TRBTYP:
+                                  TRBEND,TCHSTAT,TDEPT,PTTRLTYP,PTTREPNO:
+                                  PTTREPSD,PTTRLSPT,PTTRLSRB,PTTRAEND,PTTRADPT:
+                                  PTTRADRB,PTTRNHAC,PTTROPER,PTTRAUAT,PTTRCDAT:
+                                  PTTRCTIM,PTTRCUID,PTTRLTSC,PTTRUCID,PTTRUUID:
+                                  PTTRCLTY,PTTRTRTY,PTTRTEAM,PTTRRSTR,PTTRRESI:
+                                  PTTRFSRC,PTTRHFND,PTTRFTBL,PTTRHFMN,PTTRHFCN:
+                                  PMVXCSNR,PMVXPOST,PMVXPIND,PMVXVLOC,PMVXCFSG:
+                                  PMVXINGP,PMVXCPTH,PMVXHCP1,PMVXHCP2,PMVXHCP3:
+                                  PMVXHCP4,PMVXRHC1,PMVXRH1G,PMVXRH1C,PMVXRHC2:
+                                  PMVXRH2G,PMVXRH2C,PMVXRHC3,PMVXRH3G,PMVXRH3C:
+                                  PMVXRHC4,PMVXRH4G,PMVXRH4C,PMVXABRG,PMVXCADM:
+                                  PMVXIRAD,PMVXIDUS,PMVXCRAV,PMVXRCCT,PMVXAPWD:
+                                  PMVXAPBD,PMVXPOWD,PMVXPOBD,PMVXPSTY,PMVXVALW:
+                                  PMVXPALW,PMVXINDC,PMVXMDAV,PMVXFRMS,PMVXCSNG:
+                                  PMVXPWGT,PMVXPHGT,PMVXDHWR,PMVXEDC1,PMVXEDC2:
+                                  PMVXEDC3,PMVXHOME,PMVXUDF1,PMVXUDF2,PMVXUDF3:
+                                  PMVXUDF4,PMVXUDT1,PMVXUDT2,PMVXUDT3,PMVXUDT4:
+                                  PMVXUDT5,PMVXUDT6,PMVXCDTE,PMVXCTIM,PMVXWEBC:
+                                  PMVXLUPD,PMVXLUPT,PMVXWEBU,PMVXMHLS,PMVXPICD:
+                                  PMVXRMOR,PMVXASUT,PMVXELPS,PMVXEMPL,PMVXFINP:
+                                  PMVXOCCP,PMVXPALC,PMVXPPAL,PMVXPPPT,PMVXPSOS:
+                                  PMVXPYSP,PMVXQLDB,PMVXREAD,PMVXUDIN,PMVXUREA:
+                                  PMVXUSAC,PMVXUVTH,PMVXINTR,PMVXLNG1,PMVXASGC:
+                                  PMVXMHOS,PMVXDSPD,PMVXDSIF,PMVXPRMI,PMVXPRAI:
+                                  PMVXPRES,PMVXUITR,PMVXRPOA,PMVXRCN1,PMVXRCN2:
+                                  PMVXRHFU,PMVXRDVA,PMVXRSLO,PMVXMLOC,PMVXPACC:
+                                  PMVXEDU1,PMVXEDU2,PMVXEDU3,PMVXPRGM,PMVXCONF:
+                                  PMVXEOCL,PMVXSLOC,PMVXSCLI,PMVXSTRA,PMVXQASN:
+                                  PMVXATCP,PMVXATIM,PMVXITIM,PMVXHFGN,PMVXHFSN:
+                                  PMVXFUPI,PMVXPOEC,PMVXPGID,PMVXTICM,PMVXPILC:
+                                  PMVXFVIO,PMVXFNDM,PMVXUDF5,PMVXUDF6,PMVXUDF7:
+                                  PMVXUDF8,PMVXUDF9,PMVXUD10,PMVXUD11,PMVXUD12:
+                                  PMVXUD13,PMVXUD14,PMVXUD15,PMVXTEAM,PMVXNWHC:
+                                  PMVXEDDT,PMVXPHLD,PMVXPLOC,PMVXDTRT,PMVXDFLG:
+                                  PMVXFSRC,PMVXCONM,PMVXCPDD,PMVXPBMI,DDATE:
+                                  DTIME,DSTAT,DDEST,DDIAG,DDIAG2:
+                                  DUSD1,DUSD2,DUSD3,DUSD4,DUSD5:
+                                  DFMBS,PTDSDMDC,PTDSDDRG,DWLREASN,PTDSSIDX:
+                                  PTDSVOGU,PTDSOPER,PTDSUYN1,PTDSUYN2,PTDSUYN3:
+                                  PTDSUYN4,PTDSDWRD,PTDSDLOS,PTDSSREF,PTDSPALD:
+                                  PTDSDPMN,MHLRCODE,PKNAME,PKADD1,PKADD2:
+                                  PKSUBR,PKADD4,PKPOST,PKTELEP,PKTELEB:
+                                  PKRELP,PTREMOBL,PTRESNAM,PTREGNAM,WSTBY:
+                                  PMQVTDAT,PMQVTTIM,OERDATE,OERTIME,PMBRREQD:
+                                  PMBRREQT,PMVXCNID,PMVXCNDT,PMVXCASE,PMVXEAFL:
+                                  PTDSLSDN,PTDSCLGP,PMQVSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPMQVMES,PMQVMESI
+          MOVE      DPMQVTRN,PMQVTRAN
+          RETURN
+.
+RKPMQVI1  MOVE      ZERO,OVRCD
+          READKS    PMSQVIA1;DPMQVMES,DPMQVTRN,AADMNO,AURNO:
+                                  ADATE,ATIME,ASTAT,AINVPRT,ALACDTE:
+                                  ACANCEL,ADOCTR,ADOCTA,ADOCTL,ASRCE:
+                                  ATYPE,ACLSS,ACARE,AFUNDH,AFNDTB:
+                                  AFNDMM,AELIG,AVISIT,AALERG,AILLN:
+                                  ADIAG1,ADIAG2,ADISC,ADOCTT,ACLSSFT:
+                                  AALLOW,AMBS,ACLAIM,ADIET,APLOCCR:
+                                  ASTAY,ADYHOSP,AMEMB,AMEMBNO,ACOMM1:
+                                  ACOMM2,APLUR,APURGE,AUSR1,AUSR2:
+                                  AUSR3,AUSR4,AUSR5,AUSR6,AUSR7:
+                                  ADSCHI,ARDRNAM,AFNDYY,AFNDCG,AOCCDTE:
+                                  ACODDTE,ARETDTE,AMUMADM,PTMIPVIS,ABWGHT:
+                                  PTMSRFGP,PTMSGPPC,PTMSFHAN,PTMSECRA,PTMSMGIN:
+                                  PTMIDDIG,PTMIGPPT,PTMIDOFR,PTMIREFD,PTMIDFCN:
+                                  PTMIPHPU,PTMIAGNC,PTMIESSF,PTMIUSR8,PTMIUSR9:
+                                  PTMIUSR0,PTMIPDRG,PTMIOPER,PTMIXWRD,PTMIADOC:
+                                  PTMIREGS,PTMIUYN1,PTMIUYN2,PTMIPANO,PTMIPADT:
+                                  PTMIPCMX,PTMIGSTA,PTMICMXP,PTMIEBED,PTMIDMOV:
+                                  PTMIDFAS,PTMICRCD,PTMIFINV,PTMICONB,PTMIDATC:
+                                  PTMITIMC,PTMIWEBC,PTMIDATU,PTMITIMU,PTMIWEBU:
+                                  PTMI3BDY,PTMI3BAD,PTMILSDN,PTMIOGNO,TWARD:
+                                  TBED,TDATE,TTIME,TURNO,TADMN:
+                                  TRATEF,TRATEG,TDISC,TALLW,TATYPE:
+                                  TADOCT,TRATEH,TEXTRA,PTTRITFS,TRBTYP:
+                                  TRBEND,TCHSTAT,TDEPT,PTTRLTYP,PTTREPNO:
+                                  PTTREPSD,PTTRLSPT,PTTRLSRB,PTTRAEND,PTTRADPT:
+                                  PTTRADRB,PTTRNHAC,PTTROPER,PTTRAUAT,PTTRCDAT:
+                                  PTTRCTIM,PTTRCUID,PTTRLTSC,PTTRUCID,PTTRUUID:
+                                  PTTRCLTY,PTTRTRTY,PTTRTEAM,PTTRRSTR,PTTRRESI:
+                                  PTTRFSRC,PTTRHFND,PTTRFTBL,PTTRHFMN,PTTRHFCN:
+                                  PMVXCSNR,PMVXPOST,PMVXPIND,PMVXVLOC,PMVXCFSG:
+                                  PMVXINGP,PMVXCPTH,PMVXHCP1,PMVXHCP2,PMVXHCP3:
+                                  PMVXHCP4,PMVXRHC1,PMVXRH1G,PMVXRH1C,PMVXRHC2:
+                                  PMVXRH2G,PMVXRH2C,PMVXRHC3,PMVXRH3G,PMVXRH3C:
+                                  PMVXRHC4,PMVXRH4G,PMVXRH4C,PMVXABRG,PMVXCADM:
+                                  PMVXIRAD,PMVXIDUS,PMVXCRAV,PMVXRCCT,PMVXAPWD:
+                                  PMVXAPBD,PMVXPOWD,PMVXPOBD,PMVXPSTY,PMVXVALW:
+                                  PMVXPALW,PMVXINDC,PMVXMDAV,PMVXFRMS,PMVXCSNG:
+                                  PMVXPWGT,PMVXPHGT,PMVXDHWR,PMVXEDC1,PMVXEDC2:
+                                  PMVXEDC3,PMVXHOME,PMVXUDF1,PMVXUDF2,PMVXUDF3:
+                                  PMVXUDF4,PMVXUDT1,PMVXUDT2,PMVXUDT3,PMVXUDT4:
+                                  PMVXUDT5,PMVXUDT6,PMVXCDTE,PMVXCTIM,PMVXWEBC:
+                                  PMVXLUPD,PMVXLUPT,PMVXWEBU,PMVXMHLS,PMVXPICD:
+                                  PMVXRMOR,PMVXASUT,PMVXELPS,PMVXEMPL,PMVXFINP:
+                                  PMVXOCCP,PMVXPALC,PMVXPPAL,PMVXPPPT,PMVXPSOS:
+                                  PMVXPYSP,PMVXQLDB,PMVXREAD,PMVXUDIN,PMVXUREA:
+                                  PMVXUSAC,PMVXUVTH,PMVXINTR,PMVXLNG1,PMVXASGC:
+                                  PMVXMHOS,PMVXDSPD,PMVXDSIF,PMVXPRMI,PMVXPRAI:
+                                  PMVXPRES,PMVXUITR,PMVXRPOA,PMVXRCN1,PMVXRCN2:
+                                  PMVXRHFU,PMVXRDVA,PMVXRSLO,PMVXMLOC,PMVXPACC:
+                                  PMVXEDU1,PMVXEDU2,PMVXEDU3,PMVXPRGM,PMVXCONF:
+                                  PMVXEOCL,PMVXSLOC,PMVXSCLI,PMVXSTRA,PMVXQASN:
+                                  PMVXATCP,PMVXATIM,PMVXITIM,PMVXHFGN,PMVXHFSN:
+                                  PMVXFUPI,PMVXPOEC,PMVXPGID,PMVXTICM,PMVXPILC:
+                                  PMVXFVIO,PMVXFNDM,PMVXUDF5,PMVXUDF6,PMVXUDF7:
+                                  PMVXUDF8,PMVXUDF9,PMVXUD10,PMVXUD11,PMVXUD12:
+                                  PMVXUD13,PMVXUD14,PMVXUD15,PMVXTEAM,PMVXNWHC:
+                                  PMVXEDDT,PMVXPHLD,PMVXPLOC,PMVXDTRT,PMVXDFLG:
+                                  PMVXFSRC,PMVXCONM,PMVXCPDD,PMVXPBMI,DDATE:
+                                  DTIME,DSTAT,DDEST,DDIAG,DDIAG2:
+                                  DUSD1,DUSD2,DUSD3,DUSD4,DUSD5:
+                                  DFMBS,PTDSDMDC,PTDSDDRG,DWLREASN,PTDSSIDX:
+                                  PTDSVOGU,PTDSOPER,PTDSUYN1,PTDSUYN2,PTDSUYN3:
+                                  PTDSUYN4,PTDSDWRD,PTDSDLOS,PTDSSREF,PTDSPALD:
+                                  PTDSDPMN,MHLRCODE,PKNAME,PKADD1,PKADD2:
+                                  PKSUBR,PKADD4,PKPOST,PKTELEP,PKTELEB:
+                                  PKRELP,PTREMOBL,PTRESNAM,PTREGNAM,WSTBY:
+                                  PMQVTDAT,PMQVTTIM,OERDATE,OERTIME,PMBRREQD:
+                                  PMBRREQT,PMVXCNID,PMVXCNDT,PMVXCASE,PMVXEAFL:
+                                  PTDSLSDN,PTDSCLGP,PMQVSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPMQVMES,PMQVMESI
+          MOVE      DPMQVTRN,PMQVTRAN
+          RETURN
+.
+RPPMQVI1  MOVE      ZERO,OVRCD
+          READKP    PMSQVIA1;DPMQVMES,DPMQVTRN,AADMNO,AURNO:
+                                  ADATE,ATIME,ASTAT,AINVPRT,ALACDTE:
+                                  ACANCEL,ADOCTR,ADOCTA,ADOCTL,ASRCE:
+                                  ATYPE,ACLSS,ACARE,AFUNDH,AFNDTB:
+                                  AFNDMM,AELIG,AVISIT,AALERG,AILLN:
+                                  ADIAG1,ADIAG2,ADISC,ADOCTT,ACLSSFT:
+                                  AALLOW,AMBS,ACLAIM,ADIET,APLOCCR:
+                                  ASTAY,ADYHOSP,AMEMB,AMEMBNO,ACOMM1:
+                                  ACOMM2,APLUR,APURGE,AUSR1,AUSR2:
+                                  AUSR3,AUSR4,AUSR5,AUSR6,AUSR7:
+                                  ADSCHI,ARDRNAM,AFNDYY,AFNDCG,AOCCDTE:
+                                  ACODDTE,ARETDTE,AMUMADM,PTMIPVIS,ABWGHT:
+                                  PTMSRFGP,PTMSGPPC,PTMSFHAN,PTMSECRA,PTMSMGIN:
+                                  PTMIDDIG,PTMIGPPT,PTMIDOFR,PTMIREFD,PTMIDFCN:
+                                  PTMIPHPU,PTMIAGNC,PTMIESSF,PTMIUSR8,PTMIUSR9:
+                                  PTMIUSR0,PTMIPDRG,PTMIOPER,PTMIXWRD,PTMIADOC:
+                                  PTMIREGS,PTMIUYN1,PTMIUYN2,PTMIPANO,PTMIPADT:
+                                  PTMIPCMX,PTMIGSTA,PTMICMXP,PTMIEBED,PTMIDMOV:
+                                  PTMIDFAS,PTMICRCD,PTMIFINV,PTMICONB,PTMIDATC:
+                                  PTMITIMC,PTMIWEBC,PTMIDATU,PTMITIMU,PTMIWEBU:
+                                  PTMI3BDY,PTMI3BAD,PTMILSDN,PTMIOGNO,TWARD:
+                                  TBED,TDATE,TTIME,TURNO,TADMN:
+                                  TRATEF,TRATEG,TDISC,TALLW,TATYPE:
+                                  TADOCT,TRATEH,TEXTRA,PTTRITFS,TRBTYP:
+                                  TRBEND,TCHSTAT,TDEPT,PTTRLTYP,PTTREPNO:
+                                  PTTREPSD,PTTRLSPT,PTTRLSRB,PTTRAEND,PTTRADPT:
+                                  PTTRADRB,PTTRNHAC,PTTROPER,PTTRAUAT,PTTRCDAT:
+                                  PTTRCTIM,PTTRCUID,PTTRLTSC,PTTRUCID,PTTRUUID:
+                                  PTTRCLTY,PTTRTRTY,PTTRTEAM,PTTRRSTR,PTTRRESI:
+                                  PTTRFSRC,PTTRHFND,PTTRFTBL,PTTRHFMN,PTTRHFCN:
+                                  PMVXCSNR,PMVXPOST,PMVXPIND,PMVXVLOC,PMVXCFSG:
+                                  PMVXINGP,PMVXCPTH,PMVXHCP1,PMVXHCP2,PMVXHCP3:
+                                  PMVXHCP4,PMVXRHC1,PMVXRH1G,PMVXRH1C,PMVXRHC2:
+                                  PMVXRH2G,PMVXRH2C,PMVXRHC3,PMVXRH3G,PMVXRH3C:
+                                  PMVXRHC4,PMVXRH4G,PMVXRH4C,PMVXABRG,PMVXCADM:
+                                  PMVXIRAD,PMVXIDUS,PMVXCRAV,PMVXRCCT,PMVXAPWD:
+                                  PMVXAPBD,PMVXPOWD,PMVXPOBD,PMVXPSTY,PMVXVALW:
+                                  PMVXPALW,PMVXINDC,PMVXMDAV,PMVXFRMS,PMVXCSNG:
+                                  PMVXPWGT,PMVXPHGT,PMVXDHWR,PMVXEDC1,PMVXEDC2:
+                                  PMVXEDC3,PMVXHOME,PMVXUDF1,PMVXUDF2,PMVXUDF3:
+                                  PMVXUDF4,PMVXUDT1,PMVXUDT2,PMVXUDT3,PMVXUDT4:
+                                  PMVXUDT5,PMVXUDT6,PMVXCDTE,PMVXCTIM,PMVXWEBC:
+                                  PMVXLUPD,PMVXLUPT,PMVXWEBU,PMVXMHLS,PMVXPICD:
+                                  PMVXRMOR,PMVXASUT,PMVXELPS,PMVXEMPL,PMVXFINP:
+                                  PMVXOCCP,PMVXPALC,PMVXPPAL,PMVXPPPT,PMVXPSOS:
+                                  PMVXPYSP,PMVXQLDB,PMVXREAD,PMVXUDIN,PMVXUREA:
+                                  PMVXUSAC,PMVXUVTH,PMVXINTR,PMVXLNG1,PMVXASGC:
+                                  PMVXMHOS,PMVXDSPD,PMVXDSIF,PMVXPRMI,PMVXPRAI:
+                                  PMVXPRES,PMVXUITR,PMVXRPOA,PMVXRCN1,PMVXRCN2:
+                                  PMVXRHFU,PMVXRDVA,PMVXRSLO,PMVXMLOC,PMVXPACC:
+                                  PMVXEDU1,PMVXEDU2,PMVXEDU3,PMVXPRGM,PMVXCONF:
+                                  PMVXEOCL,PMVXSLOC,PMVXSCLI,PMVXSTRA,PMVXQASN:
+                                  PMVXATCP,PMVXATIM,PMVXITIM,PMVXHFGN,PMVXHFSN:
+                                  PMVXFUPI,PMVXPOEC,PMVXPGID,PMVXTICM,PMVXPILC:
+                                  PMVXFVIO,PMVXFNDM,PMVXUDF5,PMVXUDF6,PMVXUDF7:
+                                  PMVXUDF8,PMVXUDF9,PMVXUD10,PMVXUD11,PMVXUD12:
+                                  PMVXUD13,PMVXUD14,PMVXUD15,PMVXTEAM,PMVXNWHC:
+                                  PMVXEDDT,PMVXPHLD,PMVXPLOC,PMVXDTRT,PMVXDFLG:
+                                  PMVXFSRC,PMVXCONM,PMVXCPDD,PMVXPBMI,DDATE:
+                                  DTIME,DSTAT,DDEST,DDIAG,DDIAG2:
+                                  DUSD1,DUSD2,DUSD3,DUSD4,DUSD5:
+                                  DFMBS,PTDSDMDC,PTDSDDRG,DWLREASN,PTDSSIDX:
+                                  PTDSVOGU,PTDSOPER,PTDSUYN1,PTDSUYN2,PTDSUYN3:
+                                  PTDSUYN4,PTDSDWRD,PTDSDLOS,PTDSSREF,PTDSPALD:
+                                  PTDSDPMN,MHLRCODE,PKNAME,PKADD1,PKADD2:
+                                  PKSUBR,PKADD4,PKPOST,PKTELEP,PKTELEB:
+                                  PKRELP,PTREMOBL,PTRESNAM,PTREGNAM,WSTBY:
+                                  PMQVTDAT,PMQVTTIM,OERDATE,OERTIME,PMBRREQD:
+                                  PMBRREQT,PMVXCNID,PMVXCNDT,PMVXCASE,PMVXEAFL:
+                                  PTDSLSDN,PTDSCLGP,PMQVSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPMQVMES,PMQVMESI
+          MOVE      DPMQVTRN,PMQVTRAN
+          RETURN
+.
+UPPMQVI1  MOVE      PMQVMESI,DPMQVMES
+          MOVE      PMQVTRAN,DPMQVTRN
+          UPDATE    PMSQVIA1;DPMQVMES,DPMQVTRN,AADMNO,AURNO:
+                                  ADATE,ATIME,ASTAT,AINVPRT,ALACDTE:
+                                  ACANCEL,ADOCTR,ADOCTA,ADOCTL,ASRCE:
+                                  ATYPE,ACLSS,ACARE,AFUNDH,AFNDTB:
+                                  AFNDMM,AELIG,AVISIT,AALERG,AILLN:
+                                  ADIAG1,ADIAG2,ADISC,ADOCTT,ACLSSFT:
+                                  AALLOW,AMBS,ACLAIM,ADIET,APLOCCR:
+                                  ASTAY,ADYHOSP,AMEMB,AMEMBNO,ACOMM1:
+                                  ACOMM2,APLUR,APURGE,AUSR1,AUSR2:
+                                  AUSR3,AUSR4,AUSR5,AUSR6,AUSR7:
+                                  ADSCHI,ARDRNAM,AFNDYY,AFNDCG,AOCCDTE:
+                                  ACODDTE,ARETDTE,AMUMADM,PTMIPVIS,ABWGHT:
+                                  PTMSRFGP,PTMSGPPC,PTMSFHAN,PTMSECRA,PTMSMGIN:
+                                  PTMIDDIG,PTMIGPPT,PTMIDOFR,PTMIREFD,PTMIDFCN:
+                                  PTMIPHPU,PTMIAGNC,PTMIESSF,PTMIUSR8,PTMIUSR9:
+                                  PTMIUSR0,PTMIPDRG,PTMIOPER,PTMIXWRD,PTMIADOC:
+                                  PTMIREGS,PTMIUYN1,PTMIUYN2,PTMIPANO,PTMIPADT:
+                                  PTMIPCMX,PTMIGSTA,PTMICMXP,PTMIEBED,PTMIDMOV:
+                                  PTMIDFAS,PTMICRCD,PTMIFINV,PTMICONB,PTMIDATC:
+                                  PTMITIMC,PTMIWEBC,PTMIDATU,PTMITIMU,PTMIWEBU:
+                                  PTMI3BDY,PTMI3BAD,PTMILSDN,PTMIOGNO,TWARD:
+                                  TBED,TDATE,TTIME,TURNO,TADMN:
+                                  TRATEF,TRATEG,TDISC,TALLW,TATYPE:
+                                  TADOCT,TRATEH,TEXTRA,PTTRITFS,TRBTYP:
+                                  TRBEND,TCHSTAT,TDEPT,PTTRLTYP,PTTREPNO:
+                                  PTTREPSD,PTTRLSPT,PTTRLSRB,PTTRAEND,PTTRADPT:
+                                  PTTRADRB,PTTRNHAC,PTTROPER,PTTRAUAT,PTTRCDAT:
+                                  PTTRCTIM,PTTRCUID,PTTRLTSC,PTTRUCID,PTTRUUID:
+                                  PTTRCLTY,PTTRTRTY,PTTRTEAM,PTTRRSTR,PTTRRESI:
+                                  PTTRFSRC,PTTRHFND,PTTRFTBL,PTTRHFMN,PTTRHFCN:
+                                  PMVXCSNR,PMVXPOST,PMVXPIND,PMVXVLOC,PMVXCFSG:
+                                  PMVXINGP,PMVXCPTH,PMVXHCP1,PMVXHCP2,PMVXHCP3:
+                                  PMVXHCP4,PMVXRHC1,PMVXRH1G,PMVXRH1C,PMVXRHC2:
+                                  PMVXRH2G,PMVXRH2C,PMVXRHC3,PMVXRH3G,PMVXRH3C:
+                                  PMVXRHC4,PMVXRH4G,PMVXRH4C,PMVXABRG,PMVXCADM:
+                                  PMVXIRAD,PMVXIDUS,PMVXCRAV,PMVXRCCT,PMVXAPWD:
+                                  PMVXAPBD,PMVXPOWD,PMVXPOBD,PMVXPSTY,PMVXVALW:
+                                  PMVXPALW,PMVXINDC,PMVXMDAV,PMVXFRMS,PMVXCSNG:
+                                  PMVXPWGT,PMVXPHGT,PMVXDHWR,PMVXEDC1,PMVXEDC2:
+                                  PMVXEDC3,PMVXHOME,PMVXUDF1,PMVXUDF2,PMVXUDF3:
+                                  PMVXUDF4,PMVXUDT1,PMVXUDT2,PMVXUDT3,PMVXUDT4:
+                                  PMVXUDT5,PMVXUDT6,PMVXCDTE,PMVXCTIM,PMVXWEBC:
+                                  PMVXLUPD,PMVXLUPT,PMVXWEBU,PMVXMHLS,PMVXPICD:
+                                  PMVXRMOR,PMVXASUT,PMVXELPS,PMVXEMPL,PMVXFINP:
+                                  PMVXOCCP,PMVXPALC,PMVXPPAL,PMVXPPPT,PMVXPSOS:
+                                  PMVXPYSP,PMVXQLDB,PMVXREAD,PMVXUDIN,PMVXUREA:
+                                  PMVXUSAC,PMVXUVTH,PMVXINTR,PMVXLNG1,PMVXASGC:
+                                  PMVXMHOS,PMVXDSPD,PMVXDSIF,PMVXPRMI,PMVXPRAI:
+                                  PMVXPRES,PMVXUITR,PMVXRPOA,PMVXRCN1,PMVXRCN2:
+                                  PMVXRHFU,PMVXRDVA,PMVXRSLO,PMVXMLOC,PMVXPACC:
+                                  PMVXEDU1,PMVXEDU2,PMVXEDU3,PMVXPRGM,PMVXCONF:
+                                  PMVXEOCL,PMVXSLOC,PMVXSCLI,PMVXSTRA,PMVXQASN:
+                                  PMVXATCP,PMVXATIM,PMVXITIM,PMVXHFGN,PMVXHFSN:
+                                  PMVXFUPI,PMVXPOEC,PMVXPGID,PMVXTICM,PMVXPILC:
+                                  PMVXFVIO,PMVXFNDM,PMVXUDF5,PMVXUDF6,PMVXUDF7:
+                                  PMVXUDF8,PMVXUDF9,PMVXUD10,PMVXUD11,PMVXUD12:
+                                  PMVXUD13,PMVXUD14,PMVXUD15,PMVXTEAM,PMVXNWHC:
+                                  PMVXEDDT,PMVXPHLD,PMVXPLOC,PMVXDTRT,PMVXDFLG:
+                                  PMVXFSRC,PMVXCONM,PMVXCPDD,PMVXPBMI,DDATE:
+                                  DTIME,DSTAT,DDEST,DDIAG,DDIAG2:
+                                  DUSD1,DUSD2,DUSD3,DUSD4,DUSD5:
+                                  DFMBS,PTDSDMDC,PTDSDDRG,DWLREASN,PTDSSIDX:
+                                  PTDSVOGU,PTDSOPER,PTDSUYN1,PTDSUYN2,PTDSUYN3:
+                                  PTDSUYN4,PTDSDWRD,PTDSDLOS,PTDSSREF,PTDSPALD:
+                                  PTDSDPMN,MHLRCODE,PKNAME,PKADD1,PKADD2:
+                                  PKSUBR,PKADD4,PKPOST,PKTELEP,PKTELEB:
+                                  PKRELP,PTREMOBL,PTRESNAM,PTREGNAM,WSTBY:
+                                  PMQVTDAT,PMQVTTIM,OERDATE,OERTIME,PMBRREQD:
+                                  PMBRREQT,PMVXCNID,PMVXCNDT,PMVXCASE,PMVXEAFL:
+                                  PTDSLSDN,PTDSCLGP,PMQVSPAR
+          RETURN
+.
+WRPMQVI1  RESET     KEY22
+          MOVE      PMQVMESI,DPMQVMES
+          MOVE      PMQVTRAN,DPMQVTRN
+          WRITE     PMSQVIA1,KEY22;DPMQVMES,DPMQVTRN,AADMNO,AURNO:
+                                  ADATE,ATIME,ASTAT,AINVPRT,ALACDTE:
+                                  ACANCEL,ADOCTR,ADOCTA,ADOCTL,ASRCE:
+                                  ATYPE,ACLSS,ACARE,AFUNDH,AFNDTB:
+                                  AFNDMM,AELIG,AVISIT,AALERG,AILLN:
+                                  ADIAG1,ADIAG2,ADISC,ADOCTT,ACLSSFT:
+                                  AALLOW,AMBS,ACLAIM,ADIET,APLOCCR:
+                                  ASTAY,ADYHOSP,AMEMB,AMEMBNO,ACOMM1:
+                                  ACOMM2,APLUR,APURGE,AUSR1,AUSR2:
+                                  AUSR3,AUSR4,AUSR5,AUSR6,AUSR7:
+                                  ADSCHI,ARDRNAM,AFNDYY,AFNDCG,AOCCDTE:
+                                  ACODDTE,ARETDTE,AMUMADM,PTMIPVIS,ABWGHT:
+                                  PTMSRFGP,PTMSGPPC,PTMSFHAN,PTMSECRA,PTMSMGIN:
+                                  PTMIDDIG,PTMIGPPT,PTMIDOFR,PTMIREFD,PTMIDFCN:
+                                  PTMIPHPU,PTMIAGNC,PTMIESSF,PTMIUSR8,PTMIUSR9:
+                                  PTMIUSR0,PTMIPDRG,PTMIOPER,PTMIXWRD,PTMIADOC:
+                                  PTMIREGS,PTMIUYN1,PTMIUYN2,PTMIPANO,PTMIPADT:
+                                  PTMIPCMX,PTMIGSTA,PTMICMXP,PTMIEBED,PTMIDMOV:
+                                  PTMIDFAS,PTMICRCD,PTMIFINV,PTMICONB,PTMIDATC:
+                                  PTMITIMC,PTMIWEBC,PTMIDATU,PTMITIMU,PTMIWEBU:
+                                  PTMI3BDY,PTMI3BAD,PTMILSDN,PTMIOGNO,TWARD:
+                                  TBED,TDATE,TTIME,TURNO,TADMN:
+                                  TRATEF,TRATEG,TDISC,TALLW,TATYPE:
+                                  TADOCT,TRATEH,TEXTRA,PTTRITFS,TRBTYP:
+                                  TRBEND,TCHSTAT,TDEPT,PTTRLTYP,PTTREPNO:
+                                  PTTREPSD,PTTRLSPT,PTTRLSRB,PTTRAEND,PTTRADPT:
+                                  PTTRADRB,PTTRNHAC,PTTROPER,PTTRAUAT,PTTRCDAT:
+                                  PTTRCTIM,PTTRCUID,PTTRLTSC,PTTRUCID,PTTRUUID:
+                                  PTTRCLTY,PTTRTRTY,PTTRTEAM,PTTRRSTR,PTTRRESI:
+                                  PTTRFSRC,PTTRHFND,PTTRFTBL,PTTRHFMN,PTTRHFCN:
+                                  PMVXCSNR,PMVXPOST,PMVXPIND,PMVXVLOC,PMVXCFSG:
+                                  PMVXINGP,PMVXCPTH,PMVXHCP1,PMVXHCP2,PMVXHCP3:
+                                  PMVXHCP4,PMVXRHC1,PMVXRH1G,PMVXRH1C,PMVXRHC2:
+                                  PMVXRH2G,PMVXRH2C,PMVXRHC3,PMVXRH3G,PMVXRH3C:
+                                  PMVXRHC4,PMVXRH4G,PMVXRH4C,PMVXABRG,PMVXCADM:
+                                  PMVXIRAD,PMVXIDUS,PMVXCRAV,PMVXRCCT,PMVXAPWD:
+                                  PMVXAPBD,PMVXPOWD,PMVXPOBD,PMVXPSTY,PMVXVALW:
+                                  PMVXPALW,PMVXINDC,PMVXMDAV,PMVXFRMS,PMVXCSNG:
+                                  PMVXPWGT,PMVXPHGT,PMVXDHWR,PMVXEDC1,PMVXEDC2:
+                                  PMVXEDC3,PMVXHOME,PMVXUDF1,PMVXUDF2,PMVXUDF3:
+                                  PMVXUDF4,PMVXUDT1,PMVXUDT2,PMVXUDT3,PMVXUDT4:
+                                  PMVXUDT5,PMVXUDT6,PMVXCDTE,PMVXCTIM,PMVXWEBC:
+                                  PMVXLUPD,PMVXLUPT,PMVXWEBU,PMVXMHLS,PMVXPICD:
+                                  PMVXRMOR,PMVXASUT,PMVXELPS,PMVXEMPL,PMVXFINP:
+                                  PMVXOCCP,PMVXPALC,PMVXPPAL,PMVXPPPT,PMVXPSOS:
+                                  PMVXPYSP,PMVXQLDB,PMVXREAD,PMVXUDIN,PMVXUREA:
+                                  PMVXUSAC,PMVXUVTH,PMVXINTR,PMVXLNG1,PMVXASGC:
+                                  PMVXMHOS,PMVXDSPD,PMVXDSIF,PMVXPRMI,PMVXPRAI:
+                                  PMVXPRES,PMVXUITR,PMVXRPOA,PMVXRCN1,PMVXRCN2:
+                                  PMVXRHFU,PMVXRDVA,PMVXRSLO,PMVXMLOC,PMVXPACC:
+                                  PMVXEDU1,PMVXEDU2,PMVXEDU3,PMVXPRGM,PMVXCONF:
+                                  PMVXEOCL,PMVXSLOC,PMVXSCLI,PMVXSTRA,PMVXQASN:
+                                  PMVXATCP,PMVXATIM,PMVXITIM,PMVXHFGN,PMVXHFSN:
+                                  PMVXFUPI,PMVXPOEC,PMVXPGID,PMVXTICM,PMVXPILC:
+                                  PMVXFVIO,PMVXFNDM,PMVXUDF5,PMVXUDF6,PMVXUDF7:
+                                  PMVXUDF8,PMVXUDF9,PMVXUD10,PMVXUD11,PMVXUD12:
+                                  PMVXUD13,PMVXUD14,PMVXUD15,PMVXTEAM,PMVXNWHC:
+                                  PMVXEDDT,PMVXPHLD,PMVXPLOC,PMVXDTRT,PMVXDFLG:
+                                  PMVXFSRC,PMVXCONM,PMVXCPDD,PMVXPBMI,DDATE:
+                                  DTIME,DSTAT,DDEST,DDIAG,DDIAG2:
+                                  DUSD1,DUSD2,DUSD3,DUSD4,DUSD5:
+                                  DFMBS,PTDSDMDC,PTDSDDRG,DWLREASN,PTDSSIDX:
+                                  PTDSVOGU,PTDSOPER,PTDSUYN1,PTDSUYN2,PTDSUYN3:
+                                  PTDSUYN4,PTDSDWRD,PTDSDLOS,PTDSSREF,PTDSPALD:
+                                  PTDSDPMN,MHLRCODE,PKNAME,PKADD1,PKADD2:
+                                  PKSUBR,PKADD4,PKPOST,PKTELEP,PKTELEB:
+                                  PKRELP,PTREMOBL,PTRESNAM,PTREGNAM,WSTBY:
+                                  PMQVTDAT,PMQVTTIM,OERDATE,OERTIME,PMBRREQD:
+                                  PMBRREQT,PMVXCNID,PMVXCNDT,PMVXCASE,PMVXEAFL:
+                                  PTDSLSDN,PTDSCLGP,PMQVSPAR
+          RETURN
+.
+DEPMQVI1  RESET     KEY22
+          DELETE    PMSQVIA1,KEY22
+          RETURN
+.

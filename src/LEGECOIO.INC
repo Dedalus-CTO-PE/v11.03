@@ -1,0 +1,145 @@
+.
+. LEGECOIO.INC
+. ------------
+. Filename       :  legecoaf
+. Description    :  LEGACY Episode Operation Coding
+. Variables      :  OVRCD     FORM      1
+. Keys           :  KEY12 KEY14 KEY23
+.
+RALGECO1  MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      LEGECOA1,KEY12;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSLGECO1  RESET     KEY12
+          READ      LEGECOA1,KEY12;;
+          RETURN
+.
+RDLGECO1  MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      LEGECOA1,KEY12;DLPTEOAD,DLPTEOEP,DLPTEOCN,LPTEOCOD,LPTEOTYP:
+                                   DLPTEOUN,LPTEODTC,LPTEOOPE,LPTEODAT,LPTEOSTT:
+                                   LPTEOEDT,LPTEOSPA
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPTEOAD,LPTEOADM
+          MOVE      DLPTEOEP,LPTEOEPN
+          MOVE      DLPTEOCN,LPTEOCNT
+          MOVE      DLPTEOUN,LPTEOUNQ
+          RETURN
+.
+RKLGECO1  MOVE      ZERO,OVRCD
+          READKS    LEGECOA1;DLPTEOAD,DLPTEOEP,DLPTEOCN,LPTEOCOD,LPTEOTYP:
+                             DLPTEOUN,LPTEODTC,LPTEOOPE,LPTEODAT,LPTEOSTT:
+                             LPTEOEDT,LPTEOSPA
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPTEOAD,LPTEOADM
+          MOVE      DLPTEOEP,LPTEOEPN
+          MOVE      DLPTEOCN,LPTEOCNT
+          MOVE      DLPTEOUN,LPTEOUNQ
+          RETURN
+.
+RPLGECO1  MOVE      ZERO,OVRCD
+          READKP    LEGECOA1;DLPTEOAD,DLPTEOEP,DLPTEOCN,LPTEOCOD,LPTEOTYP:
+                             DLPTEOUN,LPTEODTC,LPTEOOPE,LPTEODAT,LPTEOSTT:
+                             LPTEOEDT,LPTEOSPA
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPTEOAD,LPTEOADM
+          MOVE      DLPTEOEP,LPTEOEPN
+          MOVE      DLPTEOCN,LPTEOCNT
+          MOVE      DLPTEOUN,LPTEOUNQ
+          RETURN
+.
+.
+.
+RALGECO2  MOVE      ZERO,OVRCD
+          RESET     KEY14
+          READ      LEGECOA2,KEY14;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSLGECO2  RESET     KEY14
+          READ      LEGECOA2,KEY14;;
+          RETURN
+.
+RDLGECO2  MOVE      ZERO,OVRCD
+          RESET     KEY14
+          READ      LEGECOA2,KEY14;DLPTEOAD,DLPTEOEP,DLPTEOCN,LPTEOCOD,LPTEOTYP:
+                                   DLPTEOUN,LPTEODTC,LPTEOOPE,LPTEODAT,LPTEOSTT:
+                                   LPTEOEDT,LPTEOSPA
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPTEOAD,LPTEOADM
+          MOVE      DLPTEOEP,LPTEOEPN
+          MOVE      DLPTEOCN,LPTEOCNT
+          MOVE      DLPTEOUN,LPTEOUNQ
+          RETURN
+.
+RKLGECO2  MOVE      ZERO,OVRCD
+          READKS    LEGECOA2;DLPTEOAD,DLPTEOEP,DLPTEOCN,LPTEOCOD,LPTEOTYP:
+                             DLPTEOUN,LPTEODTC,LPTEOOPE,LPTEODAT,LPTEOSTT:
+                             LPTEOEDT,LPTEOSPA
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPTEOAD,LPTEOADM
+          MOVE      DLPTEOEP,LPTEOEPN
+          MOVE      DLPTEOCN,LPTEOCNT
+          MOVE      DLPTEOUN,LPTEOUNQ
+          RETURN
+.
+RPLGECO2  MOVE      ZERO,OVRCD
+          READKP    LEGECOA2;DLPTEOAD,DLPTEOEP,DLPTEOCN,LPTEOCOD,LPTEOTYP:
+                             DLPTEOUN,LPTEODTC,LPTEOOPE,LPTEODAT,LPTEOSTT:
+                             LPTEOEDT,LPTEOSPA
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPTEOAD,LPTEOADM
+          MOVE      DLPTEOEP,LPTEOEPN
+          MOVE      DLPTEOCN,LPTEOCNT
+          MOVE      DLPTEOUN,LPTEOUNQ
+          RETURN
+.
+.
+RALGECO3  MOVE      ZERO,OVRCD
+          RESET     KEY23
+          READ      LEGECOA3,KEY23;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSLGECO3  RESET     KEY23
+          READ      LEGECOA3,KEY23;;
+          RETURN
+.
+RDLGECO3  MOVE      ZERO,OVRCD
+          RESET     KEY23
+          READ      LEGECOA3,KEY23;DLPTEOAD,DLPTEOEP,DLPTEOCN,LPTEOCOD,LPTEOTYP:
+                                   DLPTEOUN,LPTEODTC,LPTEOOPE,LPTEODAT,LPTEOSTT:
+                                   LPTEOEDT,LPTEOSPA
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPTEOAD,LPTEOADM
+          MOVE      DLPTEOEP,LPTEOEPN
+          MOVE      DLPTEOCN,LPTEOCNT
+          MOVE      DLPTEOUN,LPTEOUNQ
+          RETURN
+.
+RKLGECO3  MOVE      ZERO,OVRCD
+          READKS    LEGECOA3;DLPTEOAD,DLPTEOEP,DLPTEOCN,LPTEOCOD,LPTEOTYP:
+                             DLPTEOUN,LPTEODTC,LPTEOOPE,LPTEODAT,LPTEOSTT:
+                             LPTEOEDT,LPTEOSPA
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPTEOAD,LPTEOADM
+          MOVE      DLPTEOEP,LPTEOEPN
+          MOVE      DLPTEOCN,LPTEOCNT
+          MOVE      DLPTEOUN,LPTEOUNQ
+          RETURN
+.
+RPLGECO3  MOVE      ZERO,OVRCD
+          READKP    LEGECOA3;DLPTEOAD,DLPTEOEP,DLPTEOCN,LPTEOCOD,LPTEOTYP:
+                             DLPTEOUN,LPTEODTC,LPTEOOPE,LPTEODAT,LPTEOSTT:
+                             LPTEOEDT,LPTEOSPA
+          GOTO      OVERCOND IF OVER
+          MOVE      DLPTEOAD,LPTEOADM
+          MOVE      DLPTEOEP,LPTEOEPN
+          MOVE      DLPTEOCN,LPTEOCNT
+          MOVE      DLPTEOUN,LPTEOUNQ
+          RETURN
++
+.
+

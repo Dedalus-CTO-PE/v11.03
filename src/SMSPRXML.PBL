@@ -1,0 +1,231 @@
+.------------------------------------------------------------------------------
+. Program       : SMSPRXML
+.
+. Function      : Functions for printing the SMS XML metatags (header & footer)
+.                 to be used by our letter printing routines in IBAPMS89,
+.                 WATLETCD & OUTPLTCD.
+.
+. Modifications :
+.     V11.03.02    07/12/2023  Don Nguyen         TSK 0893290
+.                  Added OCTMSH00 - SMS header for other contact numbers only
+.     V11.03.01    15/08/2023  Don Nguyen         TSK 0935736
+.                  Modified GETCPN00 - Skip inactive extra contacts
+.     V11.01.02    01/07/2021  Ebon Clements      TSK 0900650
+.                  Added LEAVPSMS - Don't send overdue leave SMS to patient
+.                  LVSMSH00 
+.     V11.01.01    27/05/2021  Ebon Clements      TSK 0900650
+.                  Added LVSMSH00 - SMS header with other phone numbers pre
+.                  populated
+.     V10.08.01    14/09/2016  Ebon Clements      TSK 0294154
+.                  Added contact types xml tag - contact_types
+.                  13/09/2016  Don Nguyen         TSK 0294154
+.                  Added line count increments for PRINT calls
+.     V10.08.00    20/07/2016  Don Nguyen         TSK 0294154
+.                  Created include
+.
+.******************************************************************************
+.*                  PRSMSF00                      Called by : PRLT0000,PRIN0000
+.*        Print XML start (header) tag for SMS messages
+.******************************************************************************
+PRMSGH00  PRINT     *N,"<messages>";
+          ADD       ONE,COUNT
+.
+PRMSGH99  RETURN
++
+.******************************************************************************
+.*                  PRSMSF00                      Called by : PRLT0000,PRIN0000
+.*        Print XML end (footer) tag for SMS messages
+.******************************************************************************
+PRMSGF00  PRINT     *N,"</messages>";
+          ADD       ONE,COUNT
+.
+PRMSGF99  RETURN
++
+.******************************************************************************
+.*                  PRSMSH00                      Called by : PRLT0000,PRIN0000
+.*        Print XML metatags (Header) for an SMS letter; up to SMS message body
+.******************************************************************************
+PRSMSH00  PRINT     *N,"<sms_message>";
+          PRINT     *N,"<msg_id>",*+,LXXSMSID,*-,"</msg_id>";
+          PRINT     *N,"<msg_code>",LXSMSCOD,"</msg_code>";
+          PRINT     *N,"<key>",LXXSMSKY,"</key>";
+          PRINT     *N,"<phone_no>",*+,LXXSMSPH,*-,"</phone_no>";
+          PRINT     *N,"<urno>",LXXSMSUR,"</urno>";
+          PRINT     *N,"<user_id>",LXXSMSUS,"</user_id>";
+          ADD       SEVEN,COUNT        * Increment page line counter
+.
+          CALL      GETCPN00           * Get Contacts phone numbers & msg id's
+          IF        EXIT=1
+            PRINT     *N,"<other_contacts>1</other_contacts>";
+            PRINT     *N,"<contact_nos>",*+,CONTPNMS,*-,"</contact_nos>";
+            PRINT     *N,"<contact_ids>",*+,CONTMSGI,*-,"</contact_ids>";
+            PRINT     *N,"<contact_types>",*+,CONTTYPS,*-,"</contact_types>";
+            ADD       FOUR,COUNT      * Increment page line counter
+          ELSE
+            PRINT     *N,"<other_contacts>0</other_contacts>";
+            ADD       ONE,COUNT        * Increment page line counter
+          ENDIF
+.
+          PRINT     *N,"<text><![CDATA[";
+          ADD       ONE,COUNT          * Increment page line counter
+.
+PRSMSH99  RETURN
++
+.******************************************************************************
+.*                  PRSMSF00                      Called by : PRLT0000,PRIN0000
+.*        Print XML metatags (Footer) for an SMS message
+.******************************************************************************
+PRSMSF00  PRINT     *N,"]]></text>";
+          PRINT     *N,"</sms_message>";
+          ADD       TWO,COUNT        * Increment page line counter
+.
+          MOVE      COUNT,PHYSPAGE     * Adjust physical page length to be just
+          ADD       ONE,PHYSPAGE       * after </messages>
+.
+PRSMSF99  RETURN
++
+.******************************************************************************
+.*                  GETCPN00                               Called by : PRSMSH00
+.*        Gets the Contacts phone numbers (max 10) if they exists.
+.*
+.*        Parameter:
+.*          PURNO     Patient UR to check for Contacts
+.*
+.*        Return:
+.*          EXIT      0=No Contacts, 1=Contacts phone numbers exists
+.*          CONTPNMS  Pipe delimited list of mobile phone numbers
+.*          CONTMSGI  Pipe delimited list of msg id's
+.*          CONTTYPS  Pipe delimited list of contact types
+.*
+.******************************************************************************
+GETCPN00  MOVE      ZERO,COUNTER
+          CLEAR     CONTPNMS                * Phone numbers
+          CLEAR     CONTMSGI                * Msg ID's
+          CLEAR     CONTTYPS                * Contact Types
+          MOVE      ZERO,F1
+          MOVE      MAXCOUNT,F1
+.
+          PACK      KEY14,PURNO,SP20
+          CALL      RSPMCEX1
+GETCPN10  CALL      RKPMCEX1
+          BRANCH    OVRCD,GETCPN90
+.
+          MATCH     PURNO,PMCEURNO
+          GOTO      GETCPN90 IF NOT EQUAL
+.
+          MATCH     "1",PMCEACTV            * Inactive?
+          GOTO      GETCPN10 IF EQUAL
+.
+          MATCH     "1",PMCESSMS            * Send SMS?
+          GOTO      GETCPN10 IF NOT EQUAL
+.
+          MATCH     SP70,PMCETELM           * Blank mobile number?
+          GOTO      GETCPN10 IF EQUAL
+.
+          ADD       ONE,COUNTER
+.
+          IF        COUNTER <> 1
+            APPEND    "|",CONTPNMS
+            APPEND    "|",CONTMSGI
+            APPEND    "|",CONTTYPS
+          ENDIF
+.
+          STRIP     PMCETELM
+          APPEND    PMCETELM,CONTPNMS
+.
+          CALL      GSMSID00                * Get SMS message id
+          APPEND    IBSQNEXT,CONTMSGI
+.
+          STRIP     PMCETYPE
+          APPEND    PMCETYPE,CONTTYPS
+.
+          COMPARE   COUNTER,F1
+          GOTO      GETCPN90 IF EQUAL  * Reached our limit
+          GOTO      GETCPN10
+.
+GETCPN90  COMPARE   COUNTER,ZERO
+          IF        @LESS
+            MOVE      ONE,EXIT         * Contact phone numbers exists
+          ELSE
+            MOVE      ZERO,EXIT        * No Contact phone numbers
+          ENDIF
+.
+          RESET     CONTPNMS
+          STRIP     CONTPNMS
+          RESET     CONTMSGI
+          STRIP     CONTMSGI
+          RESET     CONTTYPS
+          STRIP     CONTTYPS
+.
+GETCPN99  RETURN
++
+.******************************************************************************
+.*                  LVSMSH00                      Called by : PRLT0000
+.*        Print XML metatags (Header) for an SMS letter up to SMS message body
+.*        with other contact number pre populated
+.******************************************************************************
+LVSMSH00  PRINT     *N,"<sms_message>";
+          PRINT     *N,"<msg_id>",*+,LXXSMSID,*-,"</msg_id>";
+          PRINT     *N,"<msg_code>",LXSMSCOD,"</msg_code>";
+          PRINT     *N,"<key>",LXXSMSKY,"</key>";
+.
+. Fill patient sms number with the first other contact to avoid send error
+.
+          IF        LEAVPSMS=1
+            PRINT     *N,"<phone_no>",*+,LEAVFSMS,*-,"</phone_no>";
+          ELSE
+            PRINT     *N,"<phone_no>",*+,LXXSMSPH,*-,"</phone_no>";
+          ENDIF
+.
+          PRINT     *N,"<urno>",LXXSMSUR,"</urno>";
+          PRINT     *N,"<user_id>",LXXSMSUS,"</user_id>";
+          ADD       SEVEN,COUNT        * Increment page line counter
+.
+          MATCH     SP70,CONTPNMS      * Any other contact phone numbers
+          IF        !@EQUAL & !@EOS
+            PRINT     *N,"<other_contacts>1</other_contacts>";
+            PRINT     *N,"<contact_nos>",*+,CONTPNMS,*-,"</contact_nos>";
+            PRINT     *N,"<contact_ids>",*+,CONTMSGI,*-,"</contact_ids>";
+            PRINT     *N,"<contact_types>",*+,CONTTYPS,*-,"</contact_types>";
+            ADD       FOUR,COUNT      * Increment page line counter
+          ELSE
+            PRINT     *N,"<other_contacts>0</other_contacts>";
+            ADD       ONE,COUNT        * Increment page line counter
+          ENDIF
+.
+          PRINT     *N,"<text><![CDATA[";
+          ADD       ONE,COUNT          * Increment page line counter
+.
+LVSMSH99  RETURN
++
+.******************************************************************************
+.*                  OCTMSH00                      Called by : PRLT0000
+.*        Print XML metatags (Header) up to the SMS message body for other
+.*        contact numbers only (CONTPNMS)
+.******************************************************************************
+OCTMSH00  PRINT     *N,"<sms_message>";
+          PRINT     *N,"<msg_id>",*+,LXXSMSID,*-,"</msg_id>";
+          PRINT     *N,"<msg_code>",LXSMSCOD,"</msg_code>";
+          PRINT     *N,"<key>",LXXSMSKY,"</key>";
+.
+          PRINT     *N,"<urno>",LXXSMSUR,"</urno>";
+          PRINT     *N,"<user_id>",LXXSMSUS,"</user_id>";
+          ADD       SIX,COUNT        * Increment page line counter
+.
+          MATCH     SP70,CONTPNMS      * Any other contact phone numbers
+          IF        !@EQUAL & !@EOS
+            PRINT     *N,"<other_contacts>1</other_contacts>";
+            PRINT     *N,"<contact_nos>",*+,CONTPNMS,*-,"</contact_nos>";
+            PRINT     *N,"<contact_ids>",*+,CONTMSGI,*-,"</contact_ids>";
+            PRINT     *N,"<contact_types>",*+,CONTTYPS,*-,"</contact_types>";
+            ADD       FOUR,COUNT      * Increment page line counter
+          ELSE
+            PRINT     *N,"<other_contacts>0</other_contacts>";
+            ADD       ONE,COUNT        * Increment page line counter
+          ENDIF
+.
+          PRINT     *N,"<text><![CDATA[";
+          ADD       ONE,COUNT          * Increment page line counter
+.
+OCTMSH99  RETURN
++

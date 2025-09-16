@@ -1,0 +1,479 @@
+RCDTRECN
+. Include  : DEBRELCD.PBL
+.
+. Function : This include contains all the routines required by the
+.            Cash Release Program for interfacing to the new
+.            Sundry Accounts Rec. System.
+. 
+. Required FDs : DEBDBTFD/INC   Debtors Masterfile
+.                DEBFTHFD/INC   Transaction Header File
+.                DEBFDTFD/INC   Transaction Details File
+.
+.---------------------------------------------------------------------------
+. Mods : 
+.         V9.09.01 31/01/2008 J.Tan    CAR 160482
+.                  Removed checking parameter for updating bank reconciliation
+.         V5.07   08/10/98    Jim Stathopoulos
+.                            507 Changes
+.---------------------------------------------------------------------------
+.ARCS0000 Sundry Accounts Rec. Cash Release Processing
+.---------------------------------------------------------------------------
+ARCS0000  CALL      GETINV00                * Get Invoice Header
+          BRANCH    OVRCD,ARCS9900          * Not Found
+.
+          MOVE      DBFHDEB,DBDBDEB         * Save Debtor Code
+          MOVE      DBFHDDAT,INVDAT         * Save Invoice Date
+          MOVE      DBFHDOC,INVREF          * Save Invoice Reference
+ARCS0100  MOVE      DBFHDEB,KEY8            * Save Debtor Code
+          CALL      RDDBDB1                 * Lock Debtor
+          BRANCH    OVRCD,ARCS9800
+.
+          CALL      MVFTH000                * Move in Header Fields
+          PACK      KEY21,DBFHDEB,DBFHDTY,DBFHDOC
+          CALL      RADBFH1
+          IF        OVRCD=1
+            CALL      WRDBFH1
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          CALL      CLRTMP00                * Clear Extract File
+          CALL      CPDET000                * Extract Outstanding Details
+          CALL      STRAN000                * Post Details
+          CALL      UPFTH000                * Post Header Details
+.
+          GOTO      ARCS9999
+.
+ARCS9700  MOVE      SP70,DISPMSG            * Clear Line 24 Message Display
+          CALL      MESSAGE2                * Clear Line 24 and Save
+          KEYIN     *P1:24,*EL,"Debtor Locked - (":
+                    *V2LON,"R",*HOFF,")etry or e(":
+                    *V2LON,"X",*HOFF,")it ? ",ANS
+          CALL      MESSAGE3                * Restore Line 24
+          REP       UPPLOW,ANS              * Convert to Upper Case
+          MATCH     ANSR,ANS                * Re-try
+          GOTO      ARCS0100 IF EQUAL       * Return to locking
+          MATCH     ANSX,ANS                * EXIT
+          GOTO      ARCS9700 IF NOT EQUAL   * Must be a valid response
+          MOVE      ONE,EXIT
+          GOTO      ARCS9999
+.
+ARCS9800  BEEP      
+          CLEAR     DISPMSG
+          APPEND    "Invalid Debtor in Sundry A/R Inv.  - ",DISPMSG
+          APPEND    RCDTINVN,DISPMSG
+          APPEND    " - ",DISPMSG
+          RESET     DISPMSG
+          PRINT     DISPMSG
+....      CALL      MESSAGE1
+          MOVE      ONE,EXIT
+          GOTO      ARCS9999
+.
+ARCS9900  BEEP      
+          CLEAR     DISPMSG
+          APPEND    "Invalid Invoice in Sundry A/R - ",DISPMSG
+          APPEND    RCDTINVN,DISPMSG
+          APPEND    " - ",DISPMSG
+          RESET     DISPMSG
+          PRINT     DISPMSG
+.....     CALL      MESSAGE1
+          MOVE      ONE,EXIT
+ARCS9999  RETURN
+.-------------------------------------------------------------------------
+. Get Invoice Header Given RCDTINVN Reference : Returns OVRCD=0 Ok
+.                                                           =1 Not Found
+.-------------------------------------------------------------------------
+GETINV00  PACK      KEY12,RCDTINVN
+          REP       " 0",KEY12
+          PACK      KEY21,ONE,KEY12,SP70
+          CALL      RSDBFH6
+          CALL      RKDBFH6
+          BRANCH    OVRCD,GETINV90
+          MATCH     "1",DBFHDTY             * Check Document Type 1=Invoice
+          GOTO      GETINV90 IF NOT EQUAL
+          MATCH     KEY12,DBFHDOC           * Check Document Ref.
+          GOTO      GETINV90 IF NOT EQUAL
+          MOVE      ZERO,OVRCD
+          GOTO      GETINV99
+GETINV90  MOVE      ONE,OVRCD
+GETINV99  RETURN
+.------------------------------------------------------------
+. Move Header Fields into Record for Write
+.------------------------------------------------------------
+MVFTH000  MOVE      THREE,DBFHDTY             * Doc. Type 3=Cash Rec
+          MOVE      RCDTRECN,DBFHDOC             * Document Reference
+          REP       " 0",DBFHDOC
+          MOVE      RCDTTDAT,DBFHDDAT          * Document Date
+          REP       " 0",DBFHDDAT             * Document Date
+          MOVE      SP70,DBFHTER              * Terms Not Applicable to CR
+          MOVE      DBFHDDAT,DBFHDPRT         * Date Printed
+          PACK      DBFHDSTA,SP70             * Statement Date
+          PACK      DBFHCDAT,CCC,CYY,CMM,CDD  * Creation Date
+          REP       " 0",DBFHDPRT
+          REP       " 0",DBFHCDAT
+          MOVE      ZERO,DBFHTOT              * Update After Details Processed
+          MOVE      ZERO,DBFHTAX
+          CLOCK     TIME,CTIMEIS
+          UNPACK    CTIMEIS,CHOUR,KEY1,CMIN,KEY1,KEY2
+          PACK      DBFHCTIM,CHOUR,CMIN,KEY2
+          MOVE      PASSCODE,DBFHCUSR         * Creation User ID
+          MOVE      SP70,DBFHUR1              * User Def Ref 1
+          MOVE      SP70,DBFHUR2              * User Def Ref 2
+          MOVE      SP70,DBFHUD1              * User Def Date 1
+          MOVE      SP70,DBFHUD2              * User Def Date 2
+          MOVE      SP70,DBFHUY1              * User Def Y/N 1
+          MOVE      SP70,DBFHUY2              * User Def Y/N 2
+          MOVE      SP70,DBFHUC1              * User Def Code 1
+          MOVE      SP70,DBFHUC2              * User Def Code 2
+          MOVE      SP70,DBFHSPA              * Spare
+          RETURN
+.------------------------------------------------------------
+. Clear Temp Files for input
+.------------------------------------------------------------
+CLRTMP00  PACK      KEY11,DBDBDEB,SP70
+          CALL      RSDBTC1
+          CALL      RKDBTC1
+          BRANCH    OVRCD,CLRTMP99
+          MATCH     DBTCDEB,DBDBDEB
+          GOTO      CLRTMP99 IF NOT EQUAL
+          PACK      KEY11,DBTCDEB,DBTCDLN
+          CALL      DEDBTC1
+          GOTO      CLRTMP00
+CLRTMP99  RETURN
+.------------------------------------------------------------
+. Copy Invoice Details to Blank Receipt Temp File
+.------------------------------------------------------------
+CPDET000  PACK     KEY44,DBDBDEB,INVDAT,INVREF,SP70
+          CALL     RDDBFD3
+          IF       OVRCD=0
+            CALL     RPDBFD3
+          ENDIF
+CPDET100  CALL     RKDBFD3
+          BRANCH   OVRCD,CPDET999
+          MATCH    DBFHDEB,DBFDDEB           * Same Debtor
+          GOTO     CPDET999 IF NOT EQUAL
+          MATCH    INVDAT,DBFDIDAT           * Same Invoice Date
+          GOTO     CPDET999 IF NOT EQUAL
+          MATCH    INVREF,DBFDINV            * Same Invoice Reference
+          GOTO     CPDET999 IF NOT EQUAL
+.
+          MOVE     DBFDDEB,DBTCDEB           * Same Debtor
+          MOVE     DBFDILN,DBTCDLN
+          PACK     KEY11,DBTCDEB,DBTCDLN
+          CALL     RDDBTC1
+          IF       OVRCD=0
+            CALL     ADDET000
+            CALL     UPDBTC1
+          ELSE
+            CALL     MVDET000
+            CALL     WRDBTC1
+          ENDIF
+          GOTO     CPDET100           * Next Line
+CPDET999  RETURN
+.------------------------------------------------------------
+. Add in Invoice Details
+.------------------------------------------------------------
+ADDET000  MOVE      DBFDDTY,F1
+          BRANCH    F1,ADDET200,ADDET400,ADDET400,ADDET200,ADDET400
+ADDET200  ADD       DBFDQTY,DBTCQTY    * This would be very Strange if
+          ADD       DBFDTOT,DBTCTOT    * it happened
+          ADD       DBFDTAX,DBTCTAX
+          GOTO      ADDET999
+.
+ADDET400  SUB       DBFDQTY,DBTCQTY    * Take off Payments & Credits
+          SUB       DBFDTOT,DBTCTOT
+          SUB       DBFDTAX,DBTCTAX
+          GOTO      ADDET999
+.
+ADDET999  RETURN
+.------------------------------------------------------------
+. Move in Invoice Details
+.------------------------------------------------------------
+MVDET000  MOVE      DBFDDEB,DBTCDEB
+          MOVE      DBFDITM,DBTCITM
+          MOVE      DBFDSDAT,DBTCSDAT
+          MOVE      DBFDDREF,DBTCDREF
+          MOVE      DBFDOREF,DBTCOREF
+          MOVE      DBFDQTY,DBTCQTY
+          MOVE      DBFDPRI,DBTCPRI
+          MOVE      DBFDTOT,DBTCTOT
+          MOVE      DBFDTRT,DBTCTRT
+          MOVE      DBFDTAX,DBTCTAX
+          MOVE      DBFDUR1,DBTCUR1
+          MOVE      DBFDUR2,DBTCUR2
+          MOVE      DBFDUD1,DBTCUD1
+          MOVE      DBFDUD2,DBTCUD2
+          MOVE      DBFDUY1,DBTCUY1
+          MOVE      DBFDUY2,DBTCUY2
+          MOVE      DBFDUC1,DBTCUC1
+          MOVE      DBFDUC2,DBTCUC2
+          MOVE      DBFDUC3,DBTCUC3
+          MOVE      DBFDUC4,DBTCUC4
+          MOVE      DBFDGST,DBTCGST
+          MOVE      SP70,DBTCSPA
+          RETURN
+.------------------------------------------------------------
+. Save Cash Transaction Details
+.------------------------------------------------------------
+STRAN000  MOVE       ZERO,TRANLINE
+          ASSIGN     RCDTAMNT-RCDTDISC,TOTALOUT
+          PACK       KEY11,DBDBDEB,SP70
+          CALL       RSDBTC1
+STRAN100  CALL       RKDBTC1
+          BRANCH     OVRCD,STRAN900
+          MATCH      DBTCDEB,DBDBDEB
+          GOTO       STRAN900 IF NOT EQUAL
+          COMPARE    ZERO,TOTALOUT           * Have we allocated all the amount
+          GOTO       STRAN900 IF EQUAL       * Received Yes
+          IF         (DBTCTAX+DBTCTOT)=0
+            GOTO       STRAN100              * Ignore Zero Amounts
+          ENDIF
+          IF         (DBTCTAX+DBTCTOT)>TOTALOUT
+            IF         DBTCTRT=0
+              MOVE       TOTALOUT,DBTCTOT
+              MOVE       ZERO,DBTCTAX
+              MOVE       ZERO,TOTALOUT
+            ELSE
+              ASSIGN     DBTCTAX/(DBTCTOT+DBTCTAX)*TOTALOUT,DBTCTAX
+              ASSIGN     TOTALOUT-DBTCTAX,DBTCTOT
+              MOVE       ZERO,TOTALOUT
+            ENDIF
+            MOVE       ZERO,TOTALOUT
+          ELSE
+            ASSIGN    TOTALOUT-DBTCTAX-DBTCTOT,TOTALOUT
+          ENDIF
+.
+STRAN110  CALL       MVFDT000
+          PACK       KEY24,DBFDDEB,DBFDDTY,DBFDDOC,DBFDDLN
+          CALL       RADBFD1       * Check File
+          COMPARE    ZERO,OVRCD    * Must Write to File
+          GOTO       STRAN110 IF EQUAL
+.
+          CALL       WRDBFD1       * Write Detail Record
+.
+          CALL       GLDEB000      * Update General Ledger
+          CALL       UPINV000      * Update Invoice Details
+.
+          GOTO       STRAN100
+.
+STRAN900  COMPARE    ZERO,TOTALOUT
+          GOTO       STRAN999 IF EQUAL
+.
+          CALL       LEFOV000      * Distribute Left Overs
+.
+STRAN999  RETURN
+.------------------------------------------------------------
+. Distribute Left Over Allocation to First Item on Invoice
+.------------------------------------------------------------
+LEFOV000  PACK       KEY11,DBDBDEB,SP70
+          CALL       RSDBTC1
+LEFOV100  CALL       RKDBTC1
+          BRANCH     OVRCD,LEFOV900
+          MATCH      DBTCDEB,DBDBDEB
+          GOTO       LEFOV900 IF NOT EQUAL
+          MOVE       TOTALOUT,DBTCTOT
+          MOVE       ZERO,DBTCTAX
+.
+LEFOV110  CALL       MVFDT000
+          PACK       KEY24,DBFDDEB,DBFDDTY,DBFDDOC,DBFDDLN
+          CALL       RADBFD1       * Check File
+          COMPARE    ZERO,OVRCD    * Must Write to File
+          GOTO       LEFOV110 IF EQUAL
+          CALL       WRDBFD1       * Write Detail Record
+.
+          CALL       GLDEB000      * Update General Ledger
+          CALL       UPINV000      * Update Invoice Details
+.
+          GOTO       LEFOV999
+.
+LEFOV900  BEEP
+          CLEAR     DISPMSG
+          APPEND    "Can't Allocate Invoice in Sundry A/R - ",DISPMSG
+          APPEND    RCDTINVN,DISPMSG
+          APPEND    " - ",DISPMSG
+          RESET     DISPMSG
+          PRINT     DISPMSG
+.....     CALL      MESSAGE1
+          MOVE      ONE,EXIT
+LEFOV999  RETURN
+.------------------------------------------------------------
+. Move in Financial Detail Transaction
+.------------------------------------------------------------
+MVFDT000  ADD        ONE,TRANLINE
+          MOVE       TRANLINE,DBFDDLN    * Line Number
+          MOVE       DBTCDEB,DBFDDEB     * Debtor
+          MOVE       THREE,DBFDDTY       * Doc. Type 3=Cash Rec.te
+          MOVE       DBFHDOC,DBFDDOC     * Document Reference (Rec. Number)
+          REP        " 0",DBFDDOC
+          MOVE       INVREF,DBFDINV      * Invoice Ref
+          MOVE       DBTCDLN,DBFDILN     * Invoice Line
+          MOVE       INVDAT,DBFDIDAT     * Invoice Date
+          REP        " 0",DBFDIDAT
+          MOVE       RCDTTDAT,DBFDPDAT
+          REP        " 0",DBFDPDAT
+.
+          MOVE       ONE,DBFDGLS        * Ledger Status
+          MOVE       DBTCITM,KEY8        * Read Item for General Ledger Details
+          CALL       RDDBIT1
+          MOVE       DBITLED,DBFDLED     * Ledger
+          MOVE       DBITIAC,DBFDIAC     * Income Account
+          MOVE       DBITCAC,DBFDCAC     * Control Account
+          MOVE       DBITTAC,DBFDTAC     * Tax Account
+          MOVE       DBITTCA,DBFDTCA     * Tax Control
+          MOVE       SP70,DBFDBCHG       * Billing Charge Number
+          PACK       DBFDBDAT,CCC,CYY,CMM,CDD
+          REP        " 0",DBFDBDAT
+          UNPACK     CTIMEIS,CHOUR,KEY1,CMIN,KEY1,KEY2
+          PACK       DBFDBTIM,CHOUR,CMIN,KEY2
+          MOVE       PASSCODE,DBFDBUSR   * Billing Input User ID
+          MOVE       DBTCITM,DBFDITM     * Sales Item Code
+          MOVE       DBTCSDAT,DBFDSDAT   * Service Date
+          REP        " 0",DBFDSDAT
+          MOVE       DBTCDREF,DBFDDREF   * Debtors Reference
+          MOVE       DBTCOREF,DBFDOREF   * Our Reference
+          MOVE       DBTCQTY,DBFDQTY     * Quantity
+          MOVE       DBTCPRI,DBFDPRI     * Price
+          MOVE       DBTCTOT,DBFDTOT     * Extended Total
+          MOVE       DBTCTRT,DBFDTRT     * Tax Rate
+          MOVE       DBTCTAX,DBFDTAX     * Tax Amount
+          ASSIGN     DBFDTAX+DBFDTOT,DBFDPAID       * Paid Amount
+          MOVE       DBTCUR1,DBFDUR1     * User Def Ref 1
+          MOVE       DBTCUR2,DBFDUR2     * User Def Ref 2
+          MOVE       DBTCUD1,DBFDUD1     * User Def Date 1
+          MOVE       DBTCUD2,DBFDUD2     * User Def Date 2
+          MOVE       DBTCUY1,DBFDUY1     * User Def Y/N 1
+          MOVE       DBTCUY2,DBFDUY2     * User Def Y/N 2
+          MOVE       DBTCUC1,DBFDUC1     * User Def Code 1
+          MOVE       DBTCUC2,DBFDUC2     * User Def Code 2
+          MOVE       DBTCUC3,DBFDUC3     * User Def Code 3
+          MOVE       DBTCUC4,DBFDUC4     * User Def Code 4
+          MOVE       DBTCGST,DBFDGST     * GST Code
+          MOVE       SP70,DBFDSPA        * Spare
+          RETURN
+.------------------------------------------------------------
+. Update Invoice Transaction Details
+.------------------------------------------------------------
+UPINV000  ASSIGN     DBFDTOT+DBFDTAX,TOTALAMT
+          PACK       KEY24,DBFDDEB,ONE,DBFDINV,DBFDILN
+          CALL       RDDBFD1
+          BRANCH     OVRCD,UPINV900
+.
+          ADD        TOTALAMT,DBFDPAID       * Increase Amount Paid by Cr Amt.
+          IF         DBFDPAID=(DBFDTAX+DBFDTOT)
+            MOVE       RCDTTDAT,DBFDPDAT
+            REP        " 0",DBFDPDAT
+          ELSE
+            MOVE       "99999999",DBFDPDAT
+          ENDIF
+          CALL       UPDBFD1
+          GOTO       UPINV999
+.
+UPINV900  BEEP
+          MOVE       "ERROR : Update Failed on Invoice Details - ",DISPMSG
+          PRINT      DISPMSG
+....      CALL       MESSAGE1
+.
+UPINV999  RETURN
+.----------------------------------------------------------------------
+. Update General Ledger Interface File for New A/R System
+.----------------------------------------------------------------------
+GLDEB000  BRANCH    HSYS1,GLDEB100        * Update GL Batch File
+.         IF        RCCNUPBR=1
+.           CALL      UPBR0000              * Update Bank Rec.
+.         ENDIF
+          GOTO      GLDEB999
+.
+GLDEB100  UNPACK    RCDTBNKA,DIM2,GLBANK
+          UNPACK    DBFDLED,GLSLEDG
+          MOVE      DBFDIAC,GLSACCT
+          PACK      GLACCT,GLSLEDG,GLSACCT
+          MOVE      ONE,GLTYPE
+          PACK      KEY15,GLACCT,GLTYPE
+          MOVE      RCDTREGI,GLREG
+          MOVE      DBFDTOT,GLAMNT
+          MATCH     DBFDIAC,DBFDTAC
+          IF        @EQUAL
+            ADD       DBFDTAX,GLAMNT
+          ENDIF
+.
+          CALL      WGLB0000
+.
+. Write Tax Entries if Required
+.--------------------------------------------------
+          COMPARE   ZERO,DBFDTAX
+          GOTO      GLDEB999 IF EQUAL
+          MATCH     DBFDIAC,DBFDTAC
+          GOTO      GLDEB999 IF EQUAL
+.
+          MOVE      DBFDTAX,GLAMNT
+          UNPACK    DBFDLED,GLSLEDG
+          MOVE      DBFDTAC,GLSACCT
+          
+          CALL      WGLB0000
+.
+GLDEB999  RETURN
+.------------------------------------------------------------
+. Display Message on Line 24
+.------------------------------------------------------------
+.MESSAGE1  GETVAR    LINE24,ATTR24,1,24
+.          RESET     DISPMSG
+.          STRIP     DISPMSG
+.          ENDSET    DISPMSG
+.          APPEND    SP1,DISPMSG
+.          RESET     DISPMSG
+.          DISPLAY   *P1:24,*EL,*+,DISPMSG;
+.          CALL      HITENTER
+.          PUTVAR    LINE24,ATTR24,1,24
+.          RETURN
+.------------------------------------------------------------
+. Display Message on Line 24 (No Hit Enter)
+.------------------------------------------------------------
+.MESSAGE2  GETVAR    LINE24A,ATTR24A,1,24
+.          RESET     DISPMSG
+.          STRIP     DISPMSG
+.          ENDSET    DISPMSG
+.          APPEND    SP1,DISPMSG
+.          RESET     DISPMSG
+.          DISPLAY   *P1:24,*EL,*+,DISPMSG;
+.          RETURN
+.
+.------------------------------------------------------------
+. Display Restore Line 24 after Message2
+.------------------------------------------------------------
+.MESSAGE3  PUTVAR    LINE24A,ATTR24A,1,24
+.          RETURN
+.------------------------------------------------------------
+. Update Debtors Transaction Header
+.------------------------------------------------------------
+UPFTH000  MOVE     THREE,DBFHDTY             * Doc. Type 3=Cash Rec
+          MOVE     RCDTRECN,DBFHDOC             * Document Reference
+          REP      " 0",DBFHDOC
+          PACK     KEY21,DBDBDEB,DBFHDTY,DBFHDOC
+          CALL     RDDBFH1
+          BRANCH   OVRCD,UPFTH900
+.
+          MOVE     ZERO,DBFHTAX
+          MOVE     ZERO,DBFHTOT
+.
+          PACK     KEY24,DBFHDEB,DBFHDTY,DBFHDOC,SP70
+          CALL     RSDBFD1
+UPFTH100  CALL     RKDBFD1
+          BRANCH   OVRCD,UPFTH200
+          PACK     KEY21,DBFHDEB,DBFHDTY,DBFHDOC,SP70
+          PACK     KEY24,DBFDDEB,DBFDDTY,DBFDDOC,DBFDDLN,SP70
+          MATCH    KEY21,KEY24
+          GOTO     UPFTH200 IF NOT EQUAL
+.
+          ADD      DBFDTAX,DBFHTAX
+          ADD      DBFDTOT,DBFHTOT
+          GOTO     UPFTH100
+.
+UPFTH200  CALL     UPDBFH1
+          GOTO     UPFTH999
+.
+UPFTH900  BEEP
+          MOVE     "ERROR: Header Record Update Failed - ",DISPMSG
+          PRINT    DISPMSG
+....      CALL     MESSAGE1
+.
+UPFTH999  RETURN
+.

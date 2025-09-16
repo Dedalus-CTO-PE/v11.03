@@ -1,0 +1,377 @@
+.
+.         INC       OUTDTRIO.INC
+.
+.         FILE  I/O REQUESTS FOR DEBTORS TRANSACTION FILE
+.------------------------------------------------------------------------------
+. Modifications  :
+.------------------------------------------------------------------------------
+. V10.13.01  26/09/2018  Thanh T       TSK 0859743
+.            Added OTDTACAO OTDTDSRO OTDTSRTX OTDTLSPN OTDTMPRO
+.                  OTDTNPAT OTDTSFDM OTDTTDUR OTDTNCAT fields
+.------------------------------------------------------------------------------
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY22   DIM           22             KEY FOR OUTDTRO1
+.KEY23   DIM           23             KEY FOR OUTDTRO2
+.KEY31   DIM           31             KEY FOR OUTDTRO3
+.KEY26   DIM           26             KEY FOR OUTDTRO5
+.KEY38   DIM           38             KEY FOR OUTDTRO6
+.
+.         NOTE:-
+.                  RDAAAX  IS OUT READ CALL ON FILE OUTAAAX
+.                  RDKAAAX  IS OUT READKS CALL
+.                  WRAAAX  IS OUT WRITE CALL
+.                  UPAAAX  IS OUT UPDATE CALL
+.                  DEAAAX  IS OUT DELETE CALL
+. 
+.         NOTE  OVRCD=1   RECORD DOSENT EXIST
+.                     2   RECORD IS LOCKED
+.
+RDADTRO1 RESET     KEY22
+         MOVE      ZERO,OVRCD
+         READ      OUTDTRO1,KEY22;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSDTRO1 RESET     KEY22
+         READ      OUTDTRO1,KEY22;;
+         RETURN  
+.
+RDDTRO1  MOVE      ZERO,OVRCD
+         RESET     KEY22
+         READ      OUTDTRO1,KEY22;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                                  OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                                  OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                                  OTMISGRP,OTDEPTYP,OTBATCHN:
+                                  OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                                  OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                                  OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                                  OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                                  OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN  
+.
+RDKDTRO1 MOVE      ZERO,OVRCD
+         READKS    OUTDTRO1;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN  
+.
+RDPDTRO1 MOVE      ZERO,OVRCD
+         READKP    OUTDTRO1;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN  
+.
+WRDTRO1  RESET     KEY22
+         MOVE      OTRECTYP,DOTRECTY
+         MOVE      OTNINVS,DOTNINVS
+.
+         CLOCK     TIME,OTCHGTIM
+         PACK      OTCHGDTE,CCC,CYY,CMM,CDD
+         REP       " 0",OTCHGDTE
+.
+         WRITE     OUTDTRO1,KEY22;KEY22,OTDDESC,OTPATAMT:
+                                  OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                                  OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                                  OTMISGRP,OTDEPTYP,OTBATCHN:
+                                  OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                                  OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                                  OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                                  OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                                  OTDTTDUR,OTDTNCAT,OTSPARE
+         RETURN  
+.
+UPDTRO1  MOVE      OTNUMB,DOTNUMB
+         MOVE      OTTRANS,DOTTRANS
+         MOVE      OTRECTYP,DOTRECTY
+         MOVE      OTNINVS,DOTNINVS
+.
+         CLOCK     TIME,OTCHGTIM
+         PACK      OTCHGDTE,CCC,CYY,CMM,CDD
+         REP       " 0",OTCHGDTE
+.
+         UPDATE    OUTDTRO1;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+         RETURN  
+.
+DEDTRO1  RESET     KEY22
+         DELETE    OUTDTRO1,KEY22
+         RETURN
+.
+RDADTRO2 RESET     KEY31
+         MOVE      ZERO,OVRCD
+         READ      OUTDTRO1,KEY31;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSDTRO2 RESET     KEY31
+         READ      OUTDTRO2,KEY31;;
+         RETURN  
+.
+RDKDTRO2 MOVE      ZERO,OVRCD
+         READKS    OUTDTRO2;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN  
+.
+RDPDTRO2 MOVE      ZERO,OVRCD
+         READKP    OUTDTRO2;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN  
+.
+RDSDTRO3 RESET     KEY31
+         READ      OUTDTRO3,KEY31;;
+         RETURN  
+.
+RDKDTRO3 MOVE      ZERO,OVRCD
+         READKS    OUTDTRO3;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN  
+.
+RDPDTRO3 MOVE      ZERO,OVRCD
+         READKP    OUTDTRO3;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN  
+.
+RDSDTRO4 RESET     KEY23
+         READ      OUTDTRO4,KEY23;;
+         RETURN  
+.
+RDKDTRO4 MOVE      ZERO,OVRCD
+         READKS    OUTDTRO4;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN  
+.
+RDPDTRO4 MOVE      ZERO,OVRCD
+         READKP    OUTDTRO4;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN  
+.
+RDSDTRO5 RESET     KEY26
+         READ      OUTDTRO5,KEY26;;
+         RETURN
+.
+RDKDTRO5 MOVE      ZERO,OVRCD
+         READKS    OUTDTRO5;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN
+.
+RDPDTRO5 MOVE      ZERO,OVRCD
+         READKP    OUTDTRO5;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN
+.
+RDSDTRO6 RESET     KEY38
+         READ      OUTDTRO6,KEY38;;
+         RETURN
+.
+RDKDTRO6 MOVE      ZERO,OVRCD
+         READKS    OUTDTRO6;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN
+.
+RDPDTRO6 MOVE      ZERO,OVRCD
+         READKP    OUTDTRO6;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+.
+         GOTO      OVERCOND IF OVER
+         MOVE      DOTNUMB,OTNUMB
+         MOVE      DOTTRANS,OTTRANS
+         MOVE      DOTRECTY,OTRECTYP
+         MOVE      ONE,OTNINVS
+         MOVE      DOTNINVS,OTNINVS
+         RETURN
+.
+UPDTRO6  MOVE      OTNUMB,DOTNUMB
+         MOVE      OTTRANS,DOTTRANS
+         MOVE      OTRECTYP,DOTRECTY
+         MOVE      OTNINVS,DOTNINVS
+.
+         CLOCK     TIME,OTCHGTIM
+         PACK      OTCHGDTE,CCC,CYY,CMM,CDD
+         REP       " 0",OTCHGDTE
+.
+         UPDATE    OUTDTRO6;DOTNUMB,OTINVNO,DOTTRANS,OTDDESC,OTPATAMT:
+                            OTDDATE,OTITEMNO,OTTYPE,OTPAYTYP,OTRECEPT:
+                            OTINVPRT,DOTRECTY,OTCHGDTE,OTCHGTIM:
+                            OTMISGRP,OTDEPTYP,OTBATCHN:
+                            OTPATPOR,OTREBPOR,DOTNINVS,OTSERVS,OTDTGSTA:
+                            OTDTGSTC,OTDTGSTM,OTDTEFFD:
+                            OTDTCRST,OTDTBTCH,OTDTPCOD,OTDTACAO,OTDTDSRO:
+                            OTDTSRTX,OTDTLSPN,OTDTMPRO,OTDTNPAT,OTDTSFDM:
+                            OTDTTDUR,OTDTNCAT,OTSPARE
+         RETURN
+.

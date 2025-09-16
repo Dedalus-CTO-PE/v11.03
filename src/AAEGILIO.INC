@@ -1,0 +1,45 @@
+.
+. AAEGILIO.INC
+. ------------
+. Filenames       : aaegilio
+. Description     : A&E Investigation sub-analysis codes file
+.
+. ******* INDEX ONE *******
+.
+RSAEGIL1  RESET     KEY6
+          READ      AAEGILA1,KEY6;;
+          RETURN
+.
+RAAEGIL1  RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      AAEGILA1,KEY6;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDAEGIL1  RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      AAEGILA1,KEY6;AEILMAIN,AEILCODE,AEILDESC,AEILSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKAEGIL1  MOVE      ZERO,OVRCD
+          READKS    AAEGILA1;AEILMAIN,AEILCODE,AEILDESC,AEILSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPAEGIL1  MOVE      ZERO,OVRCD
+          READKP    AAEGILA1;AEILMAIN,AEILCODE,AEILDESC,AEILSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPAEGIL1  UPDATE    AAEGILA1;AEILMAIN,AEILCODE,AEILDESC,AEILSPAR
+          RETURN
+.
+WRAEGIL1  RESET     KEY6
+          WRITE     AAEGILA1,KEY6;AEILMAIN,AEILCODE,AEILDESC,AEILSPAR
+          RETURN
+.
+DEAEGIL1  RESET     KEY6
+          DELETE    AAEGILA1,KEY6
+          RETURN
+.

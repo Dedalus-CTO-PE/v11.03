@@ -1,0 +1,187 @@
+.        SAPARINT :
+.
+.        USED BY  : IBAPMS56  
+.
+.        VERSION  :
+.         V9.02.01  18/03/2003  Dean Cramer  CAR 36515
+.                   Ported from 6.10 for IBAHMS62
+.         V6.10.00  23/12/2002  Henry Son SRF 35029       
+.
+.        This include will write out the SAP AR Interface Accruals to a    
+.        Temporary File.                                                
+.                                                                       
+.        The main includes where the Fields can be found are :  
+.
+.               PATDINVS : Include variables for the printing of Invoices
+.
+.---------------------------------------------------------------------------
+...
+.*******************************************************************************
+.*                                CLRSAPAR
+.*        This section of the include clears the temporary fields
+.*******************************************************************************
+...
+CLRSAPAR  UNPACK    SP70,TMPSPSEQ,TMPSPDTY,TMPSPGLA
+          UNPACK    SP70,TMPSPGLS
+          MOVE      ZERO,TMPSPAMT
+...       MOVE      ZERO,TMPSPNSQ
+          RETURN
+...
+.         This section of the include moves the appropriate fields.
+.
+CRTSP000  ADD       ONE,TMPSPNSQ            * Add 1 to seq - make unique
+          MOVE      TMPSPNSQ,TMPSPSEQ       * Move to Dim Key field
+          MOVE      FINCODE,TMPSPGLA        * G/L Account
+          PACK      TMPSPGLA,TMPSPGLA,SP70
+...
+...       Determine the G/L Sub code based on the Fincode
+...
+          UNPACK    FINCODE,FINCHAR,FINREST 
+...  
+          MATCH     ANSA,FINCHAR
+          GOTO      CRTSP010 IF EQUAL       * Accomodation or Theatre
+...
+          MATCH     ANSC,FINCHAR
+          GOTO      CRTSP020 IF EQUAL       * Lumpsum Casemix
+...
+          MATCH     ANSD,FINCHAR
+          GOTO      CRTSP030 IF EQUAL       * Daily Charge Casemix
+...
+          MATCH     ANST,FINCHAR
+          GOTO      CRTSP040 IF EQUAL       * Misc. Item Casemix
+...
+...       Theatre charges come out as Miscellaneous Charges
+...       Only for Inpatients. Check the DTR to know
+...
+          MOVE      THREE,TMPSPGLS
+          MATCH     "3",TMPSPDTY
+          GOTO      CRTSP005 IF EQUAL
+          GOTO      CRTSP060 
+...
+CRTSP005  IF        TRECTYPE=2
+              MOVE    TWO,TMPSPGLS
+          ENDIF
+...
+          GOTO      CRTSP060
+...
+CRTSP010  MOVE      ONE,TMPSPGLS            * Accomodation
+          GOTO      CRTSP060
+...
+CRTSP020  MOVE      FOUR,TMPSPGLS           * Lumpsum Casemix
+          GOTO      CRTSP060
+...
+CRTSP030  MOVE      FIVE,TMPSPGLS           * Daily Charge Casemix
+          GOTO      CRTSP060
+...
+CRTSP040  MOVE      THREE,TMPSPGLS          * Misc. Item Casemix
+          GOTO      CRTSP060
+...
+CRTSP060  IF        FINAMT = 0                        
+            GOTO      CRTSP999
+          ENDIF
+...
+          MOVE      FINAMT,TMPSPAMT         * Amount
+...
+...       Setp up Fincode for Misc Items.
+...       Miscellaneous Items comes in the form of Mxxxyyyy or M...yyyy
+...       We need to only store the xxx for Group type for
+...       acumulation but if the group type is blank
+...       then we need to accumulate by item numbers.
+...
+          UNPACK    TMPSPGLA,FINCHAR,FINGROUP,FINITEMN,FINREST
+          MATCH     ANSM,FINCHAR
+          GOTO      CRTSP200 IF NOT EQUAL
+...
+          MATCH     SP70,FINGROUP
+          GOTO      CRTSP100 IF NOT EQUAL
+          PACK      TMPSPGLA,FINCHAR,FINITEMN,FINREST,SP70
+          GOTO      CRTSP200
+...
+CRTSP100  PACK      TMPSPGLA,FINCHAR,FINGROUP,SP70
+...
+...       Now check the Financial period date.
+...       Find out which financial year and period this is in
+...
+CRTSP200  OPEN      PATDRGA2,"patdrgaf" * Open the date range file
+          PACK      KEY14,FINDATE,SP6   * Position to this date
+          CALL      RDSDRGA2            * Go to this date in the file
+          CALL      RDKDRGA2            * Get the first record on or after date
+          BRANCH    OVRCD,CRTSP500      * No records in file.
+...
+          MATCH     DRGFDTE,FINDATE     * Is the date before the from date ?
+          GOTO      CRTSP500 IF LESS    * Yes. Date not found in file.
+...
+...       Period record found
+...
+          MATCH     DRGYR,EXTRYEAR
+          GOTO      CRTSP999 IF NOT EQUAL
+...
+          PACK      KEY21,TMPSPDTY,TMPSPGLA,TMPSPGLS,TMPSPPST:
+                          TMPSPSEQ
+          CALL      WRTMPIN1                * Write the temporary record
+          ADD       TMPSPAMT,TOTIFAMT       * Total Interface Amount
+          ADD       ONE,TOTICNT             * Add 1 to total recs    
+          GOTO      CRTSP999
+...
+CRTSP500  KEYIN     *P1:24,*EL,*V2LON,*B:
+                    "** Date ",*DV,FINDATE," not found in Period Range":
+                    " file. Hit <ENTER> to Continue ",*EOFF,ANS;
+
+...
+CRTSP999  CLOSE     PATDRGA2
+          RETURN
+...
+.
+.*******************************************************************************
+.*
+.*                        Work file IO Routines
+.*******************************************************************************
+RSTMPIN1  RESET     KEY21
+          READ      TMPSPIFL,KEY21;;
+          RETURN
+.
+RKTMPIN1  MOVE      ZERO,OVRCD
+          READKS    TMPSPIFL;TMPSPSEQ,TMPSPDTY,TMPSPGLA,TMPSPGLS:
+                                 TMPSPPST,TMPSPAMT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTMPIN1  RESET     KEY21
+          MOVE      ZERO,OVRCD
+          WRITE     TMPSPIFL,KEY21;TMPSPSEQ,TMPSPDTY,TMPSPGLA,TMPSPGLS:
+                                 TMPSPPST,TMPSPAMT
+          RETURN
+.
++
+.*******************************************************************************
+.         Create a tempfile
+.*******************************************************************************
+CTMPSP00  MOVE      PORT TO DIM2
+          CLEAR     FNAMEZ
+          APPEND    "sapint",FNAMEZ
+          APPEND    DIM2,FNAMEZ
+          RESET     FNAMEZ
+          REP       " 0" IN FNAMEZ
+          CALL      KTMPSP00
+.
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAMEZ,CMDLINE
+          APPEND    " 28 U1-5,6-6,7-19,20-20,21-21",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          RETURN
++
+.*******************************************************************************
+.         Kill tempfile
+.*******************************************************************************
+KTMPSP00  CLOSE     TMPSPIFL
+.
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAMEZ,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          RETURN
++
+.*******************************************************************************

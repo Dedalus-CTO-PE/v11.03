@@ -1,0 +1,52 @@
+.
+. PATINMIO.INC
+. ------------
+. Filename     :   patinmaf.dat
+. Description  :   Patient  invoice message I/O
+. Variables    :   OVRCD  FORM   1
+.                  KEY4   DIM    4
+.
+RAPTINM1
+          MOVE      ZERO,OVRCD
+          RESET     KEY4
+          READ      PATINMA1,KEY4;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+RSPTINM1
+          MOVE      ZERO,OVRCD
+          RESET     KEY4
+          READ      PATINMA1,KEY4;;
+          RETURN
+RDPTINM1
+          RESET     KEY4
+          MOVE      ZERO,OVRCD
+          READ      PATINMA1,KEY4;DPTIMSYS,PTIMCLM,PTIMMES1,PTIMMES2,PTIMSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTIMSYS,PTIMSYS
+          RETURN
+RKPTINM1
+          MOVE      ZERO,OVRCD
+          READKS    PATINMA1;DPTIMSYS,PTIMCLM,PTIMMES1,PTIMMES2,PTIMSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTIMSYS,PTIMSYS
+          RETURN
+RPPTINM1
+          MOVE      ZERO,OVRCD
+          READKP    PATINMA1;DPTIMSYS,PTIMCLM,PTIMMES1,PTIMMES2,PTIMSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTIMSYS,PTIMSYS
+          RETURN
+UPPTINM1
+          MOVE      PTIMSYS,DPTIMSYS
+          UPDATE    PATINMA1;DPTIMSYS,PTIMCLM,PTIMMES1,PTIMMES2,PTIMSPAR
+          RETURN
+WRPTINM1
+          MOVE      PTIMSYS,DPTIMSYS
+          RESET     KEY4
+          WRITE     PATINMA1,KEY4;DPTIMSYS,PTIMCLM,PTIMMES1,PTIMMES2,PTIMSPAR
+          RETURN
+DEPTINM1
+          RESET     KEY4
+          DELETE    PATINMA1,KEY4
+          RETURN
+

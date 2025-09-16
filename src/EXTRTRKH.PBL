@@ -1,0 +1,320 @@
+.*****************************************************************************
+.* System    :   Medical Records Tracking                                    *
+.* Program   :   EXTRTRKH                                                    *
+.* Desc      :   MR Tracking History Data Extraction Program                 *
+.*****************************************************************************
+.* Date      :   06/03/2014                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will extract the Medical Records Tracking      *
+.*               history into a pipe delimited file in a format that will    *
+.*               feed into CONVTRKH.                                         *
+.* Mods:                                                                     *
+.*        V10.08.01 18/04/2016  Steve Armstrong  CAR 0312150                 *
+.*                  Mods to allow extraction for a specific campus           *
+.*****************************************************************************
+.*        V10.04.00 27/02/2014  Steve Armstrong  CAR 296128                  *
+.*                  Created program.                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       IBACONFD/INC
+          INC       MRTHISFD/INC
+          INC       MRTMASFD/INC
+          INC       PATHSPFD/INC
+.
+.
+TRAKHEXT  FILE      ASCII,FIXED=4096
+.
+.         MR Tracking History upload file layout - convtrkh.txt
+.         (as per CONVTRKH.PBL)
+.
+.Name     Type    Length Description
+.----     ----    ------ -----------
+MOVEURNO  DIM       8    U/R Number                             (mrmaurno)
+MOVEHHOS  DIM       3    Home Hospital (pathspaf)               (mrmahhos)
+MOVEHLOC  DIM       4    Home Location (coded - mrtlocaf)       (mrmahloc)
+MOVEDOTY  DIM       3    Type of document (Cat TY)              (mrmadoty)
+MOVEVOLN  DIM       2    Volume                                 (mrmavoln)
+MOVEDATE  DIM       8    Movement date (ccyymmdd)               (mrhidate)
+MOVETIME  DIM       8    Movement time (hh:mm:ss)               (mrhitime)
+MOVECHOS  DIM       3    Current Hospital (pathspaf)            (mrhidhos)
+MOVECLOC  DIM       4    Current location (coded - mrtlocaf)    (mrhiloc)
+MOVERECV  DIM       6    Receiver of record (coded - mrtstfaf)  (mrhirecv)
+MOVEREAS  DIM       4    Movement reason (coded - mrtmovaf)     (mrhireas)
+MOVEUSID  DIM       10   Operator who moved record              (mrhiusid)
+MOVEREQB  DIM       35   Requested by Free Text Field           (mrhireqb)
+MOVEDDUE  DIM       8    Due Date                               (mrhiddue)
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+ERRCOUNT  FORM      10
+EXTCOUNT  FORM      10
+HOSPCODE  DIM       3
+RECCOUNT  FORM      10
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+PIPE      INIT      "|"
+.
+PRGID     INIT      "EXTRTRKH"
+PRGNAM    INIT      "MR Tracking History Data Extraction"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * MRT History extract
+.
+MAIN1000  CALL      GHOS0000               * get hospital
+          BRANCH    EXIT,MAIN2000:         * nothing entered (All)
+                         MAIN0100          * exitchar entered
+.
+MAIN2000  CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN5000:        * yes
+                          MAIN1000:        * no
+                          MAIN0100         * cancel
+.
+MAIN5000  CALL      CFIL0000               * create file
+          BRANCH    EXIT,MAIN0100          * file exists
+.
+          CALL      PROC0000               * process
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"mrthisaf";
+          OPEN      MRTHISA1,"mrthisaf"
+.
+          DISPLAY   *P64:24,"mrtmasaf";
+          OPEN      MRTMASA2,"mrtmasaf"
+.
+          DISPLAY   *P64:24,"pathspaf";
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run data extraction                     *
+.*                        TRUE  (1)  Exit option selected                    *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". MR Tracking History Data ":
+                    "Extraction"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run extraction
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                                  GHOS0000       Called by: MAIN0000       *
+.*       Get the hospital code for extraction (Multi-hospital only)          *
+.* Returns: EXIT  0 = valid code entered                                     *
+.*                1 = spaces entered (select ALL hospitals)                  *
+.*                2 = exitchar entered                                       *
+.*          HOSPCODE - Hospital code (pathspaf)                              *
+.*****************************************************************************
+.
+GHOS0000  COMPARE   ONE,IBCNMHOS                 * using multi-hospital
+          GOTO      GHOS9000 IF NOT EQUAL        * no - finished
+.
+          MOVE      TEN7,ECOL
+          MOVE      TEN,EVERT
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND
+          MOVE      ZERO,CKYIMODE
+.
+GHOS1000  DISPLAY   *P1:EVERT,*EF,"Home Hospital :":
+                    *P1:24,"Enter spaces to select ALL"
+          CALL      PATHSPKY
+          BRANCH    EXIT,GHOS9100:               * nothing input
+                         GHOS9200:               * exitchar input
+                         GHOS9100                * spaces input
+.
+GHOS9000  DISPLAY   *P17:EVERT,*V2LON,PTHSHOSP,*HOFF:
+                    *P25:EVERT,PTHSNAME
+          MOVE      PTHSHOSP,HOSPCODE
+          MOVE      ZERO,EXIT
+          GOTO      GHOS9999
+.
+GHOS9100  MOVE      SP3,HOSPCODE
+          DISPLAY   *P17:EVERT,*V2LON,"All"
+          MOVE      ONE,EXIT
+          GOTO      GHOS9999
+.
+GHOS9200  MOVE      TWO,EXIT
+.
+GHOS9999  RETURN
++
+.*****************************************************************************
+.*                                  CFIL0000       Called by: MAIN0000       *
+.*                         Create the extract file                           *
+.*****************************************************************************
+.
+CFIL0000  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      TRAKHEXT,"convtrkh"     * extract file exists ?
+          TRAPCLR   IO
+          BRANCH    OVRCD,CFIL5000          * no - create it
+.
+CFIL1000  KEYIN     *P1:23,*B,*EF,"The extract file convtrkh.txt already ":
+                    "exists.":
+                    *P1:24,"Overwrite it (",*V2LON,*DV,ANSY,*HOFF,"/":
+                    *V2LON,*DV,ANSN,*HOFF,")?":
+                    *P21:24,*V2LON,ANS
+.
+          REP       UPPLOW,ANS
+          MATCH     ANSY,ANS                * "Y" entered ?
+          GOTO      CFIL2000 IF EQUAL       * yes - continue
+.
+          MATCH     ANSN,ANS                * "N" entered ?
+          GOTO      CFIL9100 IF EQUAL       * no
+.
+          BEEP
+          GOTO      CFIL1000
+.
+.         Delete the existing file
+.
+CFIL2000  CLOSE     TRAKHEXT,DELETE
+.
+.         Create a new extract file
+.
+CFIL5000  PREP      TRAKHEXT,"convtrkh"
+.
+          MOVE      ZERO,EXIT
+          GOTO      CFIL9999
+.
+CFIL9100  MOVE      ONE,EXIT
+.
+CFIL9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*        Loop through the MR Tracking History file and extract each record  *
+.*****************************************************************************
+.
+PROC0000  MOVE      ZERO,RECCOUNT                * initialise record count
+          MOVE      ZERO,EXTCOUNT                * initialise extract count
+          MOVE      ZERO,ERRCOUNT                * initialise error count
+          DISPLAY   *P1:24,*EL,"Processing:";
+.
+          MOVE      SP30,KEY26
+          CALL      RSMRHIS1                     * position at start of file
+PROC0500  CALL      RKMRHIS1                     * read next record
+          BRANCH    OVRCD,PROC9000               * eof - finished
+.
+          DISPLAY   *P13:24,*V2LON,RECCOUNT
+.
+          MOVE      MRHIKEY,KEY10
+          CALL      RDMRMAS2                     * MR Master record on file ?
+          IF        OVRCD = 1
+            ADD       ONE,ERRCOUNT
+            GOTO      PROC0500
+          ENDIF
+.
+          COMPARE   ONE,IBCNMHOS                 * using multi-hospital ?
+          GOTO      PROC1000 IF NOT EQUAL        * no
+.
+          MATCH     SP3,HOSPCODE                 * all hospitals selected ?
+          GOTO      PROC1000 IF EQUAL            * yes
+.
+          MATCH     HOSPCODE,MRMAHHOS            * same hospital as selected ?
+          GOTO      PROC0500 IF NOT EQUAL        * no - ignore record
+.
+PROC1000  ADD       ONE,RECCOUNT                 * increment record counter
+.
+          MOVE      MRMAURNO,MOVEURNO
+          SQUEEZE   MOVEURNO
+          MOVE      MRMAHHOS,MOVEHHOS
+          SQUEEZE   MOVEHHOS
+          MOVE      MRMAHLOC,MOVEHLOC
+          SQUEEZE   MOVEHLOC
+          MOVE      MRMADOTY,MOVEDOTY
+          SQUEEZE   MOVEDOTY
+          MOVE      MRMAVOLN,MOVEVOLN
+          SQUEEZE   MOVEVOLN
+          MOVE      MRHIDATE,MOVEDATE
+          SQUEEZE   MOVEDATE
+          MOVE      MRHITIME,MOVETIME
+          SQUEEZE   MOVETIME
+          MOVE      MRHIDHOS,MOVECHOS
+          SQUEEZE   MOVECHOS
+          MOVE      MRHILOC,MOVECLOC
+          SQUEEZE   MOVECLOC
+          MOVE      MRHIRECV,MOVERECV
+          SQUEEZE   MOVERECV
+          MOVE      MRHIREAS,MOVEREAS
+          SQUEEZE   MOVEREAS
+          MOVE      MRHIUSID,MOVEUSID
+          SQUEEZE   MOVEUSID
+          MOVE      MRHIREQB,MOVEREQB
+          STRIP     MOVEREQB
+          MOVE      MRHIDDUE,MOVEDDUE
+          SQUEEZE   MOVEDDUE
+.
+          WRITE     TRAKHEXT,SEQ;*+,MOVEURNO,PIPE,MOVEHHOS,PIPE,MOVEHLOC,PIPE:
+                                    MOVEDOTY,PIPE,MOVEVOLN,PIPE,MOVEDATE,PIPE:
+                                    MOVETIME,PIPE,MOVECHOS,PIPE,MOVECLOC,PIPE:
+                                    MOVERECV,PIPE,MOVEREAS,PIPE,MOVEUSID,PIPE:
+                                    MOVEREQB,PIPE,MOVEDDUE,*-
+.
+          ADD       ONE,EXTCOUNT                 * increment extract count
+          GOTO      PROC0500                     * get next record
+.
+PROC9000  DISPLAY   *P1:22,*EF,"Extraction complete.":
+                    *P1:23,*V2LON,ERRCOUNT,*HOFF," records with no master.  ":
+                    *P1:24,*V2LON,EXTCOUNT,*HOFF," records extracted.  ";
+          CALL      HITENTER
+.
+PROC9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       PATHSPKY
+.
+          INC       MRTHISIO/INC
+          INC       MRTMASIO/INC
+          INC       PATHSPIO/INC

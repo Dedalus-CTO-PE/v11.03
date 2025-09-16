@@ -1,0 +1,78 @@
+.
+. MRTPSHIO
+. --------
+. Filename     : mrtpshaf.dat
+.
+RSMRPSH1  RESET     KEY21
+          READ      MRTPSHA1,KEY21;;
+          RETURN
+.
+RAMRPSH1  RESET     KEY21
+          MOVE      ZERO,OVRCD
+          READ      MRTPSHA1,KEY21;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RLMRPSH1  RESET     KEY21
+          MOVE      ZERO,OVRCD
+          READL     MRTPSHA1,KEY21;DMRPSADM,MRPSDATE,MRPSTIME,MRPSSTAT:
+                                  MRPSCMNT,MRPSMIS1,MRPSMIS2,MRPSMIS3,MRPSMIS4:
+                                  MRPSMIS5,MRPSMIS6,MRPSFTM1,MRPSFTM2:
+                                  MRPSFTM3,MRPSFTM4,MRPSFTM5,MRPSSPAR
+          GOTO      OVERLOCK IF LOCKED
+          GOTO      OVERCOND IF OVER
+          MOVE      DMRPSADM,MRPSADMN
+          RETURN
+.
+RDMRPSH1  RESET     KEY21
+          MOVE      ZERO,OVRCD
+          READ      MRTPSHA1,KEY21;DMRPSADM,MRPSDATE,MRPSTIME,MRPSSTAT:
+                                  MRPSCMNT,MRPSMIS1,MRPSMIS2,MRPSMIS3,MRPSMIS4:
+                                  MRPSMIS5,MRPSMIS6,MRPSFTM1,MRPSFTM2:
+                                  MRPSFTM3,MRPSFTM4,MRPSFTM5,MRPSSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DMRPSADM,MRPSADMN
+          RETURN
+.
+RKMRPSH1
+          MOVE      ZERO,OVRCD
+          READKS    MRTPSHA1;DMRPSADM,MRPSDATE,MRPSTIME,MRPSSTAT:
+                                  MRPSCMNT,MRPSMIS1,MRPSMIS2,MRPSMIS3,MRPSMIS4:
+                                  MRPSMIS5,MRPSMIS6,MRPSFTM1,MRPSFTM2:
+                                  MRPSFTM3,MRPSFTM4,MRPSFTM5,MRPSSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DMRPSADM,MRPSADMN
+          RETURN
+.
+RPMRPSH1
+          MOVE      ZERO,OVRCD
+          READKP    MRTPSHA1;DMRPSADM,MRPSDATE,MRPSTIME,MRPSSTAT:
+                                  MRPSCMNT,MRPSMIS1,MRPSMIS2,MRPSMIS3,MRPSMIS4:
+                                  MRPSMIS5,MRPSMIS6,MRPSFTM1,MRPSFTM2:
+                                  MRPSFTM3,MRPSFTM4,MRPSFTM5,MRPSSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DMRPSADM,MRPSADMN
+          RETURN
+.
+UPMRPSH1
+          MOVE      MRPSADMN,DMRPSADM
+          UPDATE    MRTPSHA1;DMRPSADM,MRPSDATE,MRPSTIME,MRPSSTAT:
+                                  MRPSCMNT,MRPSMIS1,MRPSMIS2,MRPSMIS3,MRPSMIS4:
+                                  MRPSMIS5,MRPSMIS6,MRPSFTM1,MRPSFTM2:
+                                  MRPSFTM3,MRPSFTM4,MRPSFTM5,MRPSSPAR
+          RETURN
+.
+WRMRPSH1  RESET     KEY21
+          MOVE      MRPSADMN,DMRPSADM
+          WRITE     MRTPSHA1,KEY21;DMRPSADM,MRPSDATE,MRPSTIME,MRPSSTAT:
+                                  MRPSCMNT,MRPSMIS1,MRPSMIS2,MRPSMIS3,MRPSMIS4:
+                                  MRPSMIS5,MRPSMIS6,MRPSFTM1,MRPSFTM2:
+                                  MRPSFTM3,MRPSFTM4,MRPSFTM5,MRPSSPAR
+          RETURN
+.
+DEMRPSH1  RESET     KEY21
+          DELETE    MRTPSHA1,KEY21
+          RETURN
+.
+ULMRPSH1  UNLOCK    MRTPSHA1
+          RETURN

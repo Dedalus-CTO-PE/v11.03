@@ -1,0 +1,47 @@
+RSPMOES1  RESET     KEY14
+          READ      PMSOESA1,KEY14;;
+          RETURN
+.
+RAPMOES1  RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      PMSOESA1,KEY14;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPMOES1  RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      PMSOESA1,KEY14;PMOSVISN,PMOSCNTR,PMOSSCNT,PMOSRTYP:
+                                  PMOSITEM,PMOSQUAN,PMOSPDTE,PMOSCDTE:
+                                  PMOSCTIM,PMOSSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPMOES1  MOVE      ZERO,OVRCD
+          READKS    PMSOESA1;PMOSVISN,PMOSCNTR,PMOSSCNT,PMOSRTYP:
+                                  PMOSITEM,PMOSQUAN,PMOSPDTE,PMOSCDTE:
+                                  PMOSCTIM,PMOSSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPMOES1  MOVE      ZERO,OVRCD
+          READKP    PMSOESA1;PMOSVISN,PMOSCNTR,PMOSSCNT,PMOSRTYP:
+                                  PMOSITEM,PMOSQUAN,PMOSPDTE,PMOSCDTE:
+                                  PMOSCTIM,PMOSSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPMOES1  UPDATE    PMSOESA1;PMOSVISN,PMOSCNTR,PMOSSCNT,PMOSRTYP:
+                                  PMOSITEM,PMOSQUAN,PMOSPDTE,PMOSCDTE:
+                                  PMOSCTIM,PMOSSPAR
+          RETURN
+.
+WRPMOES1  RESET     KEY14
+          WRITE     PMSOESA1,KEY14;PMOSVISN,PMOSCNTR,PMOSSCNT,PMOSRTYP:
+                                  PMOSITEM,PMOSQUAN,PMOSPDTE,PMOSCDTE:
+                                  PMOSCTIM,PMOSSPAR
+          RETURN
+.
+DEPMOES1  RESET     KEY14
+          DELETE    PMSOESA1,KEY14
+          RETURN
+.

@@ -1,0 +1,107 @@
+RSBKQUE1  RESET     KEY20
+          READ      BOKQUEA1,KEY20;;
+          RETURN
+.
+RABKQUE1  RESET     KEY20
+          MOVE      ZERO,OVRCD
+          READ      BOKQUEA1,KEY20;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDBKQUE1  RESET     KEY20
+          MOVE      ZERO,OVRCD
+          READ      BOKQUEA1,KEY20;DBKQUMES,BKREBOOK,BKREURNO,BKREADOC,BKRESDOC:
+                                  BKREEDAT,BKREATIM,BKREPDAT,BKREPTIM,BKREADAT:
+                                  BKRETYPE,BKRECANC,BKREOMEM,BKREPREV,BKREACCM:
+                                  BKREPROC,BKRECNT,BKREWARD,BKREADMN,BKREPREA:
+                                  BKREEBED,BKRECLSS,BKREATYP,BKREDEPT,BKRETDOC:
+                                  BKRECLMT,XXXXRFGP,BKREGPPC,BKREGPFA,BKRERESI:
+                                  BKREEATY,BKREECRA,BKREGPPT,BKREDOFR,BKREOPER:
+                                  BKREELOS,BKREBKDT,BKRXPOWD,BKRXADWD,BKRXCDTE:
+                                  BKRXPSTY,BKRXCNDT,BKRXUDF1,BKRXUDF2,BKRXUDF3:
+                                  BKRXUDF4,BKRXUDF5,BKRXUDD1,BKRXUDD2,BKRXUDD3:
+                                  BKRXUDD4,BKRXUFF1,BKRXUFF2,BKRXUFF3,BKRXUFF4:
+                                  BKRXEDC1,BKRXEDC2,BKRXEDC3,BKRXODTE,BKRXOPRD:
+                                  BKQUSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DBKQUMES,BKQUMESI
+          PACK      BKRERFGP,XXXXRFGP,SP10
+          RETURN
+.
+RKBKQUE1  MOVE      ZERO,OVRCD
+          READKS    BOKQUEA1;DBKQUMES,BKREBOOK,BKREURNO,BKREADOC,BKRESDOC:
+                                  BKREEDAT,BKREATIM,BKREPDAT,BKREPTIM,BKREADAT:
+                                  BKRETYPE,BKRECANC,BKREOMEM,BKREPREV,BKREACCM:
+                                  BKREPROC,BKRECNT,BKREWARD,BKREADMN,BKREPREA:
+                                  BKREEBED,BKRECLSS,BKREATYP,BKREDEPT,BKRETDOC:
+                                  BKRECLMT,XXXXRFGP,BKREGPPC,BKREGPFA,BKRERESI:
+                                  BKREEATY,BKREECRA,BKREGPPT,BKREDOFR,BKREOPER:
+                                  BKREELOS,BKREBKDT,BKRXPOWD,BKRXADWD,BKRXCDTE:
+                                  BKRXPSTY,BKRXCNDT,BKRXUDF1,BKRXUDF2,BKRXUDF3:
+                                  BKRXUDF4,BKRXUDF5,BKRXUDD1,BKRXUDD2,BKRXUDD3:
+                                  BKRXUDD4,BKRXUFF1,BKRXUFF2,BKRXUFF3,BKRXUFF4:
+                                  BKRXEDC1,BKRXEDC2,BKRXEDC3,BKRXODTE,BKRXOPRD:
+                                  BKQUSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DBKQUMES,BKQUMESI
+          PACK      BKRERFGP,XXXXRFGP,SP10
+          RETURN
+.
+RPBKQUE1  MOVE      ZERO,OVRCD
+          READKP    BOKQUEA1;DBKQUMES,BKREBOOK,BKREURNO,BKREADOC,BKRESDOC:
+                                  BKREEDAT,BKREATIM,BKREPDAT,BKREPTIM,BKREADAT:
+                                  BKRETYPE,BKRECANC,BKREOMEM,BKREPREV,BKREACCM:
+                                  BKREPROC,BKRECNT,BKREWARD,BKREADMN,BKREPREA:
+                                  BKREEBED,BKRECLSS,BKREATYP,BKREDEPT,BKRETDOC:
+                                  BKRECLMT,XXXXRFGP,BKREGPPC,BKREGPFA,BKRERESI:
+                                  BKREEATY,BKREECRA,BKREGPPT,BKREDOFR,BKREOPER:
+                                  BKREELOS,BKREBKDT,BKRXPOWD,BKRXADWD,BKRXCDTE:
+                                  BKRXPSTY,BKRXCNDT,BKRXUDF1,BKRXUDF2,BKRXUDF3:
+                                  BKRXUDF4,BKRXUDF5,BKRXUDD1,BKRXUDD2,BKRXUDD3:
+                                  BKRXUDD4,BKRXUFF1,BKRXUFF2,BKRXUFF3,BKRXUFF4:
+                                  BKRXEDC1,BKRXEDC2,BKRXEDC3,BKRXODTE,BKRXOPRD:
+                                  BKQUSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DBKQUMES,BKQUMESI
+          PACK      BKRERFGP,XXXXRFGP,SP10
+          RETURN
+.
+UPBKQUE1  MOVE      BKQUMESI,DBKQUMES
+          MOVE      BKRERFGP,XXXXRFGP
+          UPDATE    BOKQUEA1;DBKQUMES,BKREBOOK,BKREURNO,BKREADOC,BKRESDOC:
+                                  BKREEDAT,BKREATIM,BKREPDAT,BKREPTIM,BKREADAT:
+                                  BKRETYPE,BKRECANC,BKREOMEM,BKREPREV,BKREACCM:
+                                  BKREPROC,BKRECNT,BKREWARD,BKREADMN,BKREPREA:
+                                  BKREEBED,BKRECLSS,BKREATYP,BKREDEPT,BKRETDOC:
+                                  BKRECLMT,XXXXRFGP,BKREGPPC,BKREGPFA,BKRERESI:
+                                  BKREEATY,BKREECRA,BKREGPPT,BKREDOFR,BKREOPER:
+                                  BKREELOS,BKREBKDT,BKRXPOWD,BKRXADWD,BKRXCDTE:
+                                  BKRXPSTY,BKRXCNDT,BKRXUDF1,BKRXUDF2,BKRXUDF3:
+                                  BKRXUDF4,BKRXUDF5,BKRXUDD1,BKRXUDD2,BKRXUDD3:
+                                  BKRXUDD4,BKRXUFF1,BKRXUFF2,BKRXUFF3,BKRXUFF4:
+                                  BKRXEDC1,BKRXEDC2,BKRXEDC3,BKRXODTE,BKRXOPRD:
+                                  BKQUSPAR
+          RETURN
+.
+WRBKQUE1  RESET     KEY20
+          MOVE      BKQUMESI,DBKQUMES
+          MOVE      BKRERFGP,XXXXRFGP
+          WRITE     BOKQUEA1,KEY20;DBKQUMES,BKREBOOK,BKREURNO,BKREADOC,BKRESDOC:
+                                  BKREEDAT,BKREATIM,BKREPDAT,BKREPTIM,BKREADAT:
+                                  BKRETYPE,BKRECANC,BKREOMEM,BKREPREV,BKREACCM:
+                                  BKREPROC,BKRECNT,BKREWARD,BKREADMN,BKREPREA:
+                                  BKREEBED,BKRECLSS,BKREATYP,BKREDEPT,BKRETDOC:
+                                  BKRECLMT,XXXXRFGP,BKREGPPC,BKREGPFA,BKRERESI:
+                                  BKREEATY,BKREECRA,BKREGPPT,BKREDOFR,BKREOPER:
+                                  BKREELOS,BKREBKDT,BKRXPOWD,BKRXADWD,BKRXCDTE:
+                                  BKRXPSTY,BKRXCNDT,BKRXUDF1,BKRXUDF2,BKRXUDF3:
+                                  BKRXUDF4,BKRXUDF5,BKRXUDD1,BKRXUDD2,BKRXUDD3:
+                                  BKRXUDD4,BKRXUFF1,BKRXUFF2,BKRXUFF3,BKRXUFF4:
+                                  BKRXEDC1,BKRXEDC2,BKRXEDC3,BKRXODTE,BKRXOPRD:
+                                  BKQUSPAR
+          RETURN
+.
+DEBKQUE1  RESET     KEY20
+          DELETE    BOKQUEA1,KEY20
+          RETURN
+.

@@ -1,0 +1,1155 @@
+.**************************************************************************
+.*  DGPMISER  :  Surname Search for a Datagate request                    *
+.*               ~~~~~~~~~~~~~~                                           *
+.*                                                                        *
+.*  Author    :  ROD   (11/12/95)                                         *
+.*  Mods      :                                                           *
+.*           V10.10.01 03/07/2019  Steve Armstrong   TSK 0870017          *
+.*                     Mods to make TEMPFIL2 index include PSEX so it     *
+.*                     contains the same fields as TEMPFIL1.              *
+.*                     Also change KEY144 to KEY115 for READ's on         *
+.*                     TEMPFIL2.                                          *
+.*                     Also changed temp file field name from PDOB (which *
+.*                     is not used anywhere) to PBDATE (which is used     *
+.*                     everywhere).                                       *
+.*                     Also add RATEMP1 call prior to each WRTEMP1 to     *
+.*                     prevent I*D with duplicate records.                *
+.**************************************************************************
+.*           V10.04.02 16/06/2014  Steve Armstrong   CAR 301639           *
+.*                     Moved call to TFILENAM into DGINI000 (DGSRVPMI)    *
+.*                     and changed filename variable to FNAMEB            *
+.*           V10.04.01 24/04/2014  Steve Armstrong   CAR 261630           *
+.*                     Mods for non-port based tempfile use.              *
+.**************************************************************************
+.*           V10.02.02 13/07/2011  Steve Armstrong   CAR 240722           *
+.*                     Further mods to cater for second given name as     *
+.*                     part PATGSRFD of keys                              *
+.*           V10.02.01 22/06/2011  Steve Armstrong   CAR 240722           *
+.*                     Mods to cater for changes to PATGSRFD:             *
+.*                       - GSRSNAM & GSRGNAM extended to 30 chars.        *
+.*                       - PTGSGNM2 added.                                *
+.*                       - all indexes changed in length.                 *
+.**************************************************************************
+.*            V9.02.01 09/09/2001  Sandra Barcham                        *
+.*                     Add SEX & DOB to patgsrnf                          *
+.**************************************************************************
+.*            V5.10.B01 29/03/2001  Glenn Saunders                        *
+.*                     Remove access to PTCNSNDX and associated processing*
+.**************************************************************************
+.*            V5.08.01 19/01/2000  Steve Armstrong                        *
+.*                     Mods to remove CLOSE in CRET0000                   *
+.**************************************************************************
+.*            V5.04.01 16/04/1997  Steve Armstrong                        *
+.*                     Mods to use separate inbound & outbound comms      *
+.*                     clients for PMI requests (DGATEIN/DGATEOUT)        *
+.**************************************************************************
+.*            V5.07.01 21/07/1999  Steve Downing                          *
+.*                     Added missing century variable in date range       *
+.*                     calculations                                       *
+.*            V5.07.00 26/10/1998  Davin                                  *
+.*                     Mods for 507                                       *
+.*                                                                        *
+.**************************************************************************
+          DEFPROC   DGPMISER
+ IFGE     $$VER,7
+.
+SAVFORM1  FORM      1
+MAXRECS   FORM      2
+SRCHTYPE  FORM      1
+RECFOUND  FORM      1
+NUMRETRN  FORM      2
+XXURNO    DIM       8
+XXBILL    DIM       8
+XXSNAM    DIM       8
+XXGNAM    DIM       8
+NUMFOUND  FORM      2
+LASTKEY   DIM       115
+MOREDATA  FORM      1
+.
+TEMPFIL1  IFILE     SQL, FIXED=304, KEY="U1-8,9-16,17-46,47-76,274-303,78-85,77-77"
+TEMPFIL2  IFILE     SQL, FIXED=304, KEY="U17-46,47-76,274-303,78-85,77-77,1-8,9-16"
+.GSRURNO    8     1     * u/r number
+.GSRBILL    8     9     * billing number (if no u/r)
+.GSRSNAM   30    17     * surname 
+.GSRGNAM   30    47     * given name 1
+.PSEX       1    77     * sex
+.PBDATE     8    78     * date of birth
+.PADD1     35    86     * address line 1
+.PADD2     35   121     * address line 2
+.PADD3     35   156     * address line 3
+.PADD4     35   191     * address line 4
+.PPOST      8   226     * post code
+.PTELEP    20   234     * private phone
+.PTELEB    20   254     * business phone
+.PTGSGNM2  30   274     * given name 2
+.End or record  304
+.
++
+.*************************************************************************
+.*  DGSER000  :  Process datagate Surname Search message                 *
+.*************************************************************************
+DGSER000  MOVE      "SER",RPLYHEAD
+.
+          MOVE      ZERO,NZIBDOBS                * not doing DOB search
+          CALL      SRCHCLR                      * Clear the search parameters
+          CALL      RDPAR000                     * read system parametres
+.
+          READ      DGATEOUT;SRCHTYPE,SRCHSUR,SRCHGIV,SRCHSEX,SRCHDOB,SRCHAGE:
+                          MAXRECS,LASTKEY
+.
+          CALL      VALID000                      * validate details sent
+          BRANCH    EXIT,DGSER900                 * error
+.
+. now perform desired search (strict, soundex or dob)
+.
+          PERFORM   SRCHTYPE,DSTRC000,DSOUN000,DDOBS000     * which search?
+          BRANCH    EXIT,DGSER900                 * error
+.
+          ADD       ONE,SUCCPROC                  * increm # success transactns
+          GOTO      DGSER999
+.
+. --- send back an Error response ---
+.
+DGSER900  PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC,DGMISC1:
+                            DGMISC2,DGMISC3,SP1
+          ADD       ONE,ERRRPROC                  * increm # error transactions
+.
+DGSER999  GOTO      DGSEREND                      * got end of procedure
++
+.***************************************************************************
+.*  VALID000  :  read details sent in message and make sure valid info     *
+.*               Returns:  EXIT=0 --> Valid info,   EXIT=1 --> ERROR       *
+.***************************************************************************
+VALID000  BRANCH    SRCHTYPE,VALID100,VALID100,VALID300
+          GOTO      VALID800                      * invalid search type
+.
+. validate search type 1 or 2
+.
+VALID100  MATCH     SRCHSUR,SP70                  * must have surname 4 type 1&2
+          GOTO      VALID820 IF EQUAL             * error
+.
+          MOVE      ZERO,EXIT
+          GOTO      VALID999
+.
+. validate search type 3
+.
+VALID300  MATCH     SP8,SRCHDOB                   * must have dob in dob search
+          GOTO      VALID810 IF EQUAL
+.
+          MOVE      ZERO,EXIT
+          GOTO      VALID999
+.
+VALID800  MOVE      "Invalid search type",RPLYDESC
+          MOVE      "01201",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      VALID999
+.
+VALID810  MOVE      "Date of Birth not set for search type 3",RPLYDESC
+          MOVE      "01202",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      VALID999
+.
+VALID820  MOVE      "Surname not set for search type 1 or 2",RPLYDESC
+          MOVE      "01203",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      VALID999
+.
+VALID999  RETURN
++
+.***************************************************************************
+.*  DSTRC000  :  perform strict surname search                             *
+.***************************************************************************
+DSTRC000  CALL      CRET0000                     * create temp file
+.
+          MOVE      ZERO,FORM1                   * we are reading norml records
+          MOVE      ZERO,NUMFOUND                * no. records found
+          MOVE      ZERO,MOREDATA                * more data flag (set to no)
+.
+          MOVE      SRCHSUR,GSRSNAM              * move sent name to work var
+          MOVE      SRCHGIV,GSRGNAM              * move sent name to work var
+.
+          STRIP     SRCHSUR
+          MATCH     SRCHGIV,SP70                 * only strip if non blank
+          IF        !@EQUAL
+            STRIP     SRCHGIV
+          ENDIF
+.
+          CALL      DBRNG000                     * get age range given DOB
+          CALL      CDRNG000                     * get age range given age
+.
+. do strict search and load data into a temp file
+.
+          CALL      LDSTR000
+.
+. we have found reqd amount of records matching search criteria and have
+. loaded them into a temp file
+.
+DSTRC500  IF        MOREDATA=0
+            PACK      LASTKEY,SP70,SP70
+          ENDIF
+.
+          COMPARE   ZERO,NUMFOUND                 * any records found?
+          GOTO      DSTRC800 IF EQUAL
+.
+. set no. recs returned. if moredata=1, then we have 1 too many
+.
+          ASSIGN    (NUMFOUND-MOREDATA),NUMRETRN  * set no. records returned
+.
+. send back successful reply
+.     NB.  SP1 at end of reply has been added because the interpreter does
+.     not place a "|" after the last field, and Datagate requires this.  By
+.     putting an extra field on the end (which is blank), a "|" will then
+.     be added after the last field.
+.
+          MOVE      "00000",RPLYCODE
+          MOVE      SP50,RPLYDESC
+.
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC:
+                           DGMISC1,DGMISC2,DGMISC3,NUMRETRN,MOREDATA,LASTKEY,SP1;
+.
+. now loop thru temp file and write records found
+.
+          MOVE      ZERO,FORM2
+          PACK      KEY115,SP70,SP70
+          CALL      RSTEMP2
+DSTRC600  CALL      RKTEMP2
+          BRANCH    OVRCD,DSTRC700
+.
+          ADD       ONE,FORM2
+.
+. if last alias to write then dont write using repeating group delimeter
+.
+          IF        FORM2=ONE
+            WRITE     DGATEIN;GSRURNO,GSRSNAM,GSRGNAM,PSEX,PBDATE,PADD1,PADD2:
+                            PSUBRB,PADD4,PPOST,PTELEP,PTELEB,PTGSGNM2,SP1;
+          ELSE
+            WRITE     DGATEIN;*SR,GSRURNO,*SF,GSRSNAM,GSRGNAM,PSEX,PBDATE,PADD1:
+                            PADD2,PSUBRB,PADD4,PPOST,PTELEP,PTELEB,PTGSGNM2,SP1;
+          ENDIF
+          GOTO      DSTRC600
+.
+. we have finished, all is Ok!
+.
+DSTRC700  WRITE     DGATEIN;
+.>>>>>    FLUSH     1,24,80,24
+          DISPLAY   *P1:24,*EL                    * clear surname of screen
+          MOVE      ZERO,EXIT
+          GOTO      DSTRC999
+.
+DSTRC800  MOVE      "No patients found for search criteria",RPLYDESC
+          MOVE      "01200",RPLYCODE
+          MOVE      ONE,EXIT
+          DISPLAY   *P1:24,*EL                    * clear surname of screen
+          GOTO      DSTRC999
+.
+DSTRC999  CALL      KILL0000                      * remove temp file
+          RETURN
++
+.************************************************************************
+.*  LDSTR000  :  load data from Strict Surname search into temp file    *
+.************************************************************************
+LDSTR000  
+.>>>>>    SUSPEND
+.
+. if we are continuing a search, then do a different positional read
+.
+          MATCH     SP70,LASTKEY
+          IF        @EQUAL
+            CALL      RSSTR000                   * Position with passed fields
+          ELSE
+            CALL      LSTST000                   * position with last pat. sent
+            BRANCH    EXIT,LDSTR200
+          ENDIF
+.
+LDSTR100  CALL      RKSTR000                     * read next record
+          BRANCH    OVRCD,LDSTR200               * no more records
+          GOTO      LDSTR290                     * go and display this record
+.
+.  - now try Reverse Strict search -
+.
+LDSTR200  MATCH     SP70,LASTKEY                 * are we continuing the search?
+          IF        @EQUAL
+            CALL      RSRST000                   * Position reads Reverse Strict
+            BRANCH    EXIT,LDSTR999              * not doing Reverse search
+          ELSE
+            CALL      LSTRS000                   * position reads reverse strict
+            BRANCH    EXIT,LDSTR999              * not doing Reverse search
+          ENDIF
+.
+          MOVE      ONE,FORM1                    * we are reading reverse recs
+.
+LDSTR210  CALL      REVST000                     * get next record
+          BRANCH    OVRCD,LDSTR999               * no more records
+.
+. don't allow 0 U/R numbers
+.
+LDSTR290  MATCH     ZEROUR,GSRURNO               * ignore if 0 U/R
+          GOTO      LDSTR400 IF EQUAL
+.
+          PACK      KEY8,GSRURNO
+          CALL      RDMAST1
+          BRANCH    OVRCD,LDSTR400               * ignore this patient
+.
+          CALL      DISPR000
+          BRANCH    EXIT,LDSTR400                * ignore this patient
+.
+.     increment no. records found
+.
+          ADD       ONE,NUMFOUND
+.
+. check if we have found the required amount, if so save last key
+.
+          IF        NUMFOUND=MAXRECS
+            PACK      LASTKEY,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                              GSRSEX
+          ENDIF
+.
+. if we have found more records than desired, then set the more data flag
+. have this check so only set moredata flag if there is actually more data
+.
+          IF        NUMFOUND>MAXRECS
+            MOVE      ONE,MOREDATA                * we have more data to find
+            GOTO      LDSTR999                    * dont load temp file any more
+          ENDIF
+.
+. write record to temp file
+.
+          PACK      KEY115,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,PBDATE,PSEX
+          CALL      RATEMP1
+          IF        OVRCD = 1
+            CALL      WRTEMP1
+          ENDIF
+.
+. get next record
+.
+LDSTR400  BRANCH    FORM1,LDSTR210                * we are reading reverse recs
+          GOTO      LDSTR100                      * get next record (normal)
+.
+LDSTR999  RETURN
++
+.*************************************************************************
+.*  KILL0000  :  erase temporary file                                    *
+.*************************************************************************
+KILL0000  CLOSE     TEMPFIL1
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAMEB,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+KILL9999  RETURN
++
+.*************************************************************************
+.*                             CRET0000            Called by:            *
+.*                      create temporary file                            *
+.*************************************************************************
+CRET0000  PREP     TEMPFIL1,FNAMEB,EXCL                   * create/build file
+          CLOSE    TEMPFIL1,DELETE
+          PREP     TEMPFIL1,FNAMEB,EXCL                   * create/build file
+
+          ISADD    TEMPFIL1,"U17-46,47-76,274-303,78-85,77-77,1-8,9-16"
+.
+          OPEN     TEMPFIL2,FNAMEB                        * open 2nd index
+.
+CRET9999  RETURN
++
+.*************************************************************************
+.*  Temp I/O's                                                           *
+.*************************************************************************
+RSTEMP2   RESET     KEY115
+          READ      TEMPFIL2,KEY115;;
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          READKS    TEMPFIL2;GSRURNO,DGSRBILL,GSRSNAM,GSRGNAM,PSEX,PBDATE,PADD1:
+                             PADD2,PSUBRB,PADD4,PPOST,PTELEP,PTELEB,PTGSGNM2
+          GOTO      OVERCOND IF OVER
+          MOVE      DGSRBILL,GSRBILL
+          RETURN
+.
+RATEMP1   RESET     KEY115
+          MOVE      ZERO,OVRCD
+          READ      TEMPFIL1,KEY115;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   RESET     KEY115
+          MOVE      GSRBILL,DGSRBILL
+          WRITE     TEMPFIL1,KEY115;GSRURNO,DGSRBILL,GSRSNAM,GSRGNAM,PSEX:
+                                    PBDATE,PADD1,PADD2,PSUBRB,PADD4,PPOST:
+                                    PTELEP,PTELEB,PTGSGNM2
+          RETURN
++
+.*********************************************************************
+.*  SRCHCLR  :  Subroutine to clear the search parameters            *
+.*********************************************************************
+SRCHCLR   IF        CREGOPT=1 
+            IF        PTCNNHII=1
+              CALL      NZCLR0000                 * clear National Search pars
+            ENDIF
+          ENDIF
+.
+          MOVE      SP20,NMPNUMB
+          BRANCH    SRCHCLR,SRCHC999              * dont clear search pars.
+.
+          MOVE      SP70,SRCHSUR
+          MOVE      SP70,SRCHGIV
+          MOVE      SP1,SRCHSEX
+          MOVE      SP10,SRCHFDAT
+          MOVE      SP10,SRCHTDAT
+          MOVE      SP10,SRCHFSYR
+          MOVE      SP10,SRCHTSYR
+          MOVE      SP10,SRCHFEYR
+          MOVE      SP10,SRCHTEYR
+          MOVE      SP10,SRCHDOB
+          MOVE      SP3,SRCHAGE
+SRCHC999  RETURN
++
+.************************************************************************
+.*  LSTST000  :  Do positional reads for strict surname                 *
+.************************************************************************
+LSTST000  MOVE      ONE,EXIT                  * you've gotta assume
+.
+.  if the srch parameters are diff to the last record processed then we
+.  should be doing the reverse search, so get out of here
+.
+          UNPACK    LASTKEY,KEY16,KEY30          * extract surname from lastkey
+          MATCH     KEY30,SRCHSUR        
+          GOTO      LSTST999 IF NOT EQUAL
+.
+. now position using LASTKEY on appropriate surname file
+.
+. find last given/surname record sent (in message)
+.
+LSTST100  MOVE      ZERO,SRCHHREC             * set so read next record
+          UNPACK    LASTKEY,GSRURNO,KEY8,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB,GSRSEX
+.         
+          PACK      KEY98,GSRSNAM,GSRGNAM,SP70,SP70
+          CALL      RDPTGSR2
+          GOTO      LSTST250
+.
+LSTST200  CALL      RKPTGSR2
+          BRANCH    OVRCD,LSTST900
+.
+LSTST250  PACK      KEY115,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                           GSRSEX,SP70,SP70
+          MATCH     KEY115,LASTKEY             * found our last search record?
+          GOTO      LSTST200 IF NOT EQUAL
+.
+LSTST900  MOVE      ZERO,EXIT
+.
+LSTST999  RETURN
++
+.************************************************************************
+.*  LSTRS000  :  Do positional reads for Reverse strict surname         *
+.************************************************************************
+LSTRS000  MOVE       ONE,EXIT
+          COMPARE    ZERO,SRCHRSGS         * reverse giv seq required
+          GOTO       LSTRS999 IF EQUAL
+.
+          MATCH      SRCHGIV,SP70          * no given name entered, cant reverse
+          GOTO       LSTRS999 IF EQUAL
+.
+. must check to see whether our search key has been reversed
+.
+          UNPACK     LASTKEY,KEY16,KEY30
+          MATCH      KEY30,SRCHSUR
+          GOTO       LSTRS600 IF NOT EQUAL
+.
+. -- our lastkey hasn't been reversed --
+.
+          UNPACK     LASTKEY,KEY16,SRCHSUR,SRCHGIV
+.
+          MOVE       SRCHGIV,SSDXSNAM
+          SCAN       SP1,SSDXSNAM           * Remove any possible 2nd Given Name
+          ENDSET     SSDXSNAM
+          APPEND     SP70,SSDXSNAM
+          RESET      SSDXSNAM
+.
+          PACK      KEY98,SSDXSNAM,SRCHSUR,SP70,SP70
+          CALL      RDPTGSR2
+          BRANCH    OVRCD,LSTRS900
+          GOTO      LSTRS250
+.
+LSTRS200  CALL      RKPTGSR2
+          BRANCH    OVRCD,LSTRS900
+.
+LSTRS250  PACK      KEY115,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                           GSRSEX
+.
+. if we get here and form1=0 then we just want to see if there is another
+. record to return (moredata)
+.
+          IF     FORM1=0
+            MOVE   ONE,SRCHHREC
+            GOTO   LSTRS800
+          ENDIF
+.
+          MATCH     KEY115,LASTKEY             * found our last search record?
+          GOTO      LSTRS200 IF NOT EQUAL
+.
+          GOTO LSTRS800
+.
+. -- we are already through reversing the names --
+.
+LSTRS600  MOVE       SRCHGIV,SSDXSNAM
+          SCAN       SP1,SSDXSNAM           * Remove any possible 2nd Given Name
+          ENDSET     SSDXSNAM
+          APPEND     SP70,SSDXSNAM
+          RESET      SSDXSNAM
+.
+          PACK      KEY98,SSDXSNAM,SRCHSUR
+          CALL      RDPTGSR2
+          BRANCH    OVRCD,LSTRS900
+          GOTO      LSTRS750
+.
+LSTRS700  CALL      RKPTGSR2
+          BRANCH    OVRCD,LSTRS900
+.
+LSTRS750  PACK      KEY115,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                           GSRSEX,SP70,SP70
+          MATCH     KEY115,LASTKEY             * found our last search record?
+          GOTO      LSTRS700 IF NOT EQUAL
+.
+LSTRS800  MOVE      ZERO,EXIT           * we are positioned on correct record
+          GOTO      LSTRS999
+.
+LSTRS900  MOVE      ONE,EXIT
+.
+LSTRS999  RETURN
++
+.***************************************************************
+.*  CDRNG000  :  Calculate date range to search for            *
+.***************************************************************
+CDRNG000  MATCH      SP8,SRCHDOB                 * passed D.O.B.?
+          GOTO       CDRNG999 IF NOT EQUAL       * yes, so dont do this
+.
+          MATCH      SP3,SRCHAGE                 * were we passed an age?
+          GOTO       CDRNG700 IF EQUAL
+.
+.        We have an Age, now work out the range of dates this corresponds to.
+.        The day/month range will be from tomorrows date to todays date.
+.        Eg. If today is 23/04/1968, and an age of zero was selected, then
+.            we want a birth date from 24/04/1967 to 23/04/1968.
+.
+          PACK      SRCHTDAT,CMM,CDD
+          REP       " 0",SRCHTDAT
+.
+          MOVE      CCC,CC
+          MOVE      CYY,YY
+          MOVE      CMM,MM
+          MOVE      CDD,DD
+          CALL      DMYCON               * Convert to a julian date
+          ADD       ONE,JULDAY
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON
+.
+          PACK      SRCHFDAT,MM,DD
+          REP       " 0",SRCHFDAT
+.
+.        We have the from and to dates. Now work out the from and to years.
+.        The from ending year = current year - age - year range
+.        The to ending year   = current year - age + year range
+.
+.        The starting year range will be the same if the from date is less than
+.        the end year, otherwise it will be one less than the ending year range
+.
+          PACK      SRCHWORK,CCC,CYY
+          REP       " 0",SRCHWORK
+.
+          MOVE      SRCHAGE,PSAGE       * Convert age to a form field
+.
+          MOVE      SRCHWORK,SRCHYEAR
+          SUB       PSAGE,SRCHYEAR
+          SUB       SRCHYRNG,SRCHYEAR
+          MOVE      SRCHYEAR,SRCHFEYR
+          MOVE      SRCHYEAR,SRCHFSYR
+.
+          MOVE      SRCHWORK,SRCHYEAR
+          SUB       PSAGE,SRCHYEAR
+          ADD       SRCHYRNG,SRCHYEAR
+          MOVE      SRCHYEAR,SRCHTEYR
+          MOVE      SRCHYEAR,SRCHTSYR
+.
+          MATCH     SRCHFDAT,SRCHTDAT
+          GOTO      CDRNG999 IF NOT LESS
+.
+.         Subtract one from the starting year range
+.
+          MOVE      SRCHFSYR,SRCHYEAR
+          SUB       ONE,SRCHYEAR
+          MOVE      SRCHYEAR,SRCHFSYR
+.
+          MOVE      SRCHTSYR,SRCHYEAR
+          SUB       ONE,SRCHYEAR
+          MOVE      SRCHYEAR,SRCHTSYR
+          GOTO      CDRNG999
+.
+.        Nothing entered for date of birth or age
+.
+CDRNG700  MOVE      SP4,SRCHFDAT
+.
+CDRNG999  RETURN
++
+.**************************************************************************
+.*  DISPR000  :  Subroutine to process a given surname index record       *
+.**************************************************************************
+DISPR000  MOVE      ZERO,SRCHFLAG                * Assume we will continue
+.
+.        Check for a 0 U/R record
+.
+.        We have a U/R number. Get the details and validate them
+.
+DISPR100 MOVE       GSRURNO,PURNO
+         MOVE       PURNO,KEY8
+         CALL       RDMAST1
+         BRANCH     OVRCD,DISPR900
+.
+.        Test for a valid sex
+.
+DISPR150 MATCH      SP1,SRCHSEX
+         GOTO       DISPR200 IF EQUAL
+.
+         MATCH      PSEX,SRCHSEX
+         GOTO       DISPR900 IF NOT EQUAL       * Invalid sex - continue
+.
+.        Test for a valid date of birth
+.
+DISPR200 MATCH      SP4,SRCHFDAT
+         GOTO       DISPR500 IF EQUAL
+.
+         UNPACK     PBDATE,CCENT,CYEAR,CMON,CDAY
+         PACK       SRCHWORK,CMON,CDAY
+.
+.        Two different sets of test, depending on whether or not the
+.        ending date is less than the starting date, or not.
+.
+         MATCH      SRCHFDAT,SRCHTDAT
+         GOTO       DISPR250 IF LESS
+.
+.        We want a date in the date range, and in the year range
+.
+         MATCH      SRCHFDAT,SRCHWORK
+         GOTO       DISPR900 IF LESS
+.
+         MATCH      SRCHWORK,SRCHTDAT
+         GOTO       DISPR900 IF LESS
+.
+         PACK       SRCHWORK,CCENT,CYEAR
+         REP        " 0",SRCHWORK
+.
+         MATCH      SRCHFSYR,SRCHWORK
+         GOTO       DISPR900 IF LESS
+.
+         MATCH      SRCHWORK,SRCHTSYR
+         GOTO       DISPR900 IF LESS
+.
+         GOTO       DISPR500            * Valid record
+.
+.        We want a date less that the todate, OR after the start date
+.        This occurs when the valid date is something like 27/12 to 03/01
+.
+DISPR250 MATCH      SRCHFDAT,SRCHWORK
+         GOTO       DISPR270 IF LESS
+.
+.        We have a date after the starting date
+.
+         PACK       SRCHWORK,CCENT,CYEAR
+         REP        " 0",SRCHWORK
+.
+         MATCH      SRCHFSYR,SRCHWORK
+         GOTO       DISPR900 IF LESS
+.
+         MATCH      SRCHWORK,SRCHTSYR
+         GOTO       DISPR900 IF LESS
+.
+         GOTO       DISPR500            * Valid record
+.
+.        We have a date before the to date
+.        Check if after the from date
+.
+DISPR270 MATCH      SRCHWORK,SRCHTDAT
+         GOTO       DISPR900 IF LESS
+.
+         PACK       SRCHWORK,CCENT,CYEAR
+         REP        " 0",SRCHWORK
+.
+         MATCH      SRCHFEYR,SRCHWORK
+         GOTO       DISPR900 IF LESS
+.
+         MATCH      SRCHWORK,SRCHTEYR
+         GOTO       DISPR900 IF LESS
+.
+DISPR500  MOVE     ZERO,EXIT                     * valid patient
+          GOTO     DISPR999
+.
+DISPR900  MOVE     ONE,EXIT                      * error, dont process this rec
+.
+DISPR999 RETURN
++
+.**************************************************************************
+.*  DBRNG000  :  Work out the valid date range                            *
+.*                                                                        *
+.*       We have a date of birth. Now work out a range of dates           *
+.*       corresponding to this date +/- the day range variable.           *
+.*                                                                        *
+.*       The from ending year (CCYY) = calculated birth year - year range *
+.*       The to ending year   (CCYY) = calculated birth year + year range *
+.*                                                                        *
+.*       The from date (MMDD) = birth date - day range                    *
+.*       The to date   (MMDD) = birth date + day range                    *
+.**************************************************************************
+DBRNG000  MATCH     SP8,SRCHDOB
+          GOTO      DBRNG999 IF EQUAL
+.
+          UNPACK    SRCHDOB,CCENT,CYEAR,CMON,CDAY
+.
+          MOVE      CDAY,DD
+          MOVE      CMON,MM
+          MOVE      CYEAR,YY
+          MOVE      CCENT,CC
+          CALL      DMYCON
+          ADD       SRCHDRNG,JULDAY
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON
+.
+          PACK      SRCHTDAT,MM,DD
+          REP       " 0",SRCHTDAT
+.
+          PACK      SRCHWORK,CC,YY
+          REP       " 0",SRCHWORK
+          MOVE      SRCHWORK,SRCHYEAR
+          SUB       SRCHYRNG,SRCHYEAR
+          MOVE      SRCHYEAR,SRCHFEYR
+          MOVE      SRCHYEAR,SRCHFSYR
+.
+          MOVE      SRCHWORK,SRCHYEAR
+          ADD       SRCHYRNG,SRCHYEAR
+          MOVE      SRCHYEAR,SRCHTEYR
+          MOVE      SRCHYEAR,SRCHTSYR
+.
+.        Get the from date (date of birth minus SRCHDRNG)
+.
+          MOVE      CDAY,DD
+          MOVE      CMON,MM
+          MOVE      CYEAR,YY
+          MOVE      CCENT,CC
+          CALL      DMYCON
+          SUB       SRCHDRNG,JULDAY
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON
+.
+          PACK      SRCHFDAT,MM,DD
+          REP       " 0",SRCHFDAT
+.
+.        The starting year range will be the same if the from date is less than
+.        the end year, otherwise it will be one less than the ending year range
+.
+          MATCH     SRCHFDAT,SRCHTDAT
+          GOTO      DBRNG999 IF NOT LESS
+.
+.        Subtract one from the starting year range
+.
+          MOVE      SRCHFSYR,SRCHYEAR
+          SUB       ONE,SRCHYEAR
+          MOVE      SRCHYEAR,SRCHFSYR
+.
+          MOVE      SRCHTSYR,SRCHYEAR
+          SUB       ONE,SRCHYEAR
+          MOVE      SRCHYEAR,SRCHTSYR
+.
+DBRNG999  RETURN
++
+.*******************************************************************
+.*  DDOBS000  :  Date of Birth search                              *
+.*               Returns: SRCHFLAG  0=Exit selected                *
+.*                                  1=Item selected or Register    *
++*******************************************************************
+DDOBS000  MOVE      ONE,NZIBDOBS                 * doing DOB search
+          MOVE      ZERO,NUMFOUND
+          MOVE      ZERO,MOREDATA                * more data flag (set to no)
+.
+          CALL      CRET0000                     * create temp file
+          CALL      DBRNG000                     * Work out date ranges
+.
+          MATCH     SP70,LASTKEY                 * continuing search?
+          GOTO      DDOBS050 IF EQUAL
+.
+          CALL      POSDB000                     * position on lastkey record
+          BRANCH    EXIT,DDOBS500
+          GOTO      DDOBS100
+.
+. --- now loop thru file & display all valid records ---
+.
+DDOBS050  PACK      KEY8,SRCHDOB                  * Full Key
+          CALL      RDPTMAS2                      * Get First Record
+          GOTO      DDOBS120
+.
+DDOBS100  CALL      RKPTMAS2
+          BRANCH    OVRCD,DDOBS500                * no more records
+.
+DDOBS120  MOVE      PURNO,KEY8
+          CALL      RDPMPX21
+.
+          MATCH     PBDATE,SRCHDOB
+          GOTO      DDOBS500 IF NOT EQUAL         * no more records
+.
+          MOVE      PTMASNAM,GSRSNAM
+          MOVE      PMPXFNAM,GSRGNAM
+          MOVE      PMPXSNAM,PTGSGNM2
+          PACK      KEY115,PURNO,ZEROUR,GSRSNAM,GSRGNAM,PTGSGNM2,PBDATE,PSEX:
+                           SP70,SP70
+          CALL      RDPTGSR1
+          BRANCH    OVRCD,DDOBS100
+.
+. We have a valid record - check if screen is full
+.
+.     increment no. records found
+.
+          ADD       ONE,NUMFOUND
+.
+. check if we have found the required amount, if so save last key
+.
+          IF        NUMFOUND=MAXRECS
+            PACK      LASTKEY,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                              GSRSEX
+          ENDIF
+.
+. if we have found more records than desired, then set the more data flag
+. have this check so only set moredata flag if there is actually more data
+.
+          IF        NUMFOUND>MAXRECS
+            MOVE      ONE,MOREDATA                * we have more data to find
+            GOTO      DDOBS500                    * dont load temp file any more
+          ENDIF
+.
+. write record to temp file
+.
+          PACK      KEY115,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,PBDATE,PSEX
+          CALL      RATEMP1
+          IF        OVRCD = 1
+            CALL      WRTEMP1
+          ENDIF
+          GOTO      DDOBS100                      * get next record
+.
+. ---> we have found reqd amount of records matching search criteria and have
+. loaded them into a temp file <---
+.
+DDOBS500  IF        MOREDATA=0
+            PACK      LASTKEY,SP70,SP70
+          ENDIF
+.
+          COMPARE   ZERO,NUMFOUND                 * any records found?
+          GOTO      DDOBS800 IF EQUAL
+.
+. set no. recs returned. if moredata=1, then we have 1 too many
+.
+          ASSIGN    (NUMFOUND-MOREDATA),NUMRETRN  * set no. records returned
+.
+. send back successful reply
+.
+          MOVE      "00000",RPLYCODE
+          MOVE      SP50,RPLYDESC
+.
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC:
+                          DGMISC1,DGMISC2,DGMISC3,NUMRETRN,MOREDATA,LASTKEY,SP1;
+.
+. now loop thru temp file and write records found
+.
+          MOVE      ZERO,FORM2
+          PACK      KEY115,SP70,SP70
+          CALL      RSTEMP2
+DDOBS600  CALL      RKTEMP2
+          BRANCH    OVRCD,DDOBS700
+.
+          ADD       ONE,FORM2
+.
+. if last alias to write then dont write using repeating group delimeter
+.
+          IF        FORM2=ONE
+            WRITE     DGATEIN;GSRURNO,GSRSNAM,GSRGNAM,PSEX,PBDATE,PADD1,PADD2:
+                            PSUBRB,PADD4,PPOST,PTELEP,PTELEB,PTGSGNM2,SP1;
+          ELSE
+            WRITE     DGATEIN;*SR,GSRURNO,*SF,GSRSNAM,GSRGNAM,PSEX,PBDATE,PADD1:
+                            PADD2,PSUBRB,PADD4,PPOST,PTELEP,PTELEB,PTGSGNM2,SP1;
+          ENDIF
+          GOTO      DDOBS600
+.
+. we have finished, all is Ok!
+.
+DDOBS700  WRITE     DGATEIN;
+.>>>>>>   FLUSH     1,24,80,24
+          DISPLAY   *P1:24,*EL                    * clear surname of screen
+          MOVE      ZERO,EXIT
+          GOTO      DDOBS999
+.
+DDOBS800  MOVE      "No patients found for search criteria",RPLYDESC
+          MOVE      "01200",RPLYCODE
+          MOVE      ONE,EXIT
+          GOTO      DDOBS999
+.
+DDOBS999  CALL      KILL0000                      * remove temp file
+          RETURN
++
+.***********************************************************************
+.*  POSDB000  :  position on last record accessed (continuing search)  *
+.***********************************************************************
+POSDB000  PACK      KEY8,SRCHDOB
+          CALL      RDPTMAS2
+          GOTO      POSDB150
+.
+POSDB100  CALL      RKPTMAS2
+          BRANCH    OVRCD,POSDB900
+.
+POSDB150  MOVE      PURNO,KEY8
+          CALL      RDPMPX21
+.
+          MATCH     PBDATE,SRCHDOB                * still same DOB?
+          GOTO      POSDB900 IF NOT EQUAL
+.
+          MOVE      PTMASNAM,GSRSNAM
+          MOVE      PMPXFNAM,GSRGNAM
+          MOVE      PMPXSNAM,PTGSGNM2
+          PACK      KEY115,PURNO,ZEROUR,GSRSNAM,GSRGNAM,PTGSGNM2,PBDATE,PSEX:
+                           SP70,SP70
+          MATCH     KEY115,LASTKEY                 * correct record?
+          GOTO      POSDB100 IF NOT EQUAL
+.
+          MOVE      ZERO,EXIT                     * we have found the right rec
+          GOTO      POSDB999
+.
+POSDB900  MOVE      ONE,EXIT
+.
+POSDB999  RETURN
++
+.*********************************************************************
+.*  DSOUN000  :  Sound-ex search                                     *
+.*********************************************************************
+DSOUN000  CALL      CRET0000                     * create temp file
+.
+.
+          PACK      GSRGNAM,SRCHGIV,SP70
+          CALL      GGSNX000                  * get soundex key for given names
+.
+.
+DSOUN040  MOVE      ZERO,FORM1                   * we are reading norml records
+          MOVE      ZERO,NUMFOUND                * no. records found
+          MOVE      ZERO,MOREDATA                * more data flag (set to no)
+.
+          MOVE      SRCHSUR,GSRSNAM              * move sent name to work var
+          MOVE      SRCHGIV,GSRGNAM              * move sent name to work var
+.
+          STRIP     SRCHSUR
+          MATCH     SRCHGIV,SP70                 * only strip if non blank
+          IF        !@EQUAL
+            STRIP     SRCHGIV
+          ENDIF
+.
+          CALL      DBRNG000                     * get age range given DOB
+          CALL      CDRNG000                     * get age range given age
+.
+. using Closest Match in Soundex Search?
+.
+          UNPACK    SP30,GSRSKEY,GSRGKEY1,GSRGKEY2  
+          IF        PTCNCMSX=1
+            CALL      LDSTR000                   * load strict matches in temp
+            UNPACK    SP30,GSRSKEY,GSRGKEY1,GSRGKEY2  
+          ENDIF
+.
+. -- loop thru the sound-ex order records --
+.
+          MOVE      ZERO,FORM1                   * we are reading order records
+          CALL      RSSND000                     * Positional Reads Soundex srch
+.
+          MOVE      ONE,RECFOUND                 * gotta assume
+          MATCH     SP70,LASTKEY                 * are we continuing search?
+          IF        !@EQUAL
+            MOVE      ZERO,RECFOUND              * init to haven't found LASTKEY
+          ENDIF
+.
+DSOUN100  CALL      RKSND000                     * read next record
+          BRANCH    OVRCD,DSOUN200               * no more records
+.
+. if continuing search, loop thru recs until the last record accessed is found
+.
+          BRANCH    RECFOUND,DSOUN290            * positioned on correct rec now
+.
+          MATCH     GSRURNO,LASTKEY              * match 1st 8 chars (U/R No.)
+          GOTO      DSOUN100 IF NOT EQUAL        * not correct record
+          MOVE      ONE,RECFOUND                 * we have found last rec access
+          GOTO      DSOUN100                     * get next (valid) record
+.
+. -- now try Reverse Sound-ex searchs --
+.
+DSOUN200  CALL      RSRSX000                     * Posit reads Reverse Surname
+          BRANCH    EXIT,DSOUN500                * not doing Reverse search
+          MOVE      ONE,FORM1                    * we are reading reverse recs
+DSOUN210  CALL      RKRSX000                     * Read Next record
+          BRANCH    OVRCD,DSOUN500               * no more records
+.
+. if continuing search, loop thru recs until the last record accessed is found
+.
+          BRANCH    RECFOUND,DSOUN290            * positioned on correct rec now
+          MATCH     GSRURNO,LASTKEY              * match 1st 8 chars (U/R No.)
+          IF        !@EQUAL
+            BRANCH      FORM1,DSOUN210           * we are reading reverse recs
+          ENDIF
+          MOVE      ONE,RECFOUND
+          BRANCH    FORM1,DSOUN210               * we are reading reverse recs
+.
+.
+. We have a valid record
+.
+DSOUN290  MATCH     ZEROUR,GSRURNO               * ignore if 0 U/R
+          GOTO      DSOUN400 IF EQUAL
+.
+          PACK      KEY8,GSRURNO
+          CALL      RDMAST1
+          BRANCH    OVRCD,DSOUN400               * ignore this patient
+.
+          CALL      DISPR000
+          BRANCH    EXIT,DSOUN400                * ignore this patient
+.
+.     increment no. records found
+.
+          ADD       ONE,NUMFOUND
+.
+.     setup surname/given name vars into surname vars for write
+.
+. check if we have found the required amount, if so save last key
+.
+          IF        NUMFOUND=MAXRECS
+            PACK      LASTKEY,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                              GSRSEX
+          ENDIF
+.
+. if we have found more records than desired, then set the more data flag
+. have this check so only set moredata flag if there is actually more data
+.
+          IF        NUMFOUND>MAXRECS
+            MOVE      ONE,MOREDATA                * we have more data to find
+            GOTO      DSOUN500                    * dont load temp file any more
+          ENDIF
+.
+. write record to temp file
+.
+          PACK      KEY115,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,PBDATE,PSEX
+          CALL      RATEMP1
+          IF        OVRCD = 1
+            CALL      WRTEMP1
+          ENDIF
+.
+. get next record
+.
+DSOUN400  BRANCH    FORM1,DSOUN210                * we are reading reverse recs
+          GOTO      DSOUN100                      * get next record (normal)
+.
+. we have found reqd amount of records matching search criteria and have
+. loaded them into a temp file
+.
+DSOUN500  IF        MOREDATA=0
+            PACK      LASTKEY,SP70,SP70
+          ENDIF
+.
+          COMPARE   ZERO,NUMFOUND                 * any records found?
+          GOTO      DSOUN800 IF EQUAL
+.
+. set no. recs returned. if moredata=1, then we have 1 too many
+.
+          ASSIGN    (NUMFOUND-MOREDATA),NUMRETRN  * set no. records returned
+.
+. send back successful reply
+.
+          MOVE      "00000",RPLYCODE
+          MOVE      SP50,RPLYDESC
+.
+          PACK      CCENCODE,CCDATE,CCDST,CCSRC,CCNAME,REPLYRPL
+          WRITE     DGATEIN;CCENCODE:
+                            RPLYHEAD,RPLYCODE,RPLYDESC:
+                           DGMISC1,DGMISC2,DGMISC3,NUMRETRN,MOREDATA,LASTKEY,SP1;
+.
+. now loop thru temp file and write records found
+.
+          MOVE      ZERO,FORM2
+          PACK      KEY115,SP70,SP70
+          CALL      RSTEMP2
+DSOUN600  CALL      RKTEMP2
+          BRANCH    OVRCD,DSOUN700
+.
+          ADD       ONE,FORM2
+.
+. if last alias to write then dont write using repeating group delimeter
+.
+          IF        FORM2=ONE
+            WRITE     DGATEIN;GSRURNO,GSRSNAM,GSRGNAM,PSEX,PBDATE,PADD1,PADD2:
+                            PSUBRB,PADD4,PPOST,PTELEP,PTELEB,PTGSGNM2,SP1;
+          ELSE
+            WRITE     DGATEIN;*SR,GSRURNO,*SF,GSRSNAM,GSRGNAM,PSEX,PBDATE,PADD1:
+                            PADD2,PSUBRB,PADD4,PPOST,PTELEP,PTELEB,PTGSGNM2,SP1;
+          ENDIF
+          GOTO      DSOUN600
+.
+. we have finished, all is Ok!
+.
+DSOUN700  WRITE     DGATEIN;
+.>>>>>    FLUSH     1,24,80,24
+          DISPLAY   *P1:24,*EL                    * clear surname of screen
+          MOVE      ZERO,EXIT
+          GOTO      DSOUN999
+.
+DSOUN800  MOVE      "No patients found for search criteria",RPLYDESC
+          MOVE      "01200",RPLYCODE
+          MOVE      ONE,EXIT
+          DISPLAY   *P1:24,*EL                    * clear surname of screen
+          GOTO      DSOUN999
+.
+DSOUN999  CALL      KILL0000                      * remove temp file
+          RETURN
++
+.************************************************************************
+.*  GGSNX000  :  get given names soundex key       Requires: GSRGNAM    *
+.************************************************************************
+GGSNX000  UNPACK    SP30,GSRGKEY1,GSRGKEY2 * if so, clear given name keys
+   MOVE FORM1,SAVFORM1
+          CALL      SOUNDX2                * get soundex keys for given names
+          MOVE      GSRGKEY1,SRCHGSX1      * save soundexs for test in search
+   MOVE SAVFORM1,FORM1
+          SCAN      "0",SRCHGSX1
+          BUMP      SRCHGSX1,-1
+          LENSET    SRCHGSX1
+          RESET     SRCHGSX1
+          MOVE      GSRGKEY2,SRCHGSX2    
+          SCAN      "0",SRCHGSX2
+          BUMP      SRCHGSX2,-1
+          LENSET    SRCHGSX2
+          RESET     SRCHGSX2
+.
+          MATCH     GSRGNAM,SP70           * no given name entered 
+          GOTO      GGSNX999 IF NOT EQUAL
+          UNPACK    SP30,GSRGKEY1,GSRGKEY2 * if so, clear given name keys
+.
+GGSNX999  RETURN
+.
+.
+OVERCOND  MOVE      ONE,OVRCD
+          RETURN
+.
+OVERLOCK  MOVE      TWO,OVRCD
+          RETURN
+.
+.
+. IO's go in here
+.
+ XIF
+DGSEREND  ENDPROC

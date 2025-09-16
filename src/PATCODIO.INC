@@ -1,0 +1,622 @@
+.
+. *****************************************************************************
+. *                                                                           *
+. *  Include Name :  PATCODIO                                                 *
+. *                                                                           *
+. *  Function     :  I/O for patcodes file                                    *
+. *                                                                           *
+. *  Keys         :  KEY5                                                     *
+. *                                                                           *
+. *  Modification :                                                           *
+. *    V10.13.01     03/08/2018  Don Nguyen      TSK 0853011                  *
+. *                  Added Indicators 22-41 (TCINDC22-TCINDC41),              *
+. *                  User Defined Fields 5-14 (PTCDUDF5-PTCDUD14),            *
+. *                  Associated Numbers 6-15 (PTCDASC6-PTCDAS15).             *
+. *    V10.03.01     13/06/2013  Ebon Clements    CAR 286359                  *
+. *                  Fixed index on RLCODE3                                   *
+. *    V10.02.01     22/07/2010  J.Tan            CAR 244159                  *
+. *                  Added Credit Card Surcharge & Assc.No                    *
+. *    V10.02.01     03/06/2010  J.Tan            CAR 239592                  *
+. *                  Mods for Fin.Election stationery form                    *
+. *    V10.00.01     24/03/2010  Steve Armstrong  CAR 218670                  *
+. *                  Added TCINDC12, TCINDC13, TCINDC14,                      *
+. *                  TCINDC15, TCINDC16, TCINDC17, TCINDC18,                  *
+. *                  TCINDC19, TCINDC20, TCINDC21, PTCDUDF1,                  *
+. *                  PTCDUDF2, PTCDUDF3 & PTCDUDF4.                           *
+. *    V9.09.02      13/12/2007  Davin            CAR 153384                  *
+. *                  Added PTCDDFIC - Default Fee Info Code                   *
+. *    V9.09.01      09/08/2007  Steve Armstrong  CAR 147479                  *
+. *                  Added PTCDLDES - Long Description                        *
+. *    V9.05.01      07/03/2006  Ebon Clements CAR 78533                      *
+. *                  Added PTCDHOSS - Hospital Specific                       *
+. *    V9.02.02      16.09.2002  Peter Vela SRF/MOD 19400                     *
+. *                  Added PTCDNHCP                                           *
+. *    V9.02.01       7.06.2002  Glenn Saunders                               *
+. *                  Add in RDACODE1 missing read with ans                    *
+. *                                                                           *
+. *****************************************************************************
+.
+RDSCODE1 RESET     KEY5
+         READ      PATCODE1,KEY5;;
+         RETURN
+.
+RDACODE1 MOVE      ZERO,OVRCD
+         RESET     KEY5     
+         READ      PATCODE1,KEY5;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDCODE1  MOVE      ZERO,OVRCD
+         RESET     KEY5
+         READ      PATCODE1,KEY5;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RLCODE1  MOVE      ZERO,OVRCD
+         RESET     KEY5
+         READL     PATCODE1,KEY5;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERLOCK IF LOCKED
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDKCODE1 MOVE      ZERO,OVRCD
+         READKS    PATCODE1;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDPCODE1 MOVE      ZERO,OVRCD
+         READKP    PATCODE1;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+WRCODE1  MOVE      ZERO,OVRCD
+         RESET     KEY5
+         TRAP      OVERLOCK IF IO
+         WRITE     PATCODE1,KEY5;KEY5,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         TRAPCLR   IO
+.
+         RETURN
+.
+UPCODE1  UPDATE     PATCODE1;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                             TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                             TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                             PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                             PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                             TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                             TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                             PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                             PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                             TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                             TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                             TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                             TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                             PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                             PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                             PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                             PTCDAS15,TCSPARE
+         RETURN
+.
+ULCODE1  UNLOCK     PATCODE1
+         RETURN
+.
+DECODE1  RESET      KEY5
+         DELETE     PATCODE1,KEY5
+         RETURN
+.
+.        The 2nd index uses the variable PTCDKEY2 for various reason, of which
+.        the main one is that it made it easier to add than using KEY25, and
+.        locating and changing all the programs that would now need KEY25
+.        to be defined.
+.
+RDACODE2 RESET     PTCDKEY2
+         READ      PATCODE2,PTCDKEY2;ANS
+         RETURN
+.
+RDSCODE2 RESET     PTCDKEY2
+         READ      PATCODE2,PTCDKEY2;;
+         RETURN
+.
+RDCODE2  MOVE      ZERO,OVRCD
+         RESET     PTCDKEY2
+         READ      PATCODE2,PTCDKEY2;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RLCODE2  MOVE      ZERO,OVRCD
+         RESET     PTCDKEY2
+         READL     PATCODE2,PTCDKEY2;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERLOCK IF LOCKED
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDKCODE2 MOVE      ZERO,OVRCD
+         READKS    PATCODE2;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDPCODE2 MOVE      ZERO,OVRCD
+         READKP    PATCODE2;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+. Index 3
+.
+RDSCODE3 RESET     KEY5
+         READ      PATCODE3,KEY5;;
+         RETURN
+.
+RDCODE3  MOVE      ZERO,OVRCD
+         RESET     KEY5
+         READ      PATCODE3,KEY5;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RLCODE3  MOVE      ZERO,OVRCD
+         RESET     KEY5
+         READL     PATCODE3,KEY5;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERLOCK IF LOCKED
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDKCODE3 MOVE      ZERO,OVRCD
+         READKS    PATCODE3;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDPCODE3 MOVE      ZERO,OVRCD
+         READKP    PATCODE3;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+WRCODE3  MOVE      ZERO,OVRCD
+         RESET     KEY5
+         TRAP      OVERLOCK IF IO
+         WRITE     PATCODE3,KEY5;KEY5,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         TRAPCLR   IO
+.
+         RETURN
+.
+UPCODE3  UPDATE     PATCODE3;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                             TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                             TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                             PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                             PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                             TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                             TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                             PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                             PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                             TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                             TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                             TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                             TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                             PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                             PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                             PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                             PTCDAS15,TCSPARE
+         RETURN
+.
+ULCODE3  UNLOCK     PATCODE3
+         RETURN
+.
+DECODE3  RESET      KEY5
+         DELETE     PATCODE3,KEY5
+         RETURN
+.
+. Index 4
+.
+
+RDACODE4 RESET     KEY25
+         READ      PATCODE4,KEY25;ANS
+         RETURN
+.
+RDSCODE4 RESET     KEY25
+         READ      PATCODE4,KEY25;;
+         RETURN
+.
+RDCODE4  MOVE      ZERO,OVRCD
+         RESET     KEY25
+         READ      PATCODE4,KEY25;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RLCODE4  MOVE      ZERO,OVRCD
+         RESET     KEY25
+         READL     PATCODE4,KEY25;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERLOCK IF LOCKED
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDKCODE4 MOVE      ZERO,OVRCD
+         READKS    PATCODE4;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDPCODE4 MOVE      ZERO,OVRCD
+         READKP    PATCODE4;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+. Index 5
+.
+RDACODE5 RESET     KEY9
+         READ      PATCODE5,KEY9;ANS
+         RETURN
+.
+RDSCODE5 RESET     KEY9
+         READ      PATCODE5,KEY9;;
+         RETURN
+.
+RDCODE5  MOVE      ZERO,OVRCD
+         RESET     KEY9
+         READ      PATCODE5,KEY9;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RLCODE5  MOVE      ZERO,OVRCD
+         RESET     KEY9
+         READL     PATCODE5,KEY9;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERLOCK IF LOCKED
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDKCODE5 MOVE      ZERO,OVRCD
+         READKS    PATCODE5;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDPCODE5 MOVE      ZERO,OVRCD
+         READKP    PATCODE5;TCODE,ACODE,TDESC,THCSCOD,TCFORM6:
+                            TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5,PTCOACTV:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10,TCINDC11:
+                            PTCDGRPV,PTCDDEFT,PTCDNHCP,PTCDHOSS,PTCDLDES:
+                            PTCDDFIC,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,PTCDFELC,PTCDUDF2,PTCDUDF3,PTCDUDF4:
+                            PTCDCRSC,PTCDASC1,PTCDASC2,PTCDASC3,PTCDASC4:
+                            PTCDASC5,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41,PTCDUDF5,PTCDUDF6,PTCDUDF7,PTCDUDF8:
+                            PTCDUDF9,PTCDUD10,PTCDUD11,PTCDUD12,PTCDUD13:
+                            PTCDUD14,PTCDASC6,PTCDASC7,PTCDASC8,PTCDASC9:
+                            PTCDAS10,PTCDAS11,PTCDAS12,PTCDAS13,PTCDAS14:
+                            PTCDAS15,TCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN

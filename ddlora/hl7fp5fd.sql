@@ -1,0 +1,45 @@
+create table hl7fp5af
+(
+  hlp5rsid    varchar2(64) default ' ' not null,
+  hlp5vrid    varchar2(10) default ' ' not null,
+  hlp5cnt1    varchar2(4) default ' ' not null,
+  hlp5cnt2    varchar2(4) default ' ' not null,
+  hlp5eurl    varchar2(255) default ' ' not null,
+  hlp5valu    varchar2(200) default ' ' not null,
+  hlp5text    varchar2(200) default ' ' not null,
+  hlp5syst    varchar2(255) default ' ' not null,
+  hlp5vers    varchar2(50) default ' ' not null,
+  hlp5code    varchar2(200) default ' ' not null,
+  hlp5disp    varchar2(200) default ' ' not null,
+  hlp5user    varchar2(10) default ' ' not null,
+  hlp5sdtt    varchar2(50) default ' ' not null,
+  hlp5edtt    varchar2(50) default ' ' not null,
+  hlp5ause    varchar2(40) default ' ' not null,
+  hlp5atyp    varchar2(40) default ' ' not null,
+  hlp5atxt    varchar2(200) default ' ' not null,
+  hlp5aln1    varchar2(200) default ' ' not null,
+  hlp5aln2    varchar2(200) default ' ' not null,
+  hlp5aln3    varchar2(200) default ' ' not null,
+  hlp5aln4    varchar2(200) default ' ' not null,
+  hlp5apos    varchar2(40) default ' ' not null,
+  hlp5acou    varchar2(200) default ' ' not null,
+  hlp5astr    varchar2(40) default ' ' not null,
+  hlp5aend    varchar2(40) default ' ' not null,
+  hlp5durl    varchar2(255) default ' ' not null,
+  hlp5dsys    varchar2(255) default ' ' not null,
+  hlp5dver    varchar2(50) default ' ' not null,
+  hlp5dcod    varchar2(50) default ' ' not null,
+  hlp5ddis    varchar2(200) default ' ' not null,
+  hlp5duse    varchar2(10) default ' ' not null,
+  hlp5exid    varchar2(200) default ' ' not null,
+  hlp5spar    varchar2(100) default ' ' not null,
+  lf          varchar2(1) default ' ' not null,
+constraint hl7fp5a1 primary key( 
+hlp5rsid,
+hlp5vrid,
+hlp5cnt1,
+hlp5cnt2)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 

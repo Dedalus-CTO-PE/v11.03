@@ -1,0 +1,1240 @@
+.***************************************************************************
+.* System    :   Patient Billing                                           *
+.* Program   :   IBAPMS42                                                  *
+.* Desc      :   Export/load related provider invoice information          *
+.***************************************************************************
+.* Date      :   07/12/2006                                                *
+.* Author    :   Ebon Clements                                             *
+.* Function  :   This program will export/load related provider invoice    *
+.*           :   information from the interface table nzpapiaf             *
+.* Mods      :                                                             *
+.***************************************************************************
+.* V11.03.03  21/08/2023 Thanh T           TSK 0923938                     *
+.*            Recompiled as GPATHNTM changes                               *
+.* V11.03.02  16/08/2023 Thanh T           TSK 0923938                     *
+.*            Adeded KFTYP000, KUSR0000, MVINP000 for uploading from unix  *
+.*            file                                                         *
+.* V11.03.01  20/12/2022 Thanh T           TSK 0927918                     *
+.*            Added validation for provider code to fix the file being     *
+.*            loaded with the wrong length                                 * 
+.* V10.03.01  02/01/2013 Patrick Adair     CAR 261630                      *
+.*            Removed port number from temp file name                      *
+.***************************************************************************
+.*           :   V9.09.03 19/11/2007  Ebon Clements CAR 155139             *
+.*           :            Replaced NZPIFPAY with a calculation of the inv  *
+.*           :            balance                                          *
+.*           :   V9.09.02 20/08/2007 Ebon Clements  CAR 147415             *
+.*           :            Added cost centre and sub acc code to export file*
+.*           :   V9.09.01 20/07/2007 Ebon Clements  CAR 145549             *
+.*           :            Fixed population of U/R in export file           *
+.*           :            Fixed read on pathspaf                           *
+.*           :   V9.08.01 07/03/2007 Ebon Clements  CAR 126779             *
+.*           :            Fixed export contract adm record selection       *
+.*           :   V9.08.00 09/02/2007 Ebon Clements  CAR 126779             *
+.*           :            Created program                                  *
+.***************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       NZPPICFD/INC
+          INC       NZPRPIFD/INC
+          INC       NZPAPIFD/INC
+          INC       NZPPTYFD/INC
+          INC       NZPSPRFD/INC
+          INC       IBACONFD/INC
+          INC       PATHSPFD/INC
+          INC       PATMA1FD/INC
+          INC       PATFN1FD/INC
+          INC       PATINVFD/INC
+          INC       PMSHCPFD/INC
+          INC       PMSPX2FD/INC
+          INC       PATCONFD/INC
+          INC       PATVISFD/INC
+          INC       PMSVX1FD/INC
+          INC       GPATHNTD/INC                 * Get path name/extension
+          INC       WEBSECFD/INC                 
+.
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+. IMPORT FILE DEFINITION
+. -------------------------
+LOADFILE  FILE      ASCII, FIXED=104
+.
+.Name     Type    Length  Pos  Description
+.----     ----    ------  ---  -----------
+LOADURNO  DIM       8      1    U/R Number
+LOADADMN  DIM       8      9    Admission Number
+LOADINVN  DIM       8      17   Invoice Number
+LOADCPRC  DIM       9      25   Procedure Code
+LOADDATE  DIM       8      34   Procedure Date (CCYYMMDD)
+LOADCNTR  DIM       6      42   Contract (Health Fund)
+LOADPINV  DIM       20     48   RP Invoice Number
+LOADPDAT  DIM       8      68   RP Invoice Date (CCYYMMDD)
+LOADAMNT  FORM      12.2   76   RP Invoice Amount
+LOADPTYP  DIM       3      91   Provider Type (nzpptyaf)
+LOADPCOD  DIM       10     94   Provider Code (pmshcpaf)
+.
+.End of Record             104
+.
+.-----------------------------------------------------------------------------
+. Temp Files
+.-----------------------------------------------------------------------------
+.         Filename : pms42axx.dat          (xx = port id)
+.
+TEMPFIL1  IFILE SQL, FIXED=17, KEY="U1-8,9-16" 
+.
+. NAME    TYPE   LENGTH   PHYSICAL  START LOC    DESCRIPTION
+. ----    ----   ------   --------  ---------    --------------
+TEMPADMN  DIM       8      8        1     Admission Number
+TEMPINVN  DIM       8      8        9     Invoice Number
+.
+. End of record  
+.
+.         File Variables
+.
+ERASE     INIT      "iserase "
+ISBUILD   INIT      "isbuild "
+TEMPFILE  DIM       8
+UKEY      INIT      " 17 U1-8,9-16"    * set up for record length & relevant key
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CMDLINE   DIM       127
+CURRDATE  DIM       8
+ERRORNUM  FORM      2
+ERRORDES  DIM       70
+FILENAME  DIM       200
+FILETYPE  DIM       1
+FILTCONT  DIM       6
+FILTFDAT  DIM       8
+FILTPRAC  DIM       10
+FILTSTAT  DIM       1
+FILTTDAT  DIM       8
+FUNDPAID  FORM      1         * Funder paid(invoice balance = 0)
+FORM8     FORM      8
+FORM12P2  FORM      12.2
+SAVKEY9   DIM       9
+PACFNAM2  DIM       60
+NOFREAD   FORM      4
+.
+WBUSERID  DIM       10                           * Web user id
+.
+QUOTE     INIT      "#""
+DELIM     INIT      "#",#"" 
+HYPHEN    INIT      "-" 
+CROW      INIT      "Row: " 
+CRETURN   INIT      015 
+.
+ERRCODE1  INIT      "Provider Code not in pmshcpaf"
+.
+PRGID     INIT      "IBAPMS42"
+PRGNAM    INIT      "Export/Import Related Provider Invoices"
+VERSION   INIT      "V11.03.03"
++
+.**************************************************************************
+.*                              MAIN0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999            * EXIT = 1 if 0 chosen in menu
+.
+          BRANCH    COPTION,MAIN1000,MAIN2000,MAIN3000,MAIN4000
+.
+          GOTO      MAIN0100
+.
+MAIN1000  CALL      PROA0000               * Export related prov inv  
+          BRANCH    EXIT,MAIN0100
+.
+          GOTO      MAIN9999
+.
+MAIN2000  CALL      PROB0000               * Import related prov inv
+          BRANCH    EXIT,MAIN0100
+.
+          GOTO      MAIN9999
+.
+MAIN3000  CALL      PROC0000               * Export contract adm
+          BRANCH    EXIT,MAIN0100
+.
+          GOTO      MAIN9999
+.
+MAIN4000  CALL      PROD0000               * Import bulk buyer inv
+          BRANCH    EXIT,MAIN0100
+.
+          GOTO      MAIN9999
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000                                  *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*85,IBCNUGST
+.
+          OPEN      NZPPICA1,"nzppicaf"
+          OPEN      NZPPICA2,"nzppicaf"
+          OPEN      NZPRPIA1,"nzprpiaf"
+          OPEN      NZPRPIA2,"nzprpiaf"
+          OPEN      NZPRPIA3,"nzprpiaf"
+          OPEN      NZPPTYA1,"nzpptyaf"
+          OPEN      NZPAPIA1,"nzpapiaf"
+          OPEN      NZPAPIA2,"nzpapiaf"
+          OPEN      NZPSPRA1,"nzpspraf"
+          OPEN      NZPSPRA2,"nzpspraf"
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      PATINVR1,"patinvrf"
+          OPEN      PMSPX2A1,"pmspx2af"
+          OPEN      PMSHCPA1,"pmshcpaf"
+          OPEN      PATFN1A1,"patfn1af"
+          OPEN      PATHSPA1,"pathspaf"
+          OPEN      PATVISA1,"patvisaf"
+          OPEN      PMSVX1A1,"pmsvx1af"
+          OPEN      WEBSECA1,"websecaf"
+.
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000                                  *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Run clean up                           *
+.*                        TRUE  (1)  Exit option selected                   *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Export related provider ":
+                          "invoice information to AP":
+                    *P1:6,*V2LON,TWO,*HOFF,". Import related provider ":
+                          "invoice information from AP":
+                    *P1:7,*V2LON,THREE,*HOFF,". Export contract admission ":
+                          "information":
+                    *P1:8,*V2LON,FOUR,*HOFF,". Import bulk buyer generated ":
+                          "provider invoice"
+.
+OPTN0500  KEYIN     *P1:10,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:10,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000,OPTN9000,OPTN9000,OPTN9000
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.****************************************************************************
+.* Export related provider invoice                                          *
+.****************************************************************************
+PROA0000  CALL      CONTQST
+          BRANCH    CEXIT,PROA0500,PROA9100,PROA9100
+.
+          GOTO      PROA9100
+.
+PROA0500  PACK      KEY9,ZERO,SP70             
+          CALL      RSNZRPI3
+PROA1000  CALL      RKNZRPI3                     * Process unsent records
+          BRANCH    OVRCD,PROA9000
+.
+          MATCH     "0",NZRPAPIS
+          GOTO      PROA9000 IF NOT EQUAL
+.
+          PACK      KEY22,NZRPADMN,NZRPINVN,SP5,ZERO,SP70
+          CALL      RDNZPIC1
+          IF        OVRCD=1
+            CALL      CLNZPI00
+          ENDIF
+.
+          PACK      KEY8,NZPIURNO,SP70
+          CALL      RDMAST1
+          BRANCH    OVRCD,PROA1000
+.
+          PACK      KEY8,NZPIURNO,SP70
+          CALL      RDPMPX21
+          BRANCH    OVRCD,PROA1000
+.
+          PACK      KEY3,NZRPPTYP,SP70
+          CALL      RDNZPTY1
+          IF        OVRCD=1
+            CALL      CLNZPT00
+          ENDIF
+.
+          PACK      KEY10,NZRPPCOD,SP70
+          CALL      RDPMHCP1
+          IF        OVRCD=1
+            CALL      CLPMSHCP
+          ENDIF
+          MOVE      PMHCSNAM,PACSNAME
+          MOVE      PMHCGNAM,PACGNAME
+          MOVE      PMHCTITL,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME                      * Format patients name
+.
+          PACK      KEY14,NZPICNTR,ZERO,ZERO,ZERO,ZERO,SP70
+          CALL      RDFUND1
+          IF        OVRCD=1
+            MOVE      SP70,HFNAME
+          ENDIF
+.
+          PACK      KEY8,NZRPADMN,SP70
+          CALL      RDVISA1
+          BRANCH    OVRCD,PROA1000
+.
+          PACK      KEY8,NZRPADMN,SP70
+          CALL      RDPMVX11
+          BRANCH    OVRCD,PROA1000
+.
+          PACK      KEY3,PMVXMHOS,SP70
+          CALL      RDPTHSP1
+          IF        OVRCD=1
+            CALL      CLRHSP00
+          ENDIF
+.
+          MOVE      NZRPRPIS,NZAPRPIS            * RP invoice sequence
+          MOVE      ZERO,NZAPSTAT                * Extracted
+          MOVE      NZRPRINV,NZAPRINV            * RP invoice number
+          MOVE      NZRPDATE,NZAPRDAT            * RP invoice date
+          MOVE      NZRPAMNT,NZAPRAMT            * RP invoice amount
+          MOVE      ZERO,NZAPRGST                * GST amount
+          MOVE      PACFNAME,NZAPRPIN            * RPI Provider Name
+          MOVE      NZRPADMN,NZAPADMN            * Admission Number
+          MOVE      NZPIURNO,NZAPURNO            * U/R Number
+          MOVE      PSNAME,NZAPSNAM              * Patient Surname
+          MOVE      PGNAME,NZAPGNAM              * Patient Given Name
+          MOVE      NZPICNTR,NZAPCNTR            * Contract (Health Fund)
+          MOVE      HFNAME,NZAPCNAM              * Contract Name
+          MOVE      PTHSHSNO,NZAPHSNO            * Hospital (pathspaf)
+          MOVE      PTHSHSID,NZAPORGN            * Organisation Id
+          MOVE      PTHSNAME,NZAPHNAM            * Hospital Name
+          MOVE      NZRPINVN,NZAPINVN            * Invoice Number
+          MOVE      PMHCABNN,NZAPSRID            * Supplier ABN Number
+          MOVE      SP70,NZAPAPDT                * AP Interface Date (ccyymmdd)
+          MOVE      NZPTCOST,NZAPCOST            * Cost Centre
+          MOVE      NZPTACOD,NZAPACOD            * Account Code
+          MOVE      NZPTSCOD,NZAPSCOD            * Sub Account Code
+          MOVE      NZPTGSTC,NZAPGSTC            * GST Cost Centre
+          MOVE      NZPTGSTA,NZAPGSTA            * GST Account Code
+          MOVE      NZPTGSTS,NZAPGSTS            * GST Sub Account Code
+          MOVE      SP70,NZAPSPAR                * Spare
+.
+          PACK      KEY8,NZAPRPIS,SP70
+          CALL      RANZAPI1
+          IF        OVRCD=1
+            CALL      WRNZAPI1                   * Write interface record
+          ENDIF
+.
+          MOVE      ONE,NZRPAPIS                 * Set status to sent
+          CALL      UPNZRPI3
+.
+          PACK      SAVKEY9,NZRPAPIS,NZRPRPIS,SP70
+          CALL      RSNZRPI3
+.
+          GOTO      PROA1000
+.
+PROA9000  MOVE      ZERO,EXIT
+          GOTO      PROA9999
+.
+PROA9100  MOVE      ONE,EXIT
+          GOTO      PROA9999
+.
+PROA9999  RETURN
++
+.****************************************************************************
+.* Import related provider invoice details                                  *
+.****************************************************************************
+PROB0000  CALL      CONTQST
+          BRANCH    CEXIT,PROB0500,PROB9100,PROB9100
+.
+          GOTO      PROB9100
+.
+PROB0500  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          MOVE      "Import RP Invoice Information to AP",PRGNAM
+          CALL      PHED0000                * Print heading
+.
+PROB1000  PACK      KEY9,TWO,SP70
+          CALL      RSNZAPI2
+          CALL      RKNZAPI2                * Process Accepted, Reset and Info
+          BRANCH    OVRCD,PROB9000          * records
+.
+          PACK      KEY8,NZAPRPIS,SP70
+          CALL      RDNZRPI2
+          IF        OVRCD=1
+            MOVE      ONE,ERRORNUM
+            CALL      PMES0000             * Print error
+            GOTO      PROB8000 
+          ENDIF
+.
+          COMPARE   NZRPAMNT,NZAPRAMT
+          IF        !@EQUAL
+            MOVE      TWO,ERRORNUM
+            CALL      PMES0000              * Print error
+            GOTO      PROB8000 
+          ENDIF
+.
+          MATCH     "0",NZRPAPIS
+          IF        @EQUAL
+            MOVE      THREE,ERRORNUM
+            CALL      PMES0000              * Print error
+            GOTO      PROB8000 
+          ENDIF
+.
+          MATCH     "2",NZRPAPIS
+          IF        @EQUAL
+            MOVE      FOUR,ERRORNUM
+            CALL      PMES0000              * Print error
+            GOTO      PROB8000 
+          ENDIF
+.
+          MATCH     NZAPAPDT,CURRDATE
+          IF        @LESS
+            MOVE      FIVE,ERRORNUM
+            CALL      PMES0000              * Print error
+            GOTO      PROB8000 
+          ENDIF
+.
+          MATCH    "3",NZRPAPIS
+          IF        @EQUAL
+            MOVE      SIX,ERRORNUM
+            CALL      PMES0000              * Print error
+            GOTO      PROB8000 
+          ENDIF
+          
+          MATCH     "2",NZAPSTAT            * Accepted
+          IF        @EQUAL
+            MOVE      TWO,NZRPAPIS          * Paid
+            MOVE      NZAPAPDT,NZRPAPDT
+          ENDIF
+.
+          MATCH     "3",NZAPSTAT            * Reset
+          IF        @EQUAL
+            MOVE      ZERO,NZRPAPIS         * Unsent
+            MOVE      SP70,NZRPAPDT
+          ENDIF
+.
+          MATCH     "4",NZAPSTAT            * Info
+          IF        @EQUAL
+            MOVE      THREE,NZRPAPIS        * Info
+            MOVE      NZAPAPDT,NZRPAPDT
+          ENDIF
+.
+          CALL      UPNZRPI2                * Update RP invoice record
+.
+          MOVE      ZERO,ERRORNUM
+          CALL      PMES0000                * Print successfully processed
+.
+PROB8000  PACK      KEY9,NZAPSTAT,NZAPRPIS,SP70
+          CALL      DENZAPI2                * Delete AP interface record
+.
+          GOTO      PROB1000
+.
+PROB9000  MOVE      ZERO,EXIT
+          GOTO      PROB9999
+.
+PROB9100  MOVE      ONE,EXIT
+          GOTO      PROB9999
+.
+PROB9999  RETURN
+.
+.*********************************************************************
+.         print a new page
+.*********************************************************************
+PHED0000  CALL      HEAD80
+          CALL      UND80
+.
+          PRINT     *1,"| RPI Sequence ",*16,"| Status",*80,"|"
+.
+          CALL      UND80
+          MOVE      SIX,CLNO
+.
+PHED9999  RETURN
+.
+.*********************************************************************
+.         print process status message
+.*********************************************************************
+PMES0000  MOVE      SP70,ERRORDES
+.
+          BRANCH    ERRORNUM,PMES1100,PMES1200,PMES1300,PMES1400,PMES1500:
+                             PMES1600
+.
+          PRINT     *1,"| ",NZAPRPIS,*16,"| Successfully Processed",*80,"|"
+.
+          GOTO      PMES9999
+.
+PMES1100  MOVE      "Error: Record not matched",ERRORDES
+          GOTO      PMES8000
+.
+PMES1200  MOVE      "Error: Amount differs ",ERRORDES
+          GOTO      PMES8000
+.
+PMES1300  MOVE      "Error: AP status unsent",ERRORDES
+          GOTO      PMES8000
+.
+PMES1400  MOVE      "Error: AP status paid",ERRORDES
+          GOTO      PMES8000
+.
+PMES1500  MOVE      "Error: Future paid date ",ERRORDES
+          GOTO      PMES8000
+.
+PMES1600  MOVE      "Error: AP status info",ERRORDES
+          GOTO      PMES8000
+.
+PMES8000  PRINT     *1,"| ",NZAPRPIS,*16,"| ",ERRORDES,*80,"|"
+.
+PMES9999  RETURN
+.
+.****************************************************************************
+.* Export contract admission                                                *
+.****************************************************************************
+PROC0000  CALL      SCRC0000                * Display screen
+          CALL      KEYC0000                * Keyin extract criteria
+          BRANCH    EXIT,PROC9100
+.
+          CALL      CONTQST
+          BRANCH    CEXIT,PROC0500,PROC9100,PROC9100
+.
+          GOTO      PROA9100
+.
+PROC0500  CALL      CREA0000
+          CALL      DTMP0000
+.
+          PACK      KEY30,FILTFDAT,SP70
+          CALL      RSNZPIC2
+PROC1000  CALL      RKNZPIC2
+          BRANCH    OVRCD,PROC5000
+.
+          MATCH     NZPIPDAT,FILTTDAT            * To date filter
+          GOTO      PROC5000 IF LESS
+.
+          MATCH     SP70,FILTCONT                * Contract filter
+          IF        !@EQUAL
+            MATCH     FILTCONT,NZPICNTR
+            GOTO      PROC1000 IF NOT EQUAL
+          ENDIF
+.
+          MATCH     SP70,FILTPRAC                * Practitioner filter
+          IF        !@EQUAL
+            MATCH     FILTPRAC,NZPISURG          * Surgeon
+            GOTO      PROC1100 IF EQUAL
+.
+            MATCH     FILTPRAC,NZPIANAE          * Anaesthetist
+            GOTO      PROC1100 IF EQUAL
+.
+            GOTO      PROC1000
+          ENDIF
+.
+PROC1100  MATCH     SP70,FILTSTAT                * Status filter
+          IF        !@EQUAL
+            MATCH     FILTSTAT,NZPICAPS
+            GOTO      PROC1000 IF NOT EQUAL
+          ENDIF
+.
+          MOVE      NZPIADMN,TEMPADMN
+          MOVE      NZPIINVN,TEMPINVN
+          PACK      KEY16,TEMPADMN,TEMPINVN,SP70
+          CALL      RDTEMP1
+          IF        OVRCD=1
+            CALL      WRTEMP1
+          ENDIF
+.
+          GOTO      PROC1000
+.
+PROC5000  PACK      KEY16,SP70
+          CALL      RSTEMP1
+PROC6000  CALL      RKTEMP1
+          BRANCH    OVRCD,PROC9000
+.         
+          PACK      KEY22,TEMPADMN,TEMPINVN,SP5,ZERO,SP70
+          CALL      RDNZPIC1
+          BRANCH    OVRCD,PROC6000
+.
+          MATCH     "1",NZPIEXPT                 * Export flag yes
+          GOTO      PROC6000 IF NOT EQUAL
+.
+          MOVE      TWO,NZPIEXPT
+          CALL      UPNZPIC1
+.
+          PACK      KEY22,TEMPADMN,TEMPINVN,SP5,ZERO,SP70
+          CALL      RSNZPIC1
+PROC6100  CALL      RKNZPIC1
+          BRANCH    OVRCD,PROC6000
+.         
+          MATCH     TEMPADMN,NZPIADMN
+          GOTO      PROC6000 IF NOT EQUAL
+.
+          MATCH     TEMPINVN,NZPIINVN
+          GOTO      PROC6000 IF NOT EQUAL
+.
+          CALL      EXTR0000                     * Write to export file
+.
+          GOTO      PROC6100
+.
+PROC9000  CALL      KILL0000
+. 
+          MOVE      ZERO,EXIT
+          GOTO      PROC9999
+.
+PROC9100  MOVE      ONE,EXIT
+          GOTO      PROC9999
+.
+PROC9999  RETURN
+.
+.****************************************************************************
+.* Write details to comma delimited export file                             *
+.****************************************************************************
+EXTR0000  PACK      KEY8,NZPIURNO,SP70
+          CALL      RDMAST1
+          BRANCH    OVRCD,EXTR9999
+.
+          PACK      KEY8,NZPIURNO,SP70
+          CALL      RDPMPX21
+          BRANCH    OVRCD,EXTR9999
+.
+          MOVE      SP70,PACFNAM2
+          PACK      KEY10,NZPIANAE,SP70
+          CALL      RDPMHCP1
+          IF        OVRCD=0
+            MOVE      PMHCSNAM,PACSNAME
+            MOVE      PMHCGNAM,PACGNAME
+            MOVE      PMHCTITL,PACTITLE
+            MOVE      ONE,PACFRMT
+            CALL      PACNAME   
+            MOVE      PACFNAME,PACFNAM2
+          ENDIF
+.
+          MOVE      SP70,PACFNAME
+          PACK      KEY10,NZPISURG,SP70
+          CALL      RDPMHCP1
+          IF        OVRCD=0
+            MOVE      PMHCSNAM,PACSNAME
+            MOVE      PMHCGNAM,PACGNAME
+            MOVE      PMHCTITL,PACTITLE
+            MOVE      ONE,PACFRMT
+            CALL      PACNAME
+          ENDIF
+.
+          CALL      IBAL0000                     * Check funder paid status
+.
+          PRINT     *1,PSNAME,COMMA,PGNAME,COMMA,NZPIURNO:
+                       COMMA,NZPIADMN,COMMA,NZPIINVN,COMMA:
+                       NZPICPRC,COMMA,NZPIPDAT,COMMA,NZPICNTR:
+                       COMMA,FUNDPAID,COMMA,NZPISURG,COMMA,PACFNAME:
+                       COMMA,NZPIANAE,COMMA,PACFNAM2
+.
+          MOVE      ZERO,EXIT
+          GOTO      EXTR9999
+.
+EXTR9999  RETURN
+.
+.**************************************************************************
+.*  Display screen layout  from export contract admission                 *
+.**************************************************************************
+.
+SCRC0000  DISPLAY   *P1:4,*EF:
+                    *P5:4,"Contract       : ":
+                    *P5:5,"From date      : ":
+                    *P5:6,"To date        : ":
+                    *P5:7,"Practitioner   : ":
+                    *P5:8,"Status         : "
+.
+SCRC9999  RETURN
+.
+.****************************************************************************
+.* Keyin extract selection criteria                                         *
+.****************************************************************************
+KEYC0000  KEYIN     *P26:4,*EL,*V2LON,FILTCONT;
+          PACK      FILTCONT,FILTCONT,SP70
+.         
+          MATCH     SP70,FILTCONT
+          IF        @EQUAL
+            DISPLAY   *P26:4,*V2LON,"Blank";
+            GOTO      KEYC1000
+          ENDIF
+.
+          PACK      KEY14,FILTCONT,ZERO,ZERO,ZERO,ZERO,SP70
+          CALL      RDFUND1
+          BRANCH    OVRCD,KEYC9000
+.
+          DISPLAY   *P35:4,HFNAME;
+.
+.         Keyin From Date
+.
+KEYC1000  MOVE      "26",CCOL
+          MOVE      "5",CVERT
+          UNPACK    SP70,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,KEYC9000
+.
+          PACK      FILTFDAT,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",FILTFDAT
+.
+.         Keyin To Date
+.
+KEYC2000  MOVE      "26",CCOL
+          MOVE      "6",CVERT
+          UNPACK    SP70,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,KEYC9000
+.
+          PACK      FILTTDAT,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",FILTTDAT
+.
+.         Keyin practitioner
+.
+KEYC3000  KEYIN     *P26:7,*EL,*V2LON,FILTPRAC;
+          PACK      FILTPRAC,FILTPRAC,SP70
+.
+          MATCH     SP70,FILTPRAC
+          IF        @EQUAL
+            DISPLAY   *P26:7,*V2LON,"Blank";
+            GOTO      KEYC4000
+          ENDIF
+.
+          PACK      KEY10,FILTPRAC,SP70
+          CALL      RDPMHCP1
+          BRANCH    OVRCD,KEYC9000
+.
+          MOVE      PMHCSNAM,PACSNAME
+          MOVE      PMHCGNAM,PACGNAME
+          MOVE      PMHCTITL,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME                      * Format HCP name
+          DISPLAY   *P35:7,PACFNAME;
+.
+KEYC4000  KEYIN     *P26:8,*EL,*V2LON,FILTSTAT;
+          PACK      FILTSTAT,FILTSTAT,SP70
+.
+          MATCH     SP70,FILTSTAT
+          IF        @EQUAL
+            DISPLAY   *P26:8,*V2LON,"All";
+            GOTO      KEYC8000
+          ENDIF
+.
+          MATCH     "1",FILTSTAT
+          IF        @EQUAL
+            DISPLAY   *P26:8,*V2LON,"Processing";
+            GOTO      KEYC8000
+          ENDIF
+.
+          MATCH     "2",FILTSTAT
+          IF        @EQUAL
+            DISPLAY   *P26:8,*V2LON,"Completed";
+            GOTO      KEYC8000
+          ENDIF
+.
+          MATCH     "3",FILTSTAT
+          IF        @EQUAL
+            DISPLAY   *P26:8,*V2LON,"Finalised";
+            GOTO      KEYC8000
+          ENDIF
+.
+          GOTO      KEYC9000
+.
+KEYC8000  MOVE      ZERO,EXIT
+          GOTO      KEYC9999
+.
+KEYC9000  MOVE      ONE,EXIT
+          GOTO      KEYC9999
+.
+KEYC9999  RETURN
++
+.****************************************************************************
+.* Import Bulk Buyer Generated Provider Invoice                             *
+.****************************************************************************
+PROD0000  CALL      KFTYP000               * Keyin file type
+          BRANCH    EXIT,PROD9100
+.
+          CALL      KEYF0000               * Keyin import filename
+          BRANCH    EXIT,PROD9100
+.
+          CALL      KUSR0000               * Keyin user id
+          BRANCH    EXIT,PROD9100          * exit
+.
+          CALL      CONTQST
+          BRANCH    CEXIT,PROD0500,PROD9100,PROD9100
+.
+          GOTO      PROD9100
+.
+PROD0500  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          MOVE      "Import Bulk Generated Provider Invoice",PRGNAM
+          CALL      HEDP0000                * Print heading
+.
+          MOVE      ZERO,NOFREAD
+.
+PROD1000  READ      LOADFILE,SEQ;LOADURNO,LOADADMN,LOADINVN,LOADCPRC:
+                                 LOADDATE,LOADCNTR,LOADPINV,LOADPDAT:
+                                 LOADAMNT,LOADPTYP,LOADPCOD
+          GOTO      PROD9000 IF OVER
+.
+          ADD       ONE,NOFREAD
+.
+          SCAN      CRETURN,LOADPCOD              * Check for a ^M
+          GOTO      PROD1050 IF NOT EQUAL         * ^M not found
+.
+          BUMP      LOADPCOD,-1
+          LENSET    LOADPCOD
+          RESET     LOADPCOD
+          PACK      LOADPCOD,LOADPCOD,SP70            
+.
+PROD1050  PACK      KEY22,LOADADMN,LOADINVN,SP70
+          CALL      RSNZPIC1
+PROD1200  CALL      RKNZPIC1                * Get next invoice contract record
+          BRANCH    OVRCD,PROD1900
+.
+          MATCH     LOADADMN,NZPIADMN       * Admission
+          GOTO      PROD1900 IF NOT EQUAL
+.
+          MATCH     LOADINVN,NZPIINVN       * Hospital Inv
+          GOTO      PROD1900 IF NOT EQUAL
+.
+          MATCH     LOADCNTR,NZPICNTR       * Contract (health fund)
+          GOTO      PROD1200 IF NOT EQUAL
+.
+          MATCH     LOADCPRC,NZPICPRC       * Contract procedure code
+          GOTO      PROD1200 IF NOT EQUAL
+.
+          MATCH     LOADDATE,NZPIPDAT       * Procedure date
+          GOTO      PROD1200 IF NOT EQUAL
+.
+          GOTO      PROD2000
+.
+PROD1900  MOVE      ONE,ERRORNUM
+          CALL      MESP0000                * Print error
+          GOTO      PROD1000
+.
+PROD2000  MATCH     "2",NZPICAPS
+          IF        @EQUAL
+            MOVE      TWO,ERRORNUM
+            CALL      MESP0000              * Print error
+            GOTO      PROD1000
+          ENDIF
+.
+          MATCH     "3",NZPICAPS
+          IF        @EQUAL
+            MOVE      TWO,ERRORNUM
+            CALL      MESP0000              * Print error
+            GOTO      PROD1000
+          ENDIF
+.
+          PACK      KEY36,NZPIADMN,NZPIINVN,LOADPINV,SP70
+          CALL      RDNZRPI1
+          IF        OVRCD=0
+            MOVE      THREE,ERRORNUM
+            CALL      MESP0000              * Print error
+            GOTO      PROD1000
+          ENDIF
+.
+          PACK      KEY10,LOADPCOD,SP70
+          CALL      RDPMHCP1
+          IF        OVRCD=1
+            MOVE      FOUR,ERRORNUM
+            CALL      MESP0000              * Print error
+            GOTO      PROD1000
+          ENDIF
+.
+PROD5000  CALL      CLNZRP00
+.
+          MOVE      "112",PRXCODE      * System Lock Sector 112
+          CALL      GETSLK00           * Get System Lock of Sector 112
+          READ      CONTROLF,HUND12;*11,PTCNRPIS
+.
+          MOVE      ZERO,FORM8
+          SQUEEZE   PTCNRPIS
+          MOVE      PTCNRPIS,FORM8
+          ADD       ONE,FORM8
+          MOVE      FORM8,PTCNRPIS
+.
+          WRITAB    CONTROLF,HUND12;*11,PTCNRPIS
+          CALL      RELSLK00           * Release System Lock of Sector 112
+.
+          SUB       ONE,FORM8
+          MOVE      FORM8,PTCNRPIS
+          MOVE      PTCNRPIS,NZRPRPIS  * got next RPI sequence
+.
+          MOVE      NZPIADMN,NZRPADMN
+          MOVE      NZPIINVN,NZRPINVN
+          MOVE      LOADPINV,NZRPRINV
+          MOVE      LOADPDAT,NZRPDATE
+          MOVE      LOADAMNT,NZRPAMNT
+          MOVE      LOADPTYP,NZRPPTYP
+          MOVE      LOADPCOD,NZRPPCOD
+          MOVE      ZERO,NZRPAPIS
+.
+          PACK      NZRPCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",NZRPCDAT                * Systen date
+          CLOCK     TIME,NZRPCTIM                * System time
+          MOVE      WBUSERID,NZRPCUID
+          MOVE      SP70,NZRPUDAT
+          MOVE      SP70,NZRPUTIM
+          MOVE      SP70,NZRPUUID
+.
+          PACK      KEY36,NZPIADMN,NZPIINVN,LOADPINV,SP70
+          CALL      WRNZRPI1
+.         
+          MOVE      ZERO,ERRORNUM
+          CALL      MESP0000                * Print successfully processed
+.
+          MATCH     " ",NZPICAPS
+          IF        @EQUAL
+            MOVE      "1",NZPICAPS          * Set capture status to processing
+            CALL      UPNZPIC1
+          ENDIF
+.
+          GOTO      PROD1000
+.
+PROD9000  MOVE      ZERO,EXIT
+          MATCH     "2",FILETYPE
+          IF        @EQUAL 
+            CALL      MVINP000
+          ENDIF
+          GOTO      PROD9999
+.
+PROD9100  MOVE      ONE,EXIT
+          GOTO      PROD9999
+.
+PROD9999  RETURN
+.
+.*********************************************************************
+.         Keyin file type
+.*********************************************************************
+KFTYP000  KEYIN     *P1:12,*EF,"Keyin File Type : ",*V2LON,FILETYPE
+.
+          PACK      FILETYPE,FILETYPE,SP70
+          MATCH     SP70,FILETYPE
+          GOTO      KFTYP900 IF EQUAL
+.
+          MATCH     "1",FILETYPE
+          GOTO      KFTYP800 IF EQUAL
+.
+          MATCH     "2",FILETYPE
+          GOTO      KFTYP800 IF EQUAL
+.
+          GOTO      KFTYP900
+.  
+KFTYP800  MOVE      ZERO,EXIT
+          GOTO      KFTYP999
+.
+KFTYP900  MOVE      ONE,EXIT
+          GOTO      KEYF9999
+.
+KFTYP999  RETURN
+.
+.*********************************************************************
+.         Keyin import filename
+.*********************************************************************
+KEYF0000  MOVE      ZERO,EXIT
+          PACK      FILENAME,SP70,SP70,SP70
+.
+          KEYIN     *P1:14,*EF,"Keyin Path & File Name : ",*V2LON,FILENAME
+          PACK      FILENAME,FILENAME,SP70,SP70,SP70
+.
+          MATCH     SP70,FILENAME
+          GOTO      KEYF9000 IF EQUAL
+.
+          STRIP     FILENAME
+          DISPLAY   *P26:14,*EL,*V2LON,FILENAME;
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      LOADFILE,FILENAME
+          TRAPCLR   IO
+.
+          IF        OVRCD=1
+            DISPLAY   *P1:24,*EL,*B,"*** Cannot open Import file. ***";
+            CALL      HEDP0000
+            PRINT     *N,"*** Cannot open Import file. ***"
+            CALL      HITENTER
+            GOTO      KEYF9000
+          ENDIF
+.
+KEYF8000  MOVE      ZERO,EXIT
+          GOTO      KEYF9999
+.
+KEYF9000  MOVE      ONE,EXIT
+          GOTO      KEYF9999
+.
+KEYF9999  RETURN
++
+.****************************************************************************
+.         Keyin user id  
+.****************************************************************************
+KUSR0000  KEYIN     *P1:16,*EL,"Web User Id : ",*V2LON,WBUSERID;
+          PACK      WBUSERID,WBUSERID,SP70
+.
+          MATCH     SP70,WBUSERID
+          GOTO      KUSR9500 IF EQUAL
+.
+          PACK      KEY10,WBUSERID,SP70
+          CALL      RDWBSE1
+          BRANCH    OVRCD,KUSR9500
+.
+          MOVE      ZERO,EXIT
+          GOTO      KUSR9999
+.
+KUSR9500  DISPLAY   *P1:24,*EL,*B,"Invalid User ID. ",WBUSERID;
+          CALL      PHED0000
+          PRINT     *N,"Invalid User ID ",WBUSERID
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+KUSR9999  RETURN
+.
+.*********************************************************************
+.         print a new page
+.*********************************************************************
+HEDP0000  CALL      HEAD132
+          CALL      UND132
+.
+          PRINT     *1,"| U/R",*12,"| Admission",*23,"| Invoice":
+                       *34,"| RP Invoice",*57,"| Status":
+                       *132,"|"
+.
+          CALL      UND132
+          MOVE      SIX,CLNO
+.
+HEDP9999  RETURN
+.
+.
+.*********************************************************************
+.         print process status message
+.*********************************************************************
+MESP0000  MOVE      SP70,ERRORDES
+.
+          BRANCH    ERRORNUM,MESP1100,MESP1200,MESP1300,MESP1400
+.
+          PRINT     *1,"| ",NZPIURNO,*12,"| ",NZPIADMN,*23,"| ",NZPIINVN:
+                    *34,"| ",NZRPRINV,*57,"| ","Successfully Processed",*132,"|"
+.
+          GOTO      MESP9999
+.
+MESP1100  MOVE      "Record not matched",ERRORDES
+          PRINT     *1,"| ",LOADURNO,*12,"| ",LOADADMN,*23,"| ",LOADINVN:
+                    *34,"| ",LOADPINV,*57,"| ",ERRORDES,*132,"|"
+          GOTO      MESP9999
+.
+MESP1200  MOVE      "Error: Invalid RP capture status",ERRORDES
+          GOTO      MESP8000
+.
+MESP1300  MOVE      "Error: RP Invoice exists",ERRORDES
+          GOTO      MESP8000
+.
+MESP1400  PACK      ERRORDES,ERRCODE1,DOT,SP1,CROW,NOFREAD,HYPHEN,LOADPCOD
+          PRINT     *1,"| ",LOADURNO,*12,"| ",LOADADMN,*23,"| ",LOADINVN:
+                    *34,"| ",LOADPINV,*57,"| ",ERRORDES,*132,"|"
+          GOTO      MESP9999
+.
+MESP8000  PRINT     *1,"| ",NZPIURNO,*12,"| ",NZPIADMN,*23,"| ",NZPIINVN:
+                    *34,"| ",NZRPRINV,*57,"| ",ERRORDES,*132,"|"
+.
+MESP9999  RETURN
+.   
+.-----------------------------------------------------------
+. Initialize's file data (Hospital details Maintenace)
+.-----------------------------------------------------------
+CLRHSP00  MOVE      SP70,PTHSHOSP
+          MOVE      SP70,PTHSNAME
+          MOVE      SP70,PTHSADD1
+          MOVE      SP70,PTHSADD2
+          MOVE      SP70,PTHSADD3
+          MOVE      SP70,PTHSADD4
+          MOVE      SP70,PTHSPCOD
+          MOVE      SP70,PTHSTELE
+          MOVE      SP70,PTHSFAXN
+          MOVE      SP70,PTHSUNIT
+          MOVE      SP70,PTHSHDPC
+          MOVE      SP70,PTHSMRPR
+          MOVE      SP70,PTHSPACT
+          MOVE      ZERO,PTHSNUMB
+          MOVE      SP70,PTHSPMBS
+          MOVE      SP70,PTHSTFEE
+          MOVE      SP70,PTHSHLOC
+          MOVE      SP70,PTHSRCTY
+          MOVE      SP70,PTHSVOLM
+          MOVE      SP70,PTHSSTAT
+          MOVE      SP70,PTHSDCLM
+          MOVE      SP70,PTHSAPPR
+          MOVE      SP70,PTHSUFMS
+          MOVE      SP70,PTHSABNN
+          MOVE      SP70,PTHSHSID
+          MOVE      SP70,PTHSHCEN
+          MOVE      SP70,PTHSPTIN
+          MOVE      SP70,PTHSSPID
+.
+CLRHSP99  RETURN
+.
+.------------------------------------------------------------
+. Check if an invoice has a zero balance.
+. Returns FUNDPAID = 0 - Funder NOT paid invoice balance not 0
+.                    1 - Funder PAID invoice balance = 0
+.------------------------------------------------------------
+IBAL0000  MOVE      ZERO,FUNDPAID
+.
+          PACK      KEY8,NZPIINVN,SP70
+          CALL      RDPTINV1
+          BRANCH    OVRCD,IBAL9999
+.
+          MOVE      PINVAMT,FORM12P2
+          ADD       PINVPATA,FORM12P2
+          ADD       PINVHFDA,FORM12P2
+          ADD       PINVOTHA,FORM12P2
+          ADD       PINVJOUR,FORM12P2
+          ADD       PTINCRTT,FORM12P2
+          IF        IBCNUGST=2 | IBCNUGST=3
+            ADD       PTINGSTJ,FORM12P2
+          ENDIF
+.
+          COMPARE   ZERO,FORM12P2          * invoice balanced ?
+          GOTO      IBAL9999 IF NOT EQUAL
+.
+          MOVE      ONE,FUNDPAID             * Funder paid yes
+          GOTO      IBAL9999
+.
+IBAL9999  RETURN
++
+.*****************************************************************************
+. Move Input upload file to Extract Directory
+.*****************************************************************************
+MVINP000  MOVE      FILENAME,GFILPATH
+          CALL      GPATHN00
+.  
+          CLEAR     CMDLINE
+          APPEND    "ibapms42.us1 ",CMDLINE
+          APPEND    FILENAME,CMDLINE
+          APPEND    SP1,CMDLINE
+          APPEND    GFILNAME,CMDLINE
+          APPEND    SP1,CMDLINE
+          MATCH     SP70,GFILEXTN
+          IF        @EQUAL
+            APPEND    "'",CMDLINE
+            APPEND    "'",CMDLINE
+          ELSE 
+            APPEND    DOT,CMDLINE
+            APPEND    GFILEXTN,CMDLINE
+          ENDIF 
+          RESET     CMDLINE
+MVINP800  EXECUTE   CMDLINE,TASKID
+.
+MVINP999  RETURN
+.
+.**************************************************************************
+.*             create a new temporary file                                *
+.**************************************************************************
+.
+CREA0000  CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TEMPFILE
+.
+          CALL      KILL0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILE,UKEY
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      TEMPFIL1,TEMPFILE            * open temp index file
+
+CREA9999  RETURN
+.
+.****************************************************************************
+.*               close and erase the temporary file                         *
+.****************************************************************************
+.
+KILL0000  CLOSE     TEMPFIL1                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILE       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+KILL9999 RETURN
+.
+.------------------------------------------------------------
+. Delete all records from the temp file
+.------------------------------------------------------------
+DTMP0000  PACK      KEY16,SP70
+          CALL      RSTEMP1
+          CALL      RKTEMP1
+          BRANCH    OVRCD,DTMP9999
+.
+          PACK      KEY16,TEMPADMN,TEMPINVN,SP70
+          CALL      DETEMP1
+.
+          GOTO      DTMP0000
+.
+DTMP9999  RETURN
+.
+.------------------------------------------------------------------------------
+. Temp File I/O
+.------------------------------------------------------------------------------
+RSTEMP1   RESET     KEY16
+          READ      TEMPFIL1,KEY16;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    TEMPFIL1;TEMPADMN,TEMPINVN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY16
+          READ      TEMPFIL1,KEY16;TEMPADMN,TEMPINVN
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     TEMPFIL1,KEY16;TEMPADMN,TEMPINVN
+          RETURN
+.
+DETEMP1   RESET     KEY16
+          DELETE    TEMPFIL1,KEY16
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+          INC       CLNZPPTY
+          INC       CLNZPPIC
+          INC       CLPMSHCP
+          INC       CLNZPRPI
+          INC       TFILENAM                     * Generate Temp File Name
+          INC       GPATHNTM                     * Get path name/extension
+.
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       NZPPICIO/INC
+          INC       NZPRPIIO/INC
+          INC       NZPAPIIO/INC
+          INC       NZPPTYIO/INC
+          INC       NZPSPRIO/INC
+          INC       PATHSPIO/INC
+          INC       PATMA1IO/INC
+          INC       PATFN1IO/INC
+          INC       PATINVIO/INC
+          INC       PMSHCPIO/INC
+          INC       PMSPX2IO/INC
+          INC       PATVISIO/INC
+          INC       PMSVX1IO/INC
+          INC       WEBSECIO/INC                 * web user id
+          INC       WEBERRIO/INC                 * Web Server Error Logging

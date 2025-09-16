@@ -1,0 +1,319 @@
+.  .   WATHISIO    
+.   --------
+.   Filename     : wathisaf.dat
+.
+RSWTHIS1  RESET     KEY31                                                       
+          READ      WATHISA1,KEY31;;                                            
+          RETURN
+.
+RAWTHIS1  RESET     KEY31                                                       
+          MOVE      ZERO,OVRCD
+          READ      WATHISA1,KEY31;ANS                                          
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTHIS1  RESET     KEY31                                                       
+          MOVE      ZERO,OVRCD
+          READ      WATHISA1,KEY31;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT                                           
+          MOVE      DWTHIUCN,WTHIUCNT                                           
+          RETURN
+.
+RKWTHIS1                                                                        
+          MOVE      ZERO,OVRCD
+          READKS    WATHISA1;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:      
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:  
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT                                           
+          MOVE      DWTHIUCN,WTHIUCNT                                           
+          RETURN
+.
+RPWTHIS1                                                                        
+          MOVE      ZERO,OVRCD
+          READKP    WATHISA1;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:      
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:  
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT                                           
+          MOVE      DWTHIUCN,WTHIUCNT                                           
+          RETURN
+.
+UPWTHIS1                                                                        
+          MOVE      WTHIPCNT,DWTHIPCN                                           
+          MOVE      WTHIUCNT,DWTHIUCN                                           
+          UPDATE    WATHISA1;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:      
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:  
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          RETURN
+.
+WRWTHIS1  RESET     KEY31                                                       
+          MOVE      WTHIPCNT,DWTHIPCN                                           
+          MOVE      WTHIUCNT,DWTHIUCN                                           
+          WRITE     WATHISA1,KEY31;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:  
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          RETURN
+.
+DEWTHIS1  RESET     KEY31                                                       
+          DELETE    WATHISA1,KEY31                                              
+          RETURN
+.
+. Index 2
+.
+RSWTHIS2  RESET     KEY32                                                       
+          READ      WATHISA2,KEY32;;                                            
+          RETURN
+.
+RAWTHIS2  RESET     KEY32                                                       
+          MOVE      ZERO,OVRCD
+          READ      WATHISA2,KEY32;ANS                                          
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTHIS2  RESET     KEY32                                                       
+          MOVE      ZERO,OVRCD
+          READ      WATHISA2,KEY32;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:  
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT                                           
+          MOVE      DWTHIUCN,WTHIUCNT                                           
+          RETURN
+.
+RKWTHIS2  MOVE      ZERO,OVRCD
+          READKS    WATHISA2;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:      
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:  
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT                                           
+          MOVE      DWTHIUCN,WTHIUCNT                                           
+          RETURN
+.
+RPWTHIS2  MOVE      ZERO,OVRCD
+          READKP    WATHISA2;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:      
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:  
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT                                           
+          MOVE      DWTHIUCN,WTHIUCNT                                           
+          RETURN
+.
+UPWTHIS2  MOVE      WTHIPCNT,DWTHIPCN                                           
+          MOVE      WTHIUCNT,DWTHIUCN                                           
+          UPDATE    WATHISA2;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:      
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:  
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          RETURN
+.
+DEWTHIS2  RESET     KEY32                                                       
+          DELETE    WATHISA2,KEY32                                              
+          RETURN
+.
+.
+. Index 3
+.
+RSWTHIS3  RESET     KEY39
+          READ      WATHISA3,KEY39;;
+          RETURN
+.
+RAWTHIS3  RESET     KEY39
+          MOVE      ZERO,OVRCD
+          READ      WATHISA3,KEY39;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTHIS3  RESET     KEY39
+          MOVE      ZERO,OVRCD
+          READ      WATHISA3,KEY39;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT
+          MOVE      DWTHIUCN,WTHIUCNT
+          RETURN
+.
+RKWTHIS3  MOVE      ZERO,OVRCD
+          READKS    WATHISA3;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT
+          MOVE      DWTHIUCN,WTHIUCNT
+          RETURN
+.
+RPWTHIS3  MOVE      ZERO,OVRCD
+          READKP    WATHISA3;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT
+          MOVE      DWTHIUCN,WTHIUCNT
+          RETURN
+.
+UPWTHIS3  MOVE      WTHIPCNT,DWTHIPCN
+          MOVE      WTHIUCNT,DWTHIUCN
+          UPDATE    WATHISA3;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          RETURN
+.
+DEWTHIS3  RESET     KEY39
+          DELETE    WATHISA3,KEY39
+          RETURN
+.
+. index 4
+.
+RSWTHIS4  RESET     KEY39
+          READ      WATHISA4,KEY39;;
+          RETURN
+.
+RAWTHIS4  RESET     KEY39
+          MOVE      ZERO,OVRCD
+          READ      WATHISA4,KEY39;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDWTHIS4  RESET     KEY39
+          MOVE      ZERO,OVRCD
+          READ      WATHISA4,KEY39;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT
+          MOVE      DWTHIUCN,WTHIUCNT
+          RETURN
+.
+RKWTHIS4  MOVE      ZERO,OVRCD
+          READKS    WATHISA4;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT
+          MOVE      DWTHIUCN,WTHIUCNT
+          RETURN
+.
+RPWTHIS4  MOVE      ZERO,OVRCD
+          READKP    WATHISA4;WTHIURNO,WTHIPROC,DWTHIPCN,WTHIEDAT,DWTHIUCN:
+                        WTHIPRIO,WTHIRANK,WTHIDAT2,WTHIDAT3,WTHIRDT3,WTHIBSCD:
+                        WTHIDCGV,WTHIDBFT,WTHIRECS,WTHIRTYP,WTHIRCDT:
+                        WTHIBMDT,WTHIETIM,WTHIADTE,WTHIATIM,WTHIWEBI,WTHIBCAN:
+                        WTHIBOOK,WTHIDOCT,WTHIBOKC,WTHIUNIT,WTHIPLST,WTHISTAT:
+                        WTHIDAT1,WTHIDTAD,WTHIPODT,WTHICODT,WTHIDRSA:
+                        WTHIDOSA,WTHIPHSP,WTHITRAG,WTHIPCHS,WTHIBPRO:
+                        WTHIDTEC,WTHISPFL,WTHIBRSR,WTHIHIDE,WTHIOLDP:
+                        WTHIPCHG,WTHICSST,WTHICSDT,WTHICNFA,WTHIOLDU:
+                        WTHIASSR,WTHISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DWTHIPCN,WTHIPCNT
+          MOVE      DWTHIUCN,WTHIUCNT
+          RETURN
+.

@@ -1,0 +1,159 @@
+.************************************************************************
+.*  Include  : DGCLICAD  -  Broadcast Admission Message                 *
+.*                                                                      *
+.*  Author   : Steve Armstrong  (18/04/1997)                            *
+.*                                                                      *
+.*  Mods     :                                                          *
+.*                                                                      *
+.*  V10.03.01 17/04/2013  Davin S          CAR 280425                   *
+.*            Changed IBCNUCIS - value 1 or greater will write trigger  *
+.*  V10.02.01 05/06/2011  Steve Armstrong   CAR 240692                  *
+.*            Mods to populate H7CIRTAG & H7CISTAG                      *
+.************************************************************************
+.*  V10.00.01 19/03/2010  Steve Armstrong   CAR 135505                  *
+.*            Added setting of H7CITRID & H7CIINCL                      *
+.************************************************************************
+.*  V9.04.01  21/06/2005  Steve Armstrong  CAR 64087                    *
+.*            Mods to handle CIS interface.                             *
+.*            Separated out CAD routine from dgcliadm routine.          *
+.*            Mods to write directly to holding tables instead of       *
+.*            hl7bmtaf.                                                 *
+.************************************************************************
+.*  V9.02.02  05/11/2001  Davin & MikeL                                 *
+.*            Mods to use message holding file                          *
+.*            Rename dgcliadm to dgclicad                               *
+.*  V9.02.01  22/06/2001  Mike Laming                                   *
+.*            Add PMI Master Xtrn.2 (PMSPX2) & Visit Extn.1 (PMSVX1)    *
+.*            for WEB Based processing for Messages "CAD" and "CAC"     *
+.*            (using Compiler Option $$DBASE)                           *
+.*  V5.08.02  02/10/2000  Steve Downing                                 *
+.*            Added Doctors surname and given name                      *
+.*  V5.08.01  16/08/2000  Caleb Sharman                                 *
+.*            Changed Health Fund variables to be 8 chars               *
+.*            22/12/1998  Davin                                         *
+.*            Y2K mods                                                  *
+.*            28/10/1998  Davin                                         *
+.*            Mods for 507                                              *
+.*            13/10/1997  Steve Armstrong   WHL                         *
+.*            Mods for new Master extension file variables              *
+.*            (PTMXOPER - PTMXPOST).                                    *
+.*            Fixed birth date format from ddmmyyyy to ddmmccyy.        *
+.*                                                                      *
+.************************************************************************
+.
+          DEFPROC   DGCLICAD
+.
+          INC       HL7CISFD/INC
+          INC       HL7INBFD/INC
+          INC       PMSQPTFD/INC
+          INC       PMSQVIFD/INC
+.
+CISMFLAG  FORM      1             * CIS message flag
+.                                    0 = don't send HL7 CIS message
+.                                    1 = send HL7 CIS message
+IBAMFLAG  FORM      1             * IBA proprietary message flag
+.                                    0 = don't send IBA proprietary message
+.                                    1 = send IBA proprietary message
+MESSAGID  DIM       20
+.
+DGCLI000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*133,IBCNUCIS
+          READ      CONTROLF,SEVENTY9;*239,PTCNDGAD
+          READ      CONTROLF,HUND10;*101,PTCNA01M
+.
+          MOVE      ZERO,CISMFLAG                * set default interface flag
+          MATCH     "1",IBCNUCIS                 * using CIS interface ?
+          IF        !@LESS
+            COMPARE   ONE,PTCNA01M               * yes - sending A01 ?
+            IF        @EQUAL
+              MOVE      ONE,CISMFLAG             * yes- set flag for CIS message
+            ENDIF
+          ENDIF
+.
+.         If this is PAS-CIS upload we are sending all current admissions to 
+.         synchronise the PAS and CIS databases, so don't send proprietary 
+.         message as this would double up on a CAD previously sent.
+.
+          MATCH     "CISUPLOD",PRGID
+          IF        @EQUAL
+            MOVE      ZERO,PTCNDGAD
+          ENDIF
+.
+.         Check if we are sending any messages.
+.
+          IF        PTCNDGAD <> 1 & CISMFLAG <> 1
+            GOTO      DGCLI999
+          ENDIF
+.
+.         We are sending IBA Proprietary and/or CIS HL7 messages, so
+.         first open the relevant holding tables
+.
+          MOVE      ZERO,IBAMFLAG
+          IF        PTCNDGAD = 1
+            OPEN      HL7INB01,"hl7inbaf"
+            MOVE      ONE,IBAMFLAG
+          ENDIF
+          IF        CISMFLAG = 1
+            OPEN      HL7CISA1,"hl7cisaf"
+          ENDIF
+          OPEN      PMSQPTA1,"pmsqptaf"
+          OPEN      PMSQVIA1,"pmsqviaf"
+.
+          CALL      DGMESSID                     * get the unique message id
+.
+.         Write a record to pmsqptaf (holding patient details)
+.
+          MOVE      MESSAGID,PMQPMESI
+          MOVE      SP8,PMQPOURN
+          PACK      PMQPSPAR,SP70,SP70
+          CALL      WRPMQPT1
+.
+.         Write a record to pmsqviaf (holding visit details)
+.
+          MOVE      MESSAGID,PMQVMESI
+          MOVE      ONE,PMQVTRAN
+          MOVE      SP3,MHLRCODE
+          PACK      PMQVSPAR,SP70
+          CALL      WRPMQVI1
+.
+          COMPARE   ONE,CISMFLAG                 * sending CIS HL7 A01 message?
+          IF        @EQUAL
+            MOVE      "A01",H7CIMETP
+            MOVE      HL7TRGID,H7CITRID
+            MOVE      HL7INCLD,H7CIINCL
+            MATCH     "HL7REGEN",PRGID
+            IF        @EQUAL
+              MOVE      HL7RCTAG,H7CIRTAG
+              MOVE      HL7SFTAG,H7CISTAG
+            ELSE
+              MOVE      SP20,H7CIRTAG
+              MOVE      SP3,H7CISTAG
+            ENDIF
+            CALL      WRCIS000                   * yes - write hl7cisaf record
+          ENDIF
+.
+          COMPARE   ONE,PTCNDGAD                 * sending proprietary message?
+          IF        @EQUAL
+            MOVE      "CAD",H7INMETP
+            CALL      WRINB000                   * yes - write hl7inbaf record
+          ENDIF
+.
+          CLOSE     HL7INB01
+          CLOSE     HL7CISA1
+          CLOSE     PMSQPTA1
+          CLOSE     PMSQVIA1
+.
+DGCLI999  GOTO      DGCLIEND                     * end procedure
+.
+.         I/O Routines
+.
+          INC       BRHLCOMN
+.
+          INC       HL7CISIO/INC
+          INC       HL7INBIO/INC
+          INC       IBAOVRIO/INC
+          INC       PMSQPTIO/INC
+          INC       PMSQVIIO/INC
+.
+DGCLIEND  ENDPROC
++

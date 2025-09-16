@@ -1,0 +1,947 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   CONVCOMM                                                    *
+.* Desc      :   Data Migration Program to upload U/R based comment data     *
+.*               from a third party legacy system into the PMI webPAS module.*
+.*****************************************************************************
+.* Date      :   11/03/2011                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through the convcomm.txt file and    *
+.*               for each valid record found, it will write one or more new  *
+.*               patcomaf records for the patient.                           *
+.* Mods      :                                                               *
+.*****************************************************************************
+.*        V10.13.01  28/11/2018  Jill Parkinson Task 0860741                 *
+.*                   Added missing header record or duplicate header message *
+.*        V10.11.01  22/09/2017  Thanh T.          TSK 0821710               *
+.*                   Audit Amission/outpatient and U/R comment               *
+.*        V10.04.02  11/03/2014  Steve Armstrong   CAR 296128                *
+.*                   Added display of warning message if error records found *
+.*        V10.04.01  03/03/2014  Steve Armstrong   CAR 296128                *
+.*                   Mods to handle upload from EXTRCOMM (as no date is      *
+.*                   available).                                             *
+.*****************************************************************************
+.*        V10.02.00  11/03/2011  Steve Armstrong   CAR 240681                *
+.*                   Created program                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       PMSUCHFD/INC
+          INC       PMSUCDFD/INC
+          INC       PATMA1FD/INC
+.
+. U/R Comment Extract/Load File
+.
+URCOMEXT  FILE      HL7,FIXED=4096         * Pipe delimited upload file
+.
+. Fields must be pipe delimited and in the following sequence.
+. Field lengths are irrelevant other than the fact that where
+. a field is longer than allowed, the extra data will be ignored.
+.
+. U/R comment header upload file layout
+.
+.Name     Type      Length start Description
+.----     ----      ------ ----- -----------
+CEXTTYPE  DIM       1      1     Comment Header Type (0)
+.PIPE     DIM       1      2     Pipe Delimiter
+CEXTURNO  DIM       8      3     U/R Number
+.PIPE     DIM       1      11    Pipe Delimiter
+CMUHCTYP  DIM       3      12    Comment Type
+.PIPE     DIM       1      15    Pipe Delimiter
+CMUHCNUM  DIM       6      16    Counter/Note Number
+.PIPE     DIM       1      22    Pipe Delimiter
+CMUHCUID  DIM       10     23    User Who Created Record
+.PIPE     DIM       1      33    Pipe Delimiter
+CMUHCDAT  DIM       8      34    Date Record Created (ccyymmdd)
+.PIPE     DIM       1      42    Pipe Delimiter
+CMUHCTIM  DIM       8      43    Time Record Created (hh:mm:ss)
+.PIPE     DIM       1      51    Pipe Delimiter
+CMUHOCCG  DIM       3      52    Occupational Group WEB User ID (Cat w0)
+.PIPE     DIM       1      55    Pipe Delimiter
+CMUHDELT  DIM       1      56    Delete Indicator (0=No, 1=Yes)
+.PIPE     DIM       1      57    Pipe Delimiter
+CMUHDUID  DIM       10     58    User Who Deleted Record (websecaf)
+.PIPE     DIM       1      68    Pipe Delimiter
+CMUHDDAT  DIM       8      69    Date Record Deleted (ccyymmdd)
+.PIPE     DIM       1      77    Pipe Delimiter
+CMUHDTIM  DIM       8      78    Time Record Deleted (hh:mm:ss)
+.PIPE     DIM       1      86    Pipe Delimiter
+CMUHDOCG  DIM       3      87    Occupational Grp WEB UserID Deleted (Cat w0)
+.
+.End of Record             90
+.
+.
+. U/R comment detail upload file layout
+.
+.Name     Type      Length start Description
+.----     ----      ------ ----- -----------
+.CEXTTYPE DIM       1      1     Comment Details Type (1)
+.PIPE     DIM       1      2     Pipe Delimiter
+.CEXTURNO DIM       8      3     U/R Number
+.PIPE     DIM       1      11    Pipe Delimiter
+CMUCCTTY  DIM       3      12    Comment Type
+.PIPE     DIM       1      15    Pipe Delimiter
+CMUCCNUM  DIM       6      16    Counter/Note Number
+.PIPE     DIM       1      22    Pipe Delimiter
+CMUCLNUM  DIM       3      23    Line Number
+.PIPE     DIM       1      26    Pipe Delimiter
+CMUCCOMM  DIM       70     27    Comment
+.
+.End of Record             97
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+DTECOUNT  FORM      8             * date error record count
+DPHCOUNT  FORM      8             * duplicate header record count
+INCCOUNT  FORM      8             * invalid comment type count
+DPCCOUNT  FORM      8             * duplicate comment record count
+MHDCOUNT  FORM      8             * missing  header record count
+UNKCOUNT  FORM      8             * unknown U/R error record count
+MANCOUNT  FORM      8             * mandatory field error record count
+TYPCOUNT  FORM      8             * numeric error record count
+RECCOUNT  FORM      8             * record read count
+RDCOUNT1  FORM      8             * Comment header record read count
+RDCOUNT2  FORM      8             * Comment details record read count
+WRCOUNT1  FORM      8             * Comment header record written count
+WRCOUNT2  FORM      8             * Comment details record written count
+.
+CURRCENT  FORM      2             * current century
+CURRDATE  DIM       8             * current date
+.
+DATEFLG1  FORM      1             * Date Type flag
+.                                     0 = full date (ccyymmdd)
+.                                     1 = partial date (ccyymm)
+DATEFLG2  FORM      1             * Dates Allowed flag
+.                                     0 = any date allowed
+.                                     1 = future dates not allowed
+DIM2C     DIM       2
+DIM2D     DIM       2
+DIM2M     DIM       2
+DIM2Y     DIM       2
+DIM4      DIM       4
+DIM70     DIM       70
+.
+ERORDESC  DIM       70
+ERORFLAG  FORM      1             * Field Validation Error Flag
+.                                     0 = No Errors on Field Validations
+.                                     1 = Errors on Field Validations
+.
+FORM10    FORM      10
+.
+LINENUMB  FORM      3
+.
+.
+SETLNGTH  FORM      2
+STRTLINE  FORM      3
+.
+TEMPDATE  DIM       8
+TMPFIELD  DIM       8             * Field name
+TMPSTRNG  DIM       8             * Temporary string (max field length)
+TYPEFORM  FORM      1             * Comment extract type
+.                                       0 = Commemnt Header
+.                                       1 = Comment Details
+.
+.
+VCHKFLAG  FORM      1             * Validation flag
+.                                     0 = writing data to database
+.                                     1 = only validating import data file
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+PIPE      INIT      "|"
+.
+.
+.-----------------------------------------------------------------------
+PRGID     INIT      "CONVCOMM"
+PRGNAM    INIT      "Upload Patient Based Comments"
+VERSION   INIT      "V11.03.00"
+.-----------------------------------------------------------------------
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with upload
+.
+MAIN1000  CALL      OPEN0000               * open upload file
+          BRANCH    EXIT,MAIN0100          * file not found
+.
+          CALL      ASKQ0000               * validation run only ?
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      UPLD0000               * process upload
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"pmsuchaf";
+          OPEN      PMSUCHA1,"pmsuchaf"
+          OPEN      PMSUCDA1,"pmsucdaf"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"controlf"
+          OPEN      CONTROLF,"controlf"
+.
+          MOVE      ONE,CNOUNDLN
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run data upload                         *
+.*                        TRUE  (1)  Exit selected                           *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Data Upload"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run data upload
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000              Called by: MAIN0000   *
+.*                  Open upload file (convcomm.txt)                          *
+.*****************************************************************************
+.
+OPEN0000  MOVE      ZERO,OVRCD
+.
+          TRAP      OVERCOND IF IO
+          OPEN      URCOMEXT,"convcomm"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,*B,"Upload file - convcomm.txt - not found.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.*****************************************************************************
+.*                               ASKQ0000              Called by: MAIN0000   *
+.*                  Ask if running validation only                           *
+.* Returns: VCHKFLAG  - validation flag                                      *
+.*                       0 = normal mode                                     *
+.*                       1 = validation only mode                            *
+.*****************************************************************************
+.
+ASKQ0000  MOVE      ANSY,ANS
+          KEYIN     *P1:10,*EL,"Validation only (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+                    *P25:10,*V2LON,*RV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS                     * Y input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DYES,*HOFF:
+                      *P35:10,"(No data will be uploaded)"
+            MOVE      ONE,VCHKFLAG               * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          MATCH     ANSN,ANS                     * N input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DNO,*HOFF:
+                      *P35:10,"(Data will be uploaded)"
+            MOVE      ZERO,VCHKFLAG              * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          GOTO      ASKQ0000                     * invalid input
+.
+ASKQ9999  RETURN
++
+.******************************************************************************
+.*                                  UPLD0000              Called by: MAIN0000 *
+.*                  Process the Patient Comments upload records               *
+.******************************************************************************
+.
+UPLD0000  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      CCC,CURRCENT
+.
+          DISPLAY   *P1:13,"Processing ",*V2LON,"convcomm.txt",*HOFF:
+                    *P1:15,"Started    : ",*V2LON,CTIMEIS,*HOFF
+.
+          MOVE      ZERO,DTECOUNT                * init. date error record count
+          MOVE      ZERO,DPHCOUNT                * init dupl header record count
+          MOVE      ZERO,INCCOUNT                * init inv comment type count
+          MOVE      ZERO,MHDCOUNT                * init miss header record count
+          MOVE      ZERO,DPCCOUNT                * init dupl commentrecord count
+          MOVE      ZERO,UNKCOUNT                * init. unknown pt record count
+          MOVE      ZERO,MANCOUNT                * init. mand error record count
+          MOVE      ZERO,TYPCOUNT                * init. Numeric record count
+          MOVE      ZERO,RECCOUNT                * initialise records read
+          MOVE      ZERO,RDCOUNT1
+          MOVE      ZERO,RDCOUNT2
+          MOVE      ZERO,WRCOUNT1
+          MOVE      ZERO,WRCOUNT2
+.
+          CALL      HEAD0000                     * Print the report header
+.
+.         Loop through upload file records
+.
+UPLD1000  READ      URCOMEXT,SEQ;CEXTTYPE,CEXTURNO;
+          GOTO      UPLD9000 IF OVER
+.
+          ADD       ONE,RECCOUNT                 * increment records read
+          IF        (RECCOUNT%1000) = 0 | RECCOUNT = 1
+            DISPLAY   *P14:18,"Processing UR ",*V2LON,CEXTURNO
+            DISPLAY   *P14:19,"Record number ",*V2LON,RECCOUNT
+          ENDIF
+.
+          PACK      CEXTURNO,CEXTURNO,SP8
+          RJUSTIFY  CEXTURNO
+.
+          PACK      CEXTTYPE,CEXTTYPE,SP1
+          MATCH     SP1,CEXTTYPE
+          IF        @EQUAL
+            MOVE      "Extract comment record type is blank ",ERORDESC
+            CALL      PERR0000                   * print error line
+            ADD       ONE,MANCOUNT               * increment mand. record count
+            READ      URCOMEXT,SEQ;ANS           * read the rest of the rec
+            GOTO      UPLD1000
+          ENDIF
+.
+          TYPE      CEXTTYPE
+          IF        !@EQUAL
+            MOVE      "Extract comment record type is not numeric ",ERORDESC
+            CALL      PERR0000                   * print error line
+            ADD       ONE,TYPCOUNT               * incr. numeric error rec count
+            READ      URCOMEXT,SEQ;ANS
+            GOTO      UPLD1000
+          ENDIF
+.
+          MOVE      ZERO,TYPEFORM
+          MOVE      CEXTTYPE,TYPEFORM
+          COMPARE   TYPEFORM,ONE                 * record type 0 or 1 ?
+          IF        @LESS
+            MOVE      "Extract comment record type is not valid ",ERORDESC
+            CALL      PERR0000                   * print error line
+            ADD       ONE,TYPCOUNT               * incr. numeric erorr rec count
+            READ      URCOMEXT,SEQ;ANS
+            GOTO      UPLD1000
+          ENDIF
+.
+          CALL      CLPATMAS                     * clear patient master vars.
+          CALL      VURN0000                     * validate U/R
+.
+          MATCH     "0",CEXTTYPE
+          IF        @EQUAL
+            CALL      UPLHDR00
+          ELSE
+            CALL      UPLDET00 
+          ENDIF
+.
+          GOTO      UPLD1000                     * get next record
+.
+.         Upload completed
+.
+UPLD9000  ASSIGN    (DTECOUNT+DPHCOUNT+UNKCOUNT+MANCOUNT+TYPCOUNT+MHDCOUNT+DPCCOUNT+INCCOUNT),FORM10
+          IF        FORM10 > 0
+            CALL      LINE0000                   * print bottom line if errors
+          ENDIF
+.
+          COMPARE   CLNO,FIFTY7                  * room for stats ?
+          CALL      HEAD0000 IF LESS             * no - new page req'd.
+.
+          CLOCK     TIME,CTIMEIS
+          DISPLAY   *P14:20,*V2LON,"Processed ",RECCOUNT,*HOFF:
+                    *P1:21,"Finished   : ",*V2LON,CTIMEIS
+.
+.         Warn the user if there were any records with errors
+.
+          IF        FORM10 > 0
+            DISPLAY   *P1:22,*V2LON,*BLINKON,"Warning:  Records found with ":
+                      "errors.  Refer to error report."
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,*B,"Upload complete.  ";
+          CALL      HITENTER
+.
+          PRINT     *N:
+                    *1,"Total records read                  - ",RECCOUNT,*N:
+                    *1,"Total comment header read           - ",RDCOUNT1,*N:
+                    *1,"Total comment detail read           - ",RDCOUNT2,*N:
+                    *1,"Total comment header written        - ",WRCOUNT1,*N:
+                    *1,"Total comment detail written        - ",WRCOUNT2,*N:
+                    *1,"Records with invalid dates detected - ",DTECOUNT,*N:
+                    *1,"Records with duplicate header record- ",DPHCOUNT,*N:
+                    *1,"Records with duplicate detail record- ",DPCCOUNT,*N:
+                    *1,"Records with invalid comment type   - ",INCCOUNT,*N:
+                    *1,"Records with missing header record  - ",MHDCOUNT,*N:
+                    *1,"Records with unknown U/R numbers    - ",UNKCOUNT,*N:
+                    *1,"Records with blank mandatory fields - ",MANCOUNT,*N:
+                    *1,"Records with invalid record type    - ",TYPCOUNT:
+                    *N,*N,*1,"*** End of Report ***"
+.
+UPLD9999  RETURN
+.
+.-----------------------------------------------------------------------
+. Upload the comment header data
+.-----------------------------------------------------------------------
+UPLHDR00  ADD       ONE,RDCOUNT1
+.
+          READ      URCOMEXT,SEQ;CMUHCTYP,CMUHCNUM,CMUHCUID,CMUHCDAT,CMUHCTIM:
+                                 CMUHOCCG,CMUHDELT,CMUHDUID,CMUHDDAT,CMUHDTIM:
+                                 CMUHDOCG
+.
+          PACK      CMUHCTYP,CMUHCTYP,SP70
+          PACK      CMUHCNUM,CMUHCNUM,SP70
+          PACK      CMUHCUID,CMUHCUID,SP70
+          PACK      CMUHCDAT,CMUHCDAT,SP70
+          PACK      CMUHCTIM,CMUHCTIM,SP70
+          PACK      CMUHOCCG,CMUHOCCG,SP70
+          PACK      CMUHDELT,CMUHDELT,SP70
+          PACK      CMUHDUID,CMUHDUID,SP70
+          PACK      CMUHDDAT,CMUHDDAT,SP70
+          PACK      CMUHDTIM,CMUHDTIM,SP70
+          PACK      CMUHDOCG,CMUHDOCG,SP70
+.
+          CALL      MANHDR00                     * check for Mandatory fields
+          BRANCH    EXIT,UPLHDR99                * errors on validation
+.
+          CALL      DVALHR00                     * date validation
+          BRANCH    EXIT,UPLHDR99                * errors on validation
+.
+          MOVE      CEXTURNO,PMUHURNO
+          MOVE      CMUHCTYP,PMUHCTYP
+          MOVE      CMUHCNUM,PMUHCNUM
+          RJUSTIFY  PMUHCNUM 
+          MOVE      CMUHCUID,PMUHCUID
+          MOVE      CMUHCDAT,PMUHCDAT
+          MOVE      CMUHCTIM,PMUHCTIM
+          MOVE      CMUHOCCG,PMUHOCCG
+          MOVE      CMUHDELT,PMUHDELT
+          MOVE      CMUHDUID,PMUHDUID
+          MOVE      CMUHDDAT,PMUHDDAT
+          MOVE      CMUHDTIM,PMUHDTIM
+          MOVE      CMUHDOCG,PMUHDOCG
+          MOVE      SP70,PMUHSPAR
+.
+          MATCH     "001",PMUHCTYP
+          IF        !@EQUAL
+            MOVE      "Invalid comment type ",ERORDESC
+            ADD       ONE,INCCOUNT
+            CALL      PERR0000                     * print error line
+            GOTO      UPLHDR99
+          ENDIF
+.
+          PACK      KEY17,PMUHURNO,PMUHCTYP,PMUHCNUM,SP70
+          CALL      RDPMUCH1
+          IF        OVRCD = 1
+            BRANCH    VCHKFLAG,UPLHDR99            * Error checking only
+.
+            CALL      WRPMUCH1
+            ADD       ONE,WRCOUNT1
+          ELSE
+            MOVE      "Header record already exists ",ERORDESC
+            ADD       ONE,DPHCOUNT
+            CALL      PERR0000                     * print error line
+          ENDIF
+.
+UPLHDR99  RETURN
+.
+.-----------------------------------------------------------------------
+. Upload the comment details data
+.-----------------------------------------------------------------------
+UPLDET00  ADD       ONE,RDCOUNT2
+.
+          READ      URCOMEXT,SEQ;CMUCCTTY,CMUCCNUM,CMUCLNUM,CMUCCOMM
+.
+          MATCH     CEXTURNO,PMUHURNO
+          GOTO      UPLDET91 IF NOT EQUAL
+.
+          MATCH     CMUCCTTY,PMUHCTYP
+          GOTO      UPLDET91 IF NOT EQUAL
+.
+          PACK      CMUCCTTY,CMUCCTTY,SP70
+          PACK      CMUCCNUM,CMUCCNUM,SP70
+          PACK      CMUCLNUM,CMUCLNUM,SP70
+          PACK      CMUCCOMM,CMUCCOMM,SP70
+.
+          CALL      MANDET00
+          BRANCH    EXIT,UPLDET99                * errors on validation
+.
+.
+          MOVE      CEXTURNO,PMUCURNO
+          MOVE      CMUCCTTY,PMUCCTTY
+          MOVE      CMUCCNUM,PMUCCNUM
+          RJUSTIFY  PMUCCNUM
+          MOVE      CMUCLNUM,PMUCLNUM
+          RJUSTIFY  PMUCLNUM 
+          MOVE      CMUCCOMM,PMUCCOMM
+          MOVE      SP70,PMUCSPAR
+. 
+          MATCH     "001",PMUCCTTY
+          IF        !@EQUAL
+            MOVE      "Invalid comment type ",ERORDESC
+            ADD       ONE,INCCOUNT
+            CALL      PERR0000                     * print error line
+            GOTO      UPLDET99
+          ENDIF
+.
+          PACK      KEY20,PMUCURNO,PMUCCTTY,PMUCCNUM,PMUCLNUM,SP70
+          CALL      RDPMUCD1
+          IF        OVRCD = 1
+            BRANCH    VCHKFLAG,UPLDET99            * Error checking only
+            CALL      WRPMUCD1
+            ADD       ONE,WRCOUNT2
+          ELSE
+            GOTO      UPLDET92
+          ENDIF
+          GOTO      UPLDET99
+.
+UPLDET91  ADD       ONE,MHDCOUNT    * add one to missing header count
+          MOVE      "Missing Header Record ",ERORDESC
+          CALL      PERR0000                     * print error line
+          GOTO      UPLDET99
+.
+UPLDET92  ADD       ONE,DPCCOUNT    * add one to duplicate commentunt
+          MOVE      "Duplicate comment detail Record ",ERORDESC
+          CALL      PERR0000                     * print error line
+          GOTO      UPLDET99
+
+UPLDET99  RETURN
++
+.****************************************************************************
+.*                             MANHDR00                                     *
+.*                 Check for standard Mandatory fields                      *
+.* Returns: EXIT   0 = all mandatory fields are populated                   *
+.*                 1 = one or more mandatory fields are blank               *
+.*          MANCOUNT - updated count of records with mandatory fields       *
+.*                     missing                                              *
+.****************************************************************************
+.
+MANHDR000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MOVE      CMUHCTYP,TMPSTRNG
+          MOVE      "CMUHCTYP",TMPFIELD
+          CALL      CHKM0000
+.
+          MOVE      CMUHCNUM,TMPSTRNG
+          MOVE      "CMUHCNUM",TMPFIELD
+          CALL      CHKM0000
+.
+          BRANCH    ERORFLAG,MANHDR91            * errors on mand. fields
+.
+          MOVE      ZERO,EXIT                    * no errors on mand. fields
+          GOTO      MANHDR99
+.
+MANHDR91  ADD       ONE,MANCOUNT                 * incr. mand error record count
+          MOVE      ONE,EXIT
+.
+MANHDR99  RETURN
++
+.****************************************************************************
+.*                             MANDET00                                     *
+.*                 Check for standard Mandatory fields                      *
+.* Returns: EXIT   0 = all mandatory fields are populated                   *
+.*                 1 = one or more mandatory fields are blank               *
+.*          MANCOUNT - updated count of records with mandatory fields       *
+.*                     missing                                              *
+.****************************************************************************
+.
+MANDET00  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MOVE      CMUCCTTY,TMPSTRNG
+          MOVE      "CMUCCTTY",TMPFIELD          
+          CALL      CHKM0000
+.
+          MOVE      CMUCCNUM,TMPSTRNG
+          MOVE      "CMUCCNUM",TMPFIELD          
+          CALL      CHKM0000
+.
+          MOVE      CMUCLNUM,TMPSTRNG
+          MOVE      "CMUCLNUM",TMPFIELD          
+          CALL      CHKM0000
+.
+          BRANCH    ERORFLAG,MANDET91            * errors on mand. fields
+.
+          MOVE      ZERO,EXIT                    * no errors on mand. fields
+          GOTO      MANDET99
+.
+MANDET91  ADD       ONE,MANCOUNT                 * incr. mand error record count
+          MOVE      ONE,EXIT
+.
+MANDET99  RETURN
++
+.*****************************************************************************
+.*                            CHKM0000                                       *
+.*                    Check if a mandatory field is blank                    *
+.* Requires: TMPSTRNG - field to be checked                                  *
+.*           TMPFIELD - 8 character field name                               *
+.* Returns:  ERORFLAG = 1   field is blank (error)                           *
+.*****************************************************************************
+.
+CHKM0000  MATCH     SP8,TMPSTRNG                 * blank field ?
+          GOTO      CHKM9999 IF NOT EQUAL        * no - finished
+.
+          MOVE      "Mandatory Field blank ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set error flag
+.
+CHKM9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000              Called by: UPLD0000 *
+.*                           Print The Report Header                 PERR0000 *
+.******************************************************************************
+.
+HEAD0000  MOVE      "- Error Report",CPHDROPT
+          CALL      HEAD132                 * Print the report header
+.
+          PRINT     *1,"< convcomm.txt >"
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"U/R No.",*12,PIPE:
+                    *14,"Error Description",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      SEVEN,CLNO                   * initialise line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: HEAD0000  *
+*                      Draw line across page                               *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.*****************************************************************************
+.*                              DVAL0000           Called by: UPLD0000       *
+.*                  Validate all date fields                                 *
+.* Returns:  EXIT - 0 = No date validation errors                            *
+.*                  1 = Date validation errors                               *
+.*          DTECOUNT - updated count of records with date field errors       *
+.*****************************************************************************
+.
+DVALHR00  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MATCH     SP70,CMUHCDAT                * sourced from EXTRCOMM ?
+          IF        !@EQUAL
+            MOVE      CMUHCDAT,TEMPDATE
+            MOVE      ZERO,DATEFLG1              * ccyymmdd
+            MOVE      ONE,DATEFLG2               * future date not allowed
+            MOVE      "CMUHCDAT",TMPFIELD
+            CALL      VDAT0000
+          ENDIF
+.
+          MATCH     SP70,CMUHDDAT                * sourced from EXTRCOMM ?
+          IF        !@EQUAL
+            MOVE      CMUHDDAT,TEMPDATE
+            MOVE      ZERO,DATEFLG1              * ccyymmdd
+            MOVE      ONE,DATEFLG2               * future date not allowed
+            MOVE      "CMUHDDAT",TMPFIELD
+            CALL      VDAT0000
+          ENDIF
+.
+          BRANCH    ERORFLAG,DVALHR91            * errors on date validation
+.
+          MOVE      ZERO,EXIT                    * no errors on date validation
+          GOTO      DVALHR99
+.
+DVALHR91  ADD       ONE,DTECOUNT                 * incr. date error record count
+          MOVE      ONE,EXIT
+.
+DVALHR99  RETURN
++
+.*****************************************************************************
+.*                              VDAT0000           Called by: DVAL0000       *
+.*                  Validate a date field                                    *
+.* Requires:  TEMPDATE - Date in format ccyymmdd                             *
+.*            DATEFLG1 - Date Type flag                                      *
+.*                          0 = full date (ccyymmdd)                         *
+.*                          1 = partial date (ccyymm)                        *
+.*            DATEFLG2 - Dates Allowed flag                                  *
+.*                          0 = any date allowed                             *
+.*                          1 = no future dates allowed                      *
+.*            TMPFIELD - Date field name                                     *
+.* Returns:   ERORFLAG = 1 if an error in date validation occurs.            *
+.*****************************************************************************
+.
+VDAT0000  PACK      TEMPDATE,TEMPDATE,SP70
+          MATCH     SP8,TEMPDATE                 * blank date ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+.         Validate that the date has been fully populated
+.
+          SQUEEZE   TEMPDATE
+          MOVELPTR  TEMPDATE,FORM1
+          IF        DATEFLG1 = 0 & FORM1 <> 8 | DATEFLG1 = 1 & FORM1 <> 6
+            MOVE      "Insufficient digits ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate that the date is numeric
+.
+VDAT0100  TYPE      TEMPDATE
+          IF        !@EQUAL
+            MOVE      "Not numeric ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          UNPACK    TEMPDATE,DIM2C,DIM2Y,DIM2M,DIM2D
+.
+.         Validate the century is >= 18 and <= current century
+.
+          MOVE      DIM2C,FORM2
+          IF        FORM2 < 18 | FORM2 > CURRCENT
+            MOVE      "Century not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate the month
+.
+          MOVE      DIM2M,FORM2
+          IF        FORM2 < 1 | FORM2 > 12
+            MOVE      "Month not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          COMPARE   ONE,DATEFLG1                 * short date (ccyymm) ?
+          GOTO      VDAT9999 IF EQUAL            * yes - finished
+.
+.         Validate the day is:
+.              < 32 for January, March, May, July, August, October & December
+.              < 31 for April, June, September & November
+.              < 29 for February, except in a leap year where it is < 30
+.
+          BRANCH    FORM2,VDAT1000:              * Jan
+                          VDAT3000:              * Feb
+                          VDAT1000:              * Mar
+                          VDAT2000:              * Apr
+                          VDAT1000:              * May
+                          VDAT2000:              * Jun
+                          VDAT1000:              * Jul
+                          VDAT1000:              * Aug
+                          VDAT2000:              * Sep
+                          VDAT1000:              * Oct
+                          VDAT2000:              * Nov
+                          VDAT1000               * Dec
+.
+.         Validate days for month of 31 days
+.
+VDAT1000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 31
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for month of 30 days
+.
+VDAT2000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 30
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for February
+.         A leap year is one where:
+.           1. Every year divisible by 4 is a leap year.
+.           2. But every year divisible by 100 is NOT a leap year
+.           3. Unless the year is also divisible by 400, then it is still a
+.              leap year.
+.
+VDAT3000  MOVE      DIM2D,FORM2
+          PACK      DIM4,DIM2C,DIM2Y
+          MOVE      DIM4,FORM4
+          IF        (FORM4%4) = 0
+            IF        (FORM4%100) = 0
+              IF        (FORM4%400) = 0
+                GOTO      VDAT3200
+              ENDIF
+            ELSE
+              GOTO      VDAT3200
+            ENDIF
+          ENDIF
+.
+.         Check for normal Feb days
+.
+VDAT3100  IF        FORM2 < 1 | FORM2 > 28
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Check for leap year Feb days
+.
+VDAT3200  IF        FORM2 < 1 | FORM2 > 29
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+VDAT3900  MOVE      "Day not valid ",ERORDESC
+          CALL      DERR0000
+          GOTO      VDAT9999
+.
+VDAT4000  COMPARE   ZERO,DATEFLG2                * any date allowed ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+.         Make sure the date is not in the future
+.
+          MATCH     TEMPDATE,CURRDATE
+          IF        @LESS
+            MOVE      "Cannot be in the future ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+VDAT9999  RETURN
++
+.*****************************************************************************
+.*                            DERR0000             Called by: VDAT0000       *
+.*                    Process date error                                     *
+.* Requires: TMPFIELD - field name                                           *
+.*           ERORDESC - error description                                    *
+.* Returns:  ERORFLAG = 1 if an error in date validation occurs.             *
+.*****************************************************************************
+.
+DERR0000  ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set date error flag
+.
+DERR9999  RETURN
++
+.*****************************************************************************
+.*                              PERR0000           Called by: CHKM0000       *
+.*                   Print an error detail line               DERR0000       *
+.* Requires: Valid read on PMI records (for name fields)      VURN0000       *
+.*           ERORDESC - error description                                    *
+.*           CLNO - current page line count                                  *
+.* Returns:  CLNO - updated page line count                                  *
+.*****************************************************************************
+.
+PERR0000  COMPARE   CLNO,SIXTY3                  * page full ?
+          IF        @LESS
+            CALL      LINE0000                   * yes - print bottom line
+            CALL      HEAD0000                   * print header
+          ENDIF
+.
+          PRINT     *1,PIPE,*3,CEXTURNO,*14,ERORDESC,*132,PIPE
+          ADD       ONE,CLNO                     * increment page line count
+.
+PERR9999  RETURN
++
+.*****************************************************************************
+.*                              VURN0000           Called by: UPLD0000       *
+.*                        Validate U/R Number                                *
+.* Requires: CEXTURNO - U/R number (right justified)                         *
+.* Returns:  Valid read on PMI data                                          *
+.*           EXIT  0 = PMI record found - ok to continue                     *
+.*                 1 = PMI record not found - ignore record                  *
+.*          UNKCOUNT - updated count of unknown U/R numbers                  *
+.*          PTCOURNO - U/R number right justified                            *
+.*****************************************************************************
+.
+VURN0000  MATCH     SP8,CEXTURNO                 * blank U/R ?
+          IF        @EQUAL
+            MOVE      "U/R missing ",ERORDESC    * yes
+            GOTO      VURN9150
+          ENDIF
+.
+          MOVE      CEXTURNO,KEY8
+          CALL      RDMAST1                      * U/R on file ?
+          BRANCH    OVRCD,VURN9100               * no - error
+.
+          COMPARE   ONE,PSTAT                    * merged U/R ?
+          GOTO      VURN9000 IF NOT EQUAL        * no
+.
+.         We have a merged U/R record, so get the new U/R
+.
+          MATCH     PPSNAME,SP20                 * blank previous name field ?
+          GOTO      VURN9100 IF EQUAL            * yes - error
+.
+          MOVE      PPSNAME,CEXTURNO             * no - load new U/R
+          GOTO      VURN0000                     * get new pmi record
+.
+VURN9000  MOVE      ZERO,EXIT
+          GOTO      VURN9999
+.
+VURN9100  MOVE      "PMI Record not found ",ERORDESC
+VURN9150  CALL      PERR0000                     * print error line
+          ADD       ONE,UNKCOUNT                 * increment unknown U/R count
+          MOVE      ONE,EXIT
+.
+VURN9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       CLPATMAS
+.
+          INC       PMSUCHIO/INC
+          INC       PMSUCDIO/INC
+          INC       PATMA1IO/INC

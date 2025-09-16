@@ -1,0 +1,535 @@
+.*******************************************************************************
+.                                 OPMVSBOK
+.
+.    The function Moves a patients operation record to a selected case number.
+.
+.    Function  : Move the first case number to the selected position. All other
+.                bookings are moved to eliminate the empty space left by moving
+.                the case number.
+. 
+.    Parameters:
+.    ADJSTART - Adjust start time 1=Yes
+.    CASETO   - New case  number location
+.    CASEFROM - Current case  number location
+.    KEY22    - Must be set to session hospital, date, time and clinic/doctor
+.               (Not CURSESS as in OPTRNBOK have to move bookings for the new
+.                session so this will stuff up the value of CURSESS)
+.
+.    Note : When a patient operation is cancelled to update the case numbers
+.           Simply Specify the case number cancelled in CASETO and CASEFROM
+.           eg Case 4 cancelled   CASETO=CASEFROM=4
+.
+.    Return Parameters:
+.    EXIT = 0 - No problems, a successful booking transfer
+.    EXIT = 1 - Unsuccessful transfer eg invalid parameters, record cases not
+.               on file
+.
+.    Modifications:
+.         V11.03.02 03/08/2023  Ebon Clements     TSK 0935730
+.                   Added hospital to KEY22 description/usage
+.         V11.03.01 06/03/2023  Ebon Clements     TSK 0909393
+.                   Added hospital to oprsesaf(1-6) and oprdetfa(1&5) indexes
+.         V10.05.01 15/08/2014 Jill Parkinson CAR 299980     
+.                   Added calls to write to new theatre audit opradtaf
+.         V10.04.01 19/03/2014  Peter McMullen    CAR 294400
+.                   Remove changes to update date/time/user for a shuffle of              
+.                   sessions, the argument being that the session details are 
+.                   not basically altered, just the time 
+.         V10.00.01 19/03/2010  Steve Armstrong   CAR 135505
+.                   Added HL7TRGID & HL7INCLD setting for all broadcast messages
+.-------------------------------------------------------------------------------
+.         V9.10.02  03/09/2008  Davin         CAR 147323
+.                   Send hl7 message for update bookings (added call DGCLIS14)
+.         V9.10.01  03/09/2008 Ebon Clements CAR 176184
+.                   Added test for cancelled status to MVSBOK30 and MVSBOK50
+.-------------------------------------------------------------------------------
+.         V9.04.01  05/11/2004 Lina Vo       CAR 54900
+.                   Moved check for ADJSTART flag from CANDEA00 (OPWEBCAN) 
+.                   to before call of OPCALCTM. This allows case numbers to
+.                   be resequenced even when Start times haven't.
+.                   Set ADJSTART=1 when Case number need to be shuffled
+.                   05/11/2004 Lina Vo       CAR 54237
+.                   Changed program to do a read of oprdetaf before updating
+.                   to reduce chances of I*U problems
+.-------------------------------------------------------------------------------
+.         V9.03.02  09/09/2003 Jill Habasque CAR 42894
+.                   Fixed update of case nubmer when cancelling a booking
+.         V9.03.01  07/08/2003 Jill Habasque CAR 41815
+.                   Changed matches of OPDASTAT
+.*******************************************************************************
+OPMVSBOK  MATCH     CASEFROM,CASETO    * test whether to shuffle up or down
+          GOTO      MVSBOK10 IF EQUAL  * Do cancellation or just recalc times
+          GOTO      MVSBOK50 IF LESS   * moving case backwards
+          GOTO      MVSBOK30           * moving case forwards
+.
+.    Remove a Case record by shuffling the case numbers down and re-calculate
+.    start times also check the that an empty space does exist.
+.
+MVSBOK10  PACK      KEY26,KEY22,CASEFROM,SP70
+          CALL      RSOPDEA5           * No record thus empty
+          CALL      RKOPDEA5           
+          BRANCH    OVRCD,MVSBOK15
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP20
+          MATCH     KEY22,KEY26             * test same session
+          GOTO      MVSBOK15 IF NOT EQUAL
+.
+          COMPARE   THREE,OPDASTAT
+          GOTO      MVSBOK15 IF EQUAL
+.
+          MATCH     CASEFROM,OPDACASE
+          GOTO      MVSBOK15 IF NOT EQUAL
+.
+          GOTO      MVSBOK80                * just recalculate start times
+.
+.         will come here only if the read fails  ie record is cancelled
+.
+MVSBOK15  MOVE      ZERO,FORM3         * use form3 signal case number changes
+          PACK      KEY26,KEY22,CASEFROM,SP70
+          CALL      RSOPDEA5           * Re-position fptr
+.
+MVSBOK20  CALL      RKOPDEA5
+          BRANCH    OVRCD,MVSBOK21     * Go to recalculate start times
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP30
+.
+          MATCH     KEY22,KEY26        * test same session
+          GOTO      MVSBOK21 IF NOT EQUAL
+.
+          COMPARE   THREE,OPDASTAT     * test for booked records
+          GOTO      MVSBOK20 IF EQUAL
+.
+          MOVE      TWO,AUDIFLAG       * before change audit
+          CALL      AUDEA000           * write audit
+.
+          MOVE      OPDACASE,FORM3     * move dim field to a form
+          SUB       ONE,FORM3          * decrement case as we read forwards
+          MOVE      FORM3,OPDACASE     * copy the new case number
+.
+.         Check new case key doesn't ready exist before update
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,OPDASTAT:
+                          OPDACASE,SP70
+          CALL      RAOPDEA1
+          IF        OVRCD=1
+.                       * next 5 lines removed by 294400 
+.           CALL      IBACLOCK
+.           PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+.           REP       " 0",OPDAUDAT
+.           CLOCK     TIME,OPDAUTIM
+.           MOVE      WBSEUID,OPDAWEBU
+.
+            CALL      UPOPDEA5           * update with new case number
+.
+            MOVE      "005",TADTTYPE
+            PROC      OPTHETAT                * write to theatre audit
+.
+            MOVE      THREE,AUDIFLAG     * after change audit
+            CALL      AUDEA000           * write audit
+.
+            MOVE      ONE,HL7TRGID
+            MOVE      "OPMVSBOK",HL7INCLD
+            PROC      DGCLIS14                * send update booking message
+          ENDIF
+          GOTO      MVSBOK20
+.
+MVSBOK21  COMPARE   ZERO,FORM3         * test if any case numbers were changed
+          GOTO      MVSBOK81 IF EQUAL
+          GOTO      MVSBOK80           * recalculate start times
+.
+.------------------------------------------------------------------------------
+.         Moving a case forwards (CASETO > CASEFROM)
+.         Shuffle case numbers Down.
+.
+.         move the record to be moved into case number zzz (temp storage)
+.
+MVSBOK30  MOVE      ONE,ADJSTART
+          PACK      KEY26,KEY22,CASEFROM,SP30
+          CALL      RSOPDEA5                * get the case record & move to end
+MVSBOK31  CALL      RKOPDEA5                * get the case record & move to end
+          BRANCH    OVRCD,MVSBOK90          * invalid data
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP30
+          MATCH     KEY22,KEY26        * test same session
+          GOTO      MVSBOK90 IF NOT EQUAL
+.
+          COMPARE   THREE,OPDASTAT          * Skip cancelled status
+          GOTO      MVSBOK31 IF EQUAL       
+.
+          MATCH     CASEFROM,OPDACASE
+          GOTO      MVSBOK90 IF NOT EQUAL
+.
+          MOVE      TWO,AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit
+          MOVE      Z70,OPDACASE            * set up case number
+.
+.         Check new case key doesn't ready exist before update
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,OPDASTAT:
+                          OPDACASE,SP70
+          CALL      RAOPDEA1
+          IF        OVRCD=1
+.                       * next 5 lines removed by 294400 
+.           CALL      IBACLOCK
+.           PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+.           REP       " 0",OPDAUDAT
+.           CLOCK     TIME,OPDAUTIM
+.           MOVE      WBSEUID,OPDAWEBU
+.
+            CALL      UPOPDEA5                * update with case zzz = end place
+.
+            MOVE      "005",TADTTYPE
+            PROC      OPTHETAT                * write to theatre audit
+.
+            MOVE      THREE,AUDIFLAG          * after change audit
+            CALL      AUDEA000                * write audit
+.
+            MOVE      TWO,HL7TRGID
+            MOVE      "OPMVSBOK",HL7INCLD
+            PROC      DGCLIS14                * send update booking message
+          ENDIF
+.
+.         shuffle the case numbers down
+.         (positioning at the case_from position)
+.
+          PACK      KEY26,KEY22,CASEFROM,SP30
+          CALL      RSOPDEA5                * Re-position fptr after update
+.
+MVSBOK40  CALL      RKOPDEA5                * next read
+          BRANCH    OVRCD,MVSBOK70          * no more data
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP30
+          MATCH     KEY22,KEY26             * test same session
+          GOTO      MVSBOK70 IF NOT EQUAL
+.
+          COMPARE   THREE,OPDASTAT
+          GOTO      MVSBOK40 IF EQUAL       * finished all booked records
+.
+          MATCH     OPDACASE,CASETO         * test reached desired case
+          GOTO      MVSBOK70 IF LESS        * have finished the swapping
+.
+          MOVE      TWO,AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit
+          MOVE      OPDACASE,FORM3          * set up current case number
+          SUB       ONE,FORM3               * decrement case as we read forwards
+          MOVE      FORM3,OPDACASE          * reset the case number
+.
+.         Check new case key doesn't ready exist before update
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,OPDASTAT:
+                          OPDACASE,SP70
+          CALL      RAOPDEA1
+          IF        OVRCD=1
+.                       * next 5 lines removed by 294400 
+.           CALL      IBACLOCK
+.           PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+.           REP       " 0",OPDAUDAT
+.           CLOCK     TIME,OPDAUTIM
+.           MOVE      WBSEUID,OPDAWEBU
+.
+            CALL      UPOPDEA5                * update the case
+.
+            MOVE      "005",TADTTYPE
+            PROC      OPTHETAT                * write to theatre audit
+.
+            MOVE      THREE,AUDIFLAG          * after change audit
+            CALL      AUDEA000                * write audit
+.
+            MOVE      THREE,HL7TRGID
+            MOVE      "OPMVSBOK",HL7INCLD
+            PROC      DGCLIS14                * send update booking message
+          ENDIF
+          GOTO      MVSBOK40                * get next item
+.
+.------------------------------------------------------------------------------
+.         Moving a case backwards (CASETO < CASEFROM)
+.         Shuffle case numbers Up.
+.
+.         move the record to be moved into case number zzz (temp storage)
+.
+MVSBOK50  MOVE      ONE,ADJSTART
+          PACK      KEY26,KEY22,CASEFROM,SP70
+          CALL      RSOPDEA5                * get the case record & move to end
+MVSBOK51  CALL      RKOPDEA5               
+          BRANCH    OVRCD,MVSBOK90          * data is stuffed
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP30
+          MATCH     KEY22,KEY26        * test same session
+          GOTO      MVSBOK90 IF NOT EQUAL
+.
+          COMPARE   THREE,OPDASTAT          * Skip cancelled status
+          GOTO      MVSBOK51 IF EQUAL
+.
+          MATCH     CASEFROM,OPDACASE
+          GOTO      MVSBOK90 IF NOT EQUAL
+.
+          MOVE      TWO,AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit
+          MOVE      Z70,OPDACASE            * set case to 'zzz'
+.
+.         Check new case key doesn't ready exist before update
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,OPDASTAT:
+                          OPDACASE,SP70
+          CALL      RAOPDEA1
+          IF        OVRCD=1
+.                       * next 5 lines removed by 294400 
+.           CALL      IBACLOCK
+.           PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+.           REP       " 0",OPDAUDAT
+.           CLOCK     TIME,OPDAUTIM
+.           MOVE      WBSEUID,OPDAWEBU
+.
+            CALL      UPOPDEA5                * update with case zzz = end place
+.
+            MOVE      "005",TADTTYPE
+            PROC      OPTHETAT                * write to theatre audit
+.
+            MOVE      THREE,AUDIFLAG          * after change audit
+            CALL      AUDEA000                * write audit
+.
+            MOVE      FOUR,HL7TRGID
+            MOVE      "OPMVSBOK",HL7INCLD
+            PROC      DGCLIS14                * send update booking message
+          ENDIF
+.
+.         shuffle the case numbers up
+.         (positioning at the case_from position)
+.
+          PACK      KEY26,KEY22,CASEFROM,SP70
+          CALL      RSOPDEA5                * Re-position fptr after update
+.
+MVSBOK60  CALL      RPOPDEA5                * Read back from desired rec
+          BRANCH    OVRCD,MVSBOK70          * no more data
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP30
+          MATCH     KEY22,KEY26             * test same session
+          GOTO      MVSBOK70 IF NOT EQUAL
+.
+          COMPARE   THREE,OPDASTAT
+          GOTO      MVSBOK60 IF EQUAL       * finished all booked records
+.
+          MATCH     CASETO,OPDACASE         * test reached desired case
+          GOTO      MVSBOK70 IF LESS        * finish
+.
+          MOVE      TWO,AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit
+          MOVE      OPDACASE,FORM3          * set up form number
+          ADD       ONE,FORM3               * increment case as we read forwards
+          MOVE      FORM3,OPDACASE          * reset the case number
+.
+.         Check new case key doesn't ready exist before update
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,OPDASTAT:
+                          OPDACASE,SP70
+          CALL      RAOPDEA1
+          IF        OVRCD=1
+.                       * next 5 lines removed by 294400 
+.           CALL      IBACLOCK
+.           PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+.           REP       " 0",OPDAUDAT
+.           CLOCK     TIME,OPDAUTIM
+.           MOVE      WBSEUID,OPDAWEBU
+.
+            CALL      UPOPDEA5
+.
+            MOVE      "005",TADTTYPE
+            PROC      OPTHETAT                * write to theatre audit
+.
+            MOVE      THREE,AUDIFLAG          * after change audit
+            CALL      AUDEA000                * write audit
+.
+            MOVE      FIVE,HL7TRGID
+            MOVE      "OPMVSBOK",HL7INCLD
+            PROC      DGCLIS14                * send update booking message
+          ENDIF
+          GOTO      MVSBOK60                * get next case
+.
+.------------------------------------------------------------------------------
+.         all the swapping is done
+.         set up the case which was chosen to be moved with its new case number
+.
+MVSBOK70  PACK      KEY26,KEY22,ANSZ,ANSZ,ANSZ,SP70
+          CALL      RSOPDEA5                * get the last record (CASEFROM)
+          CALL      RKOPDEA5                * get the last record (CASEFROM)
+          BRANCH    OVRCD,MVSBOK90          * data is stuffed
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP30
+          MATCH     KEY22,KEY26        * test same session
+          GOTO      MVSBOK90 IF NOT EQUAL
+          MATCH     Z70,OPDACASE
+          GOTO      MVSBOK90 IF NOT EQUAL
+.
+          MOVE      TWO,AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit
+          MOVE      CASETO,OPDACASE         * set new case number
+.
+.         Check new case key doesn't ready exist before update
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,OPDASTAT:
+                          OPDACASE,SP70
+          CALL      RAOPDEA1
+          IF        OVRCD=1
+.                       * next 5 lines removed by 294400 
+.           CALL      IBACLOCK
+.           PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+.           REP       " 0",OPDAUDAT
+.           CLOCK     TIME,OPDAUTIM
+.           MOVE      WBSEUID,OPDAWEBU
+.
+            CALL      UPOPDEA5
+.
+            MOVE      "005",TADTTYPE
+            PROC      OPTHETAT                * write to theatre audit
+.
+            MOVE      THREE,AUDIFLAG          * after change audit
+            CALL      AUDEA000                * write audit
+.
+            MOVE      SIX,HL7TRGID
+            MOVE      "OPMVSBOK",HL7INCLD
+            PROC      DGCLIS14                * send update booking message
+          ENDIF
+.
+MVSBOK80  COMPARE   ONE,ADJSTART            * moved from CANDEA00
+          GOTO      MVSBOK81 IF NOT EQUAL
+          CALL      OPCALCTM                * recalculate start times
+.
+.         delete the temporary 'zzz' record written
+.
+MVSBOK81  PACK      KEY26,KEY22,ANSZ,ANSZ,ANSZ,SP70
+          CALL      RDOPDEA1
+          BRANCH    OVRCD,MVSBOK82          * zzz record doesnt exist
+          CALL      DEOPDEA1                * delete the temporary record
+.
+          MOVE      FOUR,AUDIFLAG           * delete audit
+          CALL      AUDEA000                * write audit
+.
+.>>>>     MOVE      SEVEN,HL7TRGID
+.>>>>     MOVE      "OPMVSBOK",HL7INCLD
+.>>>>     PROC      DGCLIS14                * send update booking message
+.
+.         reset to the first case displayed on the screen
+.
+MVSBOK82  MOVE      ONE,CURPOS
+          LOAD      CURCASE,CURPOS,CASE01,CASE02,CASE03,CASE04,CASE05,CASE06:
+                                   CASE07,CASE08,CASE09,CASE10,CASE11,CASE12:
+                                   CASE13,CASE14
+          PACK      KEY26,SESNHOSP,SESNDATE,SESNTIME,SESNCODE,CURCASE,SP70
+          CALL      RSOPDEA5                * get the selected case
+          CALL      RKOPDEA5                * get the selected case
+.
+          MOVE      ZERO,EXIT
+          GOTO      MVSBOK99
+.
+MVSBOK90  MOVE      ONE,EXIT                * unsuccessful transfers
+.
+MVSBOK99  RETURN
+.
+.*******************************************************************************
+.                                 OPCALCTM
+.
+.    This program recalculates the start times for each operation record
+.    after a cancellation or case number adjustment.
+.
+.    Function  : Loop through all bookings from the first booking to the end
+.                of the session, and will recalculate the start times of each
+.                booking. The OPRDEAFD records will be updated as appropriate.
+
+.    Parameters:
+.    KEY22    - Must be set to session hospital, date, time and clinic/doctor
+.
+.    Return Parameters:
+.    None
+.*******************************************************************************
+OPCALCTM  CALL      RDOPSES1                * get session patient prep time -
+.                                             OPSEPREP
+          UNPACK    KEY22,KEY3,KEY8,EXPSTART
+          PACK      KEY26,KEY22,SP30
+          CALL      RSOPDEA5                * position fptr oprdetaf
+.
+CALCTM10  CALL      RKOPDEA5
+          BRANCH    OVRCD,CALCTM99
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,SP30
+          MATCH     KEY22,KEY26             * test record is same session
+          GOTO      CALCTM99 IF NOT EQUAL
+          COMPARE   THREE,OPDASTAT          * test for booked patients only
+          GOTO      CALCTM10 IF EQUAL
+.
+          MOVE      OPDAEXPD,EXPDURA        * save the expected duration
+          MATCH     EXPSTART,OPDAEXPS       * test if start times are correct
+          GOTO      CALCTM20 IF EQUAL
+.
+          MOVE      TWO,AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit
+          MOVE      EXPSTART,OPDAEXPS       * set the new start time
+.
+          PACK      KEY26,OPDAHOSP,OPDADATE,OPDATIME,OPDACLIN,OPDASTAT:
+                          OPDACASE,SP70
+          CALL      RAOPDEA1
+          IF        OVRCD=0
+.                       * next 5 lines removed by 294400 
+.           CALL      IBACLOCK
+.           PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+.           REP       " 0",OPDAUDAT
+.           CLOCK     TIME,OPDAUTIM
+.           MOVE      WBSEUID,OPDAWEBU
+.
+            CALL      UPOPDEA5              * update operat'n rec with new start
+.
+            MOVE      "006",TADTTYPE
+            PROC      OPTHETAT                * write to theatre audit
+.
+            MOVE      THREE,AUDIFLAG        * after change audit
+            CALL      AUDEA000              * write audit
+.
+            MOVE      EIGHT,HL7TRGID
+            MOVE      "OPMVSBOK",HL7INCLD
+            PROC      DGCLIS14                * send update booking message
+          ENDIF
+.
+.    initial start time in EXPSTART and duration EXPDURA
+.
+CALCTM20  ADD       OPSEPREP,EXPDURA        * add patient prep time to duration
+          COMPARE   ZERO,EXPDURA            * test a duration
+          GOTO      CALCTM30 IF NOT EQUAL
+          MOVE      ONE,EXPDURA             * if no duration then make it one
+.
+CALCTM30  CALL      OPADDTIM              * Calculate new start time in EXPSTART
+          GOTO      CALCTM10
+.
+CALCTM99  RETURN
+.
+. ------------------------
+. ------- OPRDEAFD -------
+. ------------------------
+.
+AUDEA000  BRANCH    OPCNAUDB,AUDEA999
+          PACK      SAVKEY23,KEY22,SP1      * save key22 on entry
+          COMPARE   FIVE,AUDIFLAG        * test to delete B audit
+          GOTO      AUDEA600 IF EQUAL
+          COMPARE   THREE,AUDIFLAG       * is it an after change audit?
+          GOTO      AUDEA100 IF EQUAL    * Yes. So don't change time
+          CALL      IBACLOCK             * get current date
+          PACK      OPDAAUDD,CCC,CYY,CMM,CDD
+          REP       " 0",OPDAAUDD
+          MOVE      CTIMEIS,OPDAAUDT     * clock current time
+.
+AUDEA100  MOVE      ONE,OPDAAUDS         * not printed
+          MOVE      PASSCODE,OPDAAUDO    * get user id
+          MOVE      PORT,OPDAAUDP        * get port number
+.
+          MOVE      AUDIFLAG,OPDAAUDR
+          REPLACE   "1A2B3C4D",OPDAAUDR
+          PACK      KEY19,OPDAAUDD,OPDAAUDT,OPDAAUDP,OPDAAUDR
+          CALL      AWOPDEA              * write audit record
+          GOTO      AUDEA995
+.
+.         now delete B audit
+.
+AUDEA600  PACK      KEY19,OPDAAUDD,OPDAAUDT,OPDAAUDP,ANSB
+          CALL      ADOPDEA              * delete audit record
+.
+AUDEA995  UNPACK    SAVKEY23,KEY22,ANS      * restore the key19
+AUDEA999  RETURN
+.

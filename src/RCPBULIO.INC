@@ -1,0 +1,123 @@
+.
+.   INC       RCPBULIO.INC
+.
+.   FILE  I/O REQUESTS FOR BULK BILLING FILE.
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY15  DIM             15            KEY FOR RCPBULA1
+.KEY23  DIM             23            KEY FOR RCPBULA2
+.KEY23  DIM             23            KEY FOR RCPBULA3
+.
+.       NOTE  OVRCD=1   RECORD DOES NOT EXIST
+.                   2   RECORD IS LOCKED
+.
+RDABULA1 RESET     KEY15 
+         MOVE      ZERO,OVRCD
+         READ      RCPBULA1,KEY15;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSBULA1 RESET     KEY15
+         READ      RCPBULA1,KEY15;;
+         RETURN  
+.
+RDBULA1  MOVE      ZERO,OVRCD
+         RESET     KEY15
+         READ      RCPBULA1,KEY15;DRBCLAIM,RBCODE,DRBCNT,RBDATE,RBSTAT1,RBTYPE:
+                                  RBRDATE,RBREG,RBINV,RBAMT,RBDISC,RBSTAT2:
+                                  RBHOSP,RBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DRBCLAIM,RBCLAIM
+         MOVE      DRBCNT,RBCNT
+         RETURN  
+.
+RDKBULA1 MOVE      ZERO,OVRCD
+         READKS    RCPBULA1;DRBCLAIM,RBCODE,DRBCNT,RBDATE,RBSTAT1,RBTYPE:
+                            RBRDATE,RBREG,RBINV,RBAMT,RBDISC,RBSTAT2:
+                            RBHOSP,RBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DRBCLAIM,RBCLAIM
+         MOVE      DRBCNT,RBCNT
+         RETURN  
+.
+RDABULA2 RESET     KEY23
+         MOVE      ZERO,OVRCD
+         READ      RCPBULA2,KEY23;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDSBULA2 RESET     KEY23
+         READ      RCPBULA2,KEY23;;
+         RETURN  
+.
+RDBULA2  MOVE      ZERO,OVRCD
+         RESET     KEY23
+         READ      RCPBULA2,KEY23;DRBCLAIM,RBCODE,DRBCNT,RBDATE,RBSTAT1,RBTYPE:
+                                  RBRDATE,RBREG,RBINV,RBAMT,RBDISC,RBSTAT2:
+                                  RBHOSP,RBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DRBCLAIM,RBCLAIM
+         MOVE      DRBCNT,RBCNT
+         RETURN  
+.
+RDKBULA2 MOVE      ZERO,OVRCD
+         READKS    RCPBULA2;DRBCLAIM,RBCODE,DRBCNT,RBDATE,RBSTAT1,RBTYPE:
+                            RBRDATE,RBREG,RBINV,RBAMT,RBDISC,RBSTAT2:
+                            RBHOSP,RBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DRBCLAIM,RBCLAIM
+         MOVE      DRBCNT,RBCNT
+         RETURN  
+.
+WRBULA1  RESET     KEY15
+         MOVE      ZERO,OVRCD
+         MOVE      RBCLAIM,DRBCLAIM
+         MOVE      RBCNT,DRBCNT
+         WRITE     RCPBULA1,KEY15;DRBCLAIM,RBCODE,DRBCNT,RBDATE,RBSTAT1,RBTYPE:
+                                  RBRDATE,RBREG,RBINV,RBAMT,RBDISC,RBSTAT2:
+                                  RBHOSP,RBSPARE
+         RETURN
+.
+UPBULA1  MOVE      RBCLAIM,DRBCLAIM
+         MOVE      RBCNT,DRBCNT
+         UPDATE    RCPBULA1;DRBCLAIM,RBCODE,DRBCNT,RBDATE,RBSTAT1,RBTYPE:
+                            RBRDATE,RBREG,RBINV,RBAMT,RBDISC,RBSTAT2:
+                            RBHOSP,RBSPARE
+         RETURN  
+.
+UPBULA2  MOVE      RBCLAIM,DRBCLAIM
+         MOVE      RBCNT,DRBCNT
+         UPDATE    RCPBULA2;DRBCLAIM,RBCODE,DRBCNT,RBDATE,RBSTAT1,RBTYPE:
+                                 RBRDATE,RBREG,RBINV,RBAMT,RBDISC,RBSTAT2:
+                                 RBHOSP,RBSPARE
+         RETURN  
+.
+DEBULA1  RESET     KEY15
+         MOVE      ZERO,OVRCD
+         DELETE    RCPBULA1,KEY15
+         RETURN
+.
+RDSBULA3 RESET     KEY23
+         READ      RCPBULA3,KEY23;;
+         RETURN  
+.
+RDKBULA3 MOVE      ZERO,OVRCD
+         READKS    RCPBULA3;DRBCLAIM,RBCODE,DRBCNT,RBDATE,RBSTAT1,RBTYPE:
+                            RBRDATE,RBREG,RBINV,RBAMT,RBDISC,RBSTAT2:
+                            RBHOSP,RBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DRBCLAIM,RBCLAIM
+         MOVE      DRBCNT,RBCNT
+         RETURN  
+.
+RDBULA3  MOVE      ZERO,OVRCD
+         RESET     KEY23
+         READ      RCPBULA3,KEY23;DRBCLAIM,RBCODE,DRBCNT,RBDATE,RBSTAT1,RBTYPE:
+                                  RBRDATE,RBREG,RBINV,RBAMT,RBDISC,RBSTAT2:
+                                  RBHOSP,RBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DRBCLAIM,RBCLAIM
+         MOVE      DRBCNT,RBCNT
+         RETURN  
+.

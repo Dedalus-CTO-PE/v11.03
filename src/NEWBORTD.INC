@@ -1,0 +1,284 @@
+.*----------------------------------------------------------------------
+.* Include Name  :   NEWBORTD.INC
+.*
+.* Function      :   Save variables for mothers pmi and admission details
+.*----------------------------------------------------------------------
+.  Modifications Done :
+.
+.  V11.02.01 02.02.2022  Ebon Clements  TSK 0888071
+.            Added MMVXPICD, MMVXUD10, MMVXUD11, MMVXADMP, MMVXCONO and MMVXMEDH
+.  V10.03.03 21.06.2013  Peter Vela     CAR 283202
+.            Added MMPXPMCN MMPXPMCR 
+.  V10.03.02 30.01.2012  Ebon Clements  CAR 258378
+.            Added additional vars for extra contact NOK name details
+.  V10.03.01 29.11.2011  Ebon Clements  CAR 256007
+.            Added MMVXPICD
+.  V10.02.02 26.09.2011  Ebon Clements  CAR 250746
+.            Added MMPXHFCN
+.  V10.02.01 22.09.2011  Ebon Clements  CAR 251221
+.            Added MMVXEDC1,MMVXEDC2 and MMVXEDC3
+.  V10.01.01 17.11.2010  Jill Parkinson CAR 233088
+.            Increased size of MPFNDMM
+.  V9.11.01  21.04.2009  Jill Habasque CAR 145706
+.            Added MMPXVGPC,MMPXVGPP,MMPXVGPG
+.  V9.10.01  20.04.2009  Ebon Clements CAR 187411
+.            Added MTMXCELL and MMPXPEML
+.*----------------------------------------------------------------------
+.
+MPURNO    DIM       8
+MPGNAME   DIM       25
+MPTITL    DIM       4
+MPSEX     DIM       1
+MPBDATE   DIM       8
+MPSNAME   DIM       20
+MPADD1    DIM       35
+MPADD2    DIM       35
+MPSUBRB   DIM       35
+MPADD4    DIM       35
+MPPOST    DIM       8
+MPTELEP   DIM       20
+MPTELEB   DIM       20
+MPMSTAT   DIM       1
+MPCONT    DIM       3
+MPREG     DIM       3
+MPTYPE    DIM       3
+MPMEDI    DIM       10
+MDPPENNO  DIM       15
+MPPNDTE   DIM       8
+MPLOCDOC  DIM       30
+MPFUNDH   DIM       6
+MPFNDTB   DIM       8
+MPFNDMM   DIM       19
+MPUSR1    DIM       3
+MPUSR2    DIM       3
+MPUSR3    DIM       3
+MPUSR4    DIM       3
+MPUSR5    DIM       3
+MPUSR6    DIM       3
+MPUYN1    DIM       1
+MPUYN2    DIM       1
+MPUYN3    DIM       1
+MPNKNAME  DIM       20
+.
+MPNKTITL  DIM       4
+MPNKSNAM  DIM       40
+MPNKGNAM  DIM       40
+MPNKGNM2  DIM       40
+PPNKTITL  DIM       4
+PPNKSNAM  DIM       40
+PPNKGNAM  DIM       40
+PPNKGNM2  DIM       40
+.
+MPNKADD1  DIM       35
+MPNKADD2  DIM       35
+MPNKSUBR  DIM       35
+MPNKADD4  DIM       35
+MPNKPOST  DIM       8
+MPNKTELP  DIM       20
+MPNKTELB  DIM       20
+MPNKRELP  DIM       10
+MTMANOKO  DIM       14
+MTMANOKE  DIM       6
+MPTMXLGA  DIM       4
+MMPXRMOB  DIM       20
+MMPXREML  DIM       80
+MTMXECNM  DIM       20
+MTMXECA1  DIM       35
+MTMXECA2  DIM       35
+MTMXECA3  DIM       35
+MTMXECA4  DIM       35
+MTMXECPC  DIM       8
+MTMXECPP  DIM       20
+MTMXECBP  DIM       20
+MTMXECRE  DIM       10
+MMPXCMOB  DIM       20
+MMPXCEML  DIM       80
+MTMXNRNM  DIM       20
+MTMXNRA1  DIM       35
+MTMXNRA2  DIM       35
+MTMXNRA3  DIM       35
+MTMXNRA4  DIM       35
+MTMXNRPC  DIM       8
+MTMXNRPP  DIM       20
+MTMXNRBP  DIM       20
+MTMXNRRE  DIM       10
+MTMXADD1  DIM       35
+MTMXADD2  DIM       35
+MTMXADD3  DIM       35
+MTMXADD4  DIM       35
+MTMXPOST  DIM       8
+MTMXSLAC  DIM       8
+MTMXCELL  DIM       20
+MMPXMEDC  DIM       8
+MMPXMSNO  DIM       10
+MMPXKMOB  DIM       20
+MMPXKEML  DIM       80
+MMPXMSNA  DIM       20
+MMPXMGNA  DIM       25
+MMPXMTLE  DIM       4
+MMPXMAD1  DIM       35
+MMPXMAD2  DIM       35
+MMPXMAD3  DIM       35
+MMPXMAD4  DIM       35
+MMPXMPOS  DIM       8
+MMPXMPNO  DIM       20
+MMPXMBNO  DIM       20
+MMPXMMNO  DIM       20
+MMPXMEML  DIM       80
+MMPXMCNT  DIM       3
+MMPXMREL  DIM       3
+MMPXFSNA  DIM       20
+MMPXFGNA  DIM       25
+MMPXFTLE  DIM       4
+MMPXFAD1  DIM       35
+MMPXFAD2  DIM       35
+MMPXFAD3  DIM       35
+MMPXFAD4  DIM       35
+MMPXFPOS  DIM       8
+MMPXFPNO  DIM       20
+MMPXFBNO  DIM       20
+MMPXFMNO  DIM       20
+MMPXFEML  DIM       80
+MMPXFCNT  DIM       3
+MMPXFREL  DIM       10
+MMPXUSR7  DIM       3
+MMPXUSR8  DIM       3
+MMPXUSR9  DIM       3
+MMPXUYN4  DIM       1
+MMPXUYN5  DIM       1
+MMPXRHC1  DIM       10
+MMPXRH1G  DIM       10
+MMPXR1GC  DIM       2
+MMPXINTR  DIM       1
+MMPXLNG1  DIM       3
+MMPXABRG  DIM       3
+MMPXPRVI  DIM       3
+MMPXFLDR  DIM       3
+MNHIETH1  DIM       2
+MNHIETH2  DIM       2
+MNHIETH3  DIM       2
+MMPXIWI1  DIM       3
+MMPXIWI2  DIM       3
+MMPXIWI3  DIM       3
+MMPXPEML  DIM       80
+MMPXVGPC  DIM       10
+MMPXVGPP  DIM       10
+MMPXVGPG  DIM       2 
+MMPXHFCN  DIM       40
+MMPXFNAM  DIM       40
+MMPXSNAM  DIM       40
+MMPXPMCN  DIM       3
+MMPXPMCR  DIM       3
+.
+MADOCTR   DIM       6
+MADOCTA   DIM       6
+MADOCTL   DIM       30
+MAFUNDH   DIM       6
+MAFNDTB   DIM       8
+MAFNDYY   DIM       10
+MAVISIT   FORM      1
+MADOCTT   DIM       6
+MACLSSFT  DIM       3
+MACLAIM   DIM       3
+MACOMM1   DIM       40
+MACOMM2   DIM       30
+MAPLUR    FORM      1
+MAUSR1    DIM       3
+MAUSR2    DIM       3
+MAUSR3    DIM       3
+MAUSR4    DIM       3
+MAUSR5    DIM       3
+MAUSR6    DIM       3
+MAUSR7    DIM       3
+MTMIUSR8  DIM       3
+MTMIUSR9  DIM       3
+MTMIUSR0  DIM       3
+MARDRNAM  DIM       22
+MTMIUYN1  FORM      1
+MTMIUYN2  FORM      1
+MMVXDOCA  DIM       10
+MMVXDOCT  DIM       10
+MMVXCSNR  DIM       1
+MMVXPIND  DIM       3
+MMVXINGP  DIM       1
+MMVXHCP1  DIM       1
+MMVXHCP2  DIM       1
+MMVXHCP3  DIM       1
+MMVXHCP4  DIM       1
+MMVXRHC1  DIM       10
+MMVXRH1G  DIM       10
+MMVXRH1C  DIM       2
+MMVXRHC2  DIM       10
+MMVXRH2G  DIM       10
+MMVXRH2C  DIM       2
+MMVXRHC3  DIM       10
+MMVXRH3G  DIM       10
+MMVXRH3C  DIM       2
+MMVXRHC4  DIM       10
+MMVXRH4G  DIM       10
+MMVXRH4C  DIM       2
+MMVXUDF1  DIM       50
+MMVXUDF2  DIM       50
+MMVXUDF3  DIM       50
+MMVXUDF4  DIM       50
+MMVXUDT1  DIM       13
+MMVXUDT2  DIM       13
+MMVXUDT3  DIM       13
+MMVXUDT4  DIM       13
+MMVXUDT5  DIM       13
+MMVXUDT6  DIM       13
+MMVXPRMI  DIM       1
+MMVXPRAI  DIM       1
+MMVXPRES  DIM       1
+MMVXUITR  DIM       1
+MMVXRPOA  DIM       1
+MMVXRCN1  DIM       1
+MMVXRCN2  DIM       1
+MMVXRHFU  DIM       1
+MMVXRDVA  DIM       1
+MMVXEDU1  DIM       3
+MMVXEDU2  DIM       3
+MMVXEDU3  DIM       3
+MASRCE    DIM       3
+MATYPE    DIM       3
+MACLSS    DIM       3
+MADIAG1   DIM       50
+MADIAG2   DIM       50
+MADIET    DIM       3
+MTMIPDRG  DIM       4
+MTMIPCMX  DIM       9
+MTMIGSTA  DIM       1
+MMVXABRG  DIM       3
+MMVXCADM  DIM       3
+MMVXIRAD  DIM       3
+MMVXIDUS  DIM       3
+MMVXAPWD  DIM       3
+MMVXASUT  DIM       3
+MMVXELPS  DIM       3
+MMVXEMPL  DIM       3
+MMVXFINP  DIM       3
+MMVXOCCP  DIM       3
+MMVXPALC  DIM       3
+MMVXPPPT  DIM       3
+MMVXPYSP  DIM       3
+MMVXINDC  DIM       1
+MMVXQLDB  DIM       3
+MMVXREAD  DIM       3
+MMVXUDIN  DIM       3
+MMVXUREA  DIM       3
+MMVXUSAC  DIM       3
+MMVXUVTH  DIM       3
+MACARE    DIM       3
+MMVXSLOC  DIM       3
+MMVXSCLI  DIM       3
+MMVXSTRA  DIM       3
+MMVXPACC  DIM       3
+MMVXEDC1  DIM       10
+MMVXEDC2  DIM       10
+MMVXEDC3  DIM       10
+MMVXPICD  DIM       9
+MMVXUD10  DIM       3
+MMVXUD11  DIM       3
+MMVXADMP  DIM       1
+MMVXCONO  DIM       1
+MMVXMEDH  DIM       1

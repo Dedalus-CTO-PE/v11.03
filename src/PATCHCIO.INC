@@ -1,0 +1,145 @@
+.
+. PATCHCIO.INC
+. ------------
+. Filename       :  patchcof
+. Description    :  Codes changes file
+. Variables      :  OVRCD     FORN      1
+.                   KEY24     DIM       24
+.                   KEY26     DIM       26
+.
+RDACHCO1  MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      PATCHCO1,KEY24;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RDSCHCO1  MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      PATCHCO1,KEY24;;
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RDCHCO1   MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      PATCHCO1,KEY24;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                                   CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                                   CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCHADMN,CHADMN
+          RETURN  
+.
+RDKCHCO1  MOVE      ZERO,OVRCD
+          READKS    PATCHCO1;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                             CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                             CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCHADMN,CHADMN
+          RETURN  
+.
+RDPCHCO1  MOVE      ZERO,OVRCD
+          READKP    PATCHCO1;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                             CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                             CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCHADMN,CHADMN
+          RETURN  
+.
+UPCHCO1   MOVE      CHADMN,DCHADMN
+          UPDATE    PATCHCO1;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                             CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                             CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          RETURN
+.
+WRCHCO1   RESET     KEY24
+          WRITE     PATCHCO1,KEY24;CHCATG,CHCODE,KEY24:
+                                   CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                                   CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          RETURN  
+.
+DECHCO1   RESET     KEY24
+          DELETE    PATCHCO1,KEY24
+          RETURN
+.
+.
+RDSCHCO2  MOVE      ZERO,OVRCD
+          RESET     KEY26
+          READ      PATCHCO2,KEY26;;
+          GOTO      OVERCOND IF OVER
+          RETURN  
+.
+RDKCHCO2  MOVE      ZERO,OVRCD
+          READKS    PATCHCO2;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                             CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                             CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCHADMN,CHADMN
+          RETURN  
+.
+RDPCHCO2  MOVE      ZERO,OVRCD
+          READKP    PATCHCO2;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                             CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                             CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCHADMN,CHADMN
+          RETURN  
+.
+UPCHCO2   MOVE      CHADMN,DCHADMN 
+          UPDATE    PATCHCO2;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                             CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                             CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          RETURN
+.
+RDACHCO3  MOVE      ZERO,OVRCD
+          RESET     KEY40
+          READ      PATCHCO3,KEY40;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDSCHCO3  MOVE      ZERO,OVRCD
+          RESET     KEY40
+          READ      PATCHCO3,KEY40;;
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDCHCO3   MOVE      ZERO,OVRCD
+          RESET     KEY40
+          READ      PATCHCO3,KEY40;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                                   CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                                   CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCHADMN,CHADMN
+          RETURN
+.
+RDKCHCO3  MOVE      ZERO,OVRCD
+          READKS    PATCHCO3;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                             CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                             CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCHADMN,CHADMN
+          RETURN
+.
+RDPCHCO3  MOVE      ZERO,OVRCD
+          READKP    PATCHCO3;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                             CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                             CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          GOTO      OVERCOND IF OVER
+          MOVE      DCHADMN,CHADMN
+          RETURN
+.
+UPCHCO3   MOVE      CHADMN,DCHADMN
+          UPDATE    PATCHCO3;CHCATG,CHCODE,DCHADMN,CHDATE,CHTIME:
+                             CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                             CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          RETURN
+.
+WRCHCO3   RESET     KEY40
+          WRITE     PATCHCO3,KEY40;CHCATG,CHCODE,KEY24:
+                                   CHCRDATE,CHCRTIME,CHCRUSID,CHUPDATE:
+                                   CHUPTIME,CHUPUSID,CHEPISNO,CHCODCMP,CHSPARE
+          RETURN
+.
+DECHCO3   RESET     KEY40
+          DELETE    PATCHCO3,KEY40
+          RETURN
+.
+

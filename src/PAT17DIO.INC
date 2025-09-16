@@ -1,0 +1,205 @@
+. V10.00.01 01/04/2010 Mike Laming  CAR 219246 - Created ICD10 Ed.7 Disease FD
+.
+RSPT17D1  RESET     KEY9
+          READ      PATI17D1,KEY9;;
+          RETURN
+.
+RAPT17D1  MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      PATI17D1,KEY9;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPT17D1  MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      PATI17D1,KEY9;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                                  DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                                  PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA:
+                                  PT0DCPRA:
+                                  PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                                  PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                                  DPT0DV5C,DPT0DV6C,PT0DDESC,DPT0DV7C,PT0DSPR5
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      ZERO,PT0DV3CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      ZERO,PT0DV4CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      ZERO,PT0DV5CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          MOVE      ZERO,PT0DV6CD
+          MOVE      DPT0DV6C,PT0DV6CD
+          MOVE      ZERO,PT0DV7CD
+          MOVE      DPT0DV7C,PT0DV7CD
+          RETURN
+.
+RKPT17D1  MOVE      ZERO,OVRCD
+          READKS    PATI17D1;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,DPT0DV6C,PT0DDESC,DPT0DV7C,PT0DSPR5
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      ZERO,PT0DV3CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      ZERO,PT0DV4CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      ZERO,PT0DV5CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          MOVE      ZERO,PT0DV6CD
+          MOVE      DPT0DV6C,PT0DV6CD
+          MOVE      ZERO,PT0DV7CD
+          MOVE      DPT0DV7C,PT0DV7CD
+          RETURN
+.
+RPPT17D1  MOVE      ZERO,OVRCD
+          READKP    PATI17D1;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,DPT0DV6C,PT0DDESC,DPT0DV7C,PT0DSPR5
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      ZERO,PT0DV3CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      ZERO,PT0DV4CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      ZERO,PT0DV5CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          MOVE      ZERO,PT0DV6CD
+          MOVE      DPT0DV6C,PT0DV6CD
+          MOVE      ZERO,PT0DV7CD
+          MOVE      DPT0DV7C,PT0DV7CD
+          RETURN
+.
+UPPT17D1  MOVE      PT0DCMFT,DPT0DCMF
+          MOVE      PT0DV1CD,DPT0DV1C
+          MOVE      PT0DV2CD,DPT0DV2C
+          MOVE      PT0DV3CD,DPT0DV3C
+          MOVE      PT0DV4CD,DPT0DV4C
+          MOVE      PT0DV5CD,DPT0DV5C
+          MOVE      PT0DV6CD,DPT0DV6C
+          MOVE      PT0DV7CD,DPT0DV7C
+          UPDATE    PATI17D1;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,DPT0DV6C,PT0DDESC,DPT0DV7C,PT0DSPR5
+          RETURN
+.
+WRPT17D1  RESET     KEY9
+          MOVE      PT0DCMFT,DPT0DCMF
+          MOVE      PT0DV1CD,DPT0DV1C
+          MOVE      PT0DV2CD,DPT0DV2C
+          MOVE      PT0DV3CD,DPT0DV3C
+          MOVE      PT0DV4CD,DPT0DV4C
+          MOVE      PT0DV5CD,DPT0DV5C
+          MOVE      PT0DV6CD,DPT0DV6C
+          MOVE      PT0DV7CD,DPT0DV7C
+          WRITE     PATI17D1,KEY9;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                                  DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                                  PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA:
+                                  PT0DCPRA:
+                                  PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                                  PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                                  DPT0DV5C,DPT0DV6C,PT0DDESC,DPT0DV7C,PT0DSPR5
+          RETURN
+.
+DEPT17D1  RESET     KEY9
+          DELETE    PATI17D1,KEY9
+          RETURN
+.
+.
+RSPT17D2  RESET     KEY79
+          READ      PATI17D2,KEY79;;
+          RETURN
+.
+RAPT17D2  MOVE      ZERO,OVRCD
+          RESET     KEY79
+          READ      PATI17D2,KEY79;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPT17D2  MOVE      ZERO,OVRCD
+          RESET     KEY79
+          READ      PATI17D2,KEY79;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                                   DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                                   PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA:
+                                   PT0DCPRA:
+                                   PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                                   PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                                   DPT0DV5C,DPT0DV6C,PT0DDESC,DPT0DV7C,PT0DSPR5
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      ZERO,PT0DV3CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      ZERO,PT0DV4CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      ZERO,PT0DV5CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          MOVE      ZERO,PT0DV6CD
+          MOVE      DPT0DV6C,PT0DV6CD
+          MOVE      ZERO,PT0DV7CD
+          MOVE      DPT0DV7C,PT0DV7CD
+          RETURN
+.
+RKPT17D2  MOVE      ZERO,OVRCD
+          READKS    PATI17D2;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,DPT0DV6C,PT0DDESC,DPT0DV7C,PT0DSPR5
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      ZERO,PT0DV3CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      ZERO,PT0DV4CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      ZERO,PT0DV5CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          MOVE      ZERO,PT0DV6CD
+          MOVE      DPT0DV6C,PT0DV6CD
+          MOVE      ZERO,PT0DV7CD
+          MOVE      DPT0DV7C,PT0DV7CD
+          RETURN
+.
+RPPT17D2  MOVE      ZERO,OVRCD
+          READKP    PATI17D2;DPCODE,DDESC,DFLAG,DAGEGP,DLOW:
+                             DHIGH,PT0D2AGP,PT0D2ALL,PT0D2AHL,DSEX:
+                             PT0DADTP,PT0DPRFX,PT0DSAC2,DDAGGER,DAREA,PT0DCPRA:
+                             PT0DACRQ,PT0DMI9C,DPT0DCMF,DPT0DV1C,DPT0DV2C:
+                             PT0DV1MP,DPT0DV3C,PT0DV2MP,DPT0DV4C:
+                             DPT0DV5C,DPT0DV6C,PT0DDESC,DPT0DV7C,PT0DSPR5
+          GOTO      OVERCOND IF OVER
+          MOVE      DPT0DCMF,PT0DCMFT
+          MOVE      DPT0DV1C,PT0DV1CD
+          MOVE      DPT0DV2C,PT0DV2CD
+          MOVE      ZERO,PT0DV3CD
+          MOVE      DPT0DV3C,PT0DV3CD
+          MOVE      ZERO,PT0DV4CD
+          MOVE      DPT0DV4C,PT0DV4CD
+          MOVE      ZERO,PT0DV5CD
+          MOVE      DPT0DV5C,PT0DV5CD
+          MOVE      ZERO,PT0DV6CD
+          MOVE      DPT0DV6C,PT0DV6CD
+          MOVE      ZERO,PT0DV7CD
+          MOVE      DPT0DV7C,PT0DV7CD
+          RETURN
++
+.
+

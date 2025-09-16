@@ -1,0 +1,139 @@
+.******************************************************************************
+. PCPDIAIO.INC
+. ------------
+. Filename     : pcpdiaaf
+. Description  : Patient Care Plan patient nursing diagnosis file
+. Variables    : OVRCD    FORM     1         0 = NOT OVER
+.                                            1 = OVER
+. KEY33        : PCPDIAA1
+. KEY10        : PCPDIAA2
+. KEY19        : PCPAUDDI
+.******************************************************************************
+.
+. ------  I/O routines for 1st index ------
+.
+RAPCDIA1  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      PCPDIAA1,KEY33;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPCDIA1  RESET     KEY33
+          READ      PCPDIAA1,KEY33;;
+          RETURN
+.
+RDPCDIA1  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      PCPDIAA1,KEY33;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPCDIADM,PCDIADMN
+          RETURN
+.
+RKPCDIA1  MOVE      ZERO,OVRCD
+          READKS    PCPDIAA1;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPCDIADM,PCDIADMN
+          RETURN
+.
+RPPCDIA1  MOVE      ZERO,OVRCD
+          READKP    PCPDIAA1;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPCDIADM,PCDIADMN
+          RETURN
+.
+WRPCDIA1  RESET     KEY33
+          MOVE      PCDIADMN,DPCDIADM
+          WRITE     PCPDIAA1,KEY33;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          RETURN
+.
+UPPCDIA1  
+          MOVE      PCDIADMN,DPCDIADM
+          UPDATE    PCPDIAA1;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          RETURN
+.
+DEPCDIA1  RESET     KEY33
+          DELETE    PCPDIAA1,KEY33
+          RETURN
+.******************************************************************************
+.
+. ----  I/O routines for 2nd index ----
+.
+RAPCDIA2  MOVE      ZERO,OVRCD
+          RESET     KEY10
+          READ      PCPDIAA2,KEY10;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPCDIA2  RESET     KEY10
+          READ      PCPDIAA2,KEY10;;
+          RETURN
+.
+RDPCDIA2  MOVE      ZERO,OVRCD
+          RESET     KEY10
+          READ      PCPDIAA2,KEY10;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPCDIADM,PCDIADMN
+          RETURN
+.
+RKPCDIA2  MOVE      ZERO,OVRCD
+          READKS    PCPDIAA2;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPCDIADM,PCDIADMN
+          RETURN
+.
+RPPCDIA2  MOVE      ZERO,OVRCD
+          READKP    PCPDIAA2;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPCDIADM,PCDIADMN
+          RETURN
+.
+WRPCDIA2  RESET     KEY10
+          MOVE      PCDIADMN,DPCDIADM
+          WRITE     PCPDIAA2,KEY10;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          RETURN
+.
+UPPCDIA2  
+          MOVE      PCDIADMN,DPCDIADM
+          UPDATE    PCPDIAA2;DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          RETURN
+.
+DEPCDIA2  RESET     KEY10
+          DELETE    PCPDIAA2,KEY10
+          RETURN
+.******************************************************************************
+.
+. ----  I/O routines for Audits----
+.
+ASPCDIA   RESET     KEY19
+          READ      PCPAUDDI,KEY19;;
+          RETURN
+.
+AKPCDIA   MOVE      ZERO,OVRCD
+          READKS    PCPAUDDI;PCDIAUDD,PCDIAUDT,PCDIAUDP,PCDIAUDR,PCDIAUDS:
+                    PCDIAUDO,DPCDIADM,PCDIDATE,PCDITIME,PCDIDIAG,PCDIUNIQ:
+                    PCDICTYP,PCDICLIN,PCDINURS,PCDIDCOD,PCDISTAT,PCDISPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPCDIADM,PCDIADMN
+          RETURN
+.
+AWPCDIA   RESET     KEY19
+          MOVE      PCDIADMN,DPCDIADM
+          WRITE     PCPAUDDI,KEY19;KEY19,PCDIAUDS,PCDIAUDO,DPCDIADM,PCDIDATE:
+                    PCDITIME,PCDIDIAG,PCDIUNIQ,PCDICTYP,PCDICLIN,PCDINURS:
+                    PCDIDCOD,PCDISTAT,PCDISPAR
+          RETURN
+.
+ADPCDIA   RESET     KEY19
+          DELETE    PCPAUDDI,KEY19
+          RETURN
+.******************************************************************************

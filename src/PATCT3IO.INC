@@ -1,0 +1,185 @@
+.
+. PATCT3IO.INC
+. ------------
+. Filename        : oldctfaf
+. Description     : DRG Theatre fee file
+. Variables       : OVRCD   FORM  1      0 = Not over
+.                                        1 = Over
+.                   KEY33   DIM   33     Key for PATCT2A1
+.                   KEY33   DIM   33     Key for PATCT2A2
+.                   KEY33   DIM   33     Key for PATCT2A3
+.
+. -------- I/O routines for PATCT2A1 -------
+.
+RAPTCT21  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      PATCT2A1,KEY33;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPTCT21  RESET     KEY33
+          READ      PATCT2A1,KEY33;;
+          RETURN
+.
+RDPTCT21  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      PATCT2A1,KEY33;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                                   PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                                   PTCTCNID,PTCTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTCTITM,PTCTITMS
+          MOVE      DPTCTDCA,PTCTDCAS
+          RETURN
+.
+RKPTCT21  MOVE      ZERO,OVRCD
+          READKS    PATCT2A1;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                             PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                             PTCTCNID,PTCTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTCTITM,PTCTITMS
+          MOVE      DPTCTDCA,PTCTDCAS
+          RETURN
+.
+RPPTCT21  MOVE      ZERO,OVRCD
+          READKP    PATCT2A1;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                             PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                             PTCTCNID,PTCTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTCTITM,PTCTITMS
+          MOVE      DPTCTDCA,PTCTDCAS
+          RETURN
+.
+WRPTCT21  MOVE      PTCTITMS,DPTCTITM
+          MOVE      PTCTDCAS,DPTCTDCA
+          RESET     KEY33
+          WRITE     PATCT2A1,KEY33;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                                   PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                                   PTCTCNID,PTCTSPAR
+          RETURN
+.
+UPPTCT21  MOVE      PTCTITMS,DPTCTITM
+          MOVE      PTCTDCAS,DPTCTDCA
+          UPDATE    PATCT2A1;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                             PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                             PTCTCNID,PTCTSPAR
+          RETURN
+.
+DEPTCT21  RESET     KEY33
+          DELETE    PATCT2A1,KEY33
+          RETURN
+.
+.
+RAPTCT22  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      PATCT2A2,KEY33;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPTCT22  RESET     KEY33
+          READ      PATCT2A2,KEY33;;
+          RETURN
+.
+RDPTCT22  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      PATCT2A2,KEY33;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                                   PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                                   PTCTCNID,PTCTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTCTITM,PTCTITMS
+          MOVE      DPTCTDCA,PTCTDCAS
+          RETURN
+.
+RKPTCT22  MOVE      ZERO,OVRCD
+          READKS    PATCT2A2;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                             PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                             PTCTCNID,PTCTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTCTITM,PTCTITMS
+          MOVE      DPTCTDCA,PTCTDCAS
+          RETURN
+.
+RPPTCT22  MOVE      ZERO,OVRCD
+          READKP    PATCT2A2;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                             PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                             PTCTCNID,PTCTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTCTITM,PTCTITMS
+          MOVE      DPTCTDCA,PTCTDCAS
+          RETURN
+.
+WRPTCT22  MOVE      PTCTITMS,DPTCTITM
+          MOVE      PTCTDCAS,DPTCTDCA
+          RESET     KEY33
+          WRITE     PATCT2A2,KEY33;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                                   PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                                   PTCTCNID,PTCTSPAR
+          RETURN
+.
+UPPTCT22  MOVE      PTCTITMS,DPTCTITM
+          MOVE      PTCTDCAS,DPTCTDCA
+          UPDATE    PATCT2A2;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                             PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                             PTCTCNID,PTCTSPAR
+          RETURN
+.
+DEPTCT22  RESET     KEY33
+          DELETE    PATCT2A2,KEY33
+          RETURN
+.
+.
+RAPTCT23  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      PATCT2A3,KEY33;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPTCT23  RESET     KEY33
+          READ      PATCT2A3,KEY33;;
+          RETURN
+.
+RDPTCT23  MOVE      ZERO,OVRCD
+          RESET     KEY33
+          READ      PATCT2A3,KEY33;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                                   PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                                   PTCTCNID,PTCTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTCTITM,PTCTITMS
+          MOVE      DPTCTDCA,PTCTDCAS
+          RETURN
+.
+RKPTCT23  MOVE      ZERO,OVRCD
+          READKS    PATCT2A3;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                             PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                             PTCTCNID,PTCTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTCTITM,PTCTITMS
+          MOVE      DPTCTDCA,PTCTDCAS
+          RETURN
+.
+RPPTCT23  MOVE      ZERO,OVRCD
+          READKP    PATCT2A3;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                             PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                             PTCTCNID,PTCTSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPTCTITM,PTCTITMS
+          MOVE      DPTCTDCA,PTCTDCAS
+          RETURN
+.
+WRPTCT23  MOVE      PTCTITMS,DPTCTITM
+          MOVE      PTCTDCAS,DPTCTDCA
+          RESET     KEY33
+          WRITE     PATCT2A3,KEY33;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                                   PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                                   PTCTCNID,PTCTSPAR
+          RETURN
+.
+UPPTCT23  MOVE      PTCTITMS,DPTCTITM
+          MOVE      PTCTDCAS,DPTCTDCA
+          UPDATE    PATCT2A3;PTCTCLMN,PTCTHFND,PTCTTABT,PTCTCASM:
+                             PTCTMBSB,DPTCTDCA,DPTCTITM,PTCTDREB,PTCTDPAT:
+                             PTCTCNID,PTCTSPAR
+          RETURN
+.
+DEPTCT23  RESET     KEY33
+          DELETE    PATCT2A3,KEY33
+          RETURN

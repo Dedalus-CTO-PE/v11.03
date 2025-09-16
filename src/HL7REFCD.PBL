@@ -1,0 +1,437 @@
+.------------------------------------------------------------------------------
+.  INCLUDE  : HL7REFTX
+.
+.  FUNCTION : Write HL7 REF-I12 Message to send a Clinical Document
+.             This incorporates the selected clinical document as a 
+.             base64 encoded string in a OBX segment.
+.
+.  INPUTS   : HCPSENDC - Send to HCP and Pratice Codes
+.           : HCPCOPYC - Copy to HCP and Pratice Codes (Array of up to 9)
+.           : CORSFILE - Full File Name for Clinical Document to Send in Message
+.           : OBPC*    - Clinical Document Meta Data in obspcoaf record
+.------------------------------------------------------------------------------
+.
+.  Send Document Via HL7 REF-I12 Message
+.
+.        1. Create HL7 File
+.        2. Write Message for each Provider to Receive Document
+.           2.1 Add Message Header
+.           2.1 Add Segments  MSH, RF1, PRD-RP, PRD-RT, OBR, OBX
+.        3. Execute script to 
+.           3.1 Insert Base64 Encoded Document Content into OBX segments
+.           3.2 Create the message file in sending directory
+.
+.  Modifications :
+.
+.  V10.08.01        22/02/2017  Jill Parkinson Task 0832932
+.                   Added use of KEY3 when packing HL7FILEN
+.------------------------------------------------------------------------------
+HL7RF000  CALL      GMESID00            * generate next message id PTCNRMIC
+          CALL      CREAT000            * create hl7 file
+          MOVE      HCPSENDC,KEY20
+          CALL      ADDMES00            * add hl7 message for send to provider
+          BRANCH    EXIT,HL7RF999
+          MOVE      ZERO,F2
+.
+HL7RF200  COMPARE   HCPCOPCT,F2         * copy to array counter
+          GOTO      HL7RF300 IF EQUAL
+          ADD       ONE,F2
+          MOVE      HCPCOPYC[F2],KEY20
+          CALL      GMESID00            * generate next message id PTCNRMIC
+          CALL      ADDMES00            * add hl7 message for copy to provider
+          GOTO      HL7RF200            * check for more copy to
+.
+HL7RF300  CALL      MTXTHL00                      * insert document and move to directory
+.
+HL7RF999  RETURN
+.------------------------------------------------------------
+. Generate next message ID & Set Current date time (DATETIME)
+.------------------------------------------------------------
+GMESID00  MOVE      ZERO,F12
+          MOVE      "114",PRXCODE   * System Lock Sector 114
+          CALL      GETSLK00        * Get System Lock of Sector 114
+          READ      CONTROLF,HUND14;*119,PTCNRMIC
+          MOVE      PTCNRMIC,F12
+          ADD       ONE,F12
+          MOVE      F12,PTCNRMIC
+          WRITAB    CONTROLF,HUND14;*119,PTCNRMIC
+          CALL      RELSLK00        * Release System Lock of Sector 10
+          SUB       ONE,F12
+          MOVE      F12,PTCNRMIC
+          REP       " 0",PTCNRMIC
+.
+          COMPARE   ZERO,F12
+          GOTO      GMESID00 IF EQUAL       * invalid number
+.
+          CALL      IBACLOCK
+          CLOCK     TIME,CTIMEIS
+          UNPACK    CTIMEIS,CHOUR,DIM1,CMIN,DIM1,CSEC
+          PACK      DATETIME,CCC,CYY,CMM,CDD,CHOUR,CMIN,CSEC
+          REP       " 0",DATETIME
+.
+GMESID99  RETURN
+.------------------------------------------------------------------------------
+. create hl7 message text file
+.------------------------------------------------------------------------------
+CREAT000  UNPACK    PTCNRMIC,KEY7,KEY5   * extrat last 5 digits for file name
+          MOVE      "ref",KEY3           * use ref as prefix for file name
+          PACK      FILENAME,KEY3,KEY5   * combine for unique temporary file name
+          REP       " 0",FILENAME
+          CLOSE     MESSFILE             * Just in case it was left open
+          PREP      MESSFILE,FILENAME    * create new text file for message
++
+CREAT999  RETURN
+.------------------------------------------------------------
+. Execute cliweb08.us4 filename> <document> <hl7 filename>
+. Add Document as BASE64 encoded string
+. Move Referral holding directory for secure transmission
+.------------------------------------------------------------
+MTXTHL00  PACK      KEY3,OBPCCTYP,SP70
+          PACK      HL7FILEN,KEY3,DASH,OBPCURNO,DASH,OBPCCVIS,SP70
+          REP       " 0",HL7FILEN       * Final Message Filename
+          STRIP     OBPTSDIR
+          CLEAR     CMDLINE
+          APPEND    "cliweb08.us4 ",CMDLINE
+          APPEND    FILENAME,CMDLINE
+          APPEND    ".txt ",CMDLINE
+          APPEND    OBPTSDIR,CMDLINE    * Physical Location
+          APPEND    CORSFILE,CMDLINE    * PDF File Name
+          APPEND    SP1,CMDLINE
+          APPEND    HL7FILEN,CMDLINE    * Output File Name Document Type - Ur - Visit
+          RESET     CMDLINE
+.
+          CLOSE     MESSFILE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+MTXTHL99  RETURN
++
+.------------------------------------------------------------------------------
+. add hl7 message - input KEY20 as HCP Code Practice Code
+.------------------------------------------------------------------------------
+ADDMES00  MOVE      ZERO,EXIT
+          CALL      RDPMHCL1            * get gp practice provider number
+          BRANCH    OVRCD,ADDMES99      * ignore if no provider no
+.
+          MOVE      KEY20,KEY10
+          CALL      RDPMHCP1            * get gp details
+          BRANCH    OVRCD,ADDMES99      * ignore if no provider no
+.
+          PACK      KEY12,PMHLHCPR,SP70
+          CALL      RSPMHCG1            * get practice details
+          CALL      RKPMHCG1            * get practice details
+          BRANCH    OVRCD,ADDMES99      * ignore if no provider no
+          MATCH     PMHLHCPR,PMHGPRAC
+          GOTO      ADDMES99 IF NOT EQUAL
+. 
+          CALL      WRMSH000            * write message header
+          CALL      WRRF1000            * write referral segment
+          CALL      WRPRDF00            * write from provider
+          CALL      WRPRDT00            * write to provider
+          CALL      WRPID000            * write message pid
+          CALL      WROBR000            * write to provider
+          CALL      WROBX000            * write to provider
+.
+ADDMES999 RETURN
+.------------------------------------------------------------------------------
+. write message header
+.------------------------------------------------------------------------------
+WRMSH000  
+          CALL      IBACLOCK
+          CLOCK     TIME,CTIMEIS
+          UNPACK    CTIMEIS,CHOUR,DIM1,CMIN,DIM1,CSEC
+          PACK      DATETIME,CCC,CYY,CMM,CDD,CHOUR,CMIN,CSEC
+          REP       " 0",DATETIME
+.
+          MOVE      CAPPRVNO,MSHSEQ04   * set sending facility
+          CALL      GFAC0000
+.
+          PACK      MSHSEQ02,ENCDCHAR
+          PACK      MSHSEQ03,PTCNRSAP
+          PACK      MSHSEQ06,PMHLPRV1   * HCP Practie Provider Number for Send Too 
+          PACK      MSHSEQ07,DATETIME
+          PACK      MSHSEQ09,MSGTYPE 
+          UNPACK    PTCNRMIC,KEY5,KEY7
+          PACK      MSHSEQ10,KEY7 
+          PACK      MSHSEQ11,PROCID 
+          PACK      MSHSEQ12,HL7V
+          STRIP     MSHSEQ03
+          STRIP     MSHSEQ04
+          STRIP     MSHSEQ06
+.
+          WRITE     MESSFILE,SEQ;*+,MSH,PIPE:
+                                 *+,MSHSEQ02,PIPE:
+                                 *+,MSHSEQ03,PIPE:
+                                 *+,MSHSEQ04,PIPE:
+                                 *+,PIPE:
+                                 *+,MSHSEQ06,PIPE:
+                                 *+,MSHSEQ07,PIPE:
+                                 *+,PIPE:      *8
+                                 *+,MSHSEQ09,PIPE:
+                                 *+,MSHSEQ10,PIPE:
+                                 *+,MSHSEQ11,PIPE:
+                                 *+,MSHSEQ12
+.
+WRMSH999  RETURN
+.
+.*****************************************************************************
+.*                           GFAC0000              Called by: WMSH0000       *
+.*              Get the sending facility for a multi hospital environment    *
+.*****************************************************************************
+.
+GFAC0000  COMPARE   ONE,IBCNMHOS                 * using multi-hospital ?
+          GOTO      GFAC9999 IF NOT EQUAL        * no
+.
+          MOVE      ADMISSNO,KEY8                * load visit number
+          CALL      RDPMVX11                     * visit on file ?
+          BRANCH    OVRCD,GFAC9999               * no - use default parameter
+          MATCH     SP3,PMVXMHOS                 * blank hospital id ?
+          GOTO      GFAC9999 IF EQUAL            * yes - use default parameter
+          MOVE      PMVXMHOS,KEY3                * load hospital key
+          CALL      RDPTHSP1                     * hospital code on file ?
+          BRANCH    OVRCD,GFAC9999               * no - use default parameter
+          MOVE      PTHSAPPR,MSHSEQ04            * set sending facility provider no
+.
+GFAC9999  RETURN
+.
+.------------------------------------------------------------------------------
+. write message referral segment rf1
+.------------------------------------------------------------------------------
+WRRF1000  MOVE      ZERO,EXIT
+          MOVE      "F^Final^HL70283",RF1SEQ01
+          MOVE      "R^Routine^HL70280",RF1SEQ02
+          MOVE      "MED^Medical^HL70281",RF1SEQ03
+          MOVE      "DSM^Discharge Summary Medication^L",RF1SEQ04
+          MOVE      OBPCCVIS,RF1SEQ06
+          SQUEEZE   RF1SEQ06
+          MOVE      DATETIME,RF1SEQ07
+          MOVE      "E^Event Summary^HL70336",RF1SEQ10
+          MOVE      OBPCCVIS,RF1SEQ11
+.
+          WRITE     MESSFILE,SEQ;*+,RF1,PIPE:
+                                 *+,RF1SEQ01,PIPE:
+                                 *+,RF1SEQ02,PIPE:
+                                 *+,RF1SEQ03,PIPE:
+                                 *+,RF1SEQ04,PIPE:
+                                 *+,PIPE:
+                                 *+,RF1SEQ06,PIPE:
+                                 *+,RF1SEQ07,PIPE:
+                                 *+,PIPE:      *8
+                                 *+,PIPE:
+                                 *+,RF1SEQ10,PIPE:
+                                 *+,RF1SEQ11
+          RETURN
+.
+.------------------------------------------------------------------------------
+. write message referring provider segment
+.------------------------------------------------------------------------------
+WRPRDF00  MOVE      ZERO,EXIT
+          MOVE      "RP^Referring Provider^HL70280",PRDSEQ01
+          STRIP     PTHSNAME
+          CLEAR     PRDSEQ02
+          APPEND    PTHSNAME,PRDSEQ02
+          APPEND    CARAT,PRDSEQ02
+          APPEND    "MDC",PRDSEQ02
+          RESET     PRDSEQ02
+          MOVE      PTHSAPPR,PRDSEQ07
+          STRIP     PRDSEQ07
+.
+          WRITE     MESSFILE,SEQ;*+,PRD,PIPE:
+                                 *+,PRDSEQ01,PIPE:
+                                 *+,PRDSEQ02,PIPE:
+                                 *+,PIPE:
+                                 *+,PIPE:
+                                 *+,PIPE:
+                                 *+,PIPE:
+                                 *+,PRDSEQ07
+          RETURN
+.
+.------------------------------------------------------------------------------
+. write message referred to provider segment
+.------------------------------------------------------------------------------
+WRPRDT00  MOVE      ZERO,EXIT
+          MOVE      "RT^Referred to Provider^HL70280",PRDSEQ01
+          STRIP     PMHCSNAM
+          STRIP     PMHCGNAM
+          STRIP     PMHCTITL
+          CLEAR     PRDSEQ02
+          APPEND    PMHCSNAM,PRDSEQ02
+          APPEND    CARAT,PRDSEQ02
+          APPEND    PMHCGNAM,PRDSEQ02
+          APPEND    CARAT,PRDSEQ02
+          APPEND    CARAT,PRDSEQ02
+          APPEND    CARAT,PRDSEQ02
+          APPEND    PMHCTITL,PRDSEQ02
+          RESET     PRDSEQ02
+          MOVE      PMHLPRV1,PRDSEQ07
+          STRIP     PRDSEQ07
+.
+          WRITE     MESSFILE,SEQ;*+,PRD,PIPE:
+                                 *+,PRDSEQ01,PIPE:
+                                 *+,PRDSEQ02,PIPE:
+                                 *+,PIPE:
+                                 *+,PIPE:
+                                 *+,PIPE:
+                                 *+,PIPE:
+                                 *+,PRDSEQ07
+          RETURN
+.------------------------------------------------------------------------------
+. write PID line
+.------------------------------------------------------------------------------
+WRPID000  CLEAR     PIDSEQ03
+          APPEND    OBPCURNO,PIDSEQ03
+          APPEND    "^^^WEBPAS^MR",PIDSEQ03
+          MATCH     SP70,PMEDI
+          IF        !@EQUAL
+            STRIP     PMEDI
+            APPEND    TILDA,PIDSEQ03
+            APPEND    PMEDI,PIDSEQ03
+            APPEND    "^^^AUSHIC^MC",PIDSEQ03
+          ENDIF
+.         
+          PACK      PIDSEQ01,ONE
+          PACK      PIDSEQ02,OBPCURNO
+          PACK      PIDSEQ04,BLANK
+          STRIP     PSNAME
+          STRIP     PGNAME
+          STRIP     PTITL 
+          PACK      PIDSEQ05,PSNAME,CARAT,PGNAME,CARAT,CARAT,CARAT,PTITL,CARAT,CARAT,ANSL
+          PACK      PIDSEQ07,PBDATE
+          PACK      PIDSEQ08,PSEX
+          STRIP     PADD1
+          STRIP     PADD2
+          STRIP     PSUBRB
+          STRIP     PADD4
+          STRIP     PPOST
+          PACK      PIDSEQ11,PADD1,CARAT,PADD2,CARAT,PSUBRB,CARAT,PADD4,CARAT,PPOST
+          MOVE      OBPCCVIS,PIDSEQ18
+.
+          STRIP     PIDSEQ01
+          SQUEEZE   PIDSEQ02
+          STRIP     PIDSEQ03
+          STRIP     PIDSEQ04
+          STRIP     PIDSEQ05
+          STRIP     PIDSEQ07
+          STRIP     PIDSEQ08
+          STRIP     PIDSEQ11
+          SQUEEZE   PIDSEQ18
+.
+          WRITE     MESSFILE,SEQ;*+,PID,PIPE:
+                                  *+,PIDSEQ01,PIPE:
+                                  *+,PIDSEQ02,PIPE:
+                                  *+,PIDSEQ03,PIPE:
+                                  *+,PIDSEQ04,PIPE:
+                                  *+,PIDSEQ05,PIPE:
+                                  *+,PIPE: * 6
+                                  *+,PIDSEQ07,PIPE:
+                                  *+,PIDSEQ08,PIPE:
+                                  *+,PIPE: * 9
+                                  *+,PIPE: * 10
+                                  *+,PIDSEQ11,PIPE:
+                                  *+,PIPE: * 12
+                                  *+,PIPE: * 13
+                                  *+,PIPE: * 14
+                                  *+,PIPE: * 15
+                                  *+,PIPE: * 16
+                                  *+,PIPE: * 17
+                                  *+,PIDSEQ18
+.
+WRPID999  RETURN
+.------------------------------------------------------------------------------
+. write OBR
+.------------------------------------------------------------------------------
+WROBR000  PACK      OBRSEQ01,ONE
+          CLEAR     OBRSEQ03
+          APPEND    OBPCCVIS,OBRSEQ03
+          APPEND    "^Discharge Medication Chart^^L",OBRSEQ03
+          RESET     OBRSEQ03
+          MOVE      "DSM^Discharge Summary Medication^L",OBRSEQ04
+          PACK      OBRSEQ07,DATETIME
+          MOVE      "PHY",OBRSEQ24  * Diagnostic Service Sect ID Table 0074
+          STRIP     OBRSEQ01
+          SQUEEZE   OBRSEQ03
+          STRIP     OBRSEQ04
+          STRIP     OBRSEQ07
+          STRIP     OBRSEQ24
+          CLEAR     OBRSEQ27
+          APPEND    "^^^",OBRSEQ27
+          APPEND    DATETIME,OBRSEQ27
+          RESET     OBRSEQ27
+          WRITE     MESSFILE,SEQ;*+,OBR,PIPE:
+                                 *+,OBRSEQ01,PIPE:
+                                 *+,PIPE: * 2
+                                 *+,OBRSEQ03,PIPE:
+                                 *+,OBRSEQ04,PIPE:
+                                 *+,PIPE: * 5
+                                 *+,PIPE: * 6
+                                 *+,OBRSEQ07,PIPE:
+                                 *+,PIPE: * 8
+                                 *+,PIPE: * 9
+                                 *+,PIPE: * 10
+                                 *+,PIPE: * 11
+                                 *+,PIPE: * 12
+                                 *+,PIPE:
+                                 *+,PIPE: * 14
+                                 *+,PIPE: * 15
+                                 *+,PIPE:
+                                 *+,PIPE: * 17
+                                 *+,PIPE: * 18
+                                 *+,PIPE: * 19
+                                 *+,PIPE: * 20
+                                 *+,PIPE: * 21
+                                 *+,PIPE: * 22
+                                 *+,PIPE: * 23
+                                 *+,OBRSEQ24,PIPE:
+                                 *+,PIPE: * 25
+                                 *+,PIPE: * 26
+                                 *+,OBRSEQ27
+.
+WROBR999  RETURN
++
+.------------------------------------------------------------------------------
+. write OBX
+.------------------------------------------------------------------------------
+WROBX000  PACK      OBXSEQ01,ONE
+          MOVE      "ED",OBXSEQ02
+          MOVE      "PDF^Display format in PDF^AUSPDI",OBXSEQ03
+          PACK      OBXSEQ04,ONE
+          MOVE      PMHGPFAX,KEY20      * Fax Number for Practice
+          REP       ") ( ",KEY20
+          SQUEEZE   KEY20
+          STRIP     KEY20
+          PACK      KEY21,OBPCCTYP,UNDLINE,OBPCURNO,UNDLINE,OBPCCVIS,SP70
+          REP       " 0",KEY21
+          CLEAR     OBXSEQ05
+          APPEND    KEY20,OBXSEQ05     * Fax Number for Practice
+          APPEND    "####PAS_",OBXSEQ05
+          APPEND    KEY21,OBXSEQ05
+          APPEND    ".pdf^TX^PDF^Base64^",OBXSEQ05
+          RESET     OBXSEQ05
+          MOVE      "F",OBXSEQ11
+          MOVE      DATETIME,OBXSEQ14
+.
+          STRIP     OBXSEQ01
+          STRIP     OBXSEQ02
+          STRIP     OBXSEQ03
+          STRIP     OBXSEQ04
+          STRIP     OBXSEQ05
+          STRIP     OBXSEQ11
+          STRIP     OBXSEQ14
+          WRITE     MESSFILE,SEQ;*+,OBX,PIPE:
+                                 *+,OBXSEQ01,PIPE:
+                                 *+,OBXSEQ02,PIPE:
+                                 *+,OBXSEQ03,PIPE:
+                                 *+,OBXSEQ04,PIPE:
+                                 *+,OBXSEQ05,PIPE:
+                                 *+,PIPE: * 6
+                                 *+,PIPE: * 7
+                                 *+,PIPE: * 8
+                                 *+,PIPE: * 9
+                                 *+,PIPE: * 10
+                                 *+,OBXSEQ11,PIPE: * 11
+                                 *+,PIPE: * 12
+                                 *+,PIPE: * 13
+                                 *+,OBXSEQ14
+.
+WROBX999  RETURN
++

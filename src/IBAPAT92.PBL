@@ -1,0 +1,1486 @@
+.******************************************************************************
+.* System   :  PATIENT SYSTEM                                                 *
+.* Program  :  IBAPAT92                                                       *
+.* Desc     :  Doctors Use of Beds Report                                     *
+.******************************************************************************
+.* Date     :  20/03/1991                                                     *
+.* Author   :  DIG                                                            *
+.* Comment  :  This is a total re-write of the existing PAT92 due to the new  *
+.*             extraction files                                               *
+.* Mods                                                                       *
+.* V10.03.01  31/12/2012 Patrick Adair                             CAR 261630 *
+.*                       Removed port number from temp file name              *
+.*        V10.00.01  Mike Laming   CAR 157391                                 *
+.*                   Recompiled for changes to PATEX1FD.                      *
+.******************************************************************************
+.*        V9.12.01  09/06/2009 Sandra Barcham CAR 198234                      *
+.*                  Reading parameter ptcnpbct from sec20 pos 184 (v6)        *
+.*                  Should be sector 80 position 246                          *
+.******************************************************************************
+.*        V9.11.01  28/01/2009  Mike Laming   CAR 184805                      *
+.*                  Added look-up of "pmshcpaf" if Dr. Name not in "patdo1af" *
+.******************************************************************************
+.*        V9.09.01  09/10/2007  Davin         CAR 150869                      *
+.*                  Added multi-hospital functionality                        *
+.******************************************************************************
+.*        V9.04.01  25/07/2005  Mike Laming   CAR 57045                       *
+.*                  Add CHOSTYP to print "Concess." for Public, "Lumpsum" for *
+.*                  Private                                                   *
+.******************************************************************************
+.*        V5.07.01  06/05/1998   J.Tan                                        *
+.*                  Changed record length of patextbf file                    *
+.*        V5.02     18/12/1991  i chung           SRF 112228                  *
+.*                  Initialized Average Day variables before any calculation  *
+.*        V5.03     26/02/1992  i chung           SRF 112616                  *
+.*                  Highlights chosen Extraction File                         *
+.*        V5.04     13/10/1992  Justin Coates     SRF 111452  Quote 7443      *
+.*                  Change to print by claim type as well for detailed report *
+.*                  (What an absolute nightmare..........)                    *
+.*        V5.05     27/10/1992  Justin Coates     SRF 111452  Quote 7443      *
+.*                  Added doctor type range to page header                    *
+.*                                                                            *
+.*        V6.00.01  15/01/93  J.Tan        SRF 119867                         *
+.*                  Recompiled for PATEXCIO                                   *
+.*        V6.00.02  12/02/1993  i chung           SRF 120628                  *
+.*                  Print all necessary totals for last Doctor Type before    *
+.*                  Grand Totals                                              *
+.*        V5.02.02  11/01/1995  Paul Howells      SRF 129909                  *
+.*                  Changed Concess Description for Journals if on            *
+.*        V5.02.03  03/03/1995  Whirlpool      srf 134041                     *
+.*                  Fixed opening of the dcotors file                         *
+.*                                                                            *
+.*                                                                            *
+.******************************************************************************
+.
+          INC       STD001FD
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATDO1FD/INC
+          INC       PATEX1FD/INC
+          INC       PATEXBFD/INC
+          INC       PATEXCFD/INC
+          INC       PATHSPFD/INC
+          INC       PMSVX1FD/INC
+          INC       PMSHCPFD/INC                                      *I-184805
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
++
+.**********************************************************************
+.*                            TEMP FILE                               *
+.**********************************************************************
+PATTM1XX  IFILE     SQL, FIXED=66, KEY="U1-3,4-6,7-12,13-15"           *C-57045
+KEYA      INIT      " 66 u1-3,4-6,7-12,13-15 "                         *C-57045
+.
+. NAME    TYPE    LENGTH   PHYSICAL  START LOC.   DESCRIPTION
+. ----    ----    ------   --------  ----------   -----------
+TMPDTYPE  DIM       3         3          1        Doctor Type
+TMPCLAIM  DIM       3         3          4        Claim Code
+TMPDOC    DIM       6         6          7        Doctor Code
+TMPATYPE  DIM       3         3         13        Admission type 
+.                                                   ("zzz" for options 1 + 2)
+TMPADMNS  FORM      5         4         16        Number of Admissions
+TMPBDAYS  FORM      7         5         20        Number of Bed Days
+TMPDCASE  FORM      6         4         25        Number of Day Cases
+TMPACCDY  FORM      7.2       6         28        Total Accomodation Charge
+.                                                   for Day Cases
+TMPACCOM  FORM      9.2       7         35        Total Accomodation Charge *C-
+.                                                   excluding Day Cases
+TMPTHEAT  FORM      8.2       6         42        Total Theatre Charge      *C-
+TMPMISC   FORM      7.2       6         48        Total Miscellaneous Charge
+TMPDSALL  FORM      7.2       6         54        Total discount + allowance
+TMPLSUM   FORM      8.2       6         60        Lumpsum              *I-57045
+.End of Record                          66
++
+.**********************************************************************
+.*                       GLOBAL VARIABLES                             *
+.**********************************************************************
+ADMISSNS  FORM      1
+AVDAY     FORM      5.2
+AVLOS     FORM      3.2
+BEDDAYS   FORM      7
+CMDLINE   DIM       50
+CODE      DIM       2
+CURRCLAM  DIM       3         * current claim code
+CURRDOCT  DIM       6         * current doctor code
+CURRDTYP  DIM       3         * current doctor type
+DAYCASES  FORM      1
+DESCATYP  DIM       19
+DESCDOC   DIM       19
+DESCTYPE  DIM       19
+DIM10     DIM       10                                                 *I-57998
+DIM11     DIM       11                                                 *I-57998
+DOCTNAM   DIM       40
+DOCTYPE   DIM       9
+DOCWORD   DIM       6
+.
+EXCDATE   DIM       10
+EXFDATE   DIM       10
+EXTDATE   DIM       10
+.
+FILETMP1  DIM       8
+FLAGATTD  FORM      1
+FLAGDAYC  FORM      1
+FLAGTOT   FORM      1
+FNAMEA    DIM       8
+FNAMEB    DIM       8
+FNAMEC    DIM       8
+FORM8     FORM      8
+FORM8P2   FORM      8.2
+FRCODE    DIM       3         * From Doctor Type
+FRDESC    DIM       20
+FRATTDOC  DIM       3         * From Attending Doctor Type
+FRREFDOC  DIM       3         * From Referring Doctor Type
+.
+HDCLAIM   FORM      1         * 1=claim type description printed
+HDCDDOC   FORM      1         * 1=doctor name printed
+HC        DIM       1                                                  *I-57045
+HCL       DIM       13                                                 *I-57045
+HEADER    DIM       28
+. 
+IBCNMHOS  FORM      1
+.
+JNRDESC   DIM       30
+.
+LASTATYP  DIM       3         * last admission type for doctor type/claim/doctor
+NET       FORM      8.2
+PRNTDOC   FORM      1         * 1=printed doctor details
+RECTYPE   DIM       1
+.
+SAVATYP   DIM       3
+SAVDOCT   DIM       6
+SAVDTYP   DIM       3
+SAVKEY15  DIM       15
+SAVOPTN   FORM      2
+SEC       FORM      2
+.
+TOATTDOC  DIM       3         * To Attending Doctor Type
+TOCODE    DIM       3         * To Doctor Type
+TOREFDOC  DIM       3         * To Referring Doctor Type
+UDOCWORD  DIM       6
+VERT      FORM      2
++
+.**********************************************************************
+.*                             CONSTANTS                              *
+.**********************************************************************
+ATTEND    INIT      "Attending"
+.
+BYATT     INIT      "By Attending "
+BYREF     INIT      "By Referring "
+.
+CODEA     INIT      "A "
+CODEDT    INIT      "DT"
+.
+DBYATT    INIT      "Detailed By Attending "
+DBYREF    INIT      "Detailed By Referring "
+DOCTORLC  INIT      "Doctor"
+DOCTORUC  INIT      "DOCTOR"
+.
+FILEEXTA  INIT      "patexa"
+FILEEXTB  INIT      "patexb"
+FILEEXTC  INIT      "patexc"
+.
+HCONCESS  INIT      "$ Consess. "                                      *I-57045
+HLUMPSUM  INIT      "$ Lumpsum  "                                      *I-57045
+INVCODE   INIT      " -Invalid code"                                   *I-57045
+ISBUILD   INIT      "isbuild "
+ISERASE   INIT      "iserase "
+.
+REFER     INIT      "Referring"
+VMP       INIT      "V.M.P."
+.
+ZZZ       INIT      "zzz"
+ZZZZZZ    INIT      "zzzzzz"
++
+PRGID     INIT      "IBAPAT92"
+PRGNAM    INIT      "Doctors Use of Beds Report"
+VERSION   INIT      "V11.03.00"
++
+.*********************************************************************
+.*                             MAINLINE                              *
+.*                         Controlling Logic                         *
+.*********************************************************************
+ML0000    CALL      INIT0000
+.
+ML1000    CALL      OPTN0000                * get the report type
+          BRANCH    EXIT,ML9999             * exit
+.
+          CALL      RNGE0000                * enter doctor type range
+          CALL      GEXT0000                * enter the extraction file
+          BRANCH    EXIT,ML1000             * exit
+.
+          CALL      CREA0000                * create the temporary files
+          CALL      LOAD0000                * load the temp files
+.
+          BRANCH    SAVOPTN,ML2000,ML2000,ML3000,ML3000
+.
+ML2000    CALL      SUMM0000                * print the report - summary
+          GOTO      ML1000
+.
+ML3000    CALL      DETL0000                * print the report - detailed
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM
++
+.**********************************************************************
+.*                           INIT0000                                 *
+.*                  Open files and display header                     *
+.**********************************************************************
+INIT0000  CALL      DISPHEAD                * display screen header
+.
+          DISPLAY   *P56:24,"Opening patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patdo1af";
+          OPEN      PATDO1A1,"patdo1af"
+.
+          DISPLAY   *P64:24,"pmshcpaf";                               *I-184805
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          DISPLAY   *P64:24,"pmsvx1af";
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,TEN3;*200,CDOCVMP,*245,CHOSTYP            *C-57045
+          READ      CONTROLF,EIGHTY;*246,PTCNPBCT
+          READ      CONTROLF,EIGHTY;*244,PTCNJADJ  * Journal Adjustments
+.
+. ------- if including journal adjustments say so in concession desc.
+.
+          IF        PTCNJADJ = ONE
+            MOVE      "including journal adjustments",JNRDESC
+          ELSE
+            MOVE      SP30,JNRDESC
+          ENDIF
+.
+.
+          MOVE      DOCTORLC,DOCWORD
+          LOAD      DOCWORD,CDOCVMP,VMP
+          MOVE      DOCWORD,UDOCWORD
+          REP       UPPLOW,UDOCWORD         * uppercase version
+.
+          MOVE      ONE,CNEWDS
+.
+.                                           * set up Private/Public headings
+          MOVE      SP1,HC
+          PACK      HCL,HC,HCONCESS,HC
+          BRANCH    CHOSTYP,INIT9999
+          MOVE      "|",HC
+          PACK      HCL,HC,HLUMPSUM,HC
+.
+INIT9999  RETURN
++
+.**********************************************************************
+.*                             CLR0000                                *
+.*           CLeaR all working variables from the temp files          *
+.**********************************************************************
+CLR0000   MOVE      ZERO,TMPADMNS
+          MOVE      ZERO,TMPBDAYS
+          MOVE      ZERO,TMPDCASE
+          MOVE      ZERO,TMPACCDY
+          MOVE      ZERO,TMPACCOM
+          MOVE      ZERO,TMPTHEAT
+          MOVE      ZERO,TMPMISC 
+          MOVE      ZERO,TMPDSALL
+          MOVE      ZERO,TMPLSUM                                       *I-57045
+          RETURN
++
+.**********************************************************************
+.*                             OPTN0000                               *
+.*                 display the main OPTioN screen                     *
+.**********************************************************************
+OPTN0000  MOVE      FALSE,EXIT
+          HLINE     *G37,2,53,80
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,"0",*HOFF," = Exit":
+                    *P1:5,*V2LON,"1",*HOFF," = By Referring ",DOCWORD:
+                    *P1:6,*V2LON,"2",*HOFF," = By Attending ",DOCWORD:
+                    *P1:7,*V2LON,"3",*HOFF," = Detailed By Referring ",DOCWORD:
+                    *P1:8,*V2LON,"4",*HOFF," = Detailed By Attending ",DOCWORD:
+                    *P1:10,"Select Option : ";
+.
+.------ select option ------
+.
+OPTN1000  MOVE      ZERO,OPTION
+          KEYIN     *P17:10,*EL,*DV,UNDLN1,*P17:10,*V2LON,*RV,OPTION;
+.
+          COMPARE   ZERO,OPTION
+          GOTO      OPTN9000 IF EQUAL
+.
+          COMPARE   FIVE,OPTION
+          GOTO      OPTN2000 IF LESS
+          BEEP
+          GOTO      OPTN1000
+.
+.------ valid option chosen ------
+.
+OPTN2000  LOAD      HEADER,OPTION,BYREF,BYATT,DBYREF,DBYATT
+          ENDSET    HEADER
+          APPEND    DOCWORD,HEADER
+          APPEND    SP1,HEADER
+          RESET     HEADER
+.
+          DISPLAY   *P53:2,*V2LON,"- ",*+,HEADER;
+          LOAD      FLAGATTD,OPTION,FALSE,TRUE,FALSE,TRUE
+          MOVE      OPTION,SAVOPTN
+          MOVE      REFER,DOCTYPE
+          LOAD      DOCTYPE,FLAGATTD,ATTEND
+          GOTO      OPTN9999
+.
+.------ Exit option chosen ------
+.
+OPTN9000  MOVE      TRUE,EXIT
+          CALL      KILL0000
+.
+OPTN9999  RETURN
++
+.**********************************************************************
+.*                              GEXT0000                              *
+.*                Get the EXTraction files for the report             *
+.**********************************************************************
+GEXT0000  MOVE      FALSE,EXIT
+          CALL      GEXTN                  * get the extraction file number
+.
+          COMPARE   ZERO,OPTION            * see if no file chosen
+          GOTO      GEXT9000 IF EQUAL
+.
+          CALL      ETABPOS                * get sector and position for dates
+          READ      CONTROLF,SEC;*ETABPS,EDATE,EFDATE,ETDATE,EDOPERS
+.
+          CALL      ETOTPOS                * get sector and position for totals
+          READ      CONTROLF,SEC;*ETABPS,EADMNS,ETPRIMOP,ETPRIMDS,EBDAYS:
+                                  EDCASES,ENETAMT
+.
+          MATCH     SP8,EDATE
+          GOTO      GEXT8000 IF EQUAL
+.
+          MATCH     "00000000",EDATE
+          GOTO      GEXT8000 IF EQUAL
+.
+          MOVE      FIVE,CVERT
+          ADD       OPTION,CVERT
+          UNPACK    EDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          DISPLAY   *P13:CVERT,*V2LON,OPTION,*P20:CVERT,CPCDATE;
+.
+          PACK      FNAMEA,FILEEXTA,OPTION
+          REP       " 0",FNAMEA
+          PACK      FNAMEB,FILEEXTB,OPTION
+          REP       " 0",FNAMEB
+          PACK      FNAMEC,FILEEXTC,OPTION
+          REP       " 0",FNAMEC
+.
+....      TRAP      GEXT8100 IF IO
+....      OPEN      PATEX1A1,FNAMEA
+....      TRAPCLR   IO
+.
+          MOVE      OPTION,DIM2
+          CALL      OPPTEXA1
+.
+          TRAP      GEXT8200 IF IO
+          OPEN      PATEXTB1,FNAMEB
+          TRAPCLR   IO
+.
+          TRAP      GEXT8300 IF IO
+          OPEN      PATEXTC1,FNAMEC
+          TRAPCLR   IO
+.
+          CALL       KHOS0000
+          BRANCH     EXIT,GEXT0000
+.
+          CALL      CONTQST                 * see if Ok to continue
+          BRANCH    CEXIT,GEXT9500,GEXT0000,GEXT9000
+.
+.------ invalid selection of extraction file ------
+.
+GEXT8000  DISPLAY   *P1:24,*EL,*B,*V2LON:
+                    "** Invalid Extraction File chosen **    ";
+          CALL      HITENTER
+          GOTO      GEXT0000
+.
+.------ extraction file A does not exist ------
+.
+GEXT8100  DISPLAY   *P1:24,*EL,*B,*V2LON,"** ",*BLINKON,"ERROR",*HOFF,*V2LON:
+                           " - Extraction File ",FNAMEA," does not exist **  ";
+          CALL      HITENTER
+          NORETURN
+          GOTO      GEXT0000
+.
+.------ extraction file B does not exist ------
+.
+GEXT8200  DISPLAY   *P1:24,*EL,*B,*V2LON,"** ",*BLINKON,"ERROR",*HOFF,*V2LON:
+                           " - Extraction File ",FNAMEB," does not exist **  ";
+          CALL      HITENTER
+          NORETURN
+          GOTO      GEXT0000
+.
+.------ extraction file C does not exist ------
+.
+GEXT8300  DISPLAY   *P1:24,*EL,*B,*V2LON,"** ",*BLINKON,"ERROR",*HOFF,*V2LON:
+                           " - Extraction File ",FNAMEC," does not exist **  ";
+          CALL      HITENTER
+          NORETURN
+          GOTO      GEXT0000
+.
+.------ no extraction file entered OR cancel selected ------
+.
+GEXT9000  MOVE      TRUE,EXIT
+          GOTO      GEXT9999
+.
+.------ "Yes" has been chosen to continue ------
+.
+GEXT9500  UNPACK    EDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                 * pack the date
+          MOVE      CPCDATE,EXCDATE
+.
+          UNPACK    EFDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                 * pack the date
+          MOVE      CPCDATE,EXFDATE
+.
+          UNPACK    ETDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                 * pack the date
+          MOVE      CPCDATE,EXTDATE
+.
+GEXT9999  RETURN
++
+.**********************************************************************
+.*                              CREA0000                              *
+.*                    CREAte the temp indexed file                    *
+.**********************************************************************
+CREA0000  DISPLAY   *P1:24,*EL,*V2LON,*BLINKON,"Creating Temp Indexed File":
+                           *HOFF,*V2LON," - Please wait";
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,CFNAME
+.
+          CALL      KILL0000                * kill existing temp file
+          PACK      CMDLINE,ISBUILD,CFNAME,KEYA,SP30,SP30
+          EXECUTE   CMDLINE,TASKID
+          OPEN      PATTM1XX,CFNAME
+CREA9999  RETURN
++
+.**********************************************************************
+.*                              KILL0000                              *
+.*               KILL the temp file if it already exists              *
+.**********************************************************************
+KILL0000  CLEAR     CMDLINE
+          PACK      CMDLINE,ISERASE,CFNAME
+          EXECUTE   CMDLINE,TASKID
+KILL9999  RETURN
++
+.**********************************************************************
+.*                              HEAD0000                              *
+.*                      Print the page HEADer                         *
+.**********************************************************************
+HEAD0000  CALL      HEAD132
+          IF        IBCNMHOS =1
+            PRINT     *40,"Hospital: ",PTHSNAME;
+          ENDIF
+          PRINT     *N,*40,"Period from ",EXFDATE," to ",EXTDATE:
+                       *80,"(As at ",EXCDATE,")":
+                    *N,*40,HEADER,*N;
+.
+          BRANCH    SAVOPTN,HEAD5000,HEAD5000
+.
+          PRINT     *N,*40,"Doctor Type Range : ";
+          MATCH     SP3,FRCODE
+          GOTO      HEAD2000 IF EQUAL       * display start
+          PACK      KEY5,CODEDT,FRCODE
+          CALL      RDCODE1
+          STRIP     TDESC
+          PRINT     *+,TDESC," to ";
+          GOTO      HEAD3000
+.
+HEAD2000  PRINT     "Start to ";
+.
+HEAD3000  MATCH     ZZZ,TOCODE
+          GOTO      HEAD4000 IF EQUAL       * display finish
+          PACK      KEY5,CODEDT,TOCODE
+          CALL      RDCODE1
+          PRINT     TDESC
+          GOTO      HEAD5000
+.
+HEAD4000  PRINT     "Finish"
+.
+.
+.                                           * Heading changed          *C-57045
+HEAD5000  PRINT     *N,*28,"Bed-",*36,"Day",*45,"Day",*118,"ALOS":
+                    *N,DOCTYPE,SP1,DOCWORD,*21,"Admns",*28,"Days":
+                       *35,"Cases",*41,"$  Cases",*53,"$     Ward":
+                       *66,"$ Theatre",*79,"$  Misc.":
+                       *91,HCL,*104,"$    Net":
+                       *118,"Days",*124,"$ Av/Day"
+          CALL      PDSH0000                * print page seperator
+          PRINT     *N;
+          MOVE      "13",CLNO
+HEAD9999  RETURN
++
+.**********************************************************************
+.*                               PDSH0000                             *
+.*                  Print line of intermetent DaSHes                  *
+.**********************************************************************
+PDSH0000  PRINT     *1,"------------------- ----- ------- -----":
+                       " ----------- ------------- ----------- ----------- ":
+                       HC,"-----------",HC," ----------- ------ ---------"
+          ADD       ONE,CLNO
+PDSH9999  RETURN
++
+.**********************************************************************
+.*                               PEQU0000                             *
+.*                Print line of intermetent EQUal signs               *
+.**********************************************************************
+PEQU0000  PRINT     *1,"=================== ===== ======= =====":
+                       " =========== ============= =========== =========== ":
+                       HC," ===========",HC," =========== ====== ========="
+          PRINT     *N;
+          ADD       TWO,CLNO
+PEQU9999  RETURN
++
+.**********************************************************************
+.*                               PASK0000                             *
+.*                 Print line of intermetent ASterisKs                *
+.**********************************************************************
+PASK0000  PRINT     *1,"******************* ***** ******* *****":
+                       " *********** ************* *********** ***********":
+                       "  ***********  *********** ****** *********"
+          ADD       ONE,CLNO
+.
+PASK9999  RETURN
++
+.**********************************************************************
+.*                               PAS20000                             *
+.*                 Print line of intermetent ASterisKs                *
+.**********************************************************************
+PAS20000  PRINT     *N,*N,*1,"***************************************":
+                       "******************* GRAND TOTAL ******************":
+                       "*******************************************",*N;
+          ADD       ONE,CLNO
+.
+PAS29999  RETURN
++
+.**********************************************************************
+.*                               PAS30000                             *
+.*                 Print line of intermetent ASterisKs                *
+.**********************************************************************
+PAS30000  BRANCH    FLAGTOT,PAS35000
+. 
+          MOVE      HCONCESS,DIM10
+          BRANCH    CHOSTYP,PAS30500
+          MOVE      HLUMPSUM,DIM10
+.
+PAS30500  PRINT     *N,*8,"Bed-",*16,"Day",*25,"Day",*116,"ALOS":
+                    *N,*1,"Admns",*8,"Days",*16,"Cases":
+                       *22,"$  Cases",*36,"$   Ward",*52,"$ Theatre":
+                       *67,"$  Misc.",*82,DIM10:
+                      *98,"$    Net",*116,"Days",*122,"$ Av/Day"
+.
+PAS35000  PRINT     *1,"***** ******* ******":
+                       " ************* ***************":
+                       " ************** *************":
+                       "  **************  **************** ****** ***********"
+          ADD       ONE,CLNO
+.
+PAS39999  RETURN
++
+.**********************************************************************
+.*                               ENDR0000                             *
+.*                Routine to print the END of the Report              *
+.**********************************************************************
+ENDR0000  COMPARE   "47",CLNO
+          CALL      HEAD0000 IF NOT LESS    * paginate if required
+.
+          PRINT     *N,"Admns      = Number of patients who were admitted ":
+                       "during the period for each doctor":
+                    *N,"Bed Days   = Number of inpatient bed days excluding":
+                       " day cases":
+                    *N,"Day Cases  = Number of day cases admitted for each":
+                       " doctor":
+                    *N,"$ Daycases = Bed charges accumulated for daycase":
+                       " patients in the period including discounts and":
+                       " allowances":
+                    *N,"$ Ward     = Bed charges accumulated for non-daycase":
+                       " patients during the period including discounts and ":
+                       "allowances":
+                    *N,"$ Theatre  = Theatre charges accumulated for patients":
+                       " during the period":
+                    *N,"$ Misc     = Miscellaneous charges accumulated for":
+                       " patients during the period";
+          IF        CHOSTYP = 1
+            PRINT   *N,"$ Concess. = Total amount of discounts and allowances":
+                       " for the period ",JNRDESC;
+          ELSE
+            PRINT   *N,"$ Lumpsum  = Lumpsum amount - includes both Daycase ":
+                       "and Ward lumpsum amounts";
+          ENDIF
+          PRINT     *N,"$ Net      = $ Daycases + $ Ward + $ Theatre + $ Misc":
+                    *N,"ALOS Days  = (Bed Days + Day Cases) / Admns":
+                    *N,"Av/Day     = $ Net / (Bed Days + Day Cases)":
+                    *N,*N,"***  End of Report  ***"
+.
+ENDR9999  RETURN
++
+.**************************************************************************
+.*                           PTMP0000                Called by : LOAD0000 *
+.*                    maintain the temp file                              *
+.*                 Para's  : KEY15         the key to temp file           *
+.**************************************************************************
+PTMP0000  CALL      CLR0000                 * clear all variables
+          CALL      RDTMPR1                 * read the temp file
+.
+          ADD       ADMISSNS,TMPADMNS
+          ADD       DAYCASES,TMPDCASE
+          ADD       PTXBACCM,TMPACCOM
+          ADD       PTXBTHET,TMPTHEAT
+          ADD       PTXBMISC,TMPMISC
+          ADD       PTXBDISC,TMPDSALL
+          ADD       PTXBALLW,TMPDSALL
+          ADD       PTXBLSRB,TMPLSUM                                   *I-57045
+          ADD       PTXBLSPT,TMPLSUM                                   *I-57045
+.
+          MATCH     ANSL,PTXBTYPE           * do not want to include leave days
+          GOTO      PTMP1000 IF EQUAL
+          ADD       PTXBNDAY,TMPBDAYS
+.
+          COMPARE   ZERO,FLAGDAYC
+          GOTO      PTMP1000 IF EQUAL       * not a day case
+          ADD       PTXBACCM,TMPACCDY       * add to day case amounts
+          SUB       PTXBACCM,TMPACCOM       * sub the previously added amount
+.
+.         maintain the temp file
+.
+PTMP1000  BRANCH    OVRCD,PTMP1500
+          CALL      UPTMPR1                 * update the first temp file
+          GOTO      PTMP9999
+.
+PTMP1500  CALL      WRTMPR1                 * clear all the data variables
+.
+PTMP9999  RETURN
++
+.**********************************************************************
+.*                               LOAD0000                             *
+.*               LOAD the temp file with the required data            *
+.**********************************************************************
+LOAD0000  DISPLAY   *P1:24,*EL,*V2LON,*BLINKON,"Loading the Temp Indexed file":
+                           *HOFF,*V2LON," - Please wait";
+          MOVE      SP8,KEY8
+          CALL      RSPTEXA1                * position on extraction file A
+.
+.------ read through the extraction file A ------
+.
+LOAD1000  CALL      RKPTEXA1
+          BRANCH    OVRCD,LOAD9999
+.
+          MOVE      FALSE,FLAGDAYC          * initialize day case flag
+          MOVE      ZERO,ADMISSNS
+          MOVE      ZERO,DAYCASES
+.
+. check for multi hospital
+.
+          COMPARE   ONE,IBCNMHOS
+          GOTO      LOAD1050 IF NOT EQUAL
+.
+          MATCH     SP10,PTHSHOSP
+          GOTO      LOAD1050 IF EQUAL
+.
+          MOVE      PTXAADMN,KEY8
+          CALL      RDPMVX11
+          BRANCH    OVRCD,LOAD1000
+.
+          MATCH     PMVXMHOS,PTHSHOSP
+          GOTO      LOAD1000 IF NOT EQUAL
+.
+LOAD1050  MATCH     FRREFDOC,PTXAARDT
+          GOTO      LOAD1000 IF LESS        * referring doctor is too low
+          MATCH     PTXAARDT,TOREFDOC
+          GOTO      LOAD1000 IF LESS        * referring doctor is too high
+.
+          MATCH     EFDATE,PTXAADAT         * skip if admission date is < the
+          GOTO      LOAD1100 IF LESS          start of the period
+          MOVE      ONE,ADMISSNS
+.
+.------ skip if not a day case ------
+.
+LOAD1100  MATCH     PTXAADAT,PTXADDAT
+          GOTO      LOAD2000 IF NOT EQUAL
+          MOVE      ONE,DAYCASES
+          MOVE      TRUE,FLAGDAYC           * set day case flag
+.
+.------ position on extraction file B ------
+.
+LOAD2000  PACK      KEY17,PTXAADMN,SP20
+          CALL      RSPTEXB1                * position on extraction file B
+.
+.------ read through the extraction file B ------
+.
+LOAD3000  CALL      RKPTEXB1
+          BRANCH    OVRCD,LOAD1000
+.
+          COMPARE   PTXAADMN,PTXBADMN       * compare admission numbers
+          GOTO      LOAD1000 IF NOT EQUAL
+.
+          MATCH     FRATTDOC,PTXBTADT
+          GOTO      LOAD3000 IF LESS        * attending doctor is too low
+          MATCH     PTXBTADT,TOATTDOC
+          GOTO      LOAD3000 IF LESS        * attending doctor is too high
+.
+. set the initial key values
+.
+          MOVE      PTXACLMC,TMPCLAIM       * set claim code
+          BRANCH    PTCNPBCT,LOAD3100
+          MOVE      ZZZ,TMPCLAIM            * set to zzz
+.
+LOAD3100  MOVE      PTXBTTYP,TMPATYPE       * set admission type
+          MOVE      PTXAARDC,TMPDOC         * set as referring doctor code
+          MOVE      PTXAARDT,TMPDTYPE       * set as referring doctor type
+          LOAD      TMPDOC,FLAGATTD,PTXBTADC     * set to att. doct code
+          LOAD      TMPDTYPE,FLAGATTD,PTXBTADT   * set to att. doct type
+.
+          PACK      KEY15,TMPDTYPE,TMPCLAIM,TMPDOC,TMPATYPE
+          UNPACK    KEY15,CURRDTYP,CURRCLAM,CURRDOCT,SAVATYP
+.
+          BRANCH    SAVOPTN,LOAD4000,LOAD4000,LOAD5000,LOAD5000
+.
+.         OPTIONS 1 and 2
+.         ---------------
+.
+. ******* update doctor type/doctor code totals *******
+.
+LOAD4000  PACK      KEY15,CURRDTYP,ZZZ,CURRDOCT,ZZZ
+          CALL      PTMP0000
+.
+. ******* update doctor type totals *******
+.
+          PACK      KEY15,CURRDTYP,ZZZ,ZZZZZZ,ZZZ
+          CALL      PTMP0000
+.
+. ******* update grand totals *******
+.
+          PACK      KEY15,ZZZ,ZZZ,ZZZZZZ,ZZZ
+          CALL      PTMP0000
+          GOTO      LOAD9000
+.
+.         OPTIONS 3 and 4
+.         ---------------
+.         if we are not using claim type, it will be set to zzz, so have to
+.         make sure we aren't posting the same key details twice
+.
+. ******* update normal values *******
+.
+LOAD5000  PACK      KEY15,CURRDTYP,CURRCLAM,CURRDOCT,SAVATYP
+          CALL      PTMP0000
+.
+. ******* update the totals for doctor type/admission type *******
+.
+          PACK      KEY15,CURRDTYP,ZZZ,ZZZZZZ,SAVATYP
+          CALL      PTMP0000
+.
+. ******* update total for doctor type/doctor code ******
+.
+          PACK      KEY15,CURRDTYP,ZZZ,CURRDOCT,ZZZ
+          CALL      PTMP0000
+.
+. ******* update total for doctor type  *******
+.
+          PACK      KEY15,CURRDTYP,ZZZ,ZZZZZZ,ZZZ
+          CALL      PTMP0000
+.
+. ******* update totals for admission type *******
+.
+          PACK      KEY15,ZZZ,ZZZ,ZZZZZZ,SAVATYP
+          CALL      PTMP0000
+.
+. ******* update for grand totals *******
+.
+          PACK      KEY15,ZZZ,ZZZ,ZZZZZZ,ZZZ
+          CALL      PTMP0000
+.
+          COMPARE   ONE,PTCNPBCT
+          GOTO      LOAD9000 IF NOT EQUAL   * not using claim type
+.
+. ******* update the totals for the doctor type/claim code/doctor code *******
+.
+          PACK      KEY15,CURRDTYP,CURRCLAM,CURRDOCT,ZZZ
+          CALL      PTMP0000
+.
+. ******* update the totals for doctor type/claim code *******
+.
+          PACK      KEY15,CURRDTYP,CURRCLAM,ZZZZZZ,ZZZ
+          CALL      PTMP0000
+.
+. ******* clear some flags *******
+.
+LOAD9000  MOVE      ZERO,ADMISSNS
+          MOVE      ZERO,DAYCASES
+          GOTO      LOAD3000
+.
+LOAD9999  RETURN
++
+.***********************************************************************
+.*                               DETL0000                              *
+.*                   routine to print report DETaiLs                   *
+.***********************************************************************
+DETL0000  DISPLAY   *P1:24,*EL,*V2LON,*BLINKON,"Generating Report":
+                           *HOFF,*V2LON," - Please wait";
+          MOVE      ZERO,CPAGENO
+          CLOCK     TIME,CTIMEIS
+          MOVE      ONE,CNOUNDLN
+          MOVE      SP20,CPHDROPT
+          MOVE      SP20,DESCTYPE
+          MOVE      ZERO,HDCLAIM            * want to print claim code
+          MOVE      ZERO,HDCDDOC            * want to print doc name
+          MOVE      ZERO,PRNTDOC            * set as not printed doc details
+.
+          CALL      HEAD0000                * print the page header
+          MOVE      "***",CURRDTYP
+          MOVE      "***",CURRCLAM
+          MOVE      "******",CURRDOCT
+.
+          MOVE      SP20,KEY15
+          CALL      RDTMPR1                 * get the first temp file record
+          COMPARE   ZERO,OVRCD
+          GOTO      DETL1100 IF EQUAL
+.
+DETL1000  CALL      RKTMPR1                 * position on the first temp
+          BRANCH    OVRCD,DETL9000            file record
+.
+DETL1100  MATCH     ZZZ,TMPDTYPE
+          GOTO      DETL5000 IF EQUAL       * have grand totals
+.
+          COMPARE   ONE,PTCNPBCT
+          GOTO      DETL1200 IF NOT EQUAL   * want zzz records when not using ct
+          MATCH     ZZZ,TMPCLAIM
+          GOTO      DETL1000 IF EQUAL       * ignore this as done later 
+.
+DETL1200  MATCH     ZZZZZZ,TMPDOC
+          GOTO      DETL1000 IF EQUAL       * ignore this as done later 
+          MATCH     ZZZ,TMPATYPE
+          GOTO      DETL1000 IF EQUAL       * ignore this as done later 
+.
+. ------- see if a change in doctor type -------
+.
+          MATCH     "***",CURRDTYP
+          GOTO      DETL2000 IF EQUAL       * on first doctor type
+          MATCH     TMPDTYPE,CURRDTYP
+          GOTO      DETL2000 IF EQUAL       * same doctor type
+.
+.         have a different doctor type so print admission type totals 
+.         and grand total for doctor type
+.
+          BRANCH    PRNTDOC,DETL1300        * have printed doctor details
+          CALL      TDOC0000                * print totals for doctor code
+          CALL      TCLM0000                * print totals for claim code
+.
+DETL1300  CALL      TDTP0000                * print totals for doctor type
+          GOTO      DETL1000
+.
+. ------- see if a change in claim code -------
+.
+DETL2000  MATCH     "***",CURRCLAM
+          GOTO      DETL3000 IF EQUAL       * on first claim code
+.
+          MATCH     TMPCLAIM,CURRCLAM
+          GOTO      DETL3000 IF EQUAL       * same claim code
+.
+.         have a different claim code so print doctor type/claim code/doct total
+.
+          COMPARE   ONE,PTCNPBCT
+          GOTO      DETL2100 IF NOT EQUAL   * not using claim type
+          BRANCH    PRNTDOC,DETL2100        * have already printed doctor
+          CALL      TDOC0000                * print totals for doctor code
+.
+DETL2100  CALL      TCLM0000                * print totals for claim code
+          GOTO      DETL1000
+.
+. ------- see if a change in doctor code -------
+.
+DETL3000  MATCH     "******",CURRDOCT
+          GOTO      DETL4000 IF EQUAL       * on first record
+.
+          MATCH     TMPDOC,CURRDOCT
+          GOTO      DETL4000 IF EQUAL       * same doctor code
+          CALL      TDOC0000                * print totals for doctor code
+          GOTO      DETL1000
+.
+.         print the details when no change in current values
+.
+DETL4000  PACK      SAVKEY15,TMPDTYPE,TMPCLAIM,TMPDOC,TMPATYPE
+          UNPACK    SAVKEY15,CURRDTYP,CURRCLAM,CURRDOCT
+          MOVE      ZERO,FORM1
+          CALL      PLIN0000                * print the line
+          MOVE      ZERO,PRNTDOC            * set as doctor not printed
+          GOTO      DETL1000
+.
+. ------- print the admission type grand totals and grand total -------
+.
+DETL5000  CALL      TDOC0000                * print totals for doctor code
+          CALL      TCLM0000                * print totals for claim code
+          CALL      TDTP0000                * print totals for doctor type
+.
+          MOVE      ONE,HDCLAIM             * set to NOT print claim code desc
+          MOVE      ONE,HDCDDOC             * set to NOT print doctor name
+          PRINT     *1,"GRAND TOTALS : "
+          ADD       ONE,CLNO
+          PACK      KEY15,ZZZ,ZZZ,ZZZZZZ,SP3
+          CALL      RSTMPR1
+.
+DETL5100  CALL      RKTMPR1
+          BRANCH    OVRCD,DETL9000          * end-of-file
+.
+          MOVE      ZERO,FORM1              * set descatyp
+          MATCH     ZZZ,TMPATYPE
+          GOTO      DETL5200 IF NOT EQUAL
+.
+          MOVE      "GRAND TOTALS ",DESCATYP
+          MOVE      ONE,FORM1               * do not set descatyp
+          CALL      PASK0000
+.
+DETL5200  CALL      PLIN0000
+          GOTO      DETL5100
+.
+DETL9000  CALL      PASK0000
+          CALL      ENDR0000                * print end crap
+.
+DETL9999  RETURN  
++
+.***********************************************************************
+.*                               PLIN0000                              *
+.*                      Print a LINe of the report                     *
+.*       Para's  : FORM1=1       means DESCATYP is set                 *
+.*                 HDCLAIM = 1   set to NOT print claim code desc.     *
+.*                 HDCDDOC = 1   set to NOT print doctor name          *
+.***********************************************************************
+PLIN0000  COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS
+.
+          COMPARE   ONE,PTCNPBCT
+          GOTO      PLIN1000 IF NOT EQUAL   * not using claim types
+          BRANCH    HDCLAIM,PLIN1000        * do not display claim type
+.
+          PACK      KEY5,ANSC,ANSL,TMPCLAIM
+          CALL      RDCODE1
+          PRINT     *1,TDESC
+          ADD       ONE,CLNO
+          MOVE      ONE,HDCLAIM             * set to NOT print claim code desc
+.
+PLIN1000  BRANCH    HDCDDOC,PLIN2000
+.
+          CALL      FDNM0000
+          PRINT     *2,PACFNAME
+          ADD       ONE,CLNO
+          MOVE      ONE,HDCDDOC             * set to NOT print doctor name
+          COMPARE   TWO,FORM1
+          GOTO      PLIN9999 IF EQUAL       * in summary mode so dont display
+.
+PLIN2000  BRANCH    FORM1,PLIN3000          * do not calculate descatyp
+          PACK      TDESC,TMPATYPE,INVCODE                             *I-57045
+          PACK      KEY5,ANSA,SP1,TMPATYPE
+          CALL      RDCODE1
+          PACK      DESCATYP,SP2,TDESC
+.
+. calculate the averages/some totals
+.
+PLIN3000  MOVE      ZERO,NET
+          MOVE      ZERO,AVLOS
+          MOVE      ZERO,AVDAY
+.
+          MOVE      TMPACCDY,NET            * calculate net amount
+          ADD       TMPACCOM,NET
+          ADD       TMPTHEAT,NET
+          ADD       TMPMISC,NET
+.
+          COMPARE   ZERO,TMPADMNS
+          GOTO      PLIN3400 IF EQUAL       * avoid divide by zero
+.
+          MOVE      TMPBDAYS,FORM8P2        * calculate some value
+          ADD       TMPDCASE,FORM8P2
+          DIV       TMPADMNS,FORM8P2 
+          MOVE      FORM8P2,AVLOS
+.
+PLIN3400  MOVE      TMPBDAYS,FORM8          * calculate average $ per day
+          ADD       TMPDCASE,FORM8  
+          COMPARE   ZERO,FORM8
+          GOTO      PLIN4000 IF EQUAL       * avoid divide by zero
+.
+          MOVE      NET,FORM8P2
+          DIV       FORM8,FORM8P2
+          MOVE      FORM8P2,AVDAY
+.
+PLIN4000  MOVE      TMPDSALL,FORM8P2        * set up Concess. for Publiv Hosp.
+          BRANCH    CHOSTYP,PLIN4500
+          MOVE      TMPLSUM,FORM8P2         * set up Lumpsum for Private Hosp.
+PLIN4500  MOVE      FORM8P2,DIM11
+          UNPACK    DIM11,ANS,DIM10
+.
+PLIN5000  MOVE      TMPACCOM,FORM8P2
+          BRANCH    FLAGTOT,PLIN5500
+.
+          PRINT     *1,DESCATYP,*21,TMPADMNS,*27,TMPBDAYS,*34,TMPDCASE:
+                    *41,"$",TMPACCDY,*53,"$",FORM8P2,*66,"$",TMPTHEAT:
+                    *79,"$",TMPMISC,*91,HC,"$",DIM10,HC,*103,"|$":
+                    NET,*117,AVLOS,*124,"$",AVDAY
+          ADD       ONE,CLNO
+          GOTO      PLIN9999
+.
+PLIN5500  PRINT     *1,TMPADMNS,*7,TMPBDAYS,*15,TMPDCASE:
+                    *22,"$",*25,TMPACCDY,*36,"$",*40,FORM8P2:
+                    *52,"$",*55,TMPTHEAT:
+                    *67,"$",*70,TMPMISC:
+                    *82,"$",*85,DIM11,*98,"$",*103,NET:
+                    *115,AVLOS,*122,"$",*125,AVDAY
+.
+PLIN9999  RETURN
++
+.***********************************************************************
+.*                               TDOC0000                              *
+.*                     print Totals for DOCtor code                    *
+.***********************************************************************
+TDOC0000  PACK      KEY15,CURRDTYP,CURRCLAM,CURRDOCT,ZZZ   * finish off doctor 
+          CALL      RDTMPR1
+          CLEAR     DESCATYP
+          APPEND    " TOTAL FOR ",DESCATYP
+          APPEND    UDOCWORD,DESCATYP
+          APPEND    " : ",DESCATYP
+          RESET     DESCATYP
+.
+          MOVE      ONE,HDCLAIM             * set to NOT print claim code desc
+          MOVE      ONE,HDCDDOC             * set to NOT print doctor name
+          MOVE      ONE,FORM1               * dont reset descatyp
+          CALL      PDSH0000
+          CALL      PLIN0000
+          CALL      PDSH0000
+          MOVE      ONE,PRNTDOC             * set as finished doctor
+          MOVE      ONE,HDCLAIM             * set to NOT print claim code desc
+          MOVE      ZERO,HDCDDOC            * set to print doctor name
+          MOVE      "******",CURRDOCT
+TDOC9999  RETURN
++
+.***********************************************************************
+.*                               TCLM0000                              *
+.*                      print Totals for CLaiM code                    *
+.***********************************************************************
+TCLM0000  COMPARE   ONE,PTCNPBCT
+          GOTO      TCLM9000 IF NOT EQUAL   * not using claim types
+.
+          PACK      KEY15,CURRDTYP,CURRCLAM,ZZZZZZ,ZZZ
+          CALL      RDTMPR1
+          MOVE      "  SUB TOTAL ",DESCATYP
+          MOVE      ONE,HDCLAIM             * set to NOT print claim code desc
+          MOVE      ONE,HDCDDOC             * set to NOT print doctor name
+          MOVE      ONE,FORM1               * dont reset descatyp
+          CALL      PLIN0000
+          CALL      PEQU0000
+.
+          MOVE      "******",CURRDOCT
+          MOVE      ZERO,PRNTDOC            * set as not printed doct
+          MOVE      ZERO,HDCDDOC            * set to print doctor name
+.
+TCLM9000  MOVE      "***",CURRCLAM
+          MOVE      ZERO,HDCLAIM            * set to print claim code desc
+TCLM9999  RETURN
++
+.***********************************************************************
+.*                               TDTP0000                              *
+.*                     print Totals for Doctor TyPe                    *
+.***********************************************************************
+TDTP0000  PRINT     "TOTAL FOR ",UDOCWORD," TYPE : "
+          ADD       ONE,CLNO
+          PACK      KEY15,CURRDTYP,ZZZ,ZZZZZZ,SP3
+          CALL      RSTMPR1
+TDTP1000  CALL      RKTMPR1
+          BRANCH    OVRCD,TDTP5000 
+          MATCH     TMPDTYPE,CURRDTYP
+          GOTO      TDTP5000 IF NOT EQUAL
+.
+          MOVE      ONE,HDCLAIM             * set to NOT print claim code desc
+          MOVE      ONE,HDCDDOC             * set to NOT print doctor name
+          MOVE      ZERO,FORM1              * set descatyp 
+.
+          MATCH     ZZZ,TMPATYPE
+          GOTO      TDTP2000 IF NOT EQUAL
+.
+          CLEAR     TDESC
+          APPEND    "NO ",TDESC
+          APPEND    UDOCWORD,TDESC
+          APPEND    " TYPE",TDESC
+          RESET     TDESC
+.
+          MATCH     SP3,CURRDTYP
+          GOTO      TDTP1500 IF EQUAL       * current doctor type is blank
+.
+....      MOVE      "INVALID CODE",TDESC
+          PACK      TDESC,TMPATYPE,INVCODE
+          PACK      KEY5,ANSD,ANST,CURRDTYP
+          CALL      RDCODE1
+.
+TDTP1500  MOVE      TDESC,DESCATYP
+          MOVE      ONE,FORM1               * dont set descatyp
+          CALL      PASK0000
+.
+TDTP2000  CALL      PLIN0000
+          GOTO      TDTP1000
+.
+TDTP5000  CALL      PASK0000
+          CALL      HEAD0000
+          PACK      KEY15,CURRDTYP,ZZZ,ZZZZZZ,ZZZ
+          CALL      RSTMPR1
+          MOVE      "***",CURRDTYP
+          MOVE      "******",CURRDOCT
+          MOVE      "***",CURRCLAM
+          MOVE      ZERO,PRNTDOC            * set as not printed doct
+          MOVE      ZERO,HDCLAIM            * set to print claim code desc
+          MOVE      ZERO,HDCDDOC            * set to print doctor name
+TDTP9999  RETURN
++
+.**************************************************************************
+.*                           SUMM0000                Called by : ML2000   *
+.*                    print the SUMMary report                            *
+.**************************************************************************
+SUMM0000  DISPLAY   *P1:24,*EL,*V2LON,*BLINKON,"Generating Report":
+                    *HOFF,*V2LON," - Please wait";
+          MOVE      ZERO,CPAGENO
+          CLOCK     TIME,CTIMEIS
+          MOVE      ONE,CNOUNDLN
+          MOVE      SP20,CPHDROPT
+          MOVE      "***",CURRDTYP
+          CALL      HEAD0000
+.         
+          MOVE      SP20,KEY15
+          CALL      RSTMPR1
+.
+SUMM1000  CALL      RKTMPR1
+          BRANCH    OVRCD,SUMM9000          * end-of-file
+.
+          MATCH     ZZZ,TMPDTYPE
+          GOTO      SUMM8000 IF EQUAL       * print grand total
+.
+          MATCH     ZZZZZZ,TMPDOC
+          GOTO      SUMM6000 IF EQUAL       * print doctor type total
+.
+. have DRTYPE/zzz/DOCT CODE/zzz
+.
+          MOVE      ONE,HDCLAIM             * set to NOT print claim code desc
+          MOVE      ONE,HDCDDOC             * set to NOT print doctor name
+          CALL      FDNM0000                * format doctor's name
+          MOVE      PACFNAME,DESCATYP       * set the description
+          MOVE      ONE,FORM1               * set to NOT calculate descatyp
+          CALL      PLIN0000
+          MOVE      TMPDTYPE,CURRDTYP       * save doctor type
+          GOTO      SUMM1000
+.
+. have DRTYPE/zzz/zzzzzz/zzz
+.
+SUMM6000  CLEAR     TDESC
+          APPEND    "NO ",TDESC
+          APPEND    UDOCWORD,TDESC
+          APPEND    " TYPE ",TDESC
+          RESET     TDESC
+.
+          MATCH     SP3,CURRDTYP
+          GOTO      SUMM6100 IF EQUAL
+....      MOVE      "INVALID CODE",TDESC
+          PACK      TDESC,TMPATYPE,INVCODE
+          PACK      KEY5,ANSD,ANST,CURRDTYP
+          CALL      RDCODE1
+.
+SUMM6100  MOVE      TDESC,DESCATYP
+          MOVE      ONE,FORM1               * set to NOT change descatyp
+          MOVE      ONE,HDCLAIM             * set to NOT print claim code desc
+          MOVE      ONE,HDCDDOC             * set to NOT print doctor name
+          CALL      PDSH0000
+          CALL      PLIN0000
+          CALL      PDSH0000
+          PRINT     *N;
+          ADD       ONE,CLNO
+          MOVE      "***",CURRDTYP
+          GOTO      SUMM1000
+.         
+. have zzz/zzz/zzzzzz/zzz
+.
+SUMM8000  CALL      PAS20000                     * was PASK0000        *C-57045
+          CALL      PAS30000                                           *I-57045
+          MOVE      ONE,FLAGTOT                                        *I-57045
+          MOVE      "GRAND TOTAL",DESCATYP
+          MOVE      ONE,FORM1               * do not reset descatyp
+          MOVE      ONE,HDCLAIM             * set to NOT print claim code desc
+          MOVE      ONE,HDCDDOC             * set to NOT print doctor name
+          CALL      PLIN0000
+          CALL      PAS30000                     * was PASK0000        *C-57045
+.
+SUMM9000  CALL      ENDR00000
+SUMM9999  RETURN
++
+.**************************************************************************
+.*                           FDNM0000                Called by : PLIN1000 *
+.*                   format the doctors' name                    SUMM1000 *
+.**************************************************************************
+FDNM0000  CLEAR     PACFNAME
+          APPEND    "UNKNOWN ",PACFNAME
+          APPEND    UDOCWORD,PACFNAME
+          RESET     PACFNAME
+.
+          MOVE      TMPDOC,KEY6             * print doctor name
+          MATCH     SP6,KEY6
+          GOTO      FDNM9999 IF EQUAL       * no code
+.
+          UNPACK    SP70,PMHCTITL,PMHCINIT,PMHCSNAM
+          MOVE      "INVALID CODE",PACFNAME
+          CALL      RDDOCT1
+.                                                                     *C-184805
+          IF        OVRCD = 0
+            PACK      PMHCTITL,DTITL,SP10
+            MOVE      DGNAME,KEY1
+            PACK      PMHCINIT,KEY1,DOT,SP10
+            PACK      PMHCSNAM,DSNAME,SP20
+            GOTO      FDNM1000
+          ELSE
+            PACK      KEY10,KEY6,SP10
+            CALL      RDPMHCP1
+            BRANCH    OVRCD,FDNM9999
+            MOVE      PMHCINIT,KEY1
+          ENDIF
+.
+.
+FDNM1000  PACK      PACFNAME,SP70
+          STRIP     PMHCTITL
+          STRIP     PMHCSNAM
+          MOVE      PMHCTITL,PACFNAME
+          ENDSET    PACFNAME
+.
+FDNM2000  MATCH     SP1,PACFNAME
+          GOTO      FDNM3000 IF NOT EQUAL
+          BUMP      PACFNAME,-1
+          GOTO      FDNM2000 IF NOT EOS
+.
+FDNM3000  APPEND    SP1,PACFNAME
+          MATCH     SP1,KEY1
+          IF        !@EQUAL
+            APPEND    KEY1,PACFNAME
+            APPEND    DOT,PACFNAME
+          ENDIF
+          APPEND    PMHCSNAM,PACFNAME
+          RESET     PACFNAME
+.
+FDNM9999  RETURN
++
+.**************************************************************************
+.*                           RNGE0000                Called by : ML1000   *
+.*                  enter the doctor type RaNGE                           *
+.**************************************************************************
+RNGE0000  MOVE      SP3,FRREFDOC
+          MOVE      ZZZ,TOREFDOC
+          MOVE      SP3,FRATTDOC
+          MOVE      ZZZ,TOATTDOC
+          MOVE      ZERO,FLAGTOT                                       *I-57045
+          BRANCH    SAVOPTN,RNGE9999,RNGE9999
+.
+          DISPLAY   *P1:13,"Start Doctor Type : ":
+                    *P1:14,"End   Doctor Type : ";
+          MOVE      "DT",CODE
+.
+          MOVE      "13",CVERT
+          MOVE      "21",CCOL
+          CALL      KCOD0000
+          STORE     ACODE,SAVOPTN,ACODE,ACODE,FRREFDOC,FRATTDOC
+          MOVE      ACODE,FRCODE
+          MOVE      TDESC,FRDESC
+.
+          MATCH     SP3,ACODE
+          GOTO      RNGE2000 IF EQUAL       * null input entered
+          DISPLAY   *P21:13,*V2LON,ACODE,*HOFF,SP5,TDESC;
+          GOTO      RNGE3000
+.
+RNGE2000  DISPLAY   *P21:13,*V2LON,"Start",*EL;
+.
+RNGE3000  MOVE      "14",CVERT
+          MOVE      "21",CCOL
+          CALL      KCOD0000
+          MATCH     SP3,ACODE
+          GOTO      RNGE4000 IF NOT EQUAL       * valid code entered
+          DISPLAY   *P21:14,*V2LON,"Finish",*EL,*W1;
+          STORE     ZZZ,SAVOPTN,ACODE,ACODE,TOREFDOC,TOATTDOC
+          MOVE      ZZZ,TOCODE
+          GOTO      RNGE9999
+.
+RNGE4000  DISPLAY   *P21:14,*V2LON,ACODE,*HOFF,SP5,TDESC;
+          STORE     ACODE,SAVOPTN,ACODE,ACODE,TOREFDOC,TOATTDOC
+          MOVE      ACODE,TOCODE
+.
+          MATCH     FRCODE,TOCODE
+          GOTO      RNGE5000 IF LESS    * invalid range
+          DISPLAY   *W1;
+          GOTO      RNGE9999
+.
+RNGE5000  DISPLAY   *P1:24,*EL,*B,*V2LON:
+                    "End Type must be greater than or equal to Start Type.   ";
+          CALL      HITENTER
+          GOTO      RNGE3000
+.
+RNGE9999  RETURN
++
+.**************************************************************************
+.*                           KCOD0000                Called by : RNGE0000 *
+.*              Keyin a CODes file entry (doctor type)                    *
+.*        must redisplay code and description after field entered         *
+.*        Para's  : CCOL          column for input                        *
+.*                  CVERT         row for input                           *
+.*                  CODE          codes file category for item            *
+.*        Returns : EXIT  = 1     exitchar entered                        *
+.*                  ENCODE        the entered code                        *
+.*                  TDESC        the description                          *
+.**************************************************************************
+KCOD0000  MOVE      ONE,FORM1               * set ? as not performed
+.
+KCOD1000  KEYIN     *PCCOL:CVERT,*DV,UNDLN3,*EL,*PCCOL:CVERT,*V2LON,ACODE:
+                    *PCCOL:CVERT,*DV,ACODE;
+.
+          ENDSET    ACODE
+          APPEND    SP3,ACODE
+          RESET     ACODE
+.
+          MATCH     SP3,ACODE 
+          GOTO      KCOD7900 IF EQUAL       * nothing entered
+.
+          CMATCH    QUEST,ACODE             * "?" entered ?
+          GOTO      KCOD2000 IF NOT EQUAL   * no
+          CALL      PATCODDS                * yes
+          MOVE      TWENTY4,CVERT           * row for input
+          MOVE      TWENTY1,CCOL            * column for input
+          MOVE      ZERO,FORM1              * set "?" as performed
+          DISPLAY   *P1:24,*EL,"Input Doctor Type : ";
+          GOTO      KCOD1000
+.
+.         validate what was entered
+.
+KCOD2000  PACK      KEY5,CODE,ACODE         * key of entered value
+          CALL      RDCODE1                 * read code file
+          BRANCH    OVRCD,KCOD7000          * invalid input
+          GOTO      KCOD8000                * valid input
+.
+.         ERROR: invalid code entered
+.
+KCOD7000  DISPLAY   *P1:24,*EL,*B,*V2LON,"Invalid Doctor Type.    ";
+          CALL      HITENTER
+          BRANCH    FORM1,KCOD1000          * "?" not entered
+          DISPLAY   *P1:24,*EL,"Input Doctor Type : ";
+          GOTO      KCOD1000    
+.
+.         nothing was entered
+.
+KCOD7900  MOVE      SP20,TDESC              * clear the description
+          MOVE      SP3,ACODE               * clear the code
+.
+.         valid code entered
+.
+KCOD8000  MOVE      FALSE,EXIT              * valid input
+          BRANCH    FORM1,KCOD9999          * "?" not entered
+          CALL      RDIS0000                * redisplay rest of screen
+.
+KCOD9999  RETURN
++
+.**************************************************************************
+.*                           RDIS0000                Called by : KCOD0000 *
+.*               ReDISplay after "?" in kcod0000                          *
+.**************************************************************************
+RDIS0000  DISPLAY   *P48:2,*EF:
+                    *P1:4,*V2LON,"0",*HOFF," = Exit":
+                    *P1:5,*V2LON,"1",*HOFF," = By Referring ",DOCWORD:
+                    *P1:6,*V2LON,"2",*HOFF," = By Attending ",DOCWORD:
+                    *P1:7,*V2LON,"3",*HOFF," = Detailed By Referring ",DOCWORD:
+                    *P1:8,*V2LON,"4",*HOFF," = Detailed By Attending ",DOCWORD:
+                    *P1:10,"Select Option : ",*V2LON,SAVOPTN,*HOFF:
+                    *P1:13,"Start Doctor Type : ":
+                    *V2LON,FRCODE,*HOFF,SP5,FRDESC:
+                    *P1:14,"End   Doctor Type : ";
+          MATCH     SP3,FRCODE
+          GOTO      RDIS9999 IF NOT EQUAL
+          DISPLAY   *P21:13,*V2LON,"Start",*EL;
+.
+RDIS9999  RETURN
++
+.******************************************************************************
+.*                                  KHOS0000                                  *
+.*                            Enter The hospital                              *
+.******************************************************************************
+KHOS0000  COMPARE   ONE,IBCNMHOS
+          GOTO      KHOS9999 IF NOT EQUAL
+.
+          DISPLAY   *P1:24,*EL,"Hospital Id : ";
+          MOVE      TEN5,ECOL
+          MOVE      "24",EVERT
+          MOVE      SP3,CKYIDEF3
+          MOVE      ZERO,CKYIMAND           * Not Mandatory
+          OPEN      PATHSPA1,"pathspaf"
+.
+          CALL      PATHSPKY
+          BRANCH    EXIT,KHOS2000,KHOS9500
+          GOTO      KHOS3000
+.
+KHOS2000  MOVE      "All Hospitals",PTHSNAME
+          MOVE      SP10,PTHSHOSP
+          MOVE      ZERO,EXIT
+.
+KHOS3000  CLOSE     PATHSPA1
+.
+          DISPLAY   *P20:24,*V2LON,PTHSNAME;
+          GOTO      KHOS9999
+.
+KHOS9500  MOVE      ONE,EXIT
+KHOS9999  RETURN
++
+.**************************************************************************
+.         I/O routines for temp indexed file 
+.**************************************************************************
+RSTMPR1   MOVE      ZERO,OVRCD
+          RESET     KEY15
+          READ      PATTM1XX,KEY15;;
+          RETURN
+.
+RDTMPR1   MOVE      ZERO,OVRCD
+          RESET     KEY15
+          READ      PATTM1XX,KEY15;TMPDTYPE,TMPCLAIM,TMPDOC,TMPATYPE,TMPADMNS:
+                                   TMPBDAYS,TMPDCASE,TMPACCDY,TMPACCOM,TMPTHEAT:
+                                   TMPMISC,TMPDSALL,TMPLSUM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTMPR1   MOVE      ZERO,OVRCD
+          RESET     KEY15
+          READKS    PATTM1XX;TMPDTYPE,TMPCLAIM,TMPDOC,TMPATYPE,TMPADMNS:
+                             TMPBDAYS,TMPDCASE,TMPACCDY,TMPACCOM,TMPTHEAT:
+                             TMPMISC,TMPDSALL,TMPLSUM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTMPR1   MOVE      ZERO,OVRCD
+          RESET     KEY15
+          WRITE     PATTM1XX,KEY15;KEY15,TMPADMNS,TMPBDAYS,TMPDCASE,TMPACCDY:
+                             TMPACCOM,TMPTHEAT,TMPMISC,TMPDSALL,TMPLSUM
+          RETURN
+.
+UPTMPR1   UPDATE    PATTM1XX;TMPDTYPE,TMPCLAIM,TMPDOC,TMPATYPE,TMPADMNS:
+                             TMPBDAYS,TMPDCASE,TMPACCDY,TMPACCOM,TMPTHEAT:
+                             TMPMISC,TMPDSALL,TMPLSUM
+          RETURN
++
+.==============================================================================
+.
+          INC       STD001IO
+          INC       PATGEXT
+.
+          INC       PATCODDS
+          INC       TFILENAM                     * Generate Temp File Name
+.
+          INC       IBASEQIO/INC                 * Sequential Numbers File
+          INC       PATHSPKY
+          INC       PATHSPIO/INC
+          INC       PATEX1IO/INC
+          INC       PATEXBIO/INC
+          INC       PATEXCIO/INC
+          INC       PATCODIO/INC
+          INC       PATDO1IO/INC
+          INC       PMSVX1IO/INC
+          INC       PMSHCPIO/INC                                      *I-184805
+          INC       WEBERRIO/INC                 * Web Server Error Logging
++

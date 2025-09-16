@@ -1,0 +1,1377 @@
+. *****************************************************************************
+. * System    :   Accounting System                                           *
+. * Program   :   IBAPIN03                                                    *
+. * Desc      :   Patient General Ledger Interface Maintenance                *
+. *               (without using financial files)                             *
+. *****************************************************************************
+. * Date      :   08/03/2002                                                  *
+. * Author    :   J.Tan                                                       *
+. *              (Copied from IBAPIN01 - free format of ledger/account)       *
+. * Mods      :                                                               *
+. * V11.00.01 11/03/2020  J.Tan          TSK 0838262                          *
+. *           Added Effective from and to date to MBS Item file               *
+. * V10.12.01 15.01.2018  J.Tan   TSK 0848146                                 *
+. *           Added CACCFEE=5 - Accumulation FI by Claim code                 *
+. * V10.01.01 20/12/2010  Mike Laming   CAR 233046                            *
+. *           Mods to Misc.Charges PATMCHFD - Key change, logic changes       *
+. * V10.00.01 30/04/2010  J.Tan     CAR 220887                                *
+. *           Mods checking for Active/Inactive of Misc.charge                *
+. * V9.03.01  16/09/2003  Lina Vo  CAR 40497                                  *
+. *           Changed index and read of patmchgf to include effective         *
+. *           date. Fixed validation of item code/misc code. It was           *
+. *           not going to misc code validation when item code did not        *
+. *           exist (MPR03010) and was not display misc description.          *
+. *****************************************************************************
+.==============================================================================
+.FILE DESCRIPTION INCLUDES
+.-------------------------
+.
+          INC       STD001FD
+          INC       PATFMSFD/INC    * Interface File
+.
+          INC       PATWR1FD/INC
+          INC       PATCONFD/INC
+          INC       PATCODFD/INC
+          INC       PATMCHFD/INC
+          INC       PATITMFD/INC 
+.
+.==============================================================================
+.LOCAL VARIABLE DEFINITION
+.-------------------------
+.
+ACCOUNT   DIM       12
+LEDGER    DIM       2
+.
+LOCCITEM  FORM      2
+FILEOPEN  DIM       30
+XLCNT     FORM      2
+FMSAMA    INIT      "fmsamaaf"
+FMSDIS    INIT      "fmsdisaf"
+FMSLMA    INIT      "fmslmaaf"
+FMSRES    INIT      "fmsresaf"
+FMSPAT    INIT      "fmspataf"
+UNDLN70   INIT      "___________________________________":
+                    "___________________________________"
+SECTION   FORM      1
+SUBSECT   FORM      1
+SAVSECT   FORM      1
+ACCEPT    FORM      1                  * accept mode (1=on)
+GSTJRNL   FORM      1
+IBASDESC  DIM       30
+IBCNUBAS  FORM      1
+IBCNUGST  FORM      1
+WARD      DIM       3
+CODE      DIM       2
+CLAIM     DIM       3
+CURRDATE  DIM       8
+ATYPE     DIM       3
+KEY21A    DIM       21
+KEY26A    DIM       26
+DAYCASE   INIT      "Daycase   "
+CODEA     INIT      "A "
+CODEJ     INIT      "J "
+CODECL    INIT      "CL"
+CODEFI    INIT      "FI"
+PTFMKEY   DIM       14
+PATTYPE   DIM       10
+SP14      INIT      "              "
+.
+PRGID     INIT      "IBAPIN03"
+PRGNAM    INIT      "Patient General Ledger Interface Maintenance"
+VERSION   INIT      "V11.03.00"
+.
+.******************************************************************************
+.*  MAINLINE - Controlling Logic                                              *
+.******************************************************************************
+ML0000    CALL      INIT0000           * display heading and open files
+.
+          MOVE      ZERO,SECTION
+ML0200    CALL      PROC0000           * get entry
+          BRANCH    EXIT,ML9999,ML9999 * exit option
+          CALL      SCRA0000           * display screen A
+.
+.---- add/modify/delete data ----
+.
+ML1000    CALL      SELA0000           * modify screen A
+          BRANCH    EXIT,ML0200,ML2000 * Don't Save,  Delete
+.
+          CALL      POST0000           * post screen A data
+          GOTO      ML0200             * get next entry
+.
+.---- delete data ----
+.
+ML2000    CALL      DELQST             * ok to delete (y/n/c) ?
+          BRANCH    CEXIT,ML2100,ML0200,ML0200
+.
+ML2100    CALL      DELT0000           * delete screen A data
+          GOTO      ML0200             * get next entry
+.
+ML9999    CHAIN     PGM                * chain back to menu
+.
+.******************************************************************************
+.* INIT - Open Files                             Called by ML0000             *
+.******************************************************************************
+INIT0000  CALL      DISPHEAD
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          DISPLAY   *P30:24,"Opening controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          READ      CONTROLF,ZERO;*85,IBCNUGST:
+                                 *107,IBCNUBAS
+          READ      CONTROLF,TEN;*192,CACCFEE
+          READ      CONTROLF,SEVENTY9;*68,PTCNMFEE
+.
+          DISPLAY   *P38:24,*EL,"patwr1af";
+          OPEN      PATWR1A1,"patwr1af"
+          OPEN      PATWR1A3,"patwr1af"
+.
+          DISPLAY   *P38:24,"patfmsaf";
+          OPEN      PATFMSA1,"patfmsaf"
+.
+          DISPLAY   *P38:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P38:24,"patmchgf";
+          OPEN      PATMCHG1,"patmchgf"           * Misc Charges file
+.
+          DISPLAY   *P38:24,"patitemn";
+          OPEN      PATITEM1,"patitemn"           * Misc Item File
+.
+INIT9999  DISPLAY   *P1:24,*EL;
+          RETURN
++
+.******************************************************************************
+.* SCRA - Display Screen A                       Called by SELA0000, redisps  *
+.*       Requires : ACCEPT   (1=accept mode)                                  *
+.******************************************************************************
+SCRA0000  CALL      DSCR0000              * Display screen
+.
+          DISPLAY   *P28:10,*V2LON:
+                    *P28:10,*V2LON,PTFMILD:
+                    *P28:11,*V2LON,PTFMICA:
+                    *P28:12,*V2LON,PTFMIDA;
+.
+          COMPARE   THREE,SECTION               * Journal ?
+          GOTO      SCRA9999 IF EQUAL           * Yes, no to be Invoiced section
+.
+          DISPLAY   *P28:15,*V2LON,PTFMTLD:
+                    *P28:16,*V2LON,PTFMTCA:
+                    *P28:17,*V2LON,PTFMTDA
+.
+SCRA9999  RETURN
++
+.******************************************************************************
+.* DSCR0000 - Display Screen A                                                *
+.******************************************************************************
+DSCR0000  DISPLAY   *P1:09,*EF:
+                    *P5:09,*ULON,*V2LON,"Fees Invoiced       ",*HOFF:
+                    *P1:10,*V2LON," 1",*HOFF,". Ledger               : ":
+                    *P1:11,*V2LON," 2",*HOFF,". Credit Account       : ":
+                    *P1:12,*V2LON," 3",*HOFF,". Debit Account        : ";
+.
+.         Journals don't have to be Invoiced section
+.
+          COMPARE   THREE,SECTION
+          GOTO      DSCR9999 IF EQUAL
+.
+          DISPLAY   *P5:14,*ULON,*V2LON,"Fees to be Invoiced ",*HOFF:
+                    *P1:15,*V2LON," 4",*HOFF,". Ledger               : ":
+                    *P1:16,*V2LON," 5",*HOFF,". Credit Account       : ":
+                    *P1:17,*V2LON," 6",*HOFF,". Debit Account        : ";
+.
+DSCR9999  RETURN
++
+.******************************************************************************
+.* PROC - Enter On-Cost Code                  Called by ML0000             *
+.*        Returns : EXIT     (2=EXITCHAR entered, 1=nothing entered, 0=cont.) *
+.*                  FMONCODE (variable entered)                               *
+.******************************************************************************
+PROC0000  COMPARE   ZERO,SECTION
+          GOTO      PROC0050 IF NOT EQUAL
+.
+PROC0010  DISPLAY   *P1:4,*EF:
+                    *P1:4,*V2LON," 0.",*HOFF," Exit":
+                    *P1:5,*V2LON," 1.",*HOFF," Accommodation":
+                    *P1:6,*V2LON," 2.",*HOFF," Misc. Items":
+                    *P1:7,*V2LON," 3.",*HOFF," Journals"
+          KEYIN     *P1:9,"Selection : ",*V2LON,SECTION
+          MOVE      ZERO,SUBSECT
+          COMPARE   ZERO,SECTION
+          GOTO      PROC9000 IF EQUAL
+PROC0050  BRANCH    SECTION,PROC0100,PROC0100,PROC0100
+          MOVE      ZERO,SECTION
+          BEEP
+          GOTO      PROC0000
+PROC0100  
+          BRANCH    SECTION,PROC1000,PROC2000,PROC3000
+.
+. Accommodation
+.
+PROC1000  CALL      APRO0000
+          BRANCH    EXIT,PROC0010
+          GOTO      PROC9999
+.
+. Misc. Items
+.
+PROC2000  CALL      MPRO0000
+          BRANCH    EXIT,PROC0010
+          GOTO      PROC9999
+.
+. Journals
+.
+PROC3000  CALL      JPRO0000
+          BRANCH    EXIT,PROC0010
+          GOTO      PROC9999
+.
+PROC9000  MOVE      ONE,EXIT
+PROC9999  RETURN
+.------------------------
+. Accommodation 
+.------------------------
+APRO0000  COMPARE   ZERO,SUBSECT
+          GOTO      APRO0320 IF NOT EQUAL
+APRO0010  DISPLAY   *P1:4,*EF:
+                    *P1:4,*V2LON," 0.",*HOFF," Exit":
+                    *P1:5,*V2LON," 1.",*HOFF," Defaults" 
+          BRANCH    CACCFEE,APRO0100:      * Ward/Claim Code
+                            APRO0150:      * ward/claim/patient type
+                            APRO0180:      * Claim/adm.type
+                            APRO0190:      * Ward/admtype/Claim
+                            APRO0192       * Claim
+          DISPLAY   *P1:6,*V2LON," 2.",*HOFF," Admission Types"
+          GOTO      APRO0200
+.
+APRO0100  DISPLAY   *P1:6,*V2LON," 2.",*HOFF," Ward/Claim Codes"
+          GOTO      APRO0200
+.
+APRO0150  DISPLAY   *P1:6,*V2LON," 2.",*HOFF," Ward/Claim/pat.type"
+          GOTO      APRO0200
+.
+APRO0180  DISPLAY   *P1:6,*V2LON," 2.",*HOFF," Claim/Adm.Type/Extr."
+          GOTO      APRO0200
+.
+APRO0190  DISPLAY   *P1:6,*V2LON," 2.",*HOFF," Ward/Adm.Type/Claim"
+          GOTO      APRO0200
+.
+APRO0192  DISPLAY   *P1:6,*V2LON," 2.",*HOFF," Claim Codes"
+          GOTO      APRO0200
+.
+APRO0200  DISPLAY   *P1:7,*V2LON," 3.",*HOFF," Lumpsum (Casemix)":
+                    *P1:8,*V2LON," 4.",*HOFF," Daily Charge (Casemix)":
+                    *P1:9,*V2LON," 5.",*HOFF," Government Subsidy"
+.
+APRO0210  KEYIN     *P1:11,"Selection : ",*V2LON,SUBSECT
+          MOVE      SUBSECT,SAVSECT
+          COMPARE   ZERO,SUBSECT
+          GOTO      APRO9000 IF EQUAL
+          BRANCH    SUBSECT,APRO1000,APRO2000,APRO3000,APRO4000,APRO5000
+          BEEP
+          GOTO      APRO0210
+.
+APRO0310   
+          KEYIN     *P1:12,"Selection : ",*V2LON,SUBSECT
+          MOVE      SUBSECT,SAVSECT
+          COMPARE   ZERO,SUBSECT
+          GOTO      APRO9000 IF EQUAL
+APRO0320  BRANCH    SUBSECT,APRO1000,APRO2000,APRO3000,APRO4000:
+                            APRO5000
+          BEEP
+          GOTO      APRO0310
+.--------------------------------------
+. Default Accommodation
+.--------------------------------------
+APRO1000  DISPLAY   *P1:4,*EF:
+                    *P5:4,"Default Accommodation Interface Details"
+          PACK      KEY14,ONE,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          MOVE      ZERO,SUBSECT
+          GOTO      APRO8000
+.-------------------------------------------------------------------------------
+. Admission Type or Ward/Claim Code or Ward/Admission Type or Ward/Claim/Adm.Typ
+.-------------------------------------------------------------------------------
+APRO2000  DISPLAY   *P1:4,*EF
+          BRANCH    CACCFEE,APRO2500:
+                            APRO2700:
+                            APRO2800:
+                            APRO2900:
+                            APRO2982
+.
+.----------------
+. Admission Type 
+.----------------
+          DISPLAY   *P5:4,"Admission Type       : "
+          KEYIN     *P28:4,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO0010 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            MOVE      CODEA,CODE
+            CALL      DSPC0000
+            GOTO      APRO2000
+          ENDIF
+.
+          PACK      KEY5,CODEA,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,APRO2100
+          DISPLAY   *P5:4,"Admission Type       : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          PACK      KEY14,ONE,ANSA,KEY3,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      APRO8000
+.
+APRO2100  DISPLAY   *P1:24,*EL,*B,"Admission Type Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      APRO2000
+.------------------
+. Ward/Claim Code
+.------------------
+APRO2500
+          MOVE      SP70,WARD
+          MOVE      SP70,CLAIM
+          DISPLAY   *P5:4,"Ward                 : ":
+                    *P5:5,"Claim Code           : "
+          KEYIN     *P28:4,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO2530 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            CALL      DSPW0000
+            GOTO      APRO2500
+          ENDIF
+.
+          PACK      KEY6,KEY3,SP3
+          CALL      RDWARD1
+          BRANCH    OVRCD,APRO2600
+          MOVE      KEY3,WARD
+          DISPLAY   *P5:4,"Ward                 : ",*V2LON,WARD,SP1,*HOFF,WBDESC
+          GOTO      APRO2540
+.
+APRO2530  DISPLAY   *P5:4,"Ward                 : ",*V2LON,"All Wards"
+.
+APRO2540  KEYIN     *P28:5,*EL,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO2590 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            MOVE      CODECL,CODE
+            CALL      DSPC0000
+            GOTO      APRO2540
+          ENDIF
+.
+          PACK      KEY5,CODECL,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,APRO2620
+          MOVE      KEY3,CLAIM
+          DISPLAY   *P5:5,"Claim Code           : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          PACK      KEY14,ONE,ANSA,WARD,CLAIM,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      APRO8000
+.
+APRO2590  MATCH     SP70,WARD
+          GOTO      APRO0010 IF EQUAL
+          DISPLAY   *P5:5,"Claim Code           : ",*V2LON,"All Claim Codes"
+          PACK      KEY14,ONE,ANSA,WARD,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      APRO8000
+APRO2600
+          DISPLAY   *P1:24,*EL,*B,"Ward Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      APRO2500
+APRO2620
+          DISPLAY   *P1:24,*EL,*B,"Claim Code Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      APRO2540
+.------------------------------------
+. Ward/claim/patient type
+.------------------------------------
+APRO2700  MOVE      SP70,WARD
+          MOVE      SP70,CLAIM 
+          DISPLAY   *P5:4,"Ward                 : ":
+                    *P5:5,"Claim Code           : ":
+                    *P5:6,"Daycase/IP           : ";
+          KEYIN     *P28:4,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO2710 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            CALL      DSPW0000
+            GOTO      APRO2700
+          ENDIF
+.
+          PACK      KEY6,KEY3,SP3
+          CALL      RDWARD1
+          BRANCH    OVRCD,APRO2780
+          MOVE      KEY3,WARD
+          DISPLAY   *P5:4,"Ward                 : ",*V2LON,WARD,SP1,*HOFF,WBDESC
+          GOTO      APRO2720
+.
+APRO2710  DISPLAY   *P5:4,"Ward                 : ",*V2LON,"All Wards"
+.
+APRO2720  KEYIN     *P28:5,*EL,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO2770 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            MOVE      CODECL,CODE
+            CALL      DSPC0000
+            GOTO      APRO2720
+          ENDIF
+.
+          PACK      KEY5,CODECL,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,APRO2790
+          MOVE      KEY3,CLAIM
+          DISPLAY   *P5:5,"Claim Code           : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          GOTO      APRO2772
+.
+APRO2770  MATCH     SP70,WARD
+          GOTO      APRO0010 IF EQUAL
+          DISPLAY   *P5:5,"Claim Code           : ",*V2LON,"All Claim Codes    "
+.
+APRO2772  DISPLAY   *P1:24,*EL,*V2LON,"0 = IP, 1 = Daycase ";
+          MOVE      ZERO,FORM1
+          KEYIN     *P28:6,*V2LON,FORM1
+          COMPARE   ZERO,FORM1
+          GOTO      APRO2774 IF EQUAL
+          BRANCH    FORM1,APRO2774
+          BEEP
+          GOTO      APRO2772
+.
+APRO2774  MOVE      "Inpatient ",PATTYPE
+          LOAD      PATTYPE,FORM1,DAYCASE
+          DISPLAY   *P31:6,PATTYPE;
+          PACK      KEY14,ONE,ANSA,WARD,CLAIM,FORM1,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      APRO8000
+APRO2780
+          DISPLAY   *P1:24,*EL,*B,"Ward Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      APRO2700
+APRO2790
+          DISPLAY   *P1:24,*EL,*B,"Claim Code Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      APRO2720
+.
+.--------------------------
+. Claim Code/Admission Type
+.--------------------------
+APRO2800  MOVE      SP70,CLAIM
+          MOVE      SP70,ATYPE
+          DISPLAY   *P5:4,"Claim Code           : ":
+                    *P5:5,"Admission Type       : ";
+.
+APRO2820  KEYIN     *P28:4,*EL,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO2830 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            MOVE      CODECL,CODE
+            CALL      DSPC0000
+            GOTO      APRO2820
+          ENDIF
+.
+          PACK      KEY5,CODECL,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,APRO2850
+          MOVE      KEY3,CLAIM
+          DISPLAY   *P5:4,"Claim Code           : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          GOTO      APRO2860
+.
+APRO2830  DISPLAY   *P5:4,"Claim Code           : ",*V2LON,"All Claim Codes"
+          GOTO      APRO2860
+.
+APRO2850  DISPLAY   *P1:24,*EL,*B,"Claim Code Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      APRO2820
+.
+APRO2855  DISPLAY   *P1:24,*EL,*B,"Admission Type Does Not Exist - ";
+          CALL      HITENTER
+.
+APRO2860  KEYIN     *P28:5,*EL,*V2LON,KEY3           * Admission type
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO2870 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            MOVE      CODEA,CODE
+            CALL      DSPC0000
+            GOTO      APRO2860
+          ENDIF
+.
+          PACK      KEY5,CODEA,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,APRO2855
+          MOVE      KEY3,ATYPE
+          DISPLAY   *P5:5,"Admission Type       : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          GOTO      APRO2880
+.
+APRO2870  MATCH     SP70,CLAIM
+          GOTO      APRO0010 IF EQUAL
+          DISPLAY   *P5:5,"Admission Type       : ",*V2LON,"All Admission Type"
+.
+APRO2880  PACK      KEY14,ONE,ANSA,CLAIM,ATYPE,ZERO,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      APRO8000
+.
+.--------------------------
+. Ward/Admission type/Claim
+.--------------------------
+APRO2900  MOVE      SP70,WARD
+          MOVE      SP70,CLAIM
+          MOVE      SP70,ATYPE
+          DISPLAY   *P5:4,"Ward                 : ":
+                    *P5:5,"Admission Type       : ":
+                    *P5:6,"Claim Code           : ";
+.
+          KEYIN     *P28:4,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO2910 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            CALL      DSPW0000
+            GOTO      APRO2900
+          ENDIF
+.
+          PACK      KEY6,KEY3,SP3
+          CALL      RDWARD1
+          BRANCH    OVRCD,APRO2940
+          MOVE      KEY3,WARD
+          DISPLAY   *P5:4,"Ward                 : ",*V2LON,WARD,SP1,*HOFF,WBDESC
+          GOTO      APRO2920
+.
+APRO2910  DISPLAY   *P5:4,"Ward                 : ",*V2LON,"All Wards"
+.
+APRO2920  KEYIN     *P28:5,*EL,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO2930 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            MOVE      CODEA,CODE
+            CALL      DSPC0000
+            GOTO      APRO2920
+          ENDIF
+.
+          PACK      KEY5,CODEA,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,APRO2950
+          MOVE      KEY3,ATYPE
+          DISPLAY   *P5:5,"Admission Type       : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          GOTO      APRO2960
+.
+APRO2930  DISPLAY   *P5:5,"Admission Type       : ",*V2LON,"All Admission type "
+          GOTO      APRO2960
+.
+APRO2940  DISPLAY   *P1:24,*EL,*B,"Ward Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      APRO2900
+.
+APRO2950  DISPLAY   *P1:24,*EL,*B,"Admission Type Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      APRO2920
+.
+APRO2955  DISPLAY   *P1:24,*EL,*B,"Claim Code Does Not Exist - ";
+          CALL      HITENTER
+.
+APRO2960  KEYIN     *P28:6,*EL,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO2970 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            MOVE      CODECL,CODE
+            CALL      DSPC0000
+            GOTO      APRO2960
+          ENDIF
+.
+          PACK      KEY5,CODECL,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,APRO2955
+          MOVE      KEY3,CLAIM
+          DISPLAY   *P5:6,"Claim Code           : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          GOTO      APRO2980
+.
+APRO2970  MATCH     SP70,WARD
+          GOTO      APRO2975 IF NOT EQUAL
+          MATCH     SP70,ATYPE
+          GOTO      APRO0010 IF EQUAL
+APRO2975  DISPLAY   *P5:6,"Claim Code           : ",*V2LON,"All Claim Codes    "
+.
+APRO2980  PACK      KEY14,ONE,ANSA,WARD,ATYPE,CLAIM,SP70
+          MOVE      KEY14,PTFMKEY
+          GOTO      APRO8000
+.
+.----------------
+. Claim Type 
+.----------------
+APRO2982  DISPLAY   *P5:4,"Claim Type           : "
+          KEYIN     *P28:4,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO0010 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            MOVE      CODECL,CODE
+            CALL      DSPC0000
+            GOTO      APRO2000
+          ENDIF
+.
+          PACK      KEY5,CODECL,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,APRO2100
+          DISPLAY   *P5:4,"Claim Type           : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          PACK      KEY14,ONE,ANSA,KEY3,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      APRO8000
+.
+.--------------------------------------
+. Lumpsum casemix 
+.--------------------------------------
+APRO3000  MOVE      SP1,DIM1
+          MOVE      SP70,ATYPE
+          MOVE      "4",EVERT
+          DISPLAY   *P1:4,*EF:
+                    *P5:4,"Episode Type         : ":
+                    *P5:5,"Admission Type       : "
+.
+          CALL      KEPS0000
+          BRANCH    EXIT,APRO9000,APRO0010
+.
+          MOVE      "28",ECOL
+          MOVE      "5",EVERT
+          MOVE      ZERO,CKYIMAND
+          MOVE      "A ",CODE
+          MOVE      SP3,CKYIDEF3
+          CALL      PATCODKY
+          BRANCH    EXIT,APRO3900,APRO9999
+          MOVE      ACODE,ATYPE
+          DISPLAY   *P5:5,"Admission Type       : ",*V2LON,ATYPE,SP1,*HOFF,TDESC
+.
+APRO3900  DISPLAY   *P1:23,*EL;
+          PACK      KEY14,ONE,ANSC,DIM1,ATYPE,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      APRO8000
+.
+.--------------------------------------
+. Daily charge for casemix
+.--------------------------------------
+APRO4000  MOVE      SP70,WARD
+          DISPLAY   *P1:4,*EF:
+                    *P5:4,"Ward                 : "
+          KEYIN     *P28:4,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      APRO0010 IF EQUAL
+.
+          CMATCH    QUEST,KEY3
+          GOTO      APRO4100 IF NOT EQUAL
+          CALL      DSPW0000
+          KEYIN     *P1:24,*EL,"End of ward scan. Hit enter to continue ",ANS;
+          DISPLAY   *P1:4,*EF;
+          GOTO      APRO4000
+.
+APRO4100  PACK      KEY6,KEY3,SP3
+          CALL      RDWARD1
+          BRANCH    OVRCD,APRO4300
+          MOVE      KEY3,WARD
+          DISPLAY   *P5:4,"Ward                 : ",*V2LON,WARD,SP1,*HOFF,WBDESC
+.
+APRO4200  PACK      KEY14,ONE,ANSD,WARD,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      APRO8000
+.
+APRO4300  DISPLAY   *P1:24,*EL,*B,*V2LON,"Invalid Ward. ";
+          CALL      HITENTER
+          GOTO      APRO4000
+.
+.--------------------------------------
+. Goverment Subsidy   
+.--------------------------------------
+APRO5000  DISPLAY   *P1:4,*EF:
+                    *P5:4,"Government Subsidy Interface Details"
+          PACK      KEY14,ONE,ANSG,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          MOVE      ZERO,SUBSECT
+          GOTO      APRO8000
+.
+APRO8000  
+          MOVE      SP70,PTFMIDI
+          MOVE      SP70,PTFMIRE
+          MOVE      SP70,PTFMILD
+          MOVE      SP70,PTFMICA
+          MOVE      SP70,PTFMIDA
+          MOVE      SP70,PTFMIGS
+          MOVE      SP70,PTFMTDI
+          MOVE      SP70,PTFMTRE
+          MOVE      SP70,PTFMTLD
+          MOVE      SP70,PTFMTCA
+          MOVE      SP70,PTFMTDA
+          MOVE      SP70,PTFMSPA
+          CALL      RDPTFM1
+          BRANCH    OVRCD,APRO8100
+          MOVE      ZERO,ACCEPT
+          GOTO      APRO9500
+APRO8100 
+          MOVE      ONE,ACCEPT
+          GOTO      APRO9500
+.
+APRO9000  MOVE      ONE,EXIT
+          GOTO      APRO9999
+.
+APRO9500  MOVE      ZERO,EXIT
+.
+APRO9999  RETURN
+.------------------------
+. Journals
+.------------------------
+JPRO0000  MOVE      ZERO,GSTJRNL         * Initialise GST journal flag
+          COMPARE   ZERO,SUBSECT
+          GOTO      JPRO0200 IF NOT EQUAL
+JPRO0010  DISPLAY   *P1:4,*EF:
+                    *P1:4,*V2LON," 0.",*HOFF," Exit":
+                    *P1:5,*V2LON," 1.",*HOFF," Defaults":
+                    *P1:6,*V2LON," 2.",*HOFF," Journal Codes"
+.
+JPRO0100  KEYIN     *P1:8,"Selection : ",*V2LON,SUBSECT
+.
+          MOVE      SUBSECT,SAVSECT
+          COMPARE   ZERO,SUBSECT
+          GOTO      JPRO9000 IF EQUAL
+JPRO0200  BRANCH    SUBSECT,JPRO1000,JPRO2000
+          BEEP
+          GOTO      JPRO0100
+.--------------------------------------
+. Default Journals
+.--------------------------------------
+JPRO1000  DISPLAY   *P1:4,*EF:
+                    *P5:4,"Default Journal Interface Details"
+          PACK      KEY14,FIVE,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          MOVE      ZERO,SUBSECT
+          GOTO      JPRO8000
+.--------------------------------------
+. Journal Codes
+.--------------------------------------
+JPRO2000  DISPLAY   *P1:4,*EF:
+                    *P5:4,"Journal Code         : ";
+          COMPARE   THREE,CACCFEE
+          GOTO      JPRO2010 IF NOT EQUAL
+.
+          DISPLAY   *P5:5,"Claim Code           : "
+.
+JPRO2010  KEYIN     *P28:4,*V2LON,KEY2
+          ENDSET    KEY2
+          APPEND    SP70,KEY2
+          RESET     KEY2
+          MATCH     SP70,KEY2
+          GOTO      JPRO0010 IF EQUAL
+.
+          PACK      KEY5,CODEJ,KEY2,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,JPRO2100
+          DISPLAY   *P5:4,"Journal Code         : ",*V2LON,KEY2,SP1,*HOFF,TDESC
+.
+          CMATCH    ANSG,THCSCOD
+          IF        @EQUAL
+            MOVE      ONE,GSTJRNL           * GST Journal
+          ENDIF
+          COMPARE   THREE,CACCFEE
+          GOTO      JPRO2120 IF EQUAL
+          PACK      KEY14,FIVE,KEY2,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      JPRO8000
+.
+JPRO2100  DISPLAY   *P1:24,*EL,*B,"Journal Code Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      JPRO2000
+.
+JPRO2110  DISPLAY   *P1:24,*EL,*B,"Claim Code Does Not Exist - ";
+          CALL      HITENTER
+.
+JPRO2120  KEYIN     *P28:5,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      JPRO2130 IF EQUAL
+.
+          PACK      KEY5,CODECL,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,JPRO2110
+          DISPLAY   *P5:5,"Claim Code           : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          MOVE      KEY3,CLAIM
+          PACK      KEY14,FIVE,KEY2,SP3,CLAIM,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      JPRO8000
+.
+JPRO2130  DISPLAY   *P5:5,"Claim Code           : ",*V2LON,"All Claim Code":
+                    *HOFF
+.
+JPRO8000
+          MOVE      SP70,PTFMIDI
+          MOVE      SP70,PTFMIRE
+          MOVE      SP70,PTFMILD
+          MOVE      SP70,PTFMICA
+          MOVE      SP70,PTFMIDA
+          MOVE      SP70,PTFMIGS
+          MOVE      SP70,PTFMTDI
+          MOVE      SP70,PTFMTRE
+          MOVE      SP70,PTFMTLD
+          MOVE      SP70,PTFMTCA
+          MOVE      SP70,PTFMTDA
+          MOVE      SP70,PTFMSPA
+          CALL      RDPTFM1
+          BRANCH    OVRCD,JPRO8100
+          MOVE      ZERO,ACCEPT
+          GOTO      JPRO9500
+JPRO8100 
+          MOVE      ONE,ACCEPT
+          GOTO      JPRO9500
+.
+JPRO9000  MOVE      ONE,EXIT
+          GOTO      JPRO9999
+.
+JPRO9500  MOVE      ZERO,EXIT
+.
+JPRO9999  RETURN
+.------------------------
+. Misc. Charges
+.------------------------
+MPRO0000  COMPARE   ZERO,SUBSECT
+          GOTO      MPRO0200 IF NOT EQUAL
+MPRO0010  DISPLAY   *P1:4,*EF:
+                    *P1:4,*V2LON," 0.",*HOFF," Exit":
+                    *P1:5,*V2LON," 1.",*HOFF," Defaults":
+                    *P1:6,*V2LON," 2.",*HOFF," Group Codes";
+          IF        PTCNMFEE = 0
+            DISPLAY   *P1:7,*V2LON," 3.",*HOFF," Item Codes"
+          ELSE
+            DISPLAY   *P1:7,*V2LON," 3.",*HOFF," Claim Codes"
+          ENDIF
+.
+          DISPLAY   *P1:8,*V2LON," 4.",*HOFF," Group Codes (Casemix)"
+.
+          IF        PTCNMFEE = 0
+            DISPLAY   *P1:9,*V2LON," 5.",*HOFF," Item Codes (Casemix)"
+          ELSE
+            DISPLAY   *P1:9,*V2LON," 5.",*HOFF," Claim Codes (Casemix)"
+          ENDIF
+.
+MPRO0100  KEYIN     *P1:11,"Selection : ",*V2LON,SUBSECT
+          MOVE      SUBSECT,SAVSECT
+.
+          COMPARE   ZERO,SUBSECT
+          GOTO      MPRO9000 IF EQUAL
+MPRO0200  BRANCH    SUBSECT,MPRO1000,MPRO2000,MPRO3000,MPRO2000,MPRO3000
+          BEEP
+          GOTO      MPRO0100
+.--------------------------------------
+. Default Misc Charges
+.--------------------------------------
+MPRO1000  DISPLAY   *P1:4,*EF:
+                    *P5:4,"Default Misc. Items Interface Details"
+          PACK      KEY14,THREE,SP70
+          MOVE      KEY14,PTFMKEY   * Save Key
+          MOVE      ZERO,SUBSECT
+          GOTO      MPRO8000
+.--------------------------------------
+. Group Codes
+.--------------------------------------
+MPRO2000  DISPLAY   *P1:4,*EF;
+          COMPARE   FOUR,SUBSECT
+          GOTO      MPRO2500 IF NOT EQUAL
+.
+          MOVE      "4",EVERT
+          DISPLAY   *P5:4,"Episode Type         : ":
+                    *P5:5,"Group Code           : "
+          CALL      KEPS0000
+          BRANCH    EXIT,MPRO9000,MPRO0010
+.
+MPRO2500  DISPLAY   *P5:5,"Group Code (Catg FI) : "
+          KEYIN     *P28:5,*V2LON,KEY3
+          ENDSET    KEY3
+          APPEND    SP70,KEY3
+          RESET     KEY3
+          MATCH     SP70,KEY3
+          GOTO      MPRO0010 IF EQUAL
+          CMATCH    QUEST,KEY3
+          IF        @EQUAL
+            MOVE      CODEFI,CODE
+            CALL      DSPC0000
+            GOTO      MPRO2500
+          ENDIF
+.
+          PACK      KEY5,CODEFI,KEY3,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,MPRO2100
+          DISPLAY   *P5:5,"Group Code (Catg FI) : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+.
+          IF        SUBSECT = 4
+            IF        PTCNMFEE = 1
+              PACK      KEY14,THREE,ANST,DIM1,SP3,KEY3,SP70
+            ELSE
+              PACK      KEY14,THREE,ANST,DIM1,KEY3,SP70
+            ENDIF
+          ELSE
+            IF        PTCNMFEE = 1
+              PACK      KEY14,THREE,ANSM,SP3,KEY3,SP70
+            ELSE
+              PACK      KEY14,THREE,ANSM,KEY3,SP70
+            ENDIF
+          ENDIF
+.
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      MPRO8000
+.
+MPRO2100  DISPLAY   *P1:24,*EL,*B,"Group Code Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      MPRO2000
+.--------------------------------------
+. Item Codes
+.--------------------------------------
+MPRO3000  DISPLAY   *P1:4,*EF;
+          COMPARE   FIVE,SUBSECT
+          GOTO      MPRO3010 IF NOT EQUAL
+.
+          MOVE      "4",EVERT
+          DISPLAY   *P5:4,"Episode Type         : ";
+.
+          IF        PTCNMFEE = 1
+            DISPLAY   *P5:5,"Claim Code           : "
+          ELSE
+            DISPLAY   *P5:5,"Item Code            : "
+          ENDIF
+.
+          CALL      KEPS0000
+          BRANCH    EXIT,MPRO9000,MPRO0010
+.
+MPRO3010  BRANCH    PTCNMFEE,MPRO3400       * Claim code
+.
+          DISPLAY   *P5:5,"Item Code            : "
+          KEYIN     *P28:5,*V2LON,KEY9
+          ENDSET    KEY9
+          APPEND    SP70,KEY9
+          RESET     KEY9
+.
+          IF        SUBSECT = 5
+            MATCH     SP70,KEY9
+            GOTO      MPRO3050 IF EQUAL     * allow to have blank item
+          ELSE
+            MATCH     SP70,KEY9
+            GOTO      MPRO0010 IF EQUAL
+          ENDIF
+.
+          PACK      KEY17,KEY9,CURRDATE,SP70
+          CALL      PATITMRD
+          BRANCH    OVRCD,MPRO3100
+.
+MPRO3050  DISPLAY   *P5:5,"Item Code            : ",*V2LON,KEY9,SP1,*HOFF,IDESC
+.
+          IF        SUBSECT = 5
+            PACK      KEY14,THREE,ANST,DIM1,SP3,KEY9,SP70
+          ELSE
+            PACK      KEY14,THREE,ANSM,SP3,KEY9,SP70
+          ENDIF
+.
+          MOVE      KEY14,PTFMKEY   * Save Key
+          GOTO      MPRO8000
+.
+MPRO3100  MOVE      "0  ",KEY3
+          PACK      KEY29,KEY3,SP6,SP3,KEY9,CURRDATE,SP10
+          CALL      PATMCHRD                * read Misc.Charges file 
+          COMPARE   ZERO,EXIT
+          GOTO      MPRO3150 IF NOT EQUAL
+.
+MPRO3140  MOVE      MDESC,IDESC
+          GOTO      MPRO3050
+.
+MPRO3150  DISPLAY   *P1:24,*EL,*B,"Item Code Does Not Exist - ";
+          CALL      HITENTER
+          GOTO      MPRO3000
+.
+MPRO3400  DISPLAY   *P1:5,*EF:
+                    *P5:5,"Claim Code           : "
+          MOVE      "28",ECOL
+          MOVE      "5",EVERT
+          MOVE      ZERO,CKYIMAND
+          MOVE      CODECL,CODE
+          MOVE      SP3,CKYIDEF3
+          CALL      PATCODKY
+          BRANCH    EXIT,MPRO0010,MPRO9000
+          GOTO      MPRO3600
+.
+MPRO3500  COMPARE   FIVE,SUBSECT
+          GOTO      MPRO0010 NOT EQUAL
+.
+MPRO3600  MOVE      ACODE,KEY3
+          MOVE      KEY3,CLAIM
+          DISPLAY   *P5:5,"Claim Code           : ",*V2LON,KEY3,SP1,*HOFF,TDESC
+          IF        SUBSECT = 5
+            PACK      KEY14,THREE,ANST,DIM1,CLAIM,SP70
+          ELSE
+            PACK      KEY14,THREE,ANSM,CLAIM,SP70
+          ENDIF
+          MOVE      KEY14,PTFMKEY   * Save Key
+.
+MPRO8000  MOVE      SP70,PTFMIDI
+          MOVE      SP70,PTFMIRE
+          MOVE      SP70,PTFMILD
+          MOVE      SP70,PTFMICA
+          MOVE      SP70,PTFMIDA
+          MOVE      SP70,PTFMIGS
+          MOVE      SP70,PTFMTDI
+          MOVE      SP70,PTFMTRE
+          MOVE      SP70,PTFMTLD
+          MOVE      SP70,PTFMTCA
+          MOVE      SP70,PTFMTDA
+          MOVE      SP70,PTFMSPA
+          CALL      RDPTFM1
+          BRANCH    OVRCD,MPRO8100
+          MOVE      ZERO,ACCEPT
+          GOTO      MPRO9500
+MPRO8100 
+          MOVE      ONE,ACCEPT
+          GOTO      MPRO9500
+.
+MPRO9000  MOVE      ONE,EXIT
+          GOTO      MPRO9999
+.
+MPRO9500  MOVE      ZERO,EXIT
+.
+MPRO9999  RETURN
+.******************************************************************************
+.* SELA - Modify screen A data                   Called by ML0000             *
+.*        Returns : EXIT     (2=EXITCHAR entered, 1=nothing entered, 0=cont.) *
+.*                  FMONDISS (variable entered)                               *
+.******************************************************************************
+SELA0000  MOVE      ZERO,LOCCITEM 
+.  
+.---- determine option to execute ----
+.
+SELA0100  ADD       ONE,LOCCITEM                   * get next option
+          BRANCH    ACCEPT,SELA0500              * in accept mode ?
+          CALL      MAINDEL                      * select/post/cancel ?
+.
+          COMPARE   ZERO,LOCCITEM
+          GOTO      SELA9000 IF EQUAL            * post ?
+.
+          COMPARE   SEQ,LOCCITEM
+          GOTO      SELA9500 IF EQUAL            * cancel ?
+.
+          COMPARE   "-2",LOCCITEM
+          GOTO      SELA9600 IF EQUAL            * Delete    
+.
+SELA0500  MOVE      "28",CCOL                    * set up screen address
+          MOVE      " 9",CVERT
+.
+          ADD       LOCCITEM,CVERT
+.
+          BRANCH    LOCCITEM,SELA1100,SELA1200,SELA1300
+          ADD       TWO,CVERT
+.
+          COMPARE   THREE,SECTION
+          GOTO      SELA0600 IF EQUAL       * Journal has no to be invoiced
+.
+          BRANCH    LOCCITEM,SELA1100,SELA1200,SELA1300,SELA1400,SELA1500:
+                           SELA1600
+.
+SELA0600  BRANCH    ACCEPT,SELA0900              * finished accept mode ?
+          BEEP                                   * illegal option
+.
+SELA0900  MOVE      ZERO,ACCEPT                  * clear accept mode
+          GOTO      SELA0100                     * get next option
+.
+.---- option 1 - Ledger ----
+.
+SELA1100  CALL      KLDG0000
+          BRANCH    EXIT,SELA9500
+          MOVE      LEDGER,PTFMILD
+          DISPLAY   *PCCOL:CVERT,*V2LON,PTFMILD,*HOFF
+          GOTO      SELA0100
+.
+.---- option 2 - Credit account ----
+.
+SELA1200  CALL      KACC0000             * keyin income account 
+          BRANCH    EXIT,SELA9500
+          MOVE      ACCOUNT,PTFMICA
+          DISPLAY   *PCCOL:CVERT,*V2LON,PTFMICA,*HOFF
+          GOTO      SELA0100
+.
+.---- option 3 - Debit account ----
+.
+SELA1300  CALL      KACC0000             * keyin income account 
+          BRANCH    EXIT,SELA9500
+          MOVE      ACCOUNT,PTFMIDA
+          DISPLAY   *PCCOL:CVERT,*V2LON,PTFMIDA,*HOFF
+          GOTO      SELA0100
+.
+.---- option 4 - Ledger ----
+.
+SELA1400  CALL      KLDG0000
+          BRANCH    EXIT,SELA9500
+          MOVE      LEDGER,PTFMTLD
+          DISPLAY   *PCCOL:CVERT,*V2LON,PTFMTLD,*HOFF
+          GOTO      SELA0100
+.
+.---- option 5 ----
+.
+SELA1500  CALL      KACC0000             * keyin income account 
+          BRANCH    EXIT,SELA9500
+          MOVE      ACCOUNT,PTFMTCA
+          DISPLAY   *PCCOL:CVERT,*V2LON,PTFMTCA,*HOFF
+          GOTO      SELA0100
+.
+.---- option 6 ----
+.
+SELA1600  CALL      KACC0000
+          BRANCH    EXIT,SELA9500
+          MOVE      ACCOUNT,PTFMTDA
+          DISPLAY   *PCCOL:CVERT,*V2LON,PTFMTDA,*HOFF
+          GOTO      SELA0100
+.
+.---- exit points ----
+.
+SELA9000  MOVE      ZERO,EXIT                    * post
+          GOTO      SELA9999
+.
+SELA9500  MOVE      ONE,EXIT                     * cancel
+          GOTO      SELA9999
+.
+SELA9600  MOVE      TWO,EXIT                     * delete
+          GOTO      SELA9999
+.
+SELA9999  RETURN
+.******************************************************************************
+.* POST - Post data                              Called by ML0000             *
+.******************************************************************************
+POST0000  MOVE      PTFMKEY,KEY14
+          UNPACK    PTFMKEY,PTFMSUB,PTFMCOD
+          CALL      RAPTFM1                 * record exists ?
+          BRANCH    OVRCD,POST1000
+          CALL      DEPTFM1                 * delete old record (if possible)
+.
+POST1000  CALL      WRPTFM1                 * write new record
+.
+POST9999  RETURN
+.******************************************************************************
+.* DELT - Delete data                            Called by ML0000             *
+.******************************************************************************
+DELT0000  MOVE      PTFMKEY,KEY14
+          CALL      DEPTFM1                 * delete old record (if possible)
+.
+DELT9999  RETURN
++
+.******************************************************************************
+.* KEPS0000 - Keyin episode type                                              *
+.******************************************************************************
+KEPS0000  DISPLAY   *P1:23,*EF,"0=MSO, ":
+                           "1=Daycase";
+.
+KEPS3100  MOVE      SP1,DIM1
+          KEYIN     *P28:EVERT,*EL,*V2LON,DIM1;
+          RESET     DIM1
+          CMATCH    EXITCHAR,DIM1
+          GOTO      KEPS9000 IF EQUAL
+          MATCH     SP1,DIM1
+          GOTO      KEPS9200 IF EQUAL
+.
+          TYPE      DIM1
+          GOTO      KEPS3100 IF NOT EQUAL
+.
+          MOVE      DIM1,FORM1
+          COMPARE   ZERO,FORM1
+          GOTO      KEPS3300 IF EQUAL
+          BRANCH    FORM1,KEPS3200
+.
+KEPS3120  DISPLAY   *P1:24,*B,*EL,*V2LON:
+                    "Only Episode Type 0 & 1  ";
+          CALL      HITENTER
+          GOTO      KEPS3100
+.
+KEPS3200  DISPLAY   *P32:EVERT,*EL,*V2LON,"Same Day";
+          GOTO      KEPS8000
+.
+KEPS3300  DISPLAY   *P32:EVERT,*EL,*V2LON,"MSO";
+.
+KEPS8000  MOVE      ZERO,EXIT
+          GOTO      KEPS9999
+.
+KEPS9000  MOVE      ONE,EXIT
+          GOTO      KEPS9999
+.
+KEPS92000 MOVE      TWO,EXIT
+KEPS9999  RETURN
+.
+MAINDEL   MOVE      ZERO,LOCCITEM
+          MOVE      SP10,CCITEMD
+          KEYIN     *P1:24,*EL,"Select Item, (",*V2LON,"P",*HOFF,")ost, (":
+                    *V2LON,"C",*HOFF,")ancel, (":
+                    *V2LON,"D",*HOFF,")elete ? ",*V2LON,*JR,CCITEMD;
+.
+          RESET     CCITEMD
+          GOTO      MAINDEL IF EOS
+.
+          REP       UPPLOW,CCITEMD
+.
+          MATCH     "  C",CCITEMD
+          GOTO      MAINDEL1 IF EQUAL
+.
+          MATCH     "  P",CCITEMD
+          GOTO      MAINDEL2 IF EQUAL
+.
+          MATCH     "  D",CCITEMD
+          GOTO      MAINDEL3 IF EQUAL
+.
+          TYPE      CCITEMD
+          GOTO      MAINDELE IF NOT EQUAL
+.
+          MOVE      CCITEMD,LOCCITEM
+          COMPARE   ONE,LOCCITEM
+          GOTO      MAINDELE IF LESS
+.
+          RETURN
+.
+MAINDELE  BEEP
+          GOTO      MAINDEL
+.
+MAINDEL1  MOVE      "-1",LOCCITEM
+          RETURN
+.
+MAINDEL2  MOVE      "0",LOCCITEM
+          RETURN
++
+MAINDEL3  MOVE      "-2",LOCCITEM
+          RETURN
++
+.******************************************************************************
+.* Display existing codes                                                     *
+.******************************************************************************
+DSPC0000    MOVE      "0",HLEF
+            CALL      GETSCR00
+            MOVE      ZERO,CNEWDS
+            CALL      PATCODDS
+            CALL      PUTSCR00
+DSPC9999    RETURN
++
+.******************************************************************************
+.* Display existing Wards                                                     *
+.******************************************************************************
+DSPW0000    MOVE      "0",HLEF
+            CALL      GETSCR00
+            CALL      PATWRDDS
+            CALL      PUTSCR00
+DSPW9999    RETURN
++
+.-------------------------------------------------------------------------------
+. Keyin free format ledger
+.-------------------------------------------------------------------------------
+KLDG0000  MOVE      UNDLN70,LEDGER
+          KEYIN     *PCCOL:CVERT,*DV,LEDGER:                                  
+                    *PCCOL:CVERT,*V2LON,*JR,*ZF,LEDGER:                       
+                    *PCCOL:CVERT,*DV,LEDGER
+.
+          ENDSET    LEDGER
+          APPEND    SP70,LEDGER
+          RESET     LEDGER
+.
+          MATCH     SP70,LEDGER
+          GOTO      KLDG9200 IF EQUAL
+.
+          CMATCH    EXITCHAR,LEDGER
+          GOTO      KLDG9300 IF EQUAL
+.
+          DISPLAY   *PCCOL:CVERT,*V2LON,LEDGER                                
+          MOVE      ZERO,EXIT
+          GOTO      KLDG9999
+.
+KLDG9200  DISPLAY   *PCCOL:CVERT,"Ledger must not be blank. ";
+          CALL      HITENTER
+          DISPLAY   *PCCOL:CVERT,*EL;
+          GOTO      KLDG0000
+.
+KLDG9300  MOVE      ONE,EXIT
+          GOTO      KLDG9999
+.
+KLDG9999  RETURN
++
+.-------------------------------------------------------------------------------
+. Keyin free format account code
+.-------------------------------------------------------------------------------
+KACC0000  DISPLAY   *PCCOL:CVERT,*EL;
+.
+          MOVE      ZERO,EXIT
+          MOVE      UNDLN70,ACCOUNT
+          KEYIN     *PCCOL:CVERT,*DV,ACCOUNT:                                  
+                    *PCCOL:CVERT,*V2LON,ACCOUNT:                               
+                    *PCCOL:CVERT,*DV,ACCOUNT
+.
+          ENDSET    ACCOUNT
+          APPEND    SP70,ACCOUNT
+          RESET     ACCOUNT
+.
+          MATCH     SP70,ACCOUNT
+          GOTO      KACC9999 IF EQUAL
+.
+          CMATCH    EXITCHAR,ACCOUNT
+          GOTO      KACC9999 IF NOT EQUAL
+          GOTO      KACC9000
+.
+KACC8000  DISPLAY   *PCCOL:CVERT,*EL,*V2LON,"Account number is mandatory ";
+          CALL      HITENTER
+          DISPLAY   *PCCOL:CVERT,*EL;
+          GOTO      KACC0000
+.
+KACC9000  MOVE      ONE,EXIT
+KACC9999  RETURN
++
+.******************************************************************************
+.* INCLUDES FOR I/O'S                                                         *
+.******************************************************************************
+          INC       STD001IO
+          INC       PATWRDDS
+          INC       PATCODKY
+          INC       PATMCHRD                * Miscellaneous Charges read routine
+          INC       PATITMRD
+.
+          INC       PATFMSIO/INC    * Interface File
+.
+          INC       PATCODIO/INC
+          INC       PATMCHIO/INC
+          INC       PATWR1IO/INC
+.
+          INC       PATITMIO/INC    * Declared in program because of conflict
+.                                   * with Standard FMS ITEMNO
+.   

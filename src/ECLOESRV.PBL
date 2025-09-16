@@ -1,0 +1,2656 @@
+.*****************************************************************************
+.* System    :   Patient Management                                          *
+.* Program   :   ECLOESRV                                                    *
+.* Desc      :   Eclipse Online Eligibility Server                           *
+.*****************************************************************************
+.* Date      :   31/03/2009                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through the online eligibility       *
+.*               holding table (pmsoecaf) looking for requests that are      *
+.*               waiting to be sent.  Waiting requests are batched together  *
+.*               and sent to the Server Adaptor.                             *
+.* Mods      :                                                               *
+.*        V11.00.01 25/03/2020 Peter Vela     TSK 0888874                    *
+.*                  Validate for Presenting Illness MBS No befroe Presenting *
+.*                  Illness Code WOEH0000  FOEH0000                          *
+.*        V10.14.04 20/06/2019 Peter Vela     TSK 0872026                    *
+.*                  Added rjustify for PMEFPLOS                              *
+.*        V10.14.03 20/06/2019 Peter Vela     TSK 0872026                    *
+.*                  Added extract functionality for Emergency Admission Ind  * 
+.*        V10.14.02 17/06/2019 Peter Vela     TSK 0872026                    *
+.*                  Get OEC information from PATMI1 then check if PATELF     *
+.*                  record is available PROC0000                             *
+.*        V10.14.01 22/02/2019 Peter Vela     TSK 0863050                    *
+.*                  Added pmselfaf validation in PROC0000                    *
+.*        V10.10.01 22/03/2017 Richa Phogat   TSK 0832066                    *
+.*                  Changed DVA Card Number to be collected from             *
+.*                  PMCDCNUM.PMSCCDFD instead of PREPAT.PMIMA1FD             *
+.*        V10.07.02 08/02/2016 Peter Vela        CAR 294157                  *
+.*                  Aded new service types in GEEQ0000 and FEEQ0000          *
+.*        V10.07.01 20/11/2015 Peter Vela        CAR 323984                  *
+.*                  Read pmselfaf in WOEH0000 for Presenting Illness code    *
+.*                  and item number                                          *
+.*        V10.03.04 21/11/2013 Peter Vela        CAR 290484                  *
+.*                  Fixed OEHSEG13 in FOEH1000                               *
+.*        V10.03.03 12/09/2013 Peter Vela        CAR 291458                  *
+.*                  Removed calls to HITENTER                                *
+.*        V10.03.02 29/05/2012 Peter Vela        CAR 265532                  *
+.*                  Fixed Free Format Discharge Intention                    *
+.*        V10.03.01 21/05/2012 Peter Vela        CAR 265532                  *
+.*                  Added PMEFBDAT to FOEV0000                               *
+.*        V10.02.01 04/04/2011 Peter Vela        CAR 232054                  *
+.*                  Added Free Format OEC Medical Booking                    *
+.*        V10.01.03 23/03/2011 Peter Vela        CAR 239463                  *
+.*                  Added Free Format OEC                                    *
+.*        V10.01.02 06/01/2011 Jill Parkinson    CAR 233088                  *
+.*                  Changed to use PMVXFNDM instead of AFNDMM                *
+.*        V10.01.01 16/12/2010  Mike Laming      CAR 233046                  *
+.*                  Mods to Misc.Charges PATMCHFD - incl. new routine PATMCHRD
+.*        V10.00.02 23/04/2010  Steve Armstrong  CAR 220612                  *
+.*                  Mods to not send LengthOfStay (OEHSEG10) if sameday      *
+.*                  stay.                                                    *
+.*        V10.00.01 30/04/2010 J.Tan         CAR 220887                      *
+.*                  Mods checking for Active/Inactive of Misc.charge         *
+.*****************************************************************************
+.*        V9.12.04  17/02/2010  Steve Armstrong  CAR 214056                  *
+.*                  Mods to use planned LOS (patmi1af.astay) and discharge   *
+.*                  intention code to determine if sameday or overnight for  *
+.*                  OEHSEG15 (SameDayInd) instead of calling PATGILOS which  *
+.*                  requires a discharge date.                               *
+.*        V9.12.03  11/01/2010  Peter Vela         CAR 213835                *
+.*                  Changed OEVSEG14 (MedicareReferenceNum) to remove        *
+.*                  leading zeroes.                                          *
+.*        V9.12.02  14/08/2009  Peter Vela         CAR 203723                *
+.*                  Validate Eclipse Participant from patfx1af.ptfxspar      *
+.*        V9.12.01  09/07/2009  Peter Vela         CAR 193566                *
+.*                  Move PTMXMCCD to a DIM2 work variable and squeeze        *
+.*                  before moving to OEVSEG14 to remove any leading spaces   *
+.*        V9.12.00  31/03/2009  Steve Armstrong    CAR 193566                *
+.*                  Program created.                                         *
+.*****************************************************************************
+.
+          INC       STD002FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATCRTFD/INC
+          INC       PATDSCFD/INC
+          INC       PATELGFD/INC
+          INC       PATFN1FD/INC
+          INC       PATFX1FD/INC
+          INC       PATHSPFD/INC
+          INC       PATPARFD/INC
+          INC       PATMA1FD/INC
+          INC       PATMCHFD/INC
+          INC       PATMI1FD/INC
+          INC       PMSCCDFD/INC
+          INC       PMSELFFD/INC
+          INC       PMSOECFD/INC
+          INC       PMSOESFD/INC
+          INC       PMSPX2FD/INC
+          INC       PMSVX1FD/INC
+          INC       WEBSECFD/INC
+.
+.
+OECXFILE  FILE      ASCII,FIXED=264
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CLAIMFLG  FORM      1             * compensation claim flag
+.                                     0 = non compensable claim
+.                                     1 = DVA claim
+.                                     2 = Workers compensation claim
+.                                     3 = TAC claim
+CMDLINE   DIM       100
+COUNTER   FORM      6             * batch record count
+CURRDATE  DIM       8
+.DIM1      DIM       1
+DIM4      DIM       4
+DIM8      DIM       8
+DIM9      DIM       9
+DIM11     DIM       11
+DIM15     DIM       15
+DIM20     DIM       20
+ERRCOUNT  FORM      3
+ERORDESC  DIM       100
+FFOECIND  FORM      1
+FORM12P2  FORM      12.2
+FORM3     FORM      3
+KEY21A    DIM       21
+LONGFNAM  DIM       12
+LOOPCNTR  FORM      1
+OESCOUNT  FORM      1
+SAVEHOSP  DIM       3
+SAVKEY16  DIM       16
+.
+. ----- Eclipse Data Variables -----
+.
+. HDR segment       Len    Pos
+.-------------      ---    ---
+.~        DIM       1      1
+.HDR      DIM       3      2
+HDRSEG01  DIM       8      5     * Location Id
+HDRSEG02  DIM       10     13    * Certificate Id
+HDRSEG03  DIM       60     23    * Sender Id
+HDRSEG04  DIM       1      83    * Test/Production Flag (T/P)
+. End of Segment           84
+.
+. OEH segment       Len    Pos   * Only 1 segment/request
+.-------------      ---    ---
+.~        DIM       1      1
+.OEH      DIM       3      2
+OEHSEG01  DIM       3      5     * OECTypeCde
+OEHSEG02  DIM       1      8     * SubmissionAuthoriseInd
+OEHSEG03  DIM       8      9     * AccidentDate
+OEHSEG04  DIM       1      17    * AccidentInd
+OEHSEG05  DIM       20     18    * AccountReferenceId
+OEHSEG06  DIM       2      38    * ClaimTypeCde
+OEHSEG07  DIM       1      40    * EmergencyAdmissionInd
+OEHSEG08  DIM       8      41    * FacilityId
+OEHSEG09  DIM       3      49    * FundBrandId
+OEHSEG10  DIM       3      52    * LengthOfStay
+OEHSEG11  DIM       1      55    * PEARequestInd
+OEHSEG12  DIM       3      56    * PresentingIllnessCode
+OEHSEG13  DIM       5      59    * PresentingIllnessItemNum
+OEHSEG14  DIM       8      64    * PrincipalProviderNum
+OEHSEG15  DIM       1      72    * SameDayInd
+OEHSEG16  DIM       128    73    * SenderContactEmail
+OEHSEG17  DIM       40     201   * SenderContactPersonName
+OEHSEG18  DIM       19     241   * SenderContactPersonPhone
+OEHSEG19  DIM       1      260   * ServiceTypeCde
+OEHSEG20  DIM       3      261   * iSOFT report counter
+. End of Segment           264
+.
+. OEV segment       Len    Pos   * Only 1 segment/request
+.-------------      ---    ---
+.~        DIM       1      1
+.OEV      DIM       3      2
+OEVSEG01  DIM       8      5     * AdmissionDate
+OEVSEG02  DIM       1      13    * CompensationClaimInd
+OEVSEG03  DIM       8      14    * DischargeDate
+OEVSEG04  DIM       12     22    * FundPayeeId
+OEVSEG05  DIM       40     34    * PatientAliasFamilyName
+OEVSEG06  DIM       40     74    * PatientAliasFirstName
+OEVSEG07  DIM       8      114   * PatientDateOfBirth
+OEVSEG08  DIM       40     122   * PatientFamilyName
+OEVSEG09  DIM       40     162   * PatientFirstName
+OEVSEG10  DIM       19     202   * PatientFundMembershipNum
+OEVSEG11  DIM       2      221   * PatientFundUPI
+OEVSEG12  DIM       1      223   * PatientGender
+OEVSEG13  DIM       10     224   * PatientMedicareCardNum
+OEVSEG14  DIM       1      234   * PatientReferenceNum
+OEVSEG15  DIM       1      235   * PatientSecondInitial
+OEVSEG16  DIM       8      236   * ServicingProviderNum
+. End of Segment           244
+.
+. OES segment       Len    Pos   * Maximum of 5 segments/request
+.-------------      ---    ---
+.~        DIM       1      1
+.OES      DIM       3      2
+OESSEG01  DIM       1[5]   5     * AfterCareOverrideInd
+OESSEG02  DIM       9[5]   6     * ChargeAmount
+OESSEG03  DIM       8[5]   15    * DateOfService
+OESSEG04  DIM       1[5]   23    * DuplicateServiceOverrideInd
+OESSEG05  DIM       1[5]   24    * FieldQuantity
+OESSEG06  DIM       5[5]   25    * ItemNum
+OESSEG07  DIM       2[5]   30    * NumberOfPatientsSeen
+OESSEG08  DIM       1[5]   32    * RestrictionOverrideInd
+OESSEG09  DIM       11[5]  33    * ServiceCode
+OESSEG10  DIM       1[5]   44    * ServiceCodeTypeCode
+OESSEG11  DIM       2[5]   45    * ServiceQuantity
+OESSEG12  DIM       9[5]   47    * ServiceRate
+OESSEG13  DIM       1[5]   56    * TimeDependantOverrideInd
+. End of Segment           57
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+ANSIL     INIT      "il"
+CATCT     INIT      "ct"
+CATU1     INIT      "U1"
+CATU2     INIT      "U2"
+CATU3     INIT      "U3"
+CATU4     INIT      "U4"
+CATU5     INIT      "U5"
+CATU6     INIT      "U6"
+CATU7     INIT      "U7"
+CATU8     INIT      "U8"
+CATU9     INIT      "U9"
+CATVI     INIT      "VI"
+REPALPHA  INIT      "a~b~c~d~e~f~g~h~i~j~k~l~m~n~o~p~q~r~s~t~u~v~w~x~y~z~"
+SP11      INIT      "           "
+SP40      INIT      "                                        "
+SP60      INIT      "                              ":
+                    "                              "
+SP80      INIT      "                                        ":
+                    "                                        "
+TILDA01   INIT      "~"
+TILDA40   INIT      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+.
+.
+PRGID     INIT      "ECLOESRV"
+PRGNAM    INIT      "Eclipse Online Eligibilty Server"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      SETX0000               * set up common variables
+          CALL      INIT0000               * initialisation and open files
+.
+          CALL      PROC0000               * process oec requests
+.
+MAIN9999  STOP
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"pmsoecaf";
+          OPEN      PMSOECA2,"pmsoecaf"
+.
+          DISPLAY   *P64:24,"pmsoesaf";
+          OPEN      PMSOESA1,"pmsoesaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patcrtaf";
+          OPEN      PATCRTA1,"patcrtaf"
+.
+          DISPLAY   *P64:24,"patdschf";
+          OPEN      PATDSCH1,"patdschf"
+.
+          DISPLAY   *P64:24,"pmselfaf";
+          OPEN      PMSELFA1,"pmselfaf"
+.
+          DISPLAY   *P64:24,"patelgaf";
+          OPEN      PATELGA1,"patelgaf"
+.
+          DISPLAY   *P64:24,"patfn1af";
+          OPEN      PATFN1A1,"patfn1af"
+.
+          DISPLAY   *P64:24,"patfx1af";
+          OPEN      PATFX1A1,"patfx1af"
+.
+          DISPLAY   *P64:24,"pathspaf";
+          OPEN      PATHSPA1,"pathspaf"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"patmchgf";
+          OPEN      PATMCHG1,"patmchgf"
+.
+          DISPLAY   *P64:24,"patmi1af";
+          OPEN      PATMI1A1,"patmi1af"
+.
+          DISPLAY   *P64:24,"patparaf";
+          OPEN      PATPARA1,"patparaf"
+.
+          DISPLAY   *P64:24,"pmsccdaf";
+          OPEN      PMSCCDA1,"pmsccdaf"
+.
+          DISPLAY   *P64:24,"pmspx2af";
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          DISPLAY   *P64:24,"pmsvx1af";
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"websecaf";
+          OPEN      WEBSECA1,"websecaf"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,TEN;*79,CAPPRVNO
+          READ      CONTROLF,TEN3;*194,CVETINS
+          READ      CONTROLF,TWENTY;*193,PTCNDCLM
+          READ      CONTROLF,SEVENTY9;*82,PTCNDSCI
+          READ      CONTROLF,HUND14;*145,PTCNCLID,*213,PTCNUEDC,*214,PTCNUTPD
+          READ      CONTROLF,HUND16;*69,PTCNSCEM,*149,PTCNSCPN,*189,PTCNSCPP
+          READ      CONTROLF,HUND17;*1,PTCNOECO
+          STRIP     PTCNOECO
+.
+.         The extract file will be created with a temporary name initially,
+.         then, when we are sure that we have one or more valid requests in
+.         the file, the file will be moved to a filename based on the current
+.         date and the next count value for the day.
+.
+          MOVE      "ecloesrv",FILENAME
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*        Loop through the pmsoecaf file looking for "Waiting" OEC records   *
+.*****************************************************************************
+.
+PROC0000  MOVE      ZERO,COUNTER                 * initialise record counter
+          MOVE      "~~~",SAVEHOSP               * initialise saved hospital var
+.
+PROC0500  PACK      KEY16,SP1,ZERO,SP20 
+PROC0600  CALL      RSPMOEC2                     * position at start of file
+          CALL      RKPMOEC2                     * read next record
+          BRANCH    OVRCD,PROC9500               * eof
+.
+          MATCH     " 0",PMOESTAT                * status still "Waiting" ?
+          GOTO      PROC9500 IF NOT EQUAL        * no
+.
+          MOVE      ZERO,FFOECIND                * Determine if Free Format OEC
+          MOVE      SP70,DIM1
+          MOVE      PMOEVISN,DIM1
+          REP       REPALPHA,DIM1
+          MATCH     "~",DIM1
+          IF        @EQUAL
+            MOVE      ONE,FFOECIND
+          ELSE
+            PACK      KEY8,PMOEVISN,SP70
+            CALL      RAPTMIS1
+            IF        OVRCD=ONE
+              PACK      KEY8,PMOEVISN,SP70
+              CALL      RAPMELF1
+              IF        OVRCD=ZERO
+                MOVE      ONE,FFOECIND
+                GOTO      PROC0700
+              ENDIF
+.
+              MATCH   SP70,PMOEELEG
+              IF      !@EQUAL & !@EOS
+                PACK      KEY8,PMOEELEG,SP70
+                CALL      RAPMELF1
+                IF        OVRCD=ZERO
+                  MOVE      ONE,FFOECIND
+                  GOTO      PROC0700
+                ENDIF
+              ENDIF
+.
+            ENDIF
+.
+            MATCH   SP70,PMOEELEG
+            IF      !@EQUAL & !@EOS
+              PACK      KEY8,PMOEELEG,SP70
+              CALL      RAPMELF1
+              IF        OVRCD=ZERO
+                MOVE      ONE,FFOECIND
+                GOTO      PROC0700
+              ENDIF
+            ENDIF
+.
+          ENDIF
+.
+PROC0700  PACK      SAVKEY16,PMOESTAT,PMOEHOSP,PMOEVISN,PMOECNTR
+.
+          MATCH     SAVEHOSP,PMOEHOSP            * same hospital still ?
+          GOTO      PROC1000 IF EQUAL            * yes
+.
+          MOVE      PMOEHOSP,SAVEHOSP            * save new hospital code
+.
+          COMPARE   ZERO,COUNTER                 * any records for curr. hosp ?
+          GOTO      PROC1000 IF EQUAL            * no
+.
+.         The hospital code has changed and there were records written
+.         to the temp file, so we need to complete the current file before
+.         starting a new file for the new hospital.
+.
+          CALL      FNAM0000
+          MOVE      ZERO,COUNTER                 * initialise record counter
+.
+PROC1000  MOVE      ZERO,ERRCOUNT                * initialise error counter
+.
+.         A waiting OEC record has been found.
+.
+.         Set the segment data fields for the OEC message
+.
+          IF        FFOECIND=ONE
+            CALL      FOEV0000                     * write voucher segment
+            BRANCH    EXIT,PROC9000                * error occured
+.
+            CALL      FOEH0000                     * write header segment
+            BRANCH    EXIT,PROC9000                * error occured
+.
+            CALL      FOES0000                     * write services segment
+            BRANCH    EXIT,PROC9000                * error occured
+.
+            CALL      WSEG0000                     * write all request segments
+            BRANCH    EXIT,PROC9000                * error occured
+          ELSE
+            CALL      WOEV0000                     * write voucher segment
+            BRANCH    EXIT,PROC9000                * error occured
+.
+            CALL      WOEH0000                     * write header segment
+            BRANCH    EXIT,PROC9000                * error occured
+.
+            CALL      WOES0000                     * write services segment
+            BRANCH    EXIT,PROC9000                * error occured
+.
+            CALL      WSEG0000                     * write all request segments
+            BRANCH    EXIT,PROC9000                * error occured
+          ENDIF
+.
+.         If there were no processing errors, simply set the request status
+.         and update the pmsoecaf record.
+.
+          ADD       ONE,COUNTER                  * increment record counter
+          PACK      PMOESTAT,SP1,ONE
+.
+.         Where errors occurred, the status and error details have already
+.         been set, so we only need to update the pmsoecaf record.
+.
+PROC9000  CALL      UPPMOEC2
+          MOVE      SAVKEY16,KEY16               * reload original key to rec.
+          GOTO      PROC0600                     * get next waiting record
+.
+.         The last waiting record has been processed.
+.         Check if there were any valid eligibility records processed, and if
+.         so, change the filename and move the file to the outbound oec
+.         directory, where the Server Adaptor will pick it up and process it.
+.
+PROC9500  IF        COUNTER > 0
+            CALL      FNAM0000                   * get the batch filename
+          ENDIF
+          DISPLAY   *W60;                        * wait for 1 min.
+          GOTO      PROC0000                     * check for more oec records
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                               FNAM0000          Called by: PROC0000       *
+.*           Get the next OEC batch filename                                 *
+.*****************************************************************************
+.
+FNAM0000  MOVE      "117",PRXCODE                * System Lock Sector 117
+          CALL      GETSLK00                     * Get System Lock-Sector 117
+.
+          READ      CONTROLF,HUND17;*133,PTCNBDAT,*141,PTCNBCNT
+.
+.         If the oec batch date field is blank, then update it with
+.         today's date and set the oec batch count to 1.
+.
+          REP       " 0",PTCNBDAT
+          MATCH     "00000000",PTCNBDAT
+          IF        @EQUAL
+            MOVE      CURRDATE,PTCNBDAT
+            MOVE      "0002",PTCNBCNT
+            PACK      LONGFNAM,CURRDATE,ZERO,ZERO,ZERO,ONE
+            REP       " 0",LONGFNAM
+            GOTO      FNAM8000
+          ENDIF
+.
+.         If the oec batch date is less than today's date, then update it with
+.         today's date and set the oec batch count to 1.
+.
+          MATCH     CURRDATE,PTCNBDAT            * oec batch date < curr. date ?
+          IF        @LESS
+            MOVE      CURRDATE,PTCNBDAT
+            MOVE      "0002",PTCNBCNT
+            PACK      LONGFNAM,CURRDATE,ZERO,ZERO,ZERO,ONE
+            GOTO      FNAM8000
+          ENDIF
+.
+.         The oec batch date is the same as today's date, so increment
+.         the count by 1 and update.
+.
+          MOVE      ZERO,FORM4
+          MOVE      PTCNBCNT,FORM4
+          PACK      LONGFNAM,PTCNBDAT,FORM4
+          REP       " 0",LONGFNAM
+          ADD       ONE,FORM4
+          MOVE      FORM4,PTCNBCNT
+.
+FNAM8000  WRITAB    CONTROLF,HUND17;*133,PTCNBDAT,*141,PTCNBCNT
+.
+          CALL      RELSLK00                    * Release System Lock-Sector 117
+.
+.         Rename the temporary extract file to the new filename and move it
+.         to the oec directory where the Server Adaptor can find it and
+.         process it.
+.
+          CLEAR     CMDLINE
+          MOVE      "mv ",CMDLINE
+          ENDSET    CMDLINE
+          APPEND    FILENAME,CMDLINE
+          APPEND    ".txt ",CMDLINE
+          APPEND    PTCNOECO,CMDLINE
+          APPEND    LONGFNAM,CMDLINE
+          APPEND    ".txt",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          DISPLAY   *P1:24,*EL,*B,"TASKID=[",*V2LON,TASKID,"].  ";
+.         CALL      HITENTER
+          MATCH     "0       ",TASKID
+          IF        !@EQUAL
+            DISPLAY   *P1:24,*EL,*B,"Failed to create extract file.  ";
+.           CALL      HITENTER
+          ENDIF
+.
+FNAM9999  RETURN
++
+.******************************************************************************
+.*                             WHDR0000            Called by: PROC0000        *
+.*                  Write the header segment                                  *
+.* Returns: EXIT   0 = no errors occurred                                     *
+.*                 1 = one or more errors occurred                            *
+.******************************************************************************
+.
+.         If this is a multi-hospital environment, we need to check if
+.         the location has already been set in the WOEV0000 routine.  if
+.         not, we need to use the default parameter location.
+.
+WHDR0000  MATCH     SP8,HDRSEG01                 * blank location ?
+          GOTO      WHDR2000 IF NOT EQUAL        * no - using hospital loc'n
+.
+          MATCH     SP8,PTCNCLID
+          IF        @EQUAL
+            MOVE      "Current Location not set up",ERORDESC
+            CALL      EROR0000
+            GOTO      WHDR9100
+          ELSE
+            MOVE      PTCNCLID,HDRSEG01          * set location id
+          ENDIF
+.
+.         Get the certificate that covers today
+.
+WHDR2000  PACK      KEY16,HDRSEG01,CURRDATE
+          CALL      RDPTCTI1                     * record found for today ?
+          COMPARE   ZERO,OVRCD
+          GOTO      WHDR3000 IF EQUAL            * yes - use this certificate id
+.
+          CALL      RPPTCTI1                     * no - read previous record
+          IF        OVRCD = 0
+            MATCH     CURRDATE,PTCITDTE          * within date range ?
+            GOTO      WHDR3000 IF NOT LESS       * yes - use this certificate id
+          ENDIF
+.
+          MOVE      "Current Certificate not available",ERORDESC
+          CALL      EROR0000
+          GOTO      WHDR9100
+.
+WHDR3000  MATCH     SP10,PTCIIDEN
+          IF        @EQUAL
+            MOVE      "Certificate Identifier blank",ERORDESC
+            CALL      EROR0000
+            GOTO      WHDR9100
+          ELSE
+            MOVE      PTCIIDEN,HDRSEG02          * load certificate identifier
+          ENDIF
+.
+          MATCH     SP60,PTCISNID
+          IF        @EQUAL
+            MOVE      "Sender Id  blank",ERORDESC
+            CALL      EROR0000
+            GOTO      WHDR9100
+          ELSE
+            MOVE      PTCISNID,HDRSEG03          * load sender id
+          ENDIF
+.
+          MATCH     SP1,PTCNUTPD
+          IF        @EQUAL
+            MOVE      "Test/Production parameter blank",ERORDESC
+            CALL      EROR0000
+            GOTO      WHDR9100
+          ELSE
+            MOVE      PTCNUTPD,HDRSEG04
+          ENDIF
+.
+          WRITE     OECXFILE,SEQ;TILDA01,ANSH,ANSD,ANSR:
+                                 HDRSEG01,HDRSEG02,HDRSEG03,HDRSEG04
+          MOVE      ZERO,EXIT
+          GOTO      WHDR9999
+.
+WHDR9100  MOVE      ONE,EXIT
+.
+WHDR9999  RETURN
++
+.******************************************************************************
+.*                             WOEH0000            Called by: PROC0000        *
+.*                  Write the OEH segment details                             *
+.* Requires: WOEV0000 previously executed to read various files               *
+.* Returns: EXIT   0 = no errors occurred                                     *
+.*                 1 = one or more errors occurred                            *
+.******************************************************************************
+.
+WOEH0000  MOVE      "ECF",OEHSEG01               * set OECTypeCde
+          MOVE      "Y",OEHSEG02                 * set SubmissionAuthoriseInd
+          MOVE      SP8,OEHSEG03                 * set AccidentDate
+          MOVE      SP1,OEHSEG04                 * set AccidentInd
+          MOVE      PMOEVISN,OEHSEG05
+          SQUEEZE   OEHSEG05
+          PACK      OEHSEG05,OEHSEG05,SP20       * set AccountReferenceId
+          MOVE      SP2,OEHSEG06                 * set ClaimTypeCde
+.         MOVE      SP1,OEHSEG07                 * set EmergencyAdmissionInd
+          MOVE      SP1,OEHSEG19                 * set ServiceTypeCde
+.
+.         Set default values for Presenting Illness.  One of these fields must
+.         be populated later in this routine.
+.
+          MOVE      SP3,OEHSEG12                 * set PresentingIllnessCode
+          MOVE      SP5,OEHSEG13                 * set PresentingIllnessNum
+.           
+.         Set FacilityId
+.
+          IF        IBCNMHOS = 1
+            MOVE      PTHSAPPR,OEHSEG08
+          ELSE
+            MOVE      CAPPRVNO,OEHSEG08
+          ENDIF
+.
+.         Load PEARequestInd, EmergencyAdmissionInd
+.
+          MOVE      PMOEVISN,KEY8
+          CALL      RDPTELG1
+          IF        OVRCD = 1
+            MOVE      "Eligibility record missing for visit",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEH9100
+          ENDIF
+.
+          MATCH     "1",PTELSPEA
+          IF        @EQUAL
+            MOVE      ANSY,OEHSEG11
+          ELSE
+            MOVE      ANSN,OEHSEG11
+          ENDIF
+.
+          MATCH     "1",PTELEADM
+          IF        @EQUAL
+            MOVE      ANSY,OEHSEG07
+          ELSE
+            MOVE      ANSN,OEHSEG07
+          ENDIF
+.
+          MATCH     SP70,PMOEELEG
+          GOTO      WOEH0500 IF EQUAL
+.
+          PACK      KEY8,PMOEELEG,SP70
+          CALL      RDPMELFA1
+          BRANCH    OVRCD,WOEH0500
+.
+.         Load PresentingIllnessCode
+.
+          MATCH     SP70,PMEFPRIM
+          GOTO      WOEH0100 IF NOT EQUAL
+.
+          MATCH     SP3,PMEFPRIC                 * blank pres. illness code ?
+          GOTO      WOEH0100 IF EQUAL            * yes - check patmi1af.ambs
+.
+          PACK      KEY5,ANSIL,PMEFPRIC
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,WOEH0100               * no
+.
+          MATCH     SP4,THCSCOD                  * blank state HCP equivalent ?
+          GOTO      WOEH0100 IF EQUAL            * yes - check patmi1af.ambs
+.
+.         Presenting Illness codes are 3 digit codes, so check the code
+.         we have is valid
+.
+          MOVE      THCSCOD,DIM4
+          STRIP     DIM4
+          MOVELPTR  DIM4,FORM1
+          IF        FORM1 > 3
+            MOVE      "Presenting Illness Code (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PMEFPRIC,ERORDESC
+            APPEND    " - Cat ",ERORDESC
+            APPEND    "il",ERORDESC
+            APPEND    ", HDP Eq.) too long",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      WOEH9100
+          ENDIF
+.
+          TYPE      DIM4
+          IF        !@EQUAL
+            MOVE      "Presenting Illness Code (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PMEFPRIC,ERORDESC
+            APPEND    " - Cat ",ERORDESC
+            APPEND    "il",ERORDESC
+            APPEND    ", HDP Eq.) not numeric",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      WOEH9100
+          ENDIF
+.
+          MOVE      THCSCOD,OEHSEG12             * set PresentingIllnessItemCode
+          GOTO      WOEH2000
+.
+.         There was no presenting illness code, so check for a CMBS item number
+.
+WOEH0100  MATCH     SP9,PMEFPRIM
+          IF        @EQUAL
+            MOVE      "Presenting Illness not found",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEH9100
+          ENDIF
+.
+          MOVE      PMEFPRIM,DIM9
+          STRIP     DIM9
+          MOVELPTR  DIM9,FORM1
+          IF        FORM1 > 5
+            MOVE      "Presenting Illness Number too long",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEH9100
+          ENDIF
+          MOVE      PMEFPRIM,OEHSEG13            * set PresentingIllnessItemNum
+.
+          GOTO      WOEH2000
+.
+.         Load PresentingIllnessCode
+.
+WOEH0500  MATCH     SP70,AMBS
+          GOTO      WOEH1000 IF NOT EQUAL
+.
+          MATCH     SP3,PMVXPILC                 * blank pres. illness code ?
+          GOTO      WOEH1000 IF EQUAL            * yes - check patmi1af.ambs
+.
+          PACK      KEY5,ANSIL,PMVXPILC
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,WOEH1000               * no
+.
+          MATCH     SP4,THCSCOD                  * blank state HCP equivalent ?
+          GOTO      WOEH1000 IF EQUAL            * yes - check patmi1af.ambs
+.
+.         Presenting Illness codes are 3 digit codes, so check the code
+.         we have is valid
+.
+          MOVE      THCSCOD,DIM4
+          STRIP     DIM4
+          MOVELPTR  DIM4,FORM1
+          IF        FORM1 > 3
+            MOVE      "Presenting Illness Code (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PMVXPILC,ERORDESC
+            APPEND    " - Cat ",ERORDESC
+            APPEND    "il",ERORDESC
+            APPEND    ", HDP Eq.) too long",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      WOEH9100
+          ENDIF
+.
+          TYPE      DIM4
+          IF        !@EQUAL
+            MOVE      "Presenting Illness Code (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PMVXPILC,ERORDESC
+            APPEND    " - Cat ",ERORDESC
+            APPEND    "il",ERORDESC
+            APPEND    ", HDP Eq.) not numeric",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      WOEH9100
+          ENDIF
+.
+          MOVE      THCSCOD,OEHSEG12             * set PresentingIllnessItemCode
+          GOTO      WOEH2000
+.
+.         There was no presenting illness code, so check for a CMBS item number
+.
+WOEH1000  MATCH     SP9,AMBS
+          IF        @EQUAL
+            MOVE      "Presenting Illness not found",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEH9100
+          ENDIF
+.
+          MOVE      AMBS,DIM9
+          STRIP     DIM9
+          MOVELPTR  DIM9,FORM1
+          IF        FORM1 > 5
+            MOVE      "Presenting Illness Number too long",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEH9100
+          ENDIF
+          MOVE      AMBS,OEHSEG13                * set PresentingIllnessItemNum
+.
+WOEH2000  MOVE      SP8,OEHSEG14                 * set PrincipalProviderNum
+.
+.         Set SameDayCode and LengthOfStay.
+.         Load default values based on estimated LOS.
+.
+          IF        ASTAY = 0
+            MOVE      ANSY,OEHSEG15              * default to sameday
+          ELSE
+            MOVE      ANSN,OEHSEG15              * default to overnight
+          ENDIF
+.
+.         Get discharge intention
+.
+          IF        PTCNDSCI=0
+            MOVE      "P ",TCODE
+            MOVE      ACLSS,ACODE
+          ELSE
+            LOAD      TCODE,PTCNDSCI,CATU1,CATU2,CATU3,CATU4,CATU5,CATVI
+            LOAD      ACODE,PTCNDSCI,AUSR1,AUSR2,AUSR3,AUSR4,AUSR5,PMVXIDUS
+          ENDIF
+.
+          MATCH     SP3,ACODE
+          IF        !@EQUAL
+            PACK      KEY5,TCODE,ACODE
+            CALL      RDCODE1                    * Read a codes file record
+            IF        OVRCD = 0
+              MATCH     "1",TCINDC1
+              IF        @EQUAL
+                MOVE      ANSN,OEHSEG15
+              ENDIF
+              MATCH     "2",TCINDC1
+              IF        @EQUAL
+                MOVE      ANSY,OEHSEG15
+              ENDIF
+            ENDIF
+          ENDIF
+.
+.         If this is an overnight stay, then make sure that the estimated LOS
+.         (patmi1af.astay) is greater than zero.
+.
+          MATCH     ANSN,OEHSEG15
+          IF        @EQUAL
+            COMPARE   ZERO,ASTAY
+            IF        @EQUAL
+              MOVE      "Length Of Stay cannot be zero",ERORDESC
+              CALL      EROR0000
+              GOTO      WOEH9100
+            ELSE
+              MOVE      ASTAY,OEHSEG10
+              REP       " 0",OEHSEG10
+            ENDIF
+          ENDIF
+.
+.         If this is a sameday stay, then make sure that the estimated LOS
+.         (patmi1af.astay) is zero.
+.
+          MATCH     ANSY,OEHSEG15
+          IF        @EQUAL
+            COMPARE   ZERO,ASTAY
+            IF        !@EQUAL
+              MOVE      "Length Of Stay must be zero",ERORDESC
+              CALL      EROR0000
+              GOTO      WOEH9100
+            ELSE
+              MOVE      SP3,OEHSEG10
+            ENDIF
+          ENDIF
+.
+.         Check if the sender contact details have been loaded from the health
+.         fund.  If not, set the fields using the default parameter settings.
+.
+          MATCH     SP80,PTFXSCEM                * blank sender contact email ?
+          IF        @EQUAL
+            MOVE      PTCNSCEM,OEHSEG16          * yes
+          ENDIF
+.
+          MATCH     SP40,PTFXSCPN                * blank sender contact name ?
+          IF        @EQUAL
+            MOVE      PTCNSCPN,OEHSEG17          * yes
+          ENDIF
+.
+          MATCH     SP20,PTFXSCPP                * blank sender contact phone ?
+          IF        @EQUAL
+            MOVE      PTCNSCPP,OEHSEG18          * yes
+          ENDIF
+.
+          MOVE      PMOECNTR,OEHSEG20            * set iSOFT report count
+.
+          MOVE      ZERO,EXIT
+          GOTO      WOEH9999
+.
+WOEH9100  MOVE      ONE,EXIT
+.
+WOEH9999  RETURN
++
+.******************************************************************************
+.*                             WOEV0000            Called by: PROC0000        *
+.*                  Write the OEV (Voucher) segment                           *
+.* Returns: EXIT   0 = no errors occurred                                     *
+.*                 1 = one or more errors occurred                            *
+.******************************************************************************
+.
+WOEV0000  MOVE      SP8,HDRSEG01                 * initialise location
+.
+          MOVE      SP4,PMOEERRC                 * initialise error code
+          MOVE      SP8,OEVSEG16                 * set ServicingProviderNum
+          MOVE      SP20,OEVSEG04                * set FundPayeeId
+.
+.         Set default values for sender contact details.  These fields will
+.         be populated later in this routine, or in WOEH0000.
+.
+          MOVE      SP80,OEHSEG16                * SenderContactEmail
+          MOVE      SP40,OEHSEG17                * SenderContactPersonName
+          MOVE      SP20,OEHSEG18                * SenderContactPersonPhone
+.
+.         Get the PMI master and master extension records so that we can
+.         populate the patient data fields in the OEV segment
+.
+          MOVE      PMOEURNO,KEY8
+          CALL      RDMAST1                      * patient master record found ?
+          IF        OVRCD = 1
+            MOVE      "PMI Master record missing",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+          MOVE      PMOEURNO,KEY8
+          CALL      RDPMPX21                     * pt. master ext record found ?
+          IF        OVRCD = 1
+            MOVE      "PMI Master extension record missing",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+.         Get the admission record for the visit
+.
+          MOVE      PMOEVISN,KEY8
+          CALL      RDMISS1                      * patient adm. record found ?
+          IF        OVRCD = 1
+            MOVE      "Admission record not found",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+          CALL      CLPATDSC                     * clear discharge variables
+.
+.         Set CompensationClaimInd
+.
+          CALL      COMP0000                     * see if compensable claim
+          COMPARE   ZERO,CLAIMFLAG
+          IF        @EQUAL
+            MOVE      ANSN,OEVSEG02
+          ELSE
+            MOVE      ANSY,OEVSEG02
+          ENDIF
+.
+.         Get the visit extension record for the admission
+.
+          MOVE      PMOEVISN,KEY8
+          CALL      RDPMVX11                     * visit ext. record found ?
+          IF        OVRCD = 1
+            MOVE      "Visit extension record not found",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+          COMPARE   ONE,IBCNMHOS                 * using multi-hospital
+          GOTO      WOEV0500 IF NOT EQUAL        * no
+.
+          MATCH     SP3,PMVXMHOS                 * hospital id blank ?
+          IF        @EQUAL
+            MOVE      "Hospital id blank",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+          MOVE      PMVXMHOS,KEY3
+          CALL      RDPTHSP1                     * hospital code on file ?
+          IF        OVRCD = 1
+            MOVE      "Hospital code (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PMVXMHOS,ERORDESC
+            APPEND    ") not on file",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+          MATCH     SP8,PTHSLOCN                 * blank location for hosp. ?
+          IF        !@EQUAL
+            MOVE      PTHSLOCN,HDRSEG01          * set location id from hosp.
+          ENDIF
+.
+          MATCH     "1",PTHSUDVA                 * Using Cat. CL for DVA ?
+          GOTO      WOEV0500 IF NOT EQUAL        * no
+.
+.         "Using Category CL for DVA" is turned on for the hospital, so
+.         check if this is a DVA claim type
+.
+          COMPARE   ONE,CLAIMFLG                 * DVA claim type ?
+          GOTO      WOEV0700 IF EQUAL            * yes
+          GOTO      WOEV2000                     * no
+.
+.         Not using multi-hospital
+.
+WOEV0500  COMPARE   ONE,PTCNUEDC                 * Using Cat. CL for DVA ?
+          GOTO      WOEV2000 IF NOT EQUAL        * no
+.
+          COMPARE   ONE,CLAIMFLG                 * yes - DVA claim type ?
+          GOTO      WOEV2000 IF NOT EQUAL        * no
+.
+.         This is a DVA claim, so use the DVA number to set
+.         PatientFundMembershipNum.  If there is a DVA concession card on
+.         file, use the number from that
+.
+          MOVE      SP70,DIM20
+          CALL      CONC0000                     * DVA conc card on file ?
+          BRANCH    EXIT,WOEV0700                * no
+.
+          MOVE      DIM20,OEVSEG10               * yes
+          GOTO      WOEV0800
+.
+WOEV0700  MOVE      "DVA number is blank",ERORDESC
+          CALL      EROR0000
+          GOTO      WOEV9100
+.
+WOEV0800  MATCH     SP3,CVETINS
+          IF        @EQUAL
+            MOVE      "DVA participant code is blank",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+          MOVE      CVETINS,KEY3                 * set key for participant read
+          GOTO      WOEV3000
+.
+.         Not a DVA claim, so check if this is a health fund claim
+.
+WOEV2000  MATCH     SP6,AFUNDH                   * blank health fund ?
+          IF        @EQUAL
+            MOVE      "Health Fund is blank",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+.         Load PatientFundMembershipNum
+.
+          MATCH     SP20,PMVXFNDM
+          IF        @EQUAL
+            MOVE      "Fund membership number is blank",ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ELSE
+            PACK      OEVSEG10,PMVXFNDM,SP20     * Health fund membership no
+          ENDIF
+.
+          PACK      KEY14,AFUNDH,ZERO,ZERO,ZERO,ZERO,SP20
+          CALL      RDFUND1
+          IF        OVRCD = 1
+            MOVE      "Health Fund (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    AFUNDH,ERORDESC
+            APPEND    ") is not on file",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+          MOVE      AFUNDH,KEY6
+          CALL      RDPTFX11
+          IF        OVRCD = 1
+            MOVE      "Health Fund extension record (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    AFUNDH,ERORDESC
+            APPEND    ") not found",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+.         Check if there are sender contact details for the health fund
+.         and load if present
+.
+          MATCH     SP80,PTFXSCEM                * blank sender contact email ?
+          IF        !@EQUAL
+            MOVE      PTFXSCEM,OEHSEG16          * no
+          ENDIF
+.
+          MATCH     SP40,PTFXSCPN                * blank sender contact name ?
+          IF        !@EQUAL
+            MOVE      PTFXSCPN,OEHSEG17          * no
+          ENDIF
+.
+          MATCH     SP20,PTFXSCPP                * blank sender contact phone ?
+          IF        !@EQUAL
+            MOVE      PTFXSCPP,OEHSEG18          * no
+          ENDIF
+.
+.         MATCH     SP3,PTHFHGRP
+.         IF        @EQUAL
+.           MOVE      "Health Fund Group is blank",ERORDESC
+.           CALL      EROR0000
+.           GOTO      WOEV9100
+.         ENDIF
+.
+          MATCH     SP70,PTFXECLP
+          IF        @EQUAL
+            MATCH     SP3,PTHFHGRP
+            IF        @EQUAL
+              MOVE      "Health Fund Group / Eclipse Participant is blank",ERORDESC 
+              CALL      EROR0000
+              GOTO      WOEV9100
+            ELSE
+              MOVE      PTHFHGRP,KEY3
+            ENDIF
+          ELSE
+            MOVE      PTFXECLP,KEY3
+          ENDIF
+.
+.         MOVE      PTHFHGRP,KEY3
+WOEV3000  CALL      RDPTPAR1
+          IF        OVRCD = 1
+            MOVE      KEY3,ERORDESC
+            ENDSET    ERORDESC
+            APPEND    " is not an Eclipse participant",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      WOEV9100
+          ENDIF
+.
+          MOVE      PTPRCODE,OEHSEG09            * set FundBrandId
+.
+          MOVE      SP8,OEVSEG03                 * set default DischargeDate
+          IF        ASTAT = 3
+            MOVE      PMOEVISN,KEY8
+            CALL      RDDSCH1
+            IF        OVRCD = 0
+              UNPACK    DDATE,CCENT,CYEAR,CMON,CDAY
+              PACK      OEVSEG03,CDAY,CMON,CCENT,CYEAR   * set DischargeDate
+            ENDIF
+          ENDIF
+.
+          UNPACK    PBDATE,CCENT,CYEAR,CMON,CDAY
+          PACK      OEVSEG07,CDAY,CMON,CCENT,CYEAR   * set PatientDateOfBirth
+          PACK      OEVSEG08,PSNAME,SP30,SP10    * set PatientFamilyName
+          MOVE      PMPXFNAM,OEVSEG09            * set PatientFirstName
+          MOVE      PMPXSNAM,OEVSEG15            * set PatientSecondInitial
+          MOVE      PMPXHFSN,OEVSEG05            * set PatientAliasFamilyName
+          MOVE      PMPXHFGN,OEVSEG06            * set PatientAliasFirstName
+          MOVE      PMPXFUPI,OEVSEG11            * set PatientFundUPI
+.
+.         Set PatientGender
+.
+          MATCH     ANSF,PSEX
+          IF        !@EQUAL
+            MATCH     ANSM,PSEX
+            IF        !@EQUAL
+              MOVE      "Patient gender not valid",ERORDESC
+              CALL      EROR0000
+              GOTO      WOEV9100
+            ENDIF
+          ENDIF
+.
+          MOVE      PSEX,OEVSEG12
+.
+.         Set PatientMedicareCardNum & PatientReferenceNum
+.
+          MATCH     SP10,PMEDI
+          IF        !@EQUAL
+            MOVE      PMEDI,OEVSEG13
+            MATCH     SP2,PTMXMCCD
+            IF        @EQUAL
+              MOVE      "Medicare reference number is blank",ERORDESC
+              CALL      EROR0000
+              GOTO      WOEV9100
+            ELSE
+              MOVE      SP70,DIM2
+              MOVE      PTMXMCCD,DIM2
+              SQUEEZE   DIM2
+              MATCH     "0",DIM2                 * leading zero ?
+              IF        @EQUAL
+                UNPACK    DIM2,ANS,OEVSEG14      * yes - take second char.
+              ELSE
+                MOVE      DIM2,OEVSEG14
+              ENDIF
+            ENDIF
+          ENDIF
+ 
+          UNPACK    ADATE,CCENT,CYEAR,CMON,CDAY
+          PACK      OEVSEG01,CDAY,CMON,CCENT,CYEAR  * set AdmissionDate
+.
+          MOVE      ZERO,EXIT
+          GOTO      WOEV9999
+.
+WOEV9100  MOVE      ONE,EXIT
+.
+WOEV9999  RETURN
++
+.******************************************************************************
+.*                             WOES0000            Called by: PROC0000        *
+.*                  Write the OES (services) segment                          *
+.* Returns: EXIT   0 = no errors occurred                                     *
+.*                 1 = one or more errors occurred                            *
+.******************************************************************************
+.
+WOES0000  MOVE      ZERO,OESCOUNT                * initialise oes counter
+.
+          PACK      KEY14,PMOEVISN,PMOECNTR,SP20
+          CALL      RSPMOES1                     * position on visit/report
+WOES0500  CALL      RKPMOES1                     * read next record
+          BRANCH    OVRCD,WOES9000               * eof - finished
+.
+          MATCH     PMOEVISN,PMOSVISN            * same visit still ?
+          GOTO      WOES9000 IF NOT EQUAL        * no - finished
+.
+          MATCH     PMOECNTR,PMOSCNTR            * same report count still ?
+          GOTO      WOES9000 IF NOT EQUAL        * no - finished
+.
+          ADD       ONE,OESCOUNT                 * increment oes count
+.
+          MOVE      SP1,OESSEG01[OESCOUNT]       * set AfterCareOverrideInd
+.
+.         Load the ServiceCode
+.
+          MATCH     "6",PMOSRTYP                 * Miscellaneous charge ?
+          IF        !@EQUAL
+            MOVE      "Service Record Type not valid",ERORDESC
+            CALL      EROR0000
+            GOTO      WOES9100
+          ENDIF
+.
+          CALL      GEEQ0000                     * get Eclipse equivalent
+          BRANCH    EXIT,WOES9100                * error occurred
+.
+          UNPACK    PMOSPDTE,CCENT,CYEAR,CMON,CDAY
+          PACK      OESSEG03[OESCOUNT],CDAY,CMON,CCENT,CYEAR * set DateOfService
+          MOVE      SP1,OESSEG04[OESCOUNT]     * set DuplicateServiceOverrideInd
+          MOVE      SP1,OESSEG05[OESCOUNT]       * set FieldQuantity
+          MOVE      SP5,OESSEG06[OESCOUNT]       * set ItemNum
+          MOVE      SP2,OESSEG07[OESCOUNT]       * set NoOfPatientsSeen
+          MOVE      SP1,OESSEG08[OESCOUNT]       * set RestrictionOverrideInd
+.
+          MOVE      PMOSQUAN,FORM3
+          IF        FORM3 > 99
+            MOVE      "Service Quantity is greater than 99",ERORDESC
+            CALL      EROR0000
+            GOTO      WOES9100
+          ENDIF
+          MOVE      FORM3,FORM2
+          MOVE      FORM2,OESSEG11[OESCOUNT]     * set ServiceQuantity
+.
+          ASSIGN    (MPATPOR+MHFPOR),FORM12P2
+          MOVE      FORM12P2,DIM15
+          UNPACK    DIM15,KEY5,KEY7,ANS,KEY2
+          PACK      KEY9,KEY7,KEY2
+          REP       " 0",KEY9
+          MOVE      KEY9,OESSEG12[OESCOUNT]      * set ServiceRate
+.
+          ASSIGN    ((MPATPOR+MHFPOR)*FORM2),FORM12P2
+          MOVE      FORM12P2,DIM15
+          UNPACK    DIM15,KEY5,KEY7,ANS,KEY2
+          PACK      KEY9,KEY7,KEY2
+          REP       " 0",KEY9
+          MOVE      KEY9,OESSEG02[OESCOUNT]      * set ChargeAmount
+.
+          GOTO      WOES0500                     * get next service
+.
+WOES9000  MOVE      ZERO,EXIT
+          GOTO      WOES9999
+.
+WOES9100  MOVE      ONE,EXIT
+.
+WOES9999  RETURN
++
+.*****************************************************************************
+.*                              WSEG0000           Called by: PROC0000       *
+.*               Write all the segment data for the claim                    *
+.* Returns: EXIT   0 = no errors occurred                                     *
+.*                 1 = one or more errors occurred                            *
+.*****************************************************************************
+.
+.         If this is the first record for the file, delete the temporary
+.         extract file in case it already exists from a previous batch,
+.         then create and open it again.
+.
+WSEG0000  IF        COUNTER = 0
+            PREP      OECXFILE,FILENAME
+            CLOSE     OECXFILE,DELETE
+            PREP      OECXFILE,FILENAME
+.
+            CALL      IBACLOCK                   * get current date
+            PACK      CURRDATE,CCC,CYY,CMM,CDD
+            REP       " 0",CURRDATE
+.
+            CALL      WHDR0000
+            BRANCH    EXIT,WSEG9100              * error occured
+          ENDIF
+.
+          WRITE     OECXFILE,SEQ;TILDA01,ANSO,ANSE,ANSH:
+                                 OEHSEG01,OEHSEG02,OEHSEG03,OEHSEG04,OEHSEG05:
+                                 OEHSEG06,OEHSEG07,OEHSEG08,OEHSEG09,OEHSEG10:
+                                 OEHSEG11,OEHSEG12,OEHSEG13,OEHSEG14,OEHSEG15:
+                                 OEHSEG16,OEHSEG17,OEHSEG18,OEHSEG19,OEHSEG20
+.
+          WRITE     OECXFILE,SEQ;TILDA01,ANSO,ANSE,ANSV:
+                                 OEVSEG01,OEVSEG02,OEVSEG03,OEVSEG04,OEVSEG05:
+                                 OEVSEG06,OEVSEG07,OEVSEG08,OEVSEG09,OEVSEG10:
+                                 OEVSEG11,OEVSEG12,OEVSEG13,OEVSEG14,OEVSEG15:
+                                 OEVSEG16
+.
+.         There can be up to 5 OES segments, so write as many as were loaded
+.
+          MOVE      ZERO,FORM1
+          WHILE     FORM1 < OESCOUNT
+            ADD       ONE,FORM1
+            WRITE     OECXFILE,SEQ;TILDA01,ANSO,ANSE,ANSS:
+                                   OESSEG01[FORM1],OESSEG02[FORM1]:
+                                   OESSEG03[FORM1],OESSEG04[FORM1]:
+                                   OESSEG05[FORM1],OESSEG06[FORM1]:
+                                   OESSEG07[FORM1],OESSEG08[FORM1]:
+                                   OESSEG09[FORM1],OESSEG10[FORM1]:
+                                   OESSEG11[FORM1],OESSEG12[FORM1]:
+                                   OESSEG13[FORM1]
+          DO
+.
+.         Write trailer to separate requests
+.
+          WRITE     OECXFILE,SEQ;TILDA01,ANST,ANSL,ANSR
+.
+          MOVE      ZERO,EXIT
+          GOTO      WSEG9999
+.
+WSEG9100  MOVE      ONE,EXIT
+.
+WSEG9999  RETURN
++
+.*****************************************************************************
+.*                           COMP0000              Called by: WOEV0000       *
+.*           Check for a Compensable claim                                   *
+.* Requires: Valid read on patmi1af for ACLAIM                               *
+.* Returns: CLAIMFLG   0 = Not a compensable claim                           *
+.*                     1 = DVA claim                                         *
+.*                     2 = Workers Compensation claim                        *
+.*                     3 = TAC claim                                         *
+.*****************************************************************************
+.
+COMP0000  MOVE      ZERO,CLAIMFLG                * initialise claim flag
+.
+          MATCH     SP3,ACLAIM                   * blank claim code ?
+          GOTO      COMP8000 IF EQUAL            * yes
+.
+          PACK      KEY5,ANSC,ANSL,ACLAIM
+          CALL      RDCODE1                      * claim code found ?
+          BRANCH    OVRCD,COMP8000               * no
+.
+          MOVE      ZERO,FORM1                   * initialise loop count
+          WHILE     FORM1 < 5
+            ADD       ONE,FORM1
+            LOAD      ANS,FORM1,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5
+            MATCH     ANSV,ANS                   * DVA claim ?
+            IF        @EQUAL
+              MOVE      ONE,CLAIMFLG             * yes
+              GOTO      COMP9000
+            ENDIF
+.
+            MATCH     ANSW,ANS                   * Workers comp claim ?
+            IF        @EQUAL
+              MOVE      TWO,CLAIMFLG             * yes
+              GOTO      COMP9000
+            ENDIF
+.
+            MATCH     ANSM,ANS                   * TAC claim ?
+            IF        @EQUAL
+              MOVE      THREE,CLAIMFLG           * yes
+              GOTO      COMP9000
+            ENDIF
+          DO
+.
+COMP8000  MOVE      ONE,EXIT
+          GOTO      COMP9999
+.
+COMP9000  MOVE      ZERO,EXIT
+.
+COMP9999  RETURN
++
+.*****************************************************************************
+.*                              EROR0000           Called by: WOEH0000       *
+.*            An error occured, so set the error fields       WOEV0000       *
+.*                                                            WOES0000       *
+.*****************************************************************************
+.
+EROR0000  ADD       ONE,ERRCOUNT                 * increment error counter
+.
+.         Only write the first error for the claim
+.
+          IF        ERRCOUNT = 1
+            PACK      PMOESTAT,SP1,FOUR
+            MOVE      "wPAS",PMOEERRC
+            PACK      PMOEERRD,ERORDESC,SP30,SP30,SP30,SP10
+          ENDIF
+.
+EROR9999  RETURN
++
+.******************************************************************************
+.*                                  GEEQ0000              Called by: WOES0000 *
+.*                         Get the Eclipse Equivalent Code                    *
+.* Requires:   PMOSITEM - Miscellaneous Charge code                           *
+.*             Valid read on patmissf.                                        *
+.* Returns:    EXIT  0 = EDI Equivalent code found                            *
+.*                   1 = EDI Equivalent code not found                        *
+.*             OESSEG09[OESCOUNT] - ServiceCode                               *
+.*             OESSEG10[OESCOUNT] - ServiceCodeTypeCode                       *
+.******************************************************************************
+.
+GEEQ0000  MOVE      ZERO,LOOPCNTR                * initialise counter
+.
+.         Look for a matching record in patmchgf for the item code using
+.         the following criteria:
+.            1. claim code, health fund/table, item code
+.            2. claim code, blank health fund/table, item code
+.            3. zero claim code, blank health fund/table, item code
+.
+          UNPACK    SP20,PTHFBCAT      * change "H/F Table" to "Table Type"
+          PACK      KEY14,AFUNDH,AFNDTB,SP20
+          CALL      RDFUND1            * "Table Type code" now in PTHFBCAT
+.
+GEEQ0500  PACK      KEY29,ACLAIM,AFUNDH,PTHFBCAT,PMOSITEM,PMOSPDTE
+          CALL      PATMCHRD                * read Misc.Charges file 
+          COMPARE   ZERO,EXIT
+          GOTO      GEEQ0600 IF EQUAL
+.                                           * - try a blank health fund
+          PACK      KEY29,ACLAIM,SP6,SP3,PMOSITEM,PMOSPDTE
+          CALL      PATMCHRD                * read Misc.Charges file 
+          COMPARE   ZERO,EXIT
+          GOTO      GEEQ0600 IF EQUAL
+.                                           * - last chance, try default Claim
+          PACK      KEY29,PTCNDCLM,SP6,SP3,PMOSITEM,PMOSPDTE
+          CALL      PATMCHRD                * read Misc.Charges file 
+          COMPARE   ZERO,EXIT
+          GOTO      GEEQ1000 IF NOT EQUAL   * Invalid - issue message
+.
+.                           * process the valid Item
+GEEQ0600  
+          MATCH     SP11,PTMCECEQ              * blank Eclipse equivalent ?
+          IF        @EQUAL
+            PACK      DIM11,MCHARGE,SP20       * yes - use charge code
+          ELSE
+            MOVE      PTMCECEQ,DIM11           * no - use Eclipse equiv.
+          ENDIF
+.
+.           If this is a DVA claim, then simply send the item code as it
+.           has been entered.
+.
+          IF        CLAIMFLG = 1
+            STRIP     DIM11
+            MOVELPTR  DIM11,FORM2
+            IF        FORM2 > 5
+              MOVE      "Misc. Charge code (",ERORDESC
+              ENDSET    ERORDESC
+              APPEND    DIM11,ERORDESC
+              APPEND    ") more than 5 characters in length",ERORDESC
+              RESET     ERORDESC
+              CALL      EROR0000
+              GOTO      GEEQ9500
+            ENDIF
+            PACK      DIM11,DIM11,SP20
+            MOVE      DIM11,OESSEG09[OESCOUNT]
+            MOVE      ANSM,OESSEG10[OESCOUNT]
+            GOTO      GEEQ9100
+          ENDIF
+.           
+.           This is not a DVA claim, so check if the Type of Service is set
+.           to a valid value 
+.           
+          MOVE      ZERO,FORM2
+          MOVE      PTMCECTS,FORM2
+          BRANCH    FORM2,GEEQ1100:            * external aid/prosthetics
+                          GEEQ1200:            * cosmetics
+                          GEEQ1300:            * dental
+                          GEEQ1400:            * drugs
+                          GEEQ1500:            * disposables
+                          GEEQ1600:            * exceptional drug list
+                          GEEQ1700:            * other - clinic
+                          GEEQ1800:            * other - home
+                          GEEQ1900:            * other
+                          GEEQ2000:            * psych - clinic
+                          GEEQ2100:            * psych - home
+                          GEEQ2200:            * psych
+                          GEEQ2300:            * c'wealth prosthetics
+                          GEEQ2400:            * rehab - clinic
+                          GEEQ2500:            * rehab - home
+                          GEEQ2600             * rehab
+.             
+.         Valid miscellaneous charge record not found
+.
+GEEQ1000  MOVE      "Misc. Charge code (",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    PMOSITEM,ERORDESC
+          APPEND    ") record not found with Eclipse Equivalent",ERORDESC
+          RESET     ERORDESC
+          CALL      EROR0000
+          GOTO      GEEQ9500
+.
+.         External Aid/Prosthetics
+.
+GEEQ1100  PACK      OESSEG09[OESCOUNT],ANSA,ANSP
+          MOVE      ANSP,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Cosmetics
+.
+GEEQ1200  PACK      OESSEG09[OESCOUNT],ANSC,ANSM
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Dental
+.
+GEEQ1300  PACK      OESSEG09[OESCOUNT],ANSD,ANSE
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Drugs
+.
+GEEQ1400  PACK      OESSEG09[OESCOUNT],ANSD,ANSR
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Disposables
+.
+GEEQ1500  PACK      OESSEG09[OESCOUNT],ANSD,ANSS
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Exceptional Drug List
+.
+GEEQ1600  PACK      OESSEG09[OESCOUNT],ANSD,ANSX
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Other - Clinic
+.
+GEEQ1700  PACK      OESSEG09[OESCOUNT],ANSO,ANSC
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Other - Home
+.
+GEEQ1800  PACK      OESSEG09[OESCOUNT],ANSO,ANSH
+          MOVE      ANSP,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Other
+.
+GEEQ1900  PACK      OESSEG09[OESCOUNT],ANSO,ANST
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Psych - Clinic
+.
+GEEQ2000  PACK      OESSEG09[OESCOUNT],ANSP,ANSC
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Psych - Home
+.
+GEEQ2100  PACK      OESSEG09[OESCOUNT],ANSP,ANSH
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Psych
+.
+GEEQ2200  PACK      OESSEG09[OESCOUNT],ANSP,ANSS
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         C'Wealth Prosthetics
+.
+GEEQ2300  PACK      OESSEG09[OESCOUNT],ANSP,ANSX
+          MOVE      ANSP,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Rehab - Clinic
+.
+GEEQ2400  PACK      OESSEG09[OESCOUNT],ANSR,ANSC
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Rehab - Home
+.
+GEEQ2500  PACK      OESSEG09[OESCOUNT],ANSR,ANSH
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.
+.         Rehab
+.
+GEEQ2600  PACK      OESSEG09[OESCOUNT],ANSR,ANSE
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      GEEQ9000
+.         
+.         Finish formatting ServiceCode
+.         
+GEEQ9000  ENDSET    OESSEG09[OESCOUNT]
+          APPEND    "00",OESSEG09[OESCOUNT]      * set default health provider
+          APPEND    DIM11,OESSEG09[OESCOUNT]
+          RESET     OESSEG09[OESCOUNT]
+          STRIP     OESSEG09[OESCOUNT]
+          ENDSET    OESSEG09[OESCOUNT]
+.
+          IF        FORM2 = 6 | FORM2 = 7 | FORM2 = 9
+            APPEND    ANSN,OESSEG09[OESCOUNT]    * set default session type
+          ENDIF
+          APPEND    SP20,OESSEG09[OESCOUNT]
+          RESET     OESSEG09[OESCOUNT]
+.
+GEEQ9100  MOVE      ZERO,EXIT
+          GOTO      GEEQ9999
+.
+GEEQ9500  MOVE      ONE,EXIT
+.
+GEEQ9999  RETURN
++
+.*****************************************************************************
+.*                              CONC0000           Called by: WPAT0000       *
+.*     See if the patient has concession card of DVA type on file            *
+.* Requires: PURNO - U/R number                                              *
+.* Returns:  EXIT  0 = valid concession card found                           *
+.*                 1 = no valid concession card found                        *
+.*           DIM20 - Concession Card Number                                  *
+.*****************************************************************************
+.
+CONC0000  MOVE      SP70,DIM20
+          PACK      KEY19,PURNO,TILDA40
+          CALL      RSPMCCD1                     * position on U/R
+CONC0500  CALL      RPPMCCD1                     * read previous record
+          BRANCH    OVRCD,CONC9100               * eof - nothing found
+.
+          MATCH     PURNO,PMCDURNO               * same U/R still ?
+          GOTO      CONC9100 IF NOT EQUAL        * no - nothing found
+.
+.         Check if the card type is DVA (Cat ct, Indicator 1)
+.
+          PACK      KEY5,CATCT,PMCDCTYP
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,CONC0500               * no - ignore record
+.
+          MATCH     SP1,TCINDC1                  * blank indicator 1 ?
+          GOTO      CONC0500 IF EQUAL            * yes - ignore record
+.
+          TYPE      TCINDC1                      * numeric indicator 1 ?
+          GOTO      CONC0500 IF NOT EQUAL        * no - ignore record
+.
+          MATCH     "3",TCINDC1                  * DVA card type ?
+          GOTO      CONC0500 IF NOT EQUAL        * no - ignore record
+.
+.         A DVA concession card has been found, so check
+.         if there is an expiry date
+.
+          MATCH     SP8,PMCDEXDT                 * expiry date blank ?
+          GOTO      CONC1000 IF EQUAL            * yes - assume valid
+.
+.         There is an expiry date for the card, so check that the
+.         card is current
+.
+          CALL      IBACLOCK
+          PACK      DIM8,CCC,CYY,CMM,CDD
+          REP       " 0",DIM8
+.         
+          MATCH     DIM8,PMCDEXDT                * card valid for date ?
+          GOTO      CONC9100 IF LESS             * no - nothing found
+.         
+.         Concession card is current
+.
+CONC1000  MATCH     SP20,PMCDCNUM                * card number blank ?
+          GOTO      CONC9100 IF EQUAL            * yes - nothing found
+.
+          MOVE      PMCDCNUM,DIM20               * load concession card number
+.
+          MOVE      ZERO,EXIT
+          GOTO      CONC9999
+.
+CONC9100  MOVE      ONE,EXIT
+.
+CONC9999  RETURN    
++
+.******************************************************************************
+.*                             FOEV0000            Called by: PROC0000        *
+.*                  Write the OEV (Voucher) segment Free Format OEC           *
+.* Returns: EXIT   0 = no errors occurred                                     *
+.*                 1 = one or more errors occurred                            *
+.******************************************************************************
+.
+FOEV0000  MOVE      SP8,HDRSEG01                 * initialise location
+.
+          MOVE      SP4,PMOEERRC                 * initialise error code
+          MOVE      SP8,OEVSEG16                 * set ServicingProviderNum
+          MOVE      SP20,OEVSEG04                * set FundPayeeId
+.
+.         Set default values for sender contact details.  These fields will
+.         be populated later in this routine, or in FOEH0000.
+.
+          MOVE      SP80,OEHSEG16                * SenderContactEmail
+          MOVE      SP40,OEHSEG17                * SenderContactPersonName
+          MOVE      SP20,OEHSEG18                * SenderContactPersonPhone
+.
+          PACK      KEY8,PMOEVISN,SP70
+          CALL      RDPMELFA1
+          IF        OVRCD = 1
+            PACK      KEY8,PMOEELEG,SP70
+            CALL      RDPMELFA1
+            IF        OVRCD = 1
+              MOVE      "Free Format OEC record missing.",ERORDESC
+              CALL      EROR0000
+              GOTO      FOEV9100
+            ENDIF
+          ENDIF
+.
+.         Set CompensationClaimInd
+.
+          CALL      FCMP0000                     * see if compensable claim
+          COMPARE   ZERO,CLAIMFLAG
+          IF        @EQUAL
+            MOVE      ANSN,OEVSEG02
+          ELSE
+            MOVE      ANSY,OEVSEG02
+          ENDIF
+.
+          COMPARE   ONE,IBCNMHOS                 * using multi-hospital
+          GOTO      FOEV0500 IF NOT EQUAL        * no
+.
+          PACK      KEY10,PMEFCUID,SP70
+          CALL      RDWBSE1
+          IF        OVRCD=ONE
+            MOVE      "Created By User record missing",ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ENDIF
+.
+          MATCH     SP3,WBSEHOSP                 * hospital id blank ?
+          IF        @EQUAL
+            MOVE      "Hospital id blank",ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ENDIF
+.
+          MOVE      WBSEHOSP,KEY3
+          CALL      RDPTHSP1                     * hospital code on file ?
+          IF        OVRCD = 1
+            MOVE      "Hospital code (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    WBSEHOSP,ERORDESC
+            APPEND    ") not on file",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ENDIF
+.
+          MATCH     SP8,PTHSLOCN                 * blank location for hosp. ?
+          IF        !@EQUAL
+            MOVE      PTHSLOCN,HDRSEG01          * set location id from hosp.
+          ENDIF
+.
+          MATCH     "1",PTHSUDVA                 * Using Cat. CL for DVA ?
+          GOTO      FOEV0500 IF NOT EQUAL        * no
+.
+.         "Using Category CL for DVA" is turned on for the hospital, so
+.         check if this is a DVA claim type
+.
+          COMPARE   ONE,CLAIMFLG                 * DVA claim type ?
+          GOTO      FOEV0700 IF EQUAL            * yes
+          GOTO      FOEV2000                     * no
+.
+.         Not using multi-hospital
+.
+FOEV0500  COMPARE   ONE,PTCNUEDC                 * Using Cat. CL for DVA ?
+          GOTO      FOEV2000 IF NOT EQUAL        * no
+.
+          COMPARE   ONE,CLAIMFLG                 * yes - DVA claim type ?
+          GOTO      FOEV2000 IF NOT EQUAL        * no
+.
+.         This is a DVA claim, so use the DVA number to set
+.         PatientFundMembershipNum.  If there is a DVA concession card on
+.         file, use the number from that
+.
+          MOVE      SP70,DIM20
+          CALL      FCNC0000                     * DVA conc card on file ?
+          BRANCH    EXIT,FOEV0700                * no
+.
+          MOVE      DIM20,OEVSEG10               * yes
+          GOTO      FOEV0800
+.
+FOEV0700  MATCH     SP10,PMEFDVAN
+          IF        @EQUAL
+            MOVE      "DVA number is blank",ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ELSE
+            PACK      OEVSEG10,PMEFDVAN,SP20
+          ENDIF
+.
+FOEV0800  MATCH     SP3,CVETINS
+          IF        @EQUAL
+            MOVE      "DVA participant code is blank",ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ENDIF
+.
+          MOVE      CVETINS,KEY3                 * set key for participant read
+          GOTO      FOEV3000
+.
+.         Not a DVA claim, so check if this is a health fund claim
+.
+FOEV2000  MATCH     SP6,PMEFHFND                 * blank health fund ?
+          IF        @EQUAL
+            MOVE      "Health Fund is blank",ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ENDIF
+.
+.         Load PatientFundMembershipNum
+.
+          MATCH     SP20,PMEFHFMN
+          IF        @EQUAL
+            MOVE      "Fund membership number is blank",ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ELSE
+            PACK      OEVSEG10,PMEFHFMN,SP20     * Health fund membership no
+          ENDIF
+.
+          PACK      KEY14,PMEFHFND,ZERO,ZERO,ZERO,ZERO,SP20
+          CALL      RDFUND1
+          IF        OVRCD = 1
+            MOVE      "Health Fund (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PMEFHFND,ERORDESC
+            APPEND    ") is not on file",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ENDIF
+.
+          MOVE      PMEFHFND,KEY6
+          CALL      RDPTFX11
+          IF        OVRCD = 1
+            MOVE      "Health Fund extension record (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PMEFHFND,ERORDESC
+            APPEND    ") not found",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ENDIF
+.
+.         Check if there are sender contact details for the health fund
+.         and load if present
+.
+          MATCH     SP80,PTFXSCEM                * blank sender contact email ?
+          IF        !@EQUAL
+            MOVE      PTFXSCEM,OEHSEG16          * no
+          ENDIF
+.
+          MATCH     SP40,PTFXSCPN                * blank sender contact name ?
+          IF        !@EQUAL
+            MOVE      PTFXSCPN,OEHSEG17          * no
+          ENDIF
+.
+          MATCH     SP20,PTFXSCPP                * blank sender contact phone ?
+          IF        !@EQUAL
+            MOVE      PTFXSCPP,OEHSEG18          * no
+          ENDIF
+.
+.         MATCH     SP3,PTHFHGRP
+.         IF        @EQUAL
+.           MOVE      "Health Fund Group is blank",ERORDESC
+.           CALL      EROR0000
+.           GOTO      FOEV9100
+.         ENDIF
+.
+          MATCH     SP70,PTFXECLP
+          IF        @EQUAL
+            MATCH     SP3,PTHFHGRP
+            IF        @EQUAL
+              MOVE      "Health Fund Group / Eclipse Participant is blank",ERORDESC
+              CALL      EROR0000
+              GOTO      FOEV9100
+            ELSE
+              MOVE      PTHFHGRP,KEY3
+            ENDIF
+          ELSE
+            MOVE      PTFXECLP,KEY3
+          ENDIF
+.
+.         MOVE      PTHFHGRP,KEY3
+FOEV3000  CALL      RDPTPAR1
+          IF        OVRCD = 1
+            MOVE      KEY3,ERORDESC
+            ENDSET    ERORDESC
+            APPEND    " is not an Eclipse participant",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      FOEV9100
+          ENDIF
+.
+          MOVE      PTPRCODE,OEHSEG09            * set FundBrandId
+.
+          MOVE      SP8,OEVSEG03                 * set default DischargeDate
+.         IF        ASTAT = 3
+.           MOVE      PMOEVISN,KEY8
+.           CALL      RDDSCH1
+.           IF        OVRCD = 0
+.             UNPACK    DDATE,CCENT,CYEAR,CMON,CDAY
+.             PACK      OEVSEG03,CDAY,CMON,CCENT,CYEAR   * set DischargeDate
+.           ENDIF
+.         ENDIF
+.
+          UNPACK    PMEFBDAT,CCENT,CYEAR,CMON,CDAY
+          PACK      OEVSEG07,CDAY,CMON,CCENT,CYEAR   * set PatientDateOfBirth
+          PACK      OEVSEG08,PMEFSNAM,SP30,SP10    * set PatientFamilyName
+          MOVE      PMEFFNAM,OEVSEG09            * set PatientFirstName
+          MOVE      SP70,OEVSEG15                * set PatientSecondInitial
+          MOVE      SP70,OEVSEG05                * set PatientAliasFamilyName
+          MOVE      SP70,OEVSEG06                * set PatientAliasFirstName
+          MOVE      SP70,OEVSEG11                * set PatientFundUPI
+.
+.         Set PatientGender
+.
+          MATCH     ANSF,PMEFGEND
+          IF        !@EQUAL
+            MATCH     ANSM,PMEFGEND
+            IF        !@EQUAL
+              MOVE      "Patient gender not valid",ERORDESC
+              CALL      EROR0000
+              GOTO      FOEV9100
+            ENDIF
+          ENDIF
+.
+          MOVE      PMEFGEND,OEVSEG12
+.
+.         Set PatientMedicareCardNum & PatientReferenceNum
+.
+          MOVE      SP70,OEVSEG13
+          MOVE      SP70,OEVSEG14
+.
+.         MATCH     SP10,PMEDI
+.         IF        !@EQUAL
+.           MOVE      PMEDI,OEVSEG13
+.           MATCH     SP2,PTMXMCCD
+.           IF        @EQUAL
+.             MOVE      "Medicare reference number is blank",ERORDESC
+.             CALL      EROR0000
+.             GOTO      WOEV9100
+.           ELSE
+.             MOVE      SP70,DIM2
+.             MOVE      PTMXMCCD,DIM2
+.             SQUEEZE   DIM2
+.             MATCH     "0",DIM2                 * leading zero ?
+.             IF        @EQUAL
+.               UNPACK    DIM2,ANS,OEVSEG14      * yes - take second char.
+.             ELSE
+.               MOVE      DIM2,OEVSEG14
+.             ENDIF
+.           ENDIF
+.         ENDIF
+.
+          UNPACK    PMEFEADT,CCENT,CYEAR,CMON,CDAY
+          PACK      OEVSEG01,CDAY,CMON,CCENT,CYEAR  * set AdmissionDate
+.
+          MOVE      ZERO,EXIT
+          GOTO      FOEV9999
+.
+FOEV9100  MOVE      ONE,EXIT
+.
+FOEV9999  RETURN
++
+.*****************************************************************************
+.*                           FCMP0000              Called by: FOEV0000       *
+.*           Check for a Compensable claim                                   *
+.* Requires: Valid read on patmi1af for PMEFCLTY                             *
+.* Returns: CLAIMFLG   0 = Not a compensable claim                           *
+.*                     1 = DVA claim                                         *
+.*                     2 = Workers Compensation claim                        *
+.*                     3 = TAC claim                                         *
+.*****************************************************************************
+.
+FCMP0000  MOVE      ZERO,CLAIMFLG                * initialise claim flag
+.
+          MATCH     SP3,PMEFCLTY                 * blank claim code ?
+          GOTO      FCMP8000 IF EQUAL            * yes
+.
+          PACK      KEY5,ANSC,ANSL,PMEFCLTY
+          CALL      RDCODE1                      * claim code found ?
+          BRANCH    OVRCD,FCMP8000               * no
+.
+          MOVE      ZERO,FORM1                   * initialise loop count
+          WHILE     FORM1 < 5
+            ADD       ONE,FORM1
+            LOAD      ANS,FORM1,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5
+            MATCH     ANSV,ANS                   * DVA claim ?
+            IF        @EQUAL
+              MOVE      ONE,CLAIMFLG             * yes
+              GOTO      FCMP9000
+            ENDIF
+.
+            MATCH     ANSW,ANS                   * Workers comp claim ?
+            IF        @EQUAL
+              MOVE      TWO,CLAIMFLG             * yes
+              GOTO      FCMP9000
+            ENDIF
+.
+            MATCH     ANSM,ANS                   * TAC claim ?
+            IF        @EQUAL
+              MOVE      THREE,CLAIMFLG           * yes
+              GOTO      FCMP9000
+            ENDIF
+          DO
+.
+FCMP8000  MOVE      ONE,EXIT
+          GOTO      FCMP9999
+.
+FCMP9000  MOVE      ZERO,EXIT
+.
+FCMP9999  RETURN
++
+.*****************************************************************************
+.*                              FCNC0000           Called by: WPAT0000       *
+.*     See if the patient has concession card of DVA type on file            *
+.* Requires: PMEFURNO - U/R number                                           *
+.* Returns:  EXIT  0 = valid concession card found                           *
+.*                 1 = no valid concession card found                        *
+.*           DIM20 - Concession Card Number                                  *
+.*****************************************************************************
+.
+FCNC0000  MOVE      SP70,DIM20
+          MATCH     SP70,PMEFURNO
+          GOTO      FCNC9100 IF EQUAL
+          GOTO      FCNC9100 IF EOS
+.
+          PACK      KEY19,PMEFURNO,TILDA40
+          CALL      RSPMCCD1                     * position on U/R
+FCNC0500  CALL      RPPMCCD1                     * read previous record
+          BRANCH    OVRCD,FCNC9100               * eof - nothing found
+.
+          MATCH     PMEFURNO,PMCDURNO               * same U/R still ?
+          GOTO      FCNC9100 IF NOT EQUAL        * no - nothing found
+.
+.         Check if the card type is DVA (Cat ct, Indicator 1)
+.
+          PACK      KEY5,CATCT,PMCDCTYP
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,FCNC0500               * no - ignore record
+.
+          MATCH     SP1,TCINDC1                  * blank indicator 1 ?
+          GOTO      FCNC0500 IF EQUAL            * yes - ignore record
+.
+          TYPE      TCINDC1                      * numeric indicator 1 ?
+          GOTO      FCNC0500 IF NOT EQUAL        * no - ignore record
+.
+          MATCH     "3",TCINDC1                  * DVA card type ?
+          GOTO      FCNC0500 IF NOT EQUAL        * no - ignore record
+.
+.         A DVA concession card has been found, so check
+.         if there is an expiry date
+.
+          MATCH     SP8,PMCDEXDT                 * expiry date blank ?
+          GOTO      FCNC1000 IF EQUAL            * yes - assume valid
+.
+.         There is an expiry date for the card, so check that the
+.         card is current
+.
+          CALL      IBACLOCK
+          PACK      DIM8,CCC,CYY,CMM,CDD
+          REP       " 0",DIM8
+.
+          MATCH     DIM8,PMCDEXDT                * card valid for date ?
+          GOTO      FCNC9100 IF LESS             * no - nothing found
+.
+.         Concession card is current
+.
+FCNC1000  MATCH     SP20,PMCDCNUM                * card number blank ?
+          GOTO      FCNC9100 IF EQUAL            * yes - nothing found
+.
+          MOVE      PMCDCNUM,DIM20               * load concession card number
+.
+          MOVE      ZERO,EXIT
+          GOTO      FCNC9999
+.
+FCNC9100  MOVE      ONE,EXIT
+.
+FCNC9999  RETURN
++
+.******************************************************************************
+.*                             FOEH0000            Called by: PROC0000        *
+.*                  Write the OEH segment details                             *
+.* Requires: FOEV0000 previously executed to read various files               *
+.* Returns: EXIT   0 = no errors occurred                                     *
+.*                 1 = one or more errors occurred                            *
+.******************************************************************************
+.
+FOEH0000  MOVE      "ECF",OEHSEG01               * set OECTypeCde
+          MOVE      "Y",OEHSEG02                 * set SubmissionAuthoriseInd
+          MOVE      SP8,OEHSEG03                 * set AccidentDate
+          MOVE      SP1,OEHSEG04                 * set AccidentInd
+          MOVE      PMOEARID,OEHSEG05
+          SQUEEZE   OEHSEG05
+          PACK      OEHSEG05,OEHSEG05,SP20       * set AccountReferenceId
+          MOVE      SP2,OEHSEG06                 * set ClaimTypeCde
+.         MOVE      SP1,OEHSEG07                 * set EmergencyAdmissionInd
+          MOVE      SP1,OEHSEG19                 * set ServiceTypeCde
+.
+.         Set default values for Presenting Illness.  One of these fields must
+.         be populated later in this routine.
+.
+          MOVE      SP3,OEHSEG12                 * set PresentingIllnessCode
+          MOVE      SP5,OEHSEG13                 * set PresentingIllnessNum
+.
+.         Set FacilityId
+.
+          IF        IBCNMHOS = 1
+            MOVE      PTHSAPPR,OEHSEG08
+          ELSE
+            MOVE      CAPPRVNO,OEHSEG08
+          ENDIF
+.
+.         Load PEARequestInd,EmergencyAdmissionInd
+.
+.         MOVE      PMOEVISN,KEY8
+.         CALL      RDPTELG1
+.         IF        OVRCD = 1
+.           MOVE      "Eligibility record missing for visit",ERORDESC
+.           CALL      EROR0000
+.           GOTO      WOEH9100
+.         ENDIF
+.
+          MATCH     "1",PMEFPEAI
+          IF        @EQUAL
+            MOVE      ANSY,OEHSEG11
+          ELSE
+            MOVE      ANSN,OEHSEG11
+          ENDIF
+.
+          MATCH     "1",PMEFEMAD
+          IF        @EQUAL
+            MOVE      ANSY,OEHSEG07
+          ELSE
+            MOVE      ANSN,OEHSEG07
+          ENDIF
+.
+.         Load PresentingIllnessCode
+.
+          MATCH     SP70,PMEFPRIM
+          GOTO      FOEH1000 IF NOT EQUAL
+.
+          MATCH     SP3,PMEFPRIC                 * blank pres. illness code ?
+          GOTO      FOEH1000 IF EQUAL            * yes - check patmi1af.ambs
+.
+          PACK      KEY5,ANSIL,PMEFPRIC
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,FOEH1000               * no
+.
+          MATCH     SP4,THCSCOD                  * blank state HCP equivalent ?
+          GOTO      FOEH1000 IF EQUAL            * yes - check patmi1af.ambs
+.
+.         Presenting Illness codes are 3 digit codes, so check the code
+.         we have is valid
+.
+          MOVE      THCSCOD,DIM4
+          STRIP     DIM4
+          MOVELPTR  DIM4,FORM1
+          IF        FORM1 > 3
+            MOVE      "Presenting Illness Code (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PMEFPRIC,ERORDESC
+            APPEND    " - Cat ",ERORDESC
+            APPEND    "il",ERORDESC
+            APPEND    ", HDP Eq.) too long",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      FOEH9100
+          ENDIF
+.
+          TYPE      DIM4
+          IF        !@EQUAL
+            MOVE      "Presenting Illness Code (",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    PMEFPRIC,ERORDESC
+            APPEND    " - Cat ",ERORDESC
+            APPEND    "il",ERORDESC
+            APPEND    ", HDP Eq.) not numeric",ERORDESC
+            RESET     ERORDESC
+            CALL      EROR0000
+            GOTO      FOEH9100
+          ENDIF
+.
+          MOVE      THCSCOD,OEHSEG12             * set PresentingIllnessItemCode
+          GOTO      FOEH2000
+.
+.         There was no presenting illness code, so check for a CMBS item number
+.
+FOEH1000  MATCH     SP9,PMEFPRIM
+          IF        @EQUAL
+            MOVE      "Presenting Illness not found",ERORDESC
+            CALL      EROR0000
+            GOTO      FOEH9100
+          ENDIF
+.
+          MOVE      PMEFPRIM,DIM9
+          STRIP     DIM9
+          MOVELPTR  DIM9,FORM1
+          IF        FORM1 > 5
+            MOVE      "Presenting Illness Number too long",ERORDESC
+            CALL      EROR0000
+            GOTO      FOEH9100
+          ENDIF
+          MOVE      PMEFPRIM,OEHSEG13            * set PresentingIllnessItemNum
+.
+FOEH2000  MOVE      SP8,OEHSEG14                 * set PrincipalProviderNum
+.
+.         Set SameDayCode and LengthOfStay.
+.         Load default values based on estimated LOS.
+.
+          MATCH     "  0",PMEFPLOS
+          IF        @EQUAL
+            MOVE      ANSY,OEHSEG15              * default to sameday
+          ELSE
+            MOVE      ANSN,OEHSEG15              * default to overnight
+          ENDIF
+.
+.         Get discharge intention
+.
+.         IF        PTCNDSCI=0
+.           MOVE      "P ",TCODE
+.           MOVE      PMEFDINT,ACODE
+.         ELSE
+.           LOAD      TCODE,PTCNDSCI,CATU1,CATU2,CATU3,CATU4,CATU5,CATVI
+.           LOAD      ACODE,PTCNDSCI,AUSR1,AUSR2,AUSR3,AUSR4,AUSR5,PMVXIDUS
+.         ENDIF
+.
+          MOVE      "VI",TCODE
+          MOVE      PMEFISTY,ACODE
+.
+          MATCH     SP3,ACODE
+          IF        !@EQUAL
+            PACK      KEY5,TCODE,ACODE
+            CALL      RDCODE1                    * Read a codes file record
+            IF        OVRCD = 0
+              MATCH     "1",TCINDC1
+              IF        @EQUAL
+                MOVE      ANSN,OEHSEG15
+              ENDIF
+              MATCH     "2",TCINDC1
+              IF        @EQUAL
+                MOVE      ANSY,OEHSEG15
+              ENDIF
+            ENDIF
+          ENDIF
+.
+.         If this is an overnight stay, then make sure that the estimated LOS
+.         (pmselfaf.pmefplos) is greater than zero.
+.
+          MATCH     ANSN,OEHSEG15
+          IF        @EQUAL
+            RJUSTIFY  PMEFPLOS
+            MATCH     "  0",PMEFPLOS
+            IF        @EQUAL
+              MOVE      "Length Of Stay cannot be zero",ERORDESC
+              CALL      EROR0000
+              GOTO      FOEH9100
+            ELSE
+              MOVE      PMEFPLOS,OEHSEG10
+              RJUSTIFY  OEHSEG10
+              REP       " 0",OEHSEG10
+            ENDIF
+          ENDIF
+.
+.         If this is a sameday stay, then make sure that the estimated LOS
+.         (pmselfaf.pmefplos) is zero.
+.
+          MATCH     ANSY,OEHSEG15
+          IF        @EQUAL
+            RJUSTIFY  PMEFPLOS
+            MATCH     "  0",PMEFPLOS
+            IF        !@EQUAL
+              MOVE      "Length Of Stay must be zero",ERORDESC
+              CALL      EROR0000
+              GOTO      FOEH9100
+            ELSE
+              MOVE      SP3,OEHSEG10
+            ENDIF
+          ENDIF
+.
+.         Check if the sender contact details have been loaded from the health
+.         fund.  If not, set the fields using the default parameter settings.
+.
+          MATCH     SP80,PTFXSCEM                * blank sender contact email ?
+          IF        @EQUAL
+            MOVE      PTCNSCEM,OEHSEG16          * yes
+          ENDIF
+.
+          MATCH     SP40,PTFXSCPN                * blank sender contact name ?
+          IF        @EQUAL
+            MOVE      PTCNSCPN,OEHSEG17          * yes
+          ENDIF
+.
+          MATCH     SP20,PTFXSCPP                * blank sender contact phone ?
+          IF        @EQUAL
+            MOVE      PTCNSCPP,OEHSEG18          * yes
+          ENDIF
+.
+          MOVE      PMOECNTR,OEHSEG20            * set iSOFT report count
+.
+          MOVE      ZERO,EXIT
+          GOTO      FOEH9999
+.
+FOEH9100  MOVE      ONE,EXIT
+.
+FOEH9999  RETURN
++
+.******************************************************************************
+.*                             FOES0000            Called by: PROC0000        *
+.*                  Write the OES (services) segment                          *
+.* Returns: EXIT   0 = no errors occurred                                     *
+.*                 1 = one or more errors occurred                            *
+.******************************************************************************
+.
+FOES0000  MOVE      ZERO,OESCOUNT                * initialise oes counter
+.
+          PACK      KEY14,PMOEVISN,PMOECNTR,SP20
+          CALL      RSPMOES1                     * position on visit/report
+FOES0500  CALL      RKPMOES1                     * read next record
+          BRANCH    OVRCD,FOES9000               * eof - finished
+.
+          MATCH     PMOEVISN,PMOSVISN            * same visit still ?
+          GOTO      FOES9000 IF NOT EQUAL        * no - finished
+.
+          MATCH     PMOECNTR,PMOSCNTR            * same report count still ?
+          GOTO      FOES9000 IF NOT EQUAL        * no - finished
+.
+          ADD       ONE,OESCOUNT                 * increment oes count
+.
+          MOVE      SP1,OESSEG01[OESCOUNT]       * set AfterCareOverrideInd
+.
+.         Load the ServiceCode
+.
+          MATCH     "6",PMOSRTYP                 * Miscellaneous charge ?
+          IF        !@EQUAL
+            MOVE      "Service Record Type not valid",ERORDESC
+            CALL      EROR0000
+            GOTO      FOES9100
+          ENDIF
+.
+          CALL      FEEQ0000                     * get Eclipse equivalent
+          BRANCH    EXIT,FOES9100                * error occurred
+.
+          UNPACK    PMOSPDTE,CCENT,CYEAR,CMON,CDAY
+          PACK      OESSEG03[OESCOUNT],CDAY,CMON,CCENT,CYEAR * set DateOfService
+          MOVE      SP1,OESSEG04[OESCOUNT]     * set DuplicateServiceOverrideInd
+          MOVE      SP1,OESSEG05[OESCOUNT]       * set FieldQuantity
+          MOVE      SP5,OESSEG06[OESCOUNT]       * set ItemNum
+          MOVE      SP2,OESSEG07[OESCOUNT]       * set NoOfPatientsSeen
+          MOVE      SP1,OESSEG08[OESCOUNT]       * set RestrictionOverrideInd
+.
+          MOVE      PMOSQUAN,FORM3
+          IF        FORM3 > 99
+            MOVE      "Service Quantity is greater than 99",ERORDESC
+            CALL      EROR0000
+            GOTO      FOES9100
+          ENDIF
+          MOVE      FORM3,FORM2
+          MOVE      FORM2,OESSEG11[OESCOUNT]     * set ServiceQuantity
+.
+          ASSIGN    (MPATPOR+MHFPOR),FORM12P2
+          MOVE      FORM12P2,DIM15
+          UNPACK    DIM15,KEY5,KEY7,ANS,KEY2
+          PACK      KEY9,KEY7,KEY2
+          REP       " 0",KEY9
+          MOVE      KEY9,OESSEG12[OESCOUNT]      * set ServiceRate
+.
+          ASSIGN    ((MPATPOR+MHFPOR)*FORM2),FORM12P2
+          MOVE      FORM12P2,DIM15
+          UNPACK    DIM15,KEY5,KEY7,ANS,KEY2
+          PACK      KEY9,KEY7,KEY2
+          REP       " 0",KEY9
+          MOVE      KEY9,OESSEG02[OESCOUNT]      * set ChargeAmount
+.
+          GOTO      FOES0500                     * get next service
+.
+FOES9000  MOVE      ZERO,EXIT
+          GOTO      FOES9999
+.
+FOES9100  MOVE      ONE,EXIT
+.
+FOES9999  RETURN
++
+.******************************************************************************
+.*                                  FEEQ0000              Called by: FOES0000 *
+.*                         Get the Eclipse Equivalent Code                    *
+.* Requires:   PMOSITEM - Miscellaneous Charge code                           *
+.* Returns:    EXIT  0 = EDI Equivalent code found                            *
+.*                   1 = EDI Equivalent code not found                        *
+.*             OESSEG09[OESCOUNT] - ServiceCode                               *
+.*             OESSEG10[OESCOUNT] - ServiceCodeTypeCode                       *
+.******************************************************************************
+.
+FEEQ0000  MOVE      ZERO,LOOPCNTR                * initialise counter
+.
+.         Look for a matching record in patmchgf for the item code using
+.         the following criteria:
+.            1. claim code, health fund/table, item code
+.            2. claim code, blank health fund/table, item code
+.            3. zero claim code, blank health fund/table, item code
+.
+          UNPACK    SP20,PTHFBCAT      * change "H/F Table" to "Table Type"
+          PACK      KEY14,PMEFHFND,PMEFHFNT,SP20
+          CALL      RDFUND1            * "Table Type code" now in PTHFBCAT
+.
+FEEQ0500  PACK      KEY29,PMEFCLTY,PMEFHFND,PTHFBCAT,PMOSITEM,PMOSPDTE
+          CALL      PATMCHRD                * read Misc.Charges file
+          COMPARE   ZERO,EXIT
+          GOTO      FEEQ0600 IF EQUAL
+.                                           * - try a blank health fund
+          PACK      KEY29,PMEFCLTY,SP6,SP3,PMOSITEM,PMOSPDTE
+          CALL      PATMCHRD                * read Misc.Charges file
+          COMPARE   ZERO,EXIT
+          GOTO      FEEQ0600 IF EQUAL
+.                                           * - last chance, try default Claim
+          PACK      KEY29,PTCNDCLM,SP6,SP3,PMOSITEM,PMOSPDTE
+          CALL      PATMCHRD                * read Misc.Charges file
+          COMPARE   ZERO,EXIT
+          GOTO      FEEQ1000 IF NOT EQUAL   * Invalid - issue message
+.
+.                           * process the valid Item
+FEEQ0600
+          MATCH     SP11,PTMCECEQ              * blank Eclipse equivalent ?
+          IF        @EQUAL
+            PACK      DIM11,MCHARGE,SP20       * yes - use charge code
+          ELSE
+            MOVE      PTMCECEQ,DIM11           * no - use Eclipse equiv.
+          ENDIF
+.
+.           If this is a DVA claim, then simply send the item code as it
+.           has been entered.
+.
+          IF        CLAIMFLG = 1
+            STRIP     DIM11
+            MOVELPTR  DIM11,FORM2
+            IF        FORM2 > 5
+              MOVE      "Misc. Charge code (",ERORDESC
+              ENDSET    ERORDESC
+              APPEND    DIM11,ERORDESC
+              APPEND    ") more than 5 characters in length",ERORDESC
+              RESET     ERORDESC
+              CALL      EROR0000
+              GOTO      FEEQ9500
+            ENDIF
+            PACK      DIM11,DIM11,SP20
+            MOVE      DIM11,OESSEG09[OESCOUNT]
+            MOVE      ANSM,OESSEG10[OESCOUNT]
+            GOTO      FEEQ9100
+          ENDIF
+.
+.           This is not a DVA claim, so check if the Type of Service is set
+.           to a valid value
+.
+          MOVE      ZERO,FORM2
+          MOVE      PTMCECTS,FORM2
+          BRANCH    FORM2,FEEQ1100:            * external aid/prosthetics
+                          FEEQ1200:            * cosmetics
+                          FEEQ1300:            * dental
+                          FEEQ1400:            * drugs
+                          FEEQ1500:            * disposables
+                          FEEQ1600:            * exceptional drug list
+                          FEEQ1700:            * other - clinic
+                          FEEQ1800:            * other - home
+                          FEEQ1900:            * other
+                          FEEQ2000:            * psych - clinic
+                          FEEQ2100:            * psych - home
+                          FEEQ2200:            * psych
+                          FEEQ2300:            * c'wealth prosthetics
+                          FEEQ2400:            * rehab - clinic
+                          FEEQ2500:            * rehab - home
+                          FEEQ2600             * rehab
+.
+.         Valid miscellaneous charge record not found
+.
+FEEQ1000  MOVE      "Misc. Charge code (",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    PMOSITEM,ERORDESC
+          APPEND    ") record not found with Eclipse Equivalent",ERORDESC
+          RESET     ERORDESC
+          CALL      EROR0000
+          GOTO      FEEQ9500
+.
+.         External Aid/Prosthetics
+.
+FEEQ1100  PACK      OESSEG09[OESCOUNT],ANSA,ANSP
+          MOVE      ANSP,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Cosmetics
+.
+FEEQ1200  PACK      OESSEG09[OESCOUNT],ANSC,ANSM
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Dental
+.
+FEEQ1300  PACK      OESSEG09[OESCOUNT],ANSD,ANSE
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Drugs
+.
+FEEQ1400  PACK      OESSEG09[OESCOUNT],ANSD,ANSR
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Disposables
+.
+FEEQ1500  PACK      OESSEG09[OESCOUNT],ANSD,ANSS
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Exceptional Drug List
+.
+FEEQ1600  PACK      OESSEG09[OESCOUNT],ANSD,ANSX
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Other - Clinic
+.
+FEEQ1700  PACK      OESSEG09[OESCOUNT],ANSO,ANSC
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Other - Home
+.
+FEEQ1800  PACK      OESSEG09[OESCOUNT],ANSO,ANSH
+          MOVE      ANSP,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Other
+.
+FEEQ1900  PACK      OESSEG09[OESCOUNT],ANSO,ANST
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Psych - Clinic
+.
+FEEQ2000  PACK      OESSEG09[OESCOUNT],ANSP,ANSC
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Psych - Home
+.
+FEEQ2100  PACK      OESSEG09[OESCOUNT],ANSP,ANSH
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Psych
+.
+FEEQ2200  PACK      OESSEG09[OESCOUNT],ANSP,ANSS
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         C'Wealth Prosthetics
+.
+FEEQ2300  PACK      OESSEG09[OESCOUNT],ANSP,ANSX
+          MOVE      ANSP,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Rehab - Clinic
+.
+FEEQ2400  PACK      OESSEG09[OESCOUNT],ANSR,ANSC
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Rehab - Home
+.
+FEEQ2500  PACK      OESSEG09[OESCOUNT],ANSR,ANSH
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Rehab
+.
+FEEQ2600  PACK      OESSEG09[OESCOUNT],ANSR,ANSE
+          MOVE      ANSM,OESSEG10[OESCOUNT]
+          GOTO      FEEQ9000
+.
+.         Finish formatting ServiceCode
+.
+FEEQ9000  ENDSET    OESSEG09[OESCOUNT]
+          APPEND    "00",OESSEG09[OESCOUNT]      * set default health provider
+          APPEND    DIM11,OESSEG09[OESCOUNT]
+          RESET     OESSEG09[OESCOUNT]
+          STRIP     OESSEG09[OESCOUNT]
+          ENDSET    OESSEG09[OESCOUNT]
+.
+          IF        FORM2 = 6 | FORM2 = 7 | FORM2 = 9
+            APPEND    ANSN,OESSEG09[OESCOUNT]    * set default session type
+          ENDIF
+          APPEND    SP20,OESSEG09[OESCOUNT]
+          RESET     OESSEG09[OESCOUNT]
+.
+FEEQ9100  MOVE      ZERO,EXIT
+          GOTO      FEEQ9999
+.
+FEEQ9500  MOVE      ONE,EXIT
+.
+FEEQ9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD002IO
+.
+          INC       CLPATDSC
+          INC       PATMCHRD                * Miscellaneous Charges read routine
+.
+          INC       PATCODIO/INC
+          INC       PATCRTIO/INC
+          INC       PATDSCIO/INC
+          INC       PATELGIO/INC
+          INC       PATFN1IO/INC
+          INC       PATFX1IO/INC
+          INC       PATHSPIO/INC
+          INC       PATMA1IO/INC
+          INC       PATMCHIO/INC
+          INC       PATMI1IO/INC
+          INC       PATPARIO/INC
+          INC       PMSELFIO/INC
+          INC       PMSCCDIO/INC
+          INC       PMSOECIO/INC
+          INC       PMSOESIO/INC
+          INC       PMSPX2IO/INC
+          INC       PMSVX1IO/INC
+.
+          INC       WEBSECIO/INC

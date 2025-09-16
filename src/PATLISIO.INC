@@ -1,0 +1,47 @@
+.
+. PATLISIO.INC
+. ------------
+. Filename       :  patlisaf
+. Description    :  Level of Insurance
+. Variables      :  OVRCD     FORM      1
+. Keys           :  KEY14
+. Modifications  :
+.
+. Index 1 KEY14
+.
+RAPTLIS1  MOVE      ZERO,OVRCD
+          RESET     KEY14
+          READ      PATLISA1,KEY14;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSPTLIS1  RESET     KEY14
+          READ      PATLISA1,KEY14;;
+          RETURN
+.
+RDPTLIS1  MOVE      ZERO,OVRCD
+          RESET     KEY14
+          READ      PATLISA1,KEY14;PTLIFUND,PTLITABL,PTLILINS,PTLISPAR 
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPTLIS1  MOVE      ZERO,OVRCD
+          READKS    PATLISA1;PTLIFUND,PTLITABL,PTLILINS,PTLISPAR 
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPTLIS1  MOVE      ZERO,OVRCD
+          READKP    PATLISA1;PTLIFUND,PTLITABL,PTLILINS,PTLISPAR 
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPTLIS1  UPDATE    PATLISA1;PTLIFUND,PTLITABL,PTLILINS,PTLISPAR 
+          RETURN
+.
+WRPTLIS1  RESET     KEY14
+          WRITE     PATLISA1,KEY14;PTLIFUND,PTLITABL,PTLILINS,PTLISPAR 
+          RETURN
+.
+DEPTLIS1  RESET     KEY14
+          DELETE    PATLISA1,KEY14
+          RETURN

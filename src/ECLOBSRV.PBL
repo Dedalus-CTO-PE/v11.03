@@ -1,0 +1,1764 @@
+.******************************************************************************
+.* System         : Eclipse                                                   *
+.* Program        : ECLOBSRV.PBL                                              *
+.* Name           : Eclipse Outbound Request Server                           *
+.******************************************************************************
+.* Date           : 08/04/2008                                                *
+.* Author         : Davin Sloan                                               *
+.* Function       : Process outbound requests for outstanding Eclipse claims  *
+.*                                                                            *
+.* Modifications  :                                                           *
+.*       V11.00.03  13/10/2020  Peter Vela       TSK 0893237                  *
+.*                  Added one day status request to RMRQ0000                  *
+.*       V11.00.02  22/04/2020  Peter Vela       TSK 0874025                  *
+.*                  Recompiled for PRIECTFD                                   *
+.*       V11.00.01  17/04/2020  Peter Vela       TSK 0874025                  *
+.*                  Recompiled for PRIECTFD                                   *
+.*       V10.14.02  22/05/2019  Peter Vela       TSK 0875081                  *
+.*                  Added validation for expired certificate before each      *
+.*                  occurence of WRPMETR1                                     *
+.*       V10.14.01  07/02/2019  Peter Vela       TSK 0867807                  *
+.*                  Added validation to stop retrieve of payment report       *
+.*                  if claim benefit amount is zero PROB0000                  *
+.*       V10.13.03  14/01/2018  Peter Vela       TSK 0859743                  *
+.*                  Fixed positional read to OUTECT RSTB2000                  *
+.*       V10.13.02  21/12/2018  Peter Vela       TSK 0859743                  *
+.*                  Recompiled for OUTECTFD                                   *
+.*       V10.13.01  08/10/2018  Peter Vela       TSK 0859743                  *
+.*                  Added Bulk Billing Assessment Reports and                 *
+.*                  Payment Reports                                           *
+.*       V10.08.03  06/07/2016  Peter Vela       TSK 0294177                  *
+.*                  Added IMC functionality                                   *
+.*       V10.08.02  23/06/2016  Peter Vela       TSK 0819748                  *
+.*                  Added validation for amount paid in ESCL1000              *
+.*       V10.08.01  06/05/2016  Peter Vela       TSK 0816422                  *
+.*                  Initialise PMETEROR to spaces in RSTA0500                 *
+.*       V10.04.02  10/07/2014  Peter Vela       CAR 246097                   *
+.*                  Changed email escalation functionality to group           *
+.*                  by escalation days                                        *
+.*       V10.04.01  06/03/2014  Peter Vela       CAR 298266                   *
+.*                  Added check for fund transaction id in CLOS0000           *
+.*                  06/03/2014  Peter Vela       CAR 297276                   *
+.*                  Changed pmsecaaf index 1 to index 3                       *
+.*       V10.03.01  06/05/2012  Peter Vela       CAR 265848                   *
+.*                  Added PRCETR00 - Remove Status Requests and Report        *
+.*                  Requests from pmsetraf at the start of processing         *
+.*       V10.02.01  09/09/2011  Steve Armstrong  CAR 250685                   *
+.*                  Mods to load PMETFDTM & PMETTDTM for ERA status requests. *
+.******************************************************************************
+.*       V9.12.05   10/03/2010  Peter Vela       CAR 217793                   *
+.*                  Added delete of duplicate pmsecoaf record @ CLOS0000      *
+.*                  to prevent I * U                                          *
+.*       V9.12.04   06/11/2009  Peter Vela       CAR 208626                   *
+.*                  Cater for time sync issue in PROC4000.                    *
+.*                  Loop back to next history record when Trans Id do not     *
+.*                  match                                                     *
+.*       V9.12.03   29/10/2009  Peter Vela       CAR 208626                   *
+.*                  Added status request for Error 3002.                      *
+.*       V9.12.02   29/06/2009  Peter Vela       CAR 199638                   *
+.*                  Check for status 2 in RSTA0000. If status = 2 then don't  *
+.*                  validate transaction id.                                  *
+.*       V9.12.01   26/06/2009  Davin            CAR 199638                   *
+.*                  Commented out check on status request type (RSTA0000).    *
+.*                  Will now send requests regardless of last type on pmseca. *
+.******************************************************************************
+.*       V9.11.01   20/04/2009  Davin            CAR 183976                   *
+.*                  Send a remittance request for each active location if     *
+.*                  multihospital is set to yes (rmrq0000)                    *
+.*       V9.11.00   17/12/2008  Steve Armstrong  CAR 183976                   *
+.*                  Ported from V6.16.05                                      *
+.******************************************************************************
+.
+          INC       STD002FD
+.
+          INC       PATCONFD/INC
+.
+          INC       OUTIBHFD/INC       * Eclipse Batch Header Table BLK
+          INC       OUTECAFD/INC       * Eclipse Claim Transaction Audit BLK
+          INC       OUTECTFD/INC       * Eclipse Claim Transaction Table BLK
+          INC       OUTEAHFD/INC       * Eclipse Processing Report Header
+.
+          INC       PMSEBHFD/INC       * Eclipse Batch Header Table IHC
+          INC       PRIIBHFD/INC       * Eclipse Batch Header Table IMC
+          INC       PMSECAFD/INC       * Eclipse Claim Transaction Audit IHC
+          INC       PRIECAFD/INC       * Eclipse Claim Transaction Audit IMC
+          INC       PMSECOFD/INC       * Eclipse Outstanding Processing Report
+          INC       PMSECTFD/INC       * Eclipse Claim Transaction Table IHC
+          INC       PRIECTFD/INC       * Eclipse Claim Transaction Table IMC
+          INC       PMSETRFD/INC       * Eclipse Transaction Request Table
+          INC       PATCRTFD/INC       * Eclipse Certificate Table
+          INC       PATINVFD/INC
+          INC       PATLCNFD/INC       * Eclipse Location Table
+.
+. LOCAL VARIABLES
+. ---------------   
+CHCKDATE  DATE      8
+CMDLINE   DIM       127
+COUNTER   FORM      1
+CURRDATE  DIM       8
+DIM8      DIM       8
+EMAILADR  DIM       80       * email address for escalations
+EMAILFLG  FORM      1        * send escalation email? (1=Yes/0=No)
+EMALFLG1  FORM      1
+EMALFLG2  FORM      1
+EMALFLG3  FORM      1
+ERRMESSG  DIM       50
+ESCLDAYS  DIM       2
+FORM2A    FORM      2
+FORM8A    FORM      8
+FORM12P2  FORM      12.2
+SAVEDATE  DATE      8
+SAVKEY31  DIM       31
+TYPOFREQ  FORM      2        * type of request: 1=status/2=get partic/3=report
+ZERO00    FORM      "0.00"
+.
+. PROGRAM CONSTANTS
+. -----------------
+TILDA31   INIT      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+.
+.
+PRGID     INIT      "ECLOBSRV"
+PRGNAM    INIT      "Eclipse Outbound Request Server"
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                 MAIN0000                                   *
+.*                       Controlling Logic (Mainline code)                    *
+.******************************************************************************
+MAIN0000  CALL      SETX0000                * Setup common variables
+.
+          CALL      INIT0000                * Initialise variables & open files
+          BRANCH    EXIT,MAIN9999           * not using eclipse
+.
+          CALL      PRCETR00                * Remove excess status requests
+.                                           * and report requests from pmsetraf
+.                                           * at the start of processing
+.
+          CALL      PROC0000                * Process eclipse IHC tran table
+.
+          CALL      PROM0000                * Process eclipse IMC tran table
+.
+          CALL      PROB0000                * Process eclipse BLK tran table
+.
+          CALL      RMRQ0000                * Send an ERA status request
+.
+          CALL      ROUT0000                * Send status requests for pmsecoaf
+.
+          CALL      ESCL0000                * escalate if necessary
+.
+MAIN9999  STOP
++
+.*****************************************************************************
+.*                                  INIT0000                                 *
+.*                       Initialise Variable & Open Files                    *
+.*****************************************************************************
+INIT0000  CALL      DISPHEAD                * Display screen heading
+.
+          DISPLAY   *P56:24,"Opening controlf"
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"pmsebhaf"
+          OPEN      PMSEBHA1,"pmsebhaf"
+.
+          DISPLAY   *P64:24,"pmsecaaf"
+          OPEN      PMSECAA1,"pmsecaaf"
+          OPEN      PMSECAA3,"pmsecaaf"
+.
+          DISPLAY   *P64:24,"pmsecoaf"
+          OPEN      PMSECOA1,"pmsecoaf"
+.
+          DISPLAY   *P64:24,"pmsectaf"
+          OPEN      PMSECTA1,"pmsectaf"
+          OPEN      PMSECTA6,"pmsectaf"
+.
+          DISPLAY   *P64:24,"pmsetraf"
+          OPEN      PMSETRA1,"pmsetraf"
+.
+          DISPLAY   *P64:24,"patcrtaf"
+          OPEN      PATCRTA1,"patcrtaf"
+.
+          DISPLAY   *P64:24,"patlcnaf"
+          OPEN      PATLCNA1,"patlcnaf"
+.
+          DISPLAY   *P64:24,"patinvrf"
+          OPEN      PATINVR1,"patinvrf"
+.
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+          READ      CONTROLF,ZERO;*85,IBCNUGST 
+          READ      CONTROLF,HUND14;*145,PTCNCLID,*215,PTCNDCOP
+          READ      CONTROLF,HUND15;*1,PTCNFEDN,*3,PTCNFEEN,*83,PTCNSEDN:
+                                    *85,PTCNSEEN,*165,PTCNTEDN,*167,PTCNTEEN
+          READ      CONTROLF,HUND24;*111,PTCNUIMC
+          READ      CONTROLF,HUND27;*122,PTCNUEBB
+.
+          CALL      IBACLOCK                * Get the current date
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          MATCH     "1",PTCNUIMC
+          IF        @EQUAL
+            DISPLAY   *P64:24,"priectaf"
+            OPEN      PRIECTA1,"priectaf"
+            OPEN      PRIECTA6,"priectaf"
+.
+            DISPLAY   *P64:24,"priecaaf"
+            OPEN      PRIECAA1,"priecaaf"
+            OPEN      PRIECAA3,"priecaaf"
+.
+            DISPLAY   *P64:24,"priibhaf"
+            OPEN      PRIIBHA1,"priibhaf"
+          ENDIF
+.
+          MATCH     "1",PTCNUEBB
+          IF        @EQUAL
+            DISPLAY   *P64:24,"outectaf"
+            OPEN      OUTECTA1,"outectaf"
+            OPEN      OUTECTA6,"outectaf"
+.
+            DISPLAY   *P64:24,"outecaaf"
+            OPEN      OUTECAA1,"outecaaf"
+            OPEN      OUTECAA3,"outecaaf"
+.
+            DISPLAY   *P64:24,"outibhaf"
+            OPEN      OUTIBHA1,"outibhaf"
+.
+            DISPLAY   *P64:24,"outeahaf"
+            OPEN      OUTEAHA1,"outeahaf"
+            OPEN      OUTEAHA2,"outeahaf"
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      INIT9999
+.
+INIT9100  MOVE      ONE,EXIT
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                PROC0000                                   *
+.*                   Process eclipse transaction table                       *
+.*****************************************************************************
+PROC0000  DISPLAY   *P1:24,*EL,"Processing IHC Eclipse Requests...";
+.
+.....     Loop thru pmsectaf and determine what request type to send for each 
+.....     claim (depending on current status):
+.....     Either - Retreive status (if current status = 4,6,7,9)
+.....            - Get Participant (not applicable to this server)
+.....            - Retrieve report (if current status = 8,10,11)
+.....     There will possibly be multiple requests of each type.
+.
+.....     Note: No further requests needed for transactions with status of...
+.....     5 = Health Fund Unverified
+.....     12 = Health Fund Rejected - Reported
+.....     13 = HF Processing Complete - Reported
+.....     14 = Remittance Reported
+.....     15 or greater (closed)
+.
+.....     Requests will be written to a transaction request table (pmsetraf).
+.....     Request types on this table will be either Retrieve status, 
+.....     Get Participant or Retrieve report.
+.....     This record will then be processed by the server adaptor.
+.
+.....     Check pmsecaaf (audit) to see most recent request/response for the
+.....     transaction id. If the latest audit record is a previous REQUEST, do 
+.....     nothing.
+.....     If the latest audit record is a RESPONSE (and it was received on or
+.....     before the previous day) then send a new request.
+.
+.....     Write a record to pmsecaaf to audit the request just sent.
+.
+          PACK      KEY35,SP70
+          CALL      RSPMECT1
+PROC1000  CALL      RKPMECT1
+          BRANCH    OVRCD,PROC9999
+.
+          BRANCH    PMECFLAG,PROC1000,PROC1000,PROC4000,PROC5000,PROC1000:
+                             PROC5000,PROC5000,PROC6000,PROC5000,PROC6000:
+                             PROC6000,PROC1000,PROC1000,PROC1000,PROC3000
+.
+          GOTO      PROC1000
+.
+PROC3000  MATCH     SP70,PMECNBAT
+          GOTO      PROC1000 IF NOT EQUAL
+.
+          MATCH     SP70,PMECFTID
+          GOTO      PROC1000 IF NOT EQUAL
+.
+PROC4000  PACK      KEY34,PMECINVN,Z70
+          CALL      RSPMECA3
+PROC4100  CALL      RPPMECA3
+          BRANCH    OVRCD,PROC1000
+.
+          MATCH     PMECINVN,PMEAINVN
+          GOTO      PROC1000 IF NOT EQUAL
+.
+          MATCH     PMECTRID,PMEATRID
+          GOTO      PROC4100 IF NOT EQUAL
+.
+          COMPARE   PMEASTAT,THREE
+          GOTO      PROC4100 IF NOT EQUAL
+.
+          MATCH     " 6",PMEATYPE
+          GOTO      PROC4100 IF NOT EQUAL
+.
+          MATCH     "3002",PMEAEROR
+          GOTO      PROC4100 IF NOT EQUAL
+.
+          MOVE      ZERO,FORM8A
+.
+          DAYSEP    PMEADATE,CURRDATE,FORM8A
+.
+          COMPARE   ONE,FORM8A
+          GOTO      PROC5000 IF EQUAL
+          GOTO      PROC5000 IF LESS
+.
+          GOTO      PROC1000
+.
+PROC5000  MOVE      ONE,TYPOFREQ            * retrieve status
+          GOTO      PROC7000
+.
+PROC6000  MOVE      THREE,TYPOFREQ          * retrieve report
+.
+PROC7000  CALL      RSTA0000                * retrieve status/report
+          GOTO      PROC1000
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                                RSTA0000                                   *
+.*               Retrieve Eclipse IHC Transaction Status/Report              *
+.*****************************************************************************
+RSTA0000  PACK      KEY34,PMECINVN,Z70
+          CALL      RSPMECA3
+          CALL      RPPMECA3                * get last transaction audit record
+          BRANCH    OVRCD,RSTA9999
+.
+          MATCH     PMECINVN,PMEAINVN
+          GOTO      RSTA9999 IF NOT EQUAL   * different invoice number
+.
+          IF        PMEASTAT <> 2
+            MATCH     PMECTRID,PMEATRID
+            GOTO      RSTA9999 IF NOT EQUAL   * different transaction ID
+          ENDIF
+.
+.>>>>     MATCH     " 6",PMEATYPE
+.>>>>     GOTO      RSTA0200 IF EQUAL       * error, so send another request
+.
+.>>>>     MATCH     " 1",PMEATYPE
+.>>>>     GOTO      RSTA9999 IF EQUAL       * status request already sent
+.
+.>>>>     MATCH     " 3",PMEATYPE
+.>>>>     GOTO      RSTA9999 IF EQUAL       * report request already sent
+.
+          COMPARE   THREE,TYPOFREQ
+          GOTO      RSTA0200 IF EQUAL       * retrieve reports immediately
+.
+          MOVE      CURRDATE,CHCKDATE
+          SUB       ONE,CHCKDATE            * yesterday's date
+.
+.>>>>     MATCH     PMEADATE,CHCKDATE
+.>>>>     GOTO      RSTA9999 IF LESS        * don't send another request today
+.
+.....     Get location & sender id from pmsebhaf
+.
+RSTA0200  MOVE      SP70,PMETLOCN
+          MOVE      SP70,PMETSNID
+.
+          MATCH     SP70,PMEABATN
+          GOTO      RSTA0500 IF EQUAL
+.
+          PACK      KEY8,PMEABATN,SP70
+          CALL      RDPMEBH1
+          IF        OVRCD<>1
+            MOVE      PMEBLOCN,PMETLOCN
+            MOVE      PMEBSNID,PMETSNID
+          ENDIF
+.
+          CALL      VLCN0000
+          BRANCH    EXIT,RSTA9999
+.
+.....     Write a record to transaction request table
+.
+RSTA0500  MOVE      SP1,PMETSTAT
+          MOVE      TYPOFREQ,PMETTYPE
+          MOVE      PMECTRID,PMETTRID
+          MOVE      PMEABATN,PMETBATN
+          MOVE      PMEAINVN,PMETINVN
+          MOVE      SP30,PMETUDTE
+          MOVE      SP30,PMETUTIM
+          MOVE      SP70,PMETEROR
+          MOVE      SP30,PMETSPAR
+.
+RSTA1000  CALL      IBACLOCK                     * get current date/time
+          PACK      PMETCDTE,CCC,CYY,CMM,CDD
+          REP       " 0",PMETCDTE
+          MOVE      CTIMEIS,PMETCTIM
+          REP       " 0",PMETCTIM
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID
+          CALL      RDPMETR1
+          IF        OVRCD = 0
+            GOTO      RSTA1000
+          ENDIF
+.
+          CALL      WRPMETR1                     * write transaction request
+.
+.....     Now audit the request by writing to pmsecaaf (transaction audit)
+.
+RSTA2000  CALL      IBACLOCK                     * get current date/time
+          PACK      PMEADATE,CCC,CYY,CMM,CDD
+          REP       " 0",PMEADATE
+          MOVE      CTIMEIS,PMEATIME
+          REP       " 0",PMEATIME
+.
+          MOVE      TYPOFREQ,PMEATYPE            * type of request (1 or 3)
+          PACK      PMEAOPER,PRGID,SP10
+.
+          PACK      KEY26,PMEAINVN,PMEADATE,PMEATIME,PMEATYPE
+          CALL      RAPMECA1
+          IF        OVRCD = 0
+            GOTO      RSTA2000
+          ENDIF
+.
+          CALL      WRPMECA1                     * write EDI History record
+.
+RSTA9999  RETURN
++
+.*****************************************************************************
+.*                                ESCL0000                                   *
+.*                      Escalate ERA Transaction Request                     *
+.*****************************************************************************
+ESCL0000  MOVE      ZERO,EMAILFLG           * set email flag to 'no'
+          MOVE      ZERO,EMALFLG1
+          MOVE      ZERO,EMALFLG2
+          MOVE      ZERO,EMALFLG3
+.
+          PACK      KEY35,SP70
+          CALL      RSPMECT1
+ESCL1000  CALL      RKPMECT1                * loop thru claim transactions
+          BRANCH    OVRCD,ESCL9000
+.
+          BRANCH    PMECFLAG,ESCL1000,ESCL1000,ESCL1000,ESCL1200,ESCL1000:
+                             ESCL1200,ESCL1200,ESCL1200,ESCL1200,ESCL1000:
+                             ESCL1200,ESCL1000,ESCL1200,ESCL1000,ESCL1000
+.
+          GOTO      ESCL1000
+.
+ESCL1200  PACK      KEY8,PMECINVN,SP70
+          CALL      RDPTINV1
+          BRANCH    OVRCD,ESCL1300
+.
+          MOVE      ZERO,FORM12P2
+          MOVE      PINVAMT,FORM12P2
+          ADD       PINVPATA,FORM12P2
+          ADD       PINVHFDA,FORM12P2
+          ADD       PINVOTHA,FORM12P2
+          ADD       PINVJOUR,FORM12P2
+          ADD       PTINCRTT,FORM12P2
+          IF        IBCNUGST=2 | IBCNUGST=3
+            ADD       PTINGSTJ,FORM12P2
+          ENDIF
+.
+          COMPARE   ZERO00,FORM12P2           * invoice balanced ?
+          GOTO      ESCL1000 IF EQUAL         * yes, ignore invoice 
+.
+ESCL1300  PACK      KEY34,PMECINVN,SP70
+          CALL      RSPMECA3
+ESCL1500  CALL      RKPMECA3                * loop thru audit for this invoice
+          BRANCH    OVRCD,ESCL1000
+.
+          MATCH     PMECINVN,PMEAINVN
+          GOTO      ESCL1000 IF NOT EQUAL   * different invoice number
+.
+          MATCH     PMECTRID,PMEATRID
+          GOTO      ESCL1500 IF NOT EQUAL   * different transaction ID
+.
+          COMPARE   FOUR,PMEASTAT
+          GOTO      ESCL1500 IF NOT EQUAL   * get when claim was received
+.
+          MOVE      PTCNFEDN,FORM2          * escalation days 1
+          MOVE      PMEADATE,CHCKDATE       * date of extraction
+          ADD       FORM2,CHCKDATE          * need response by this date
+.         
+          MATCH     CURRDATE,CHCKDATE       * 1st escalation date passed?
+          IF        @LESS
+            MOVE      PTCNFEDN,ESCLDAYS     * escalation days 1 passed
+            MOVE      PTCNFEEN,EMAILADR     * escalation email address 1
+            MOVE      ONE,EMAILFLG          * send email
+          ELSE
+            MOVE      ZERO,FORM2            * no, reset escalation days check
+          ENDIF
+.
+          MOVE      PTCNSEDN,FORM2A         * escalation days 2
+          MOVE      PMEADATE,CHCKDATE       * date of extraction
+          ADD       FORM2A,CHCKDATE         * need response by this date
+.
+          MATCH     CURRDATE,CHCKDATE       * 2nd escalation date passed?
+          GOTO      ESCL2000 IF NOT LESS
+.
+          IF        FORM2A > FORM2
+            MOVE      PTCNSEDN,ESCLDAYS     * escalation days 2 passed
+            MOVE      PTCNSEEN,EMAILADR     * escalation email address 2
+            MOVE      TWO,EMAILFLG          * send email
+            MOVE      FORM2A,FORM2          * save highest days
+          ENDIF
+.
+ESCL2000  MOVE      PTCNTEDN,FORM2A         * escalation days 3
+          MOVE      PMEADATE,CHCKDATE       * date of extraction
+          ADD       FORM2A,CHCKDATE         * need response by this date
+.
+          MATCH     CURRDATE,CHCKDATE       * 3rd escalation date passed?
+          GOTO      ESCL3000 IF NOT LESS
+.
+          IF        FORM2A > FORM2
+            MOVE      PTCNTEDN,ESCLDAYS     * escalation days 3 passed
+            MOVE      PTCNTEEN,EMAILADR     * escalation email address 3
+            MOVE      THREE,EMAILFLG          * send email
+          ENDIF
+.
+ESCL3000  IF        EMAILFLG > 0
+            MOVE      "Remittance_report_not_yet_received",ERRMESSG
+            CALL      ALTUSR00              * send email warning
+          ENDIF
+          MOVE      ZERO,EMAILFLG           * reset email flag to 'no'
+          GOTO      ESCL1000
+.
+ESCL9000  CALL      SNDALT00
+.
+ESCL9999  RETURN
++
+.*****************************************************************************
+.*                                 ALTUSR00                                  *
+.*      Alert user of escalation by executing a script to send an email      *
+.*****************************************************************************
+ALTUSR00  IF        EMAILFLG=1
+            IF        EMALFLG1=0
+              MOVE      "eclobsrv.us1 ",KEY13
+              PACK      CMDLINE,KEY13,ESCLDAYS,SP70
+              STRIP     CMDLINE
+              ENDSET    CMDLINE
+              RESET     CMDLINE
+              EXECUTE   CMDLINE,TASKID
+              MOVE      ONE,EMALFLG1
+            ENDIF
+.
+            MOVE      "eclobsrv.us2 ",KEY13
+            PACK      CMDLINE,KEY13,PRGID,SP70
+            STRIP     CMDLINE
+            ENDSET    CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PMECAMTC,CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    ERRMESSG,CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PMECADMN,CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PMECINVN,CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+          IF        EMAILFLG=2
+            IF        EMALFLG2=0
+              MOVE      "eclobsrv.us3 ",KEY13
+              PACK      CMDLINE,KEY13,ESCLDAYS,SP70
+              STRIP     CMDLINE
+              ENDSET    CMDLINE
+              RESET     CMDLINE
+              EXECUTE   CMDLINE,TASKID
+              MOVE      ONE,EMALFLG2
+            ENDIF
+.
+            MOVE      "eclobsrv.us4 ",KEY13
+            PACK      CMDLINE,KEY13,PRGID,SP70
+            STRIP     CMDLINE
+            ENDSET    CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PMECAMTC,CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    ERRMESSG,CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PMECADMN,CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PMECINVN,CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+          IF        EMAILFLG=3
+            IF        EMALFLG3=0
+              MOVE      "eclobsrv.us5 ",KEY13
+              PACK      CMDLINE,KEY13,ESCLDAYS,SP70
+              STRIP     CMDLINE
+              ENDSET    CMDLINE
+              RESET     CMDLINE
+              EXECUTE   CMDLINE,TASKID
+              MOVE      ONE,EMALFLG3
+            ENDIF
+.
+            MOVE      "eclobsrv.us6 ",KEY13
+            PACK      CMDLINE,KEY13,PRGID,SP70
+            STRIP     CMDLINE
+            ENDSET    CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PMECAMTC,CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    ERRMESSG,CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PMECADMN,CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PMECINVN,CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+ALTUSR99  RETURN
++
+.*****************************************************************************
+.*                                 SNDALT00                                  *
+.*                       Send the excalation email                           *
+.*****************************************************************************
+SNDALT00  IF        EMALFLG1=1
+            MOVE      "eclobsrv.us7 ",KEY13
+            PACK      CMDLINE,KEY13,PTCNFEEN,SP70
+            STRIP     CMDLINE
+            ENDSET    CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PTCNFEDN,CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+          IF        EMALFLG2=1
+            MOVE      "eclobsrv.us8 ",KEY13
+            PACK      CMDLINE,KEY13,PTCNSEEN,SP70
+            STRIP     CMDLINE
+            ENDSET    CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PTCNSEDN,CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+          IF        EMALFLG3=1
+            MOVE      "eclobsrv.us9 ",KEY13
+            PACK      CMDLINE,KEY13,PTCNTEEN,SP70
+            STRIP     CMDLINE
+            ENDSET    CMDLINE
+            APPEND    SP1,CMDLINE
+            APPEND    PTCNTEDN,CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+          IF        EMALFLG1=1 | EMALFLG2=1 | EMALFLG3=1
+            MOVE      "eclobsrv.us12 ",KEY14
+            PACK      CMDLINE,KEY14,SP70
+            STRIP     CMDLINE
+            ENDSET    CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+          IF        EMALFLG1=1
+            MATCH     SP70,PTCNFEEN
+            IF        !@EQUAL & !@EOS
+              MOVE      "eclobsrv.us10 ",KEY14
+              PACK      CMDLINE,KEY14,PTCNFEEN,SP70
+              STRIP     CMDLINE
+              ENDSET    CMDLINE
+              RESET     CMDLINE
+              EXECUTE   CMDLINE,TASKID
+            ENDIF
+          ENDIF
+.
+          IF        EMALFLG2=1
+            MATCH     SP70,PTCNSEEN
+            IF        !@EQUAL & !@EOS
+              MOVE      "eclobsrv.us10 ",KEY14
+              PACK      CMDLINE,KEY14,PTCNSEEN,SP70
+               STRIP     CMDLINE
+              ENDSET    CMDLINE
+              RESET     CMDLINE
+              EXECUTE   CMDLINE,TASKID
+            ENDIF
+          ENDIF
+.
+          IF        EMALFLG3=1
+            MATCH     SP70,PTCNTEEN
+            IF        !@EQUAL & !@EOS
+              MOVE      "eclobsrv.us10 ",KEY14
+              PACK      CMDLINE,KEY14,PTCNTEEN,SP70
+              STRIP     CMDLINE
+              ENDSET    CMDLINE
+              RESET     CMDLINE
+              EXECUTE   CMDLINE,TASKID
+            ENDIF
+          ENDIF
+.
+          IF        EMALFLG1=1 | EMALFLG2=1 | EMALFLG3=1
+            MOVE      "eclobsrv.us11 ",KEY14
+            PACK      CMDLINE,KEY14,SP70
+            STRIP     CMDLINE
+            ENDSET    CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+SNDALT99  RETURN
+.*****************************************************************************
+.*                                RMRQ0000                                   *
+.*                   Send an eclipse remittance status request               *
+.*   Create a pmsetraf record for each of the previous 4 weeks for each      *
+.*   location.  This is done to overcome sending one transaction for 30      *
+.*   days which was causing a timeout from Medicare.                         *
+.*****************************************************************************
+RMRQ0000  MOVE      SP1,PMETSTAT
+          MOVE      " 4",PMETTYPE                * type 4 = ERA status request
+          MOVE      SP70,PMETTRID
+          MOVE      SP70,PMETBATN
+          MOVE      SP70,PMETINVN
+          MOVE      SP30,PMETUDTE
+          MOVE      SP30,PMETUTIM
+          MOVE      SP30,PMETEROR
+          MOVE      SP30,PMETSPAR
+.
+          CALL      IBACLOCK                     * get current date/time
+          PACK      PMETCDTE,CCC,CYY,CMM,CDD
+          REP       " 0",PMETCDTE
+          MOVE      PMETCDTE,SAVEDATE            * save current date
+.
+          IF        IBCNMHOS<>1
+            MOVE      PTCNCLID,PMETLOCN          * get location from controlf
+.
+            CALL      VLCN0000
+            BRANCH    EXIT,RMRQ9999
+.
+            GOTO      RMRQ0700
+          ENDIF
+.
+          PACK      KEY8,SP70
+          CALL      RSPTLCN1
+RMRQ0500  CALL      RKPTLCN1                     * get (multiple) location ids
+          BRANCH    OVRCD,RMRQ9999
+.
+          MATCH     ANSA,PTLNACTV
+          GOTO      RMRQ0500 IF NOT EQUAL        * location not active
+.
+          MOVE      PTLNLOCN,PMETLOCN            * location from patlcn
+.
+          CALL      VLCN0000
+          BRANCH    EXIT,RMRQ0500
+.
+RMRQ0700  CALL      GSID0000                     * get sender id
+          MOVE      FOUR,COUNTER                 * initialise counter
+.
+.         Load one day in the past
+.
+RMRQ0800  CLOCK     TIME,PMETCTIM
+          REP       " 0",PMETCTIM
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID
+          CALL      RDPMETR1
+          IF        OVRCD = 0
+            GOTO      RMRQ0800
+          ENDIF
+.
+          MOVE      PMETCTIM,DIM8
+          REP       ": ",DIM8
+          SQUEEZE   DIM8
+          PACK      PMETTDTM,SAVEDATE,DIM8
+.
+          SUB       ONE,SAVEDATE
+          PACK      PMETFDTM,SAVEDATE,ZERO,ZERO,ZERO,ZERO,ZERO,ZERO
+          SUB       ONE,SAVEDATE
+.
+          CALL      WRPMETR1
+.
+.         Load four weeks in the past. One record for each week.
+.
+RMRQ1000  CLOCK     TIME,PMETCTIM
+          REP       " 0",PMETCTIM
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID
+          CALL      RDPMETR1
+          IF        OVRCD = 0
+            GOTO      RMRQ1000
+          ENDIF
+.
+.         Load from and to dates for the week
+.
+.         IF        COUNTER = 4
+.           MOVE      PMETCTIM,DIM8
+.           REP       ": ",DIM8
+.           SQUEEZE   DIM8
+.           PACK      PMETTDTM,SAVEDATE,DIM8
+.         ELSE
+            PACK      PMETTDTM,SAVEDATE,TWO,THREE,FIVE,NINE,FIVE,NINE
+.         ENDIF
+          SUB       SIX,SAVEDATE
+          PACK      PMETFDTM,SAVEDATE,ZERO,ZERO,ZERO,ZERO,ZERO,ZERO
+          SUB       ONE,SAVEDATE
+.
+          CALL      WRPMETR1                     * write transaction request
+.
+          SUB       ONE,COUNTER                  * decrement counter
+          COMPARE   ZERO,COUNTER                 * finished sending 4 weeks ?
+          GOTO      RMRQ1000 IF NOT EQUAL        * no
+.
+          COMPARE   ONE,IBCNMHOS
+          IF        @EQUAL
+            MOVE      PMETCDTE,SAVEDATE          * reset saved date
+            GOTO      RMRQ0500                   * get next location if multhosp
+          ENDIF
+.
+RMRQ9999  RETURN
++
+.*****************************************************************************
+.*                                GSID0000                                   *
+.*                   Get sender id from certificate table                    *
+.*****************************************************************************
+.
+.         Get the certificate that covers today
+.
+GSID0000  PACK      KEY16,PMETLOCN,PMETCDTE
+          CALL      RDPTCTI1                     * record found for today ?
+          COMPARE   ZERO,OVRCD
+          GOTO      GSID9000 IF EQUAL            * yes - use this certificate id
+.
+          CALL      RPPTCTI1                     * no - read previous record
+          IF        OVRCD = 0
+            MATCH     PMETCDTE,PTCITDTE          * within date range ?
+            GOTO      GSID9000 IF NOT LESS       * yes - use this certificate id
+          ENDIF
+.
+          MOVE      SP70,PMETSNID                * no current certificate
+          GOTO      GSID9999
+.
+GSID9000  MOVE      PTCISNID,PMETSNID            * use certificate sender id
+GSID9999  RETURN
++
+.*****************************************************************************
+.*                                VLCN0000                                   *
+.*                   Validate Location ID Certificate Dates                  *
+.*****************************************************************************
+VLCN0000  MOVE      ZERO,EXIT
+.
+          MATCH     SP70,PMETLOCN
+          GOTO      VLCN9000 IF EQUAL
+          GOTO      VLCN9000 IF EOS
+.
+          CALL      IBACLOCK
+          PACK      DIM8,CCC,CYY,CMM,CDD
+          REP       " 0",DIM8
+.
+          PACK      KEY16,PMETLOCN,Z70
+          CALL      RSPTCTI1
+VLCN1000  CALL      RPPTCTI1
+          BRANCH    OVRCD,VLCN9000
+.
+          MATCH     PMETLOCN,PTCILOCN
+          GOTO      VLCN9000 IF NOT EQUAL
+.
+          MATCH     PTCIFDTE,DIM8
+          GOTO      VLCN1000 IF LESS
+.
+          MATCH     DIM8,PTCITDTE
+          GOTO      VLCN1000 IF LESS
+.
+          GOTO      VLCN9999
+.
+VLCN9000  MOVE      ONE,EXIT
+.
+VLCN9999  RETURN
++
+.*****************************************************************************
+.*                               ROUT0000          Called by: MAIN0000       *
+.*    Send status requests on all "Open" claims in pmsecoaf.  These are      *
+.*    claims that are yet to receive a Processing Report, even though the    *
+.*    Remittance Report has been received.                                   *
+.*****************************************************************************
+.
+ROUT0000  PACK      KEY31,SP30,SP10
+          CALL      RSPMECO1                     * position in file
+ROUT1000  CALL      RKPMECO1                     * read next record
+          BRANCH    OVRCD,ROUT9999               * eof - finished
+.
+          MATCH     "0",PMEODFLG                 * open record ?
+          IF        !@EQUAL
+            PACK      KEY31,PMEOHFND,TILDA31
+            CALL      RSPMECO1                   * position for next fund
+            GOTO      ROUT1000
+          ENDIF
+.
+.         An "Open" claim has been found which is waiting on a processing
+.         report, so get the corresponding pmsectaf record.
+.
+          PACK      KEY40,PMEOTRID,SP30,SP10     
+          CALL      RSPMECT6                     * position on trans. id
+          CALL      RKPMECT6                     * read next record
+          BRANCH    OVRCD,ROUT5000               * eof
+.         
+          MATCH     PMEOTRID,PMECTRID            * same transaction id still ?
+          GOTO      ROUT5000 IF NOT EQUAL        * no
+.
+          COMPARE   ZERO,PTCNDCOP                * days for closing claim set ?
+          GOTO      ROUT1700 IF EQUAL            * no
+.
+.         See if the claim has reached the age (in days) to be auto closed
+.         using the date the pmsecoaf record was created
+.
+          MOVE      PMEOCDAT,CHCKDATE            * load date record created
+          ADD       PTCNDCOP,CHCKDATE            * need response by this date
+.
+          MATCH     CURRDATE,CHCKDATE            * past date for closing ?
+          IF        @LESS
+            MATCH     SP70,PMECFTID
+            IF        !@EQUAL
+              CALL      CLOS0000                   * yes - close claim
+              GOTO      ROUT1000                   * get next claim
+            ENDIF
+          ENDIF
+.
+.         An "Open" claim has been found, so write a record to pmsetraf to
+.         trigger a status request to be sent on the claim.
+.
+ROUT1700  MOVE      SP1,PMETSTAT
+          MOVE      " 1",PMETTYPE                * status request
+          MOVE      PMEOTRID,PMETTRID
+          MOVE      PMECBATN,PMETBATN
+          MOVE      PMECINVN,PMETINVN
+          MOVE      SP30,PMETUDTE
+          MOVE      SP30,PMETUTIM
+          MOVE      SP30,PMETFDTM
+          MOVE      SP30,PMETTDTM
+          MOVE      SP30,PMETEROR
+          MOVE      SP70,PMETLOCN
+          MOVE      SP70,PMETSNID
+          MOVE      SP30,PMETSPAR
+.
+.         Get location & sender id from pmsebhaf
+.
+          MATCH     SP70,PMECBATN
+          GOTO      ROUT2000 IF EQUAL
+.         
+          MOVE      PMECBATN,KEY8
+          CALL      RDPMEBH1
+          IF        OVRCD = 0 
+            MOVE      PMEBLOCN,PMETLOCN
+            MOVE      PMEBSNID,PMETSNID
+          ENDIF
+.
+          CALL      VLCN0000
+          BRANCH    EXIT,ROUT1000
+.
+ROUT2000  CALL      IBACLOCK                     * get current date/time
+          PACK      PMETCDTE,CCC,CYY,CMM,CDD
+          REP       " 0",PMETCDTE
+          MOVE      CTIMEIS,PMETCTIM
+          REP       " 0",PMETCTIM
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID
+          CALL      RDPMETR1
+          IF        OVRCD = 0
+            GOTO      ROUT2000
+          ENDIF
+.
+          CALL      WRPMETR1                     * write transaction request
+.
+.         Now audit the request by writing to pmsecaaf (transaction audit)
+.
+          MOVE      PMECINVN,PMEAINVN
+          MOVE      PMECBATN,PMEABATN
+          MOVE      PMECFLAG,PMEASTAT
+          MOVE      " 1",PMEATYPE
+          PACK      PMEAOPER,PRGID,SP10
+          MOVE      PMECTRID,PMEATRID
+          MOVE      SP4,PMEAEROR
+          PACK      PMEASPAR,SP30,SP10
+.
+ROUT3000  CALL      IBACLOCK                     * get current date/time
+          PACK      PMEADATE,CCC,CYY,CMM,CDD
+          REP       " 0",PMEADATE
+          MOVE      CTIMEIS,PMEATIME
+          REP       " 0",PMEATIME
+.
+          PACK      KEY26,PMEAINVN,PMEADATE,PMEATIME,PMEATYPE
+          CALL      RAPMECA1
+          IF        OVRCD = 0
+            GOTO      ROUT3000
+          ENDIF
+.
+          CALL      WRPMECA1                     * write EDI History record
+.
+          GOTO      ROUT1000                     * get next record
+.
+.         Check IMC Tables
+.         An "Open" claim has been found which is waiting on a processing
+.         report, so get the corresponding priectaf record.
+.
+ROUT5000  MATCH     "1",PTCNUIMC
+          GOTO      ROUT1000 IF NOT EQUAL
+.
+          PACK      KEY40,PMEOTRID,SP30,SP10
+          CALL      RSPRECT6                     * position on trans. id
+          CALL      RKPRECT6                     * read next record
+          BRANCH    OVRCD,ROUT1000               * eof
+.
+          MATCH     PMEOTRID,PRECTRID            * same transaction id still ?
+          GOTO      ROUT1000 IF NOT EQUAL        * no
+.
+          COMPARE   ZERO,PTCNDCOP                * days for closing claim set ?
+          GOTO      ROUT5700 IF EQUAL            * no
+.
+.         See if the claim has reached the age (in days) to be auto closed
+.         using the date the pmsecoaf record was created
+.
+          MOVE      PMEOCDAT,CHCKDATE            * load date record created
+          ADD       PTCNDCOP,CHCKDATE            * need response by this date
+.
+          MATCH     CURRDATE,CHCKDATE            * past date for closing ?
+          IF        @LESS
+            MATCH     SP70,PRECFTID
+            IF        !@EQUAL
+              CALL      CLOM0000                   * yes - close claim
+              GOTO      ROUT1000                   * get next claim
+            ENDIF
+          ENDIF
+.
+.         An "Open" claim has been found, so write a record to pmsetraf to
+.         trigger a status request to be sent on the claim.
+.
+ROUT5700  MOVE      SP1,PMETSTAT
+          MOVE      " 1",PMETTYPE                * status request
+          MOVE      PMEOTRID,PMETTRID
+          MOVE      PRECBATN,PMETBATN
+          MOVE      PRECINVN,PMETINVN
+          MOVE      SP30,PMETUDTE
+          MOVE      SP30,PMETUTIM
+          MOVE      SP30,PMETFDTM
+          MOVE      SP30,PMETTDTM
+          MOVE      SP30,PMETEROR
+          MOVE      SP70,PMETLOCN
+          MOVE      SP70,PMETSNID
+          MOVE      SP30,PMETSPAR
+.
+.         Get location & sender id from priibhaf
+.
+          MATCH     SP70,PRECBATN
+          GOTO      ROUT6000 IF EQUAL
+.
+          MOVE      PRECBATN,KEY8
+          CALL      RDPRIBH1
+          IF        OVRCD = 0
+            MOVE      PRIBLOCN,PMETLOCN
+            MOVE      PRIBSNID,PMETSNID
+          ENDIF
+.
+          CALL      VLCN0000
+          BRANCH    EXIT,ROUT1000
+.
+ROUT6000  CALL      IBACLOCK                     * get current date/time
+          PACK      PMETCDTE,CCC,CYY,CMM,CDD
+          REP       " 0",PMETCDTE
+          MOVE      CTIMEIS,PMETCTIM
+          REP       " 0",PMETCTIM
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID
+          CALL      RDPMETR1
+          IF        OVRCD = 0
+            GOTO      ROUT6000
+          ENDIF
+.
+          CALL      WRPMETR1                     * write transaction request
+.
+.         Now audit the request by writing to priecaaf (transaction audit)
+.
+          MOVE      PRECINVN,PREAINVN
+          MOVE      PRECBATN,PREABATN
+          MOVE      PRECFLAG,PREASTAT
+          MOVE      " 1",PREATYPE
+          PACK      PREAOPER,PRGID,SP10
+          MOVE      PRECTRID,PREATRID
+          MOVE      SP4,PREAEROR
+          PACK      PREASPAR,SP30,SP10
+.
+ROUT7000  CALL      IBACLOCK                     * get current date/time
+          PACK      PREADATE,CCC,CYY,CMM,CDD
+          REP       " 0",PREADATE
+          MOVE      CTIMEIS,PREATIME
+          REP       " 0",PREATIME
+.
+          PACK      KEY26,PREAINVN,PREADATE,PREATIME,PREATYPE
+          CALL      RAPRECA1
+          IF        OVRCD = 0
+            GOTO      ROUT7000
+          ENDIF
+.
+          CALL      WRPRECA1                     * write EDI History record
+.
+          GOTO      ROUT1000                     * get next record
+.
+ROUT9999  RETURN
++
+.*****************************************************************************
+.*                                CLOS0000         Called by: ROUT0000       *
+.*             Close a claim that is still waiting for an outstanding        *
+.*             report and for which a remittance report has been received.   *
+.*****************************************************************************
+.
+.         Update the outstanding processing report (pmsecoaf) record
+.
+CLOS0000  PACK      SAVKEY31,PMEOHFND,PMEODFLG,PMEOTRID,SP70
+.
+          PACK      KEY31,PMEOHFND,ONE,PMEOTRID,SP70
+          CALL      RDPMECO1
+          IF        OVRCD=0
+.
+            PACK      KEY31,SAVKEY31,SP70
+            CALL      RDPMECO1
+.
+            CALL      DEPMECO1
+.
+            PACK      KEY31,SAVKEY31,SP70
+            CALL      RSPMECO1
+.
+            GOTO      CLOS9999
+          ELSE
+.
+            PACK      KEY31,SAVKEY31,SP70
+            CALL      RDPMECO1
+.
+            MOVE      "1",PMEODFLG                 * set status to "Closed"
+            PACK      PMEOUSER,PRGID,SP10
+            CALL      UPPMECO1                     * update record
+.
+          ENDIF
+.
+.         Update the pmsectaf record
+.
+          MOVE      TEN5,PMECFLAG                * set status to closed
+          PACK      PMECSTAT,SP1,TWO             * set closed with payment
+          CALL      UPPMECT6                     * update claim
+.
+.         Write a new history (pmsecaaf) record
+.
+          MOVE      PMECINVN,PMEAINVN
+          MOVE      PMECBATN,PMEABATN
+          MOVE      TEN5,PMEASTAT
+          MOVE      " 5",PMEATYPE
+          PACK      PMEAOPER,PRGID,SP10
+          MOVE      PMECTRID,PMEATRID
+          MOVE      SP4,PMEAEROR
+          PACK      PMEASPAR,SP30,SP10
+.
+CLOS5000  CALL      IBACLOCK                     * get current date/time
+          PACK      PMEADATE,CCC,CYY,CMM,CDD
+          REP       " 0",PMEADATE
+          MOVE      CTIMEIS,PMEATIME
+          REP       " 0",PMEATIME
+.
+          PACK      KEY26,PMEAINVN,PMEADATE,PMEATIME,PMEATYPE
+          CALL      RAPMECA1
+          IF        OVRCD = 1
+            CALL      WRPMECA1
+          ELSE
+            GOTO      CLOS5000
+          ENDIF
+.
+CLOS9999 RETURN
++
+.*****************************************************************************
+.*                                PRCETR00                                   *
+.*           Remove excess status requests and report requests from          *
+.*           pmsetraf at the start of processing.                            *
+.*****************************************************************************
+PRCETR00  DISPLAY   *P1:24,*EL,"Removing excess status and report requests from pmsetraf...";
+.
+PRCETR10  PACK      KEY51,SP1,SP1,ONE,SP70
+          CALL      RSPMETR1
+          CALL      RKPMETR1
+          BRANCH    OVRCD,PRCETR50
+.
+          MATCH     SP70,PMETSTAT
+          GOTO      PRCETR50 IF NOT EQUAL
+.
+          MATCH     " 1",PMETTYPE
+          GOTO      PRCETR50 IF NOT EQUAL
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID:
+                          SP70
+          CALL      DEPMETR1
+.
+          GOTO      PRCETR10
+.
+PRCETR50  PACK      KEY51,SP1,SP1,THREE,SP70
+          CALL      RSPMETR1
+          CALL      RKPMETR1
+          BRANCH    OVRCD,PRCETR60
+.
+          MATCH     SP70,PMETSTAT
+          GOTO      PRCETR60 IF NOT EQUAL
+.
+          MATCH     " 3",PMETTYPE
+          GOTO      PRCETR60 IF NOT EQUAL
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID:
+                          SP70
+          CALL      DEPMETR1
+.
+          GOTO      PRCETR50
+.
+PRCETR60  MATCH     "1",PTCNUIMC
+          GOTO      PRCETR80 IF NOT EQUAL
+.
+          PACK      KEY51,SP1,SP1,NINE,SP70
+          CALL      RSPMETR1
+          CALL      RKPMETR1
+          BRANCH    OVRCD,PRCETR70
+.
+          MATCH     SP70,PMETSTAT
+          GOTO      PRCETR70 IF NOT EQUAL
+.
+          MATCH     " 9",PMETTYPE
+          GOTO      PRCETR70 IF NOT EQUAL
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID:
+                          SP70
+          CALL      DEPMETR1
+.
+          GOTO      PRCETR60
+.
+PRCETR70  PACK      KEY51,SP1,SP1,TEN,SP70
+          CALL      RSPMETR1
+          CALL      RKPMETR1
+          BRANCH    OVRCD,PRCETR80
+.
+          MATCH     SP70,PMETSTAT
+          GOTO      PRCETR80 IF NOT EQUAL
+.
+          MATCH     "10",PMETTYPE
+          GOTO      PRCETR80 IF NOT EQUAL
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID:
+                          SP70
+          CALL      DEPMETR1
+.
+          GOTO      PRCETR70
+.
+
+PRCETR80  MATCH     "1",PTCNUEBB
+          GOTO      PRCETR99 IF NOT EQUAL
+.
+          PACK      KEY51,SP1,SP1,TEN1,SP70
+          CALL      RSPMETR1
+          CALL      RKPMETR1
+          BRANCH    OVRCD,PRCETR99
+.
+          MATCH     SP70,PMETSTAT
+          GOTO      PRCETR99 IF NOT EQUAL
+.
+          MATCH     "11",PMETTYPE
+          GOTO      PRCETR99 IF NOT EQUAL
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID:
+                          SP70
+          CALL      DEPMETR1
+.
+          GOTO      PRCETR80 
+.
+PRCETR99  RETURN
++
+.*****************************************************************************
+.*                                PROM0000                                   *
+.*                   Process eclipse transaction table                       *
+.*****************************************************************************
+PROM0000  MATCH     "1",PTCNUIMC
+          GOTO      PROM9999 IF NOT EQUAL
+.
+          DISPLAY   *P1:24,*EL,"Processing IMC Eclipse Requests...";
+.
+.....     Loop thru priectaf and determine what request type to send for each
+.....     claim (depending on current status):
+.....     Either - Retrieve status (if current status = 4,6,8,9,10)
+.....            - Get Participant (not applicable to this server)
+.....            - Retrieve report (if current status = 11,12,13,14)
+.....     There will possibly be multiple requests of each type.
+.
+.....     Note: No further requests needed for transactions with status of...
+.....     5 = Medicare Unverified 
+.....     7 = Health Fund Unverified
+.....     15 = Medicare Rejected - Reported
+.....     16 = Health Fund Rejected - Reported
+.....     17 = Processing Complete - Reported
+.....     18 = Remittance Reported
+.....     19 or greater (closed)
+.
+.....     Requests will be written to a transaction request table (pmsetraf).
+.....     Request types on this table will be either Retrieve status,
+.....     Get Participant or Retrieve report.
+.....     This record will then be processed by the server adaptor.
+.
+.....     Check priecaaf (audit) to see most recent request/response for the
+.....     transaction id. If the latest audit record is a previous REQUEST, do
+.....     nothing.
+.....     If the latest audit record is a RESPONSE (and it was received on or
+.....     before the previous day) then send a new request.
+.
+.....     Write a record to priecaaf to audit the request just sent.
+.
+          PACK      KEY35,SP70
+          CALL      RSPRECT1
+PROM1000  CALL      RKPRECT1
+          BRANCH    OVRCD,PROM9999
+.
+          BRANCH    PRECFLAG,PROM1000,PROM1000,PROM4000,PROM5000,PROM1000:
+                             PROM5000,PROM1000,PROM5000,PROM5000,PROM5000:
+                             PROM6000,PROM6000,PROM6000,PROM6000,PROM1000:
+                             PROM1000,PROM1000,PROM1000,PROM3000
+.
+          GOTO      PROM1000
+.
+PROM3000  MATCH     SP70,PRECNBAT
+          GOTO      PROM1000 IF NOT EQUAL
+.
+          MATCH     SP70,PRECFTID
+          GOTO      PROM1000 IF NOT EQUAL
+.
+PROM4000  PACK      KEY34,PRECINVN,Z70
+          CALL      RSPRECA3
+PROM4100  CALL      RPPRECA3
+          BRANCH    OVRCD,PROM1000
+.
+          MATCH     PRECINVN,PREAINVN
+          GOTO      PROM1000 IF NOT EQUAL
+.
+          MATCH     PRECTRID,PREATRID
+          GOTO      PROM4100 IF NOT EQUAL
+.
+          COMPARE   PREASTAT,THREE
+          GOTO      PROM4100 IF NOT EQUAL
+.
+          MATCH     " 6",PREATYPE
+          GOTO      PROM4100 IF NOT EQUAL
+.
+          MATCH     "3002",PREAEROR
+          GOTO      PROM4100 IF NOT EQUAL
+.
+          MOVE      ZERO,FORM8A
+.
+          DAYSEP    PREADATE,CURRDATE,FORM8A
+.
+          COMPARE   ONE,FORM8A
+          GOTO      PROM5000 IF EQUAL
+          GOTO      PROM5000 IF LESS
+.
+          GOTO      PROM1000
+.
+PROM5000  MOVE      NINE,TYPOFREQ            * retrieve status
+          GOTO      PROM7000
+.
+PROM6000  MOVE      TEN,TYPOFREQ          * retrieve report
+.
+PROM7000  CALL      RSTM0000                * retrieve status/report
+          GOTO      PROM1000
+.
+PROM9999  RETURN
++
+.*****************************************************************************
+.*                                RSTM0000                                   *
+.*               Retrieve Eclipse IMC Transaction Status/Report              *
+.*****************************************************************************
+RSTM0000  PACK      KEY34,PRECINVN,Z70
+          CALL      RSPRECA3
+          CALL      RPPRECA3               * get last transaction audit record
+          BRANCH    OVRCD,RSTM9999
+.
+          MATCH     PRECINVN,PREAINVN
+          GOTO      RSTM9999 IF NOT EQUAL   * different invoice number
+.
+          IF        PREASTAT <> 2
+            MATCH     PRECTRID,PREATRID
+            GOTO      RSTM9999 IF NOT EQUAL   * different transaction ID
+          ENDIF
+.
+.>>>>     MATCH     " 6",PREATYPE
+.>>>>     GOTO      RSTM0200 IF EQUAL       * error, so send another request
+.
+.>>>>     MATCH     " 1",PREATYPE
+.>>>>     GOTO      RSTM9999 IF EQUAL       * status request already sent
+.
+.>>>>     MATCH     " 3",PREATYPE
+.>>>>     GOTO      RSTM9999 IF EQUAL       * report request already sent
+.
+          COMPARE   TEN,TYPOFREQ
+          GOTO      RSTM0200 IF EQUAL       * retrieve reports immediately
+.
+          MOVE      CURRDATE,CHCKDATE
+          SUB       ONE,CHCKDATE            * yesterday's date
+.
+.>>>>     MATCH     PREADATE,CHCKDATE
+.>>>>     GOTO      RSTM9999 IF LESS        * don't send another request today
+.
+.....     Get location & sender id from priibhaf
+.
+RSTM0200  MOVE      SP70,PMETLOCN
+          MOVE      SP70,PMETSNID
+.
+          MATCH     SP70,PREABATN
+          GOTO      RSTM0500 IF EQUAL
+.
+          PACK      KEY8,PREABATN,SP70
+          CALL      RDPRIBH1
+          IF        OVRCD<>1
+            MOVE      PRIBLOCN,PMETLOCN
+            MOVE      PRIBSNID,PMETSNID
+          ENDIF
+.
+          CALL      VLCN0000
+          BRANCH    EXIT,RSTM9999
+.
+.....     Write a record to transaction request table
+.
+RSTM0500  MOVE      SP1,PMETSTAT
+          MOVE      TYPOFREQ,PMETTYPE
+          MOVE      PRECTRID,PMETTRID
+          MOVE      PREABATN,PMETBATN
+          MOVE      PREAINVN,PMETINVN
+          MOVE      SP30,PMETUDTE
+          MOVE      SP30,PMETUTIM
+          MOVE      SP70,PMETEROR
+          MOVE      SP30,PMETSPAR
+.
+RSTM1000  CALL      IBACLOCK                     * get current date/time
+          PACK      PMETCDTE,CCC,CYY,CMM,CDD
+          REP       " 0",PMETCDTE
+          MOVE      CTIMEIS,PMETCTIM
+          REP       " 0",PMETCTIM
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID
+          CALL      RDPMETR1
+          IF        OVRCD = 0
+            GOTO      RSTM1000
+          ENDIF
+.
+          CALL      WRPMETR1                     * write transaction request
+.
+.....     Now audit the request by writing to priecaaf (transaction audit)
+.
+RSTM2000  CALL      IBACLOCK                     * get current date/time
+          PACK      PREADATE,CCC,CYY,CMM,CDD
+          REP       " 0",PREADATE
+          MOVE      CTIMEIS,PREATIME
+          REP       " 0",PREATIME
+.
+          MOVE      TYPOFREQ,PREATYPE            * type of request (1 or 3)
+          PACK      PREAOPER,PRGID,SP10
+.
+          PACK      KEY26,PREAINVN,PREADATE,PREATIME,PREATYPE
+          CALL      RAPRECA1
+          IF        OVRCD = 0
+            GOTO      RSTM2000
+          ENDIF
+.
+          CALL      WRPRECA1                     * write EDI History record
+.
+RSTM9999  RETURN
++
+.*****************************************************************************
+.*                                CLOM0000         Called by: ROUT0000       *
+.*             Close a claim that is still waiting for an outstanding        *
+.*             report and for which a remittance report has been received.   *
+.*****************************************************************************
+.
+.         Update the outstanding processing report (pmsecoaf) record
+.
+CLOM0000  PACK      SAVKEY31,PMEOHFND,PMEODFLG,PMEOTRID,SP70
+.
+          PACK      KEY31,PMEOHFND,ONE,PMEOTRID,SP70
+          CALL      RDPMECO1
+          IF        OVRCD=0
+.
+            PACK      KEY31,SAVKEY31,SP70
+            CALL      RDPMECO1
+.
+            CALL      DEPMECO1
+.
+            PACK      KEY31,SAVKEY31,SP70
+            CALL      RSPMECO1
+.
+            GOTO      CLOM9999
+          ELSE
+.
+            PACK      KEY31,SAVKEY31,SP70
+            CALL      RDPMECO1
+.
+            MOVE      "1",PMEODFLG                 * set status to "Closed"
+            PACK      PMEOUSER,PRGID,SP10
+            CALL      UPPMECO1                     * update record
+.
+          ENDIF
+.
+.         Update the priectaf record
+.
+          MOVE      TEN9,PRECFLAG                * set status to closed
+          PACK      PRECSTAT,SP1,TWO             * set closed with payment
+          CALL      UPPRECT6                     * update claim
+.
+.         Write a new history (priecaaf) record
+.
+          MOVE      PRECINVN,PREAINVN
+          MOVE      PRECBATN,PREABATN
+          MOVE      TEN9,PREASTAT
+          MOVE      " 5",PREATYPE
+          PACK      PREAOPER,PRGID,SP10
+          MOVE      PRECTRID,PREATRID
+          MOVE      SP4,PREAEROR
+          PACK      PREASPAR,SP30,SP10
+.
+CLOM5000  CALL      IBACLOCK                     * get current date/time
+          PACK      PREADATE,CCC,CYY,CMM,CDD
+          REP       " 0",PREADATE
+          MOVE      CTIMEIS,PREATIME
+          REP       " 0",PREATIME
+.
+          PACK      KEY26,PREAINVN,PREADATE,PREATIME,PREATYPE
+          CALL      RAPRECA1
+          IF        OVRCD = 1
+            CALL      WRPRECA1
+          ELSE
+            GOTO      CLOM5000
+          ENDIF
+.
+CLOM9999 RETURN
++
+.*****************************************************************************
+.*                                PROB0000                                   *
+.*                   Process eclipse transaction table                       *
+.*****************************************************************************
+PROB0000  MATCH     "1",PTCNUEBB
+          GOTO      PROB9999 IF NOT EQUAL
+.
+          DISPLAY   *P1:24,*EL,"Processing BLK Eclipse Requests...";
+.
+.....     Loop thru outectaf and determine what request type to send for each
+.....     claim (depending on current status):
+.....            - Retrieve report (if current status = 4)
+.....     There will possibly be multiple requests of each type.
+.
+.....     Note: No further requests needed for transactions with status of...
+.....     5 = Processing complete - Reported
+.....     6 = Remittance Reported
+.....     7 or greater (closed)
+.
+.....     Requests will be written to a transaction request table (pmsetraf).
+.....     Request types on this table will be either Retrieve status,
+.....     Get Participant or Retrieve report.
+.....     This record will then be processed by the server adaptor.
+.
+.....     Check priecaaf (audit) to see most recent request/response for the
+.....     transaction id. If the latest audit record is a previous REQUEST, do
+.....     nothing.
+.....     If the latest audit record is a RESPONSE (and it was received on or
+.....     before the previous day) then send a new request.
+.
+.....     Write a record to priecaaf to audit the request just sent.
+.
+          PACK      KEY30,SP70
+          CALL      RSOTECT1
+PROB1000  CALL      RKOTECT1
+          BRANCH    OVRCD,PROB9999
+.
+          BRANCH    OTECFLAG,PROB1000,PROB1000,PROB4000,PROB6000,PROB7000:
+                             PROB1000,PROB1000
+.
+          GOTO      PROB1000
+.
+.PROB3000  MATCH     SP70,OTECNBAT
+.          GOTO      PROB1000 IF NOT EQUAL
+..
+.          MATCH     SP70,PRECFTID
+.          GOTO      PROB1000 IF NOT EQUAL
+.
+PROB4000  PACK      KEY27,OTECINVN,Z70
+          CALL      RSOTECA3
+PROB4100  CALL      RPOTECA3
+          BRANCH    OVRCD,PROB1000
+.
+          MATCH     OTECINVN,OTEAINVN
+          GOTO      PROB1000 IF NOT EQUAL
+.
+          MATCH     OTECTRID,OTEATRID
+          GOTO      PROB4100 IF NOT EQUAL
+.
+          COMPARE   OTEASTAT,THREE
+          GOTO      PROB4100 IF NOT EQUAL
+.
+          MATCH     " 4",OTEATYPE
+          GOTO      PROB4100 IF NOT EQUAL
+.
+          MATCH     "3002",OTEAEROR
+          GOTO      PROB4100 IF NOT EQUAL
+.
+          MOVE      ZERO,FORM8A
+.
+          DAYSEP    OTEADATE,CURRDATE,FORM8A
+.
+          COMPARE   ONE,FORM8A
+          GOTO      PROB6000 IF EQUAL
+          GOTO      PROB6000 IF LESS
+.
+          GOTO      PROB1000
+.
+.PROB5000  MOVE      NINE,TYPOFREQ            * retrieve status
+.          GOTO      PROB7000
+.
+PROB6000  MOVE      TEN1,TYPOFREQ          * retrieve assessment report
+          GOTO      PROB8000
+.
+PROB7000  PACK      KEY57,OTECTRID,SP70
+          CALL      RSOTEAH2
+          CALL      RKOTEAH2
+          BRANCH    OVRCD,PROB9000
+.
+          MATCH     OTECTRID,OTEHCTID
+          GOTO      PROB9000 IF NOT EQUAL
+.
+          REP       " 0",OTEHCLBP
+.
+          MATCH     "000000000",OTEHCLBP
+          GOTO      PROB9000 IF EQUAL
+.
+          MOVE      TEN2,TYPOFREQ          * retrieve payment report
+          GOTO      PROB8000
+.
+PROB8000  CALL      RSTB0000               * retrieve status/report
+PROB9000  GOTO      PROB1000
+.
+PROB9999  RETURN
++
+.*****************************************************************************
+.*                                RSTB0000                                   *
+.*               Retrieve Eclipse BLK Transaction Status/Report              *
+.*****************************************************************************
+RSTB0000  PACK      KEY35,OTECINVN,Z70
+          CALL      RSOTECA3
+RSTB0010  CALL      RPOTECA3               * get last transaction audit record
+          BRANCH    OVRCD,RSTB9999
+.
+          MATCH     OTECINVN,OTEAINVN
+          GOTO      RSTB9999 IF NOT EQUAL   * different invoice number
+.
+          MATCH     OTECMODL,OTEAMODL
+          GOTO      RSTB0010 IF NOT EQUAL
+.
+          IF        OTEASTAT <> 2
+            MATCH     OTECTRID,OTEATRID
+            GOTO      RSTB9999 IF NOT EQUAL   * different transaction ID
+          ENDIF
+.
+.>>>>     MATCH     " 6",PREATYPE
+.>>>>     GOTO      RSTB0200 IF EQUAL       * error, so send another request
+.
+.>>>>     MATCH     " 1",PREATYPE
+.>>>>     GOTO      RSTB9999 IF EQUAL       * status request already sent
+.
+.>>>>     MATCH     " 3",PREATYPE
+.>>>>     GOTO      RSTB9999 IF EQUAL       * report request already sent
+.
+.
+.         COMPARE   TEN1,TYPOFREQ
+.         GOTO      RSTB0200 IF EQUAL       * retrieve reports immediately
+.
+.         MOVE      CURRDATE,CHCKDATE
+.         SUB       ONE,CHCKDATE            * yesterday's date
+.
+.>>>>     MATCH     PREADATE,CHCKDATE
+.>>>>     GOTO      RSTB9999 IF LESS        * don't send another request today
+.
+.....     Get location & sender id from priibhaf
+.
+RSTB0200  MOVE      SP70,PMETLOCN
+          MOVE      SP70,PMETSNID
+.
+          MATCH     SP70,OTEABATN
+          GOTO      RSTB0500 IF EQUAL
+.
+          PACK      KEY8,OTEABATN,SP70
+          CALL      RDOTIBH1
+          IF        OVRCD<>1
+            MOVE      OTIBLOCN,PMETLOCN
+            MOVE      OTIBSNID,PMETSNID
+          ENDIF
+.
+.....     Write a record to transaction request table
+.
+RSTB0500  MOVE      SP1,PMETSTAT
+          MOVE      TYPOFREQ,PMETTYPE
+          MOVE      OTECTRID,PMETTRID
+          MOVE      OTEABATN,PMETBATN
+          MOVE      OTEAINVN,PMETINVN
+          MOVE      SP30,PMETUDTE
+          MOVE      SP30,PMETUTIM
+          MOVE      SP70,PMETEROR
+          MOVE      OTECMODL,PMETMODL
+          MOVE      SP30,PMETSPAR
+.
+RSTB1000  CALL      IBACLOCK                     * get current date/time
+          PACK      PMETCDTE,CCC,CYY,CMM,CDD
+          REP       " 0",PMETCDTE
+          MOVE      CTIMEIS,PMETCTIM
+          REP       " 0",PMETCTIM
+.
+          PACK      KEY51,PMETSTAT,PMETTYPE,PMETLOCN,PMETCDTE,PMETCTIM,PMETTRID
+          CALL      RDPMETR1
+          IF        OVRCD = 0
+            GOTO      RSTB1000
+          ENDIF
+.
+          CALL      WRPMETR1                     * write transaction request
+.
+.....     Now audit the request by writing to outecaaf (transaction audit)
+.
+RSTB2000  CALL      IBACLOCK                     * get current date/time
+          PACK      OTEADATE,CCC,CYY,CMM,CDD
+          REP       " 0",OTEADATE
+          MOVE      CTIMEIS,OTEATIME
+          REP       " 0",OTEATIME
+.
+          MOVE      TYPOFREQ,OTEATYPE            * type of request (1 or 3)
+          PACK      OTEAOPER,PRGID,SP10
+.
+          PACK      KEY27,OTEAINVN,OTEADATE,OTEATIME,OTEATYPE,OTEAMODL,SP70
+          CALL      RAOTECA1
+          IF        OVRCD = 0
+            GOTO      RSTB2000
+          ENDIF
+.
+          CALL      WROTECA1                     * write EDI History record
+.
+RSTB9999  RETURN
++
+.*****************************************************************************
+.*        I/O Includes                                                       *
+.*****************************************************************************
+.
+          INC       STD002IO
+.
+          INC       OUTECAIO/INC
+          INC       OUTIBHIO/INC
+          INC       OUTECTIO/INC
+          INC       OUTEAHIO/INC
+.
+          INC       PMSEBHIO/INC
+          INC       PRIIBHIO/INC
+          INC       PMSECAIO/INC
+          INC       PRIECAIO/INC
+          INC       PMSECOIO/INC
+          INC       PMSECTIO/INC
+          INC       PRIECTIO/INC
+          INC       PMSETRIO/INC
+          INC       PATCRTIO/INC
+          INC       PATLCNIO/INC
+          INC       PATINVIO/INC
++

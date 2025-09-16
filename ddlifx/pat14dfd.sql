@@ -1,0 +1,41 @@
+create table pat10d4f
+(
+dpcode      char(9),
+ddesc       char(70),
+dflag       char(1),
+dagegp      char(1),
+dlow        decimal(2,0),
+dhigh       decimal(2,0),
+pt0d2agp    char(1),
+pt0d2all    decimal(2,0),
+pt0d2ahl    decimal(2,0),
+dsex        char(1),
+pt0dadtp    char(1),
+pt0dprfx    char(2),
+pt0dsac2    char(7),
+ddagger     char(1),
+darea       char(1),
+pt0dcpra    char(1),
+pt0dacrq    char(1),
+pt0dmi9c    char(9),
+dpt0dcmf    char(2),
+dpt0dv1c    char(1),
+dpt0dv2c    char(1),
+pt0dv1mp    char(9),
+dpt0dv3c    char(1),
+pt0dv2mp    char(9),
+dpt0dv4c    char(1),
+pt0dspr2    char(11),
+lf          char(1)
+);
+create unique index pati14d1 on pat10d4f
+(
+dpcode
+);
+create unique index pati14d2 on pat10d4f
+(
+ddesc,
+dpcode
+);
+revoke all on pat10d4f from public ; 
+grant select on pat10d4f to public ; 

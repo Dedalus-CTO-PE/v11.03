@@ -1,0 +1,4550 @@
+.******************************************************************************
+.* System         : Patient Billing                                           *
+.* Program        : IBAADT08.PBL                                              *
+.* Name           : Singapore CCPS Claims Extract to XML                      *
+.******************************************************************************
+.* Date           : 16/10/2006                                                *
+.* Author         : Mike Laming                                               *
+.* Function       : Extract CCPS Medical only/Claims for input to MEDIClaim   *
+.*                  User is given 4 options upon entering program:            *
+.*                     1. Create Medical only Extract                         *
+.*                     2. Create Claims Extract                               *
+.*                     3. Create Cancellation Extract                         *
+.*                     4. Re-extract Batch                                    *
+.*                                                                            *
+.* Modifications  :                                                           *
+.* V10.13.01  06/12/2013 J.Tan         TSK 0859743                            *
+.*            Mod for OTRECTYP=6 for Theatre item                             *
+.* V10.03.01  19/12/2012 Patrick Adair                             CAR 261630 *
+.*            Removed port number from temp file name                         *
+.*        V10.01.01 17/12/2010  Mike Laming   CAR 233046                      *
+.*                  Mods to Misc.Charges PATMCHFD - Key change, logic changes *
+.*                  19/01/2010  J.Tan         CAR 233034                      *
+.*                  Mods to use Johns Hopkins bed fees file                   *
+.*        V10.00.01 30/04/2010 J.Tan         CAR 220887                       *
+.*                  Mods checking for Active/Inactive of Misc.charge          *
+.*        V9.08.06  17/04/2007  Mike Laming       CAR 131592                  *
+.*                  'Final' changes to headers and footers                    *
+.*        V9.08.05  13/03/2007  Mike Laming       CAR 131592                  *
+.*                  'Final' changes to headers and footers                    *
+.*        V9.08.04  25/01/2007  Mike Laming       CAR 131592                  *
+.*                  Changes to read all Invoices for each Admission/Visit     *
+.*        V9.08.03  25/01/2007  Mike Laming       CAR                         *
+.*                  Changes to read all Invoices for each Admission/Visit     *
+.*        V9.08.02  15/01/2007  Mike Laming       CAR                         *
+.*                  A couple more changes. Add spaces to addresses, remove    *
+.*                  duplicate tag, hard code OP Discharge dets.               *
+.*        V9.08.01  11/01/2007  Mike Laming       CAR 103368                  *
+.*                  Port all changes up to V9.07.05                           *
+.******************************************************************************
+
+          INC       STD001FD
+          INC       CCPSXML/INC             * XML Tags for CCPS messages
+.
+          INC       IBACONFD/INC            * IBA Common                 
+          INC       IBAGEDFD/INC            * GST Rates                  
+          INC       IBASEQFD/INC            * Sequential Numbers File
+          INC       OUTBOAFD/INC            * Outpatient Booking Table A
+          INC       OUTBB1FD/INC            * Outpatient Booking Table B
+          INC       OUTCLIFD/INC            * Outpatient Clinic Table
+          INC       OUTDTRFD/INC            * Outpatient DTR Trans Details
+          INC       OUTSITFD/INC            * Outpatient Site File
+          INC       PATCFAFD/INC
+          INC       PATCODFD/INC            * Codes file                     
+          INC       PATCONFD/INC            * Control file
+          INC       PATBFEFD/INC            * Bed Fees 
+          INC       PMSCIDFD/INC            * Contract ID
+          INC       PATDO1FD/INC            * Doctor File
+          INC       PATDSCFD/INC            * Disch file
+          INC       PATDTRFD/INC            * DTR file
+          INC       PATEBHFD/INC            * EDI batch header file
+          INC       PATEDTFD/INC            * Patient CCPS EDI Summmary Table
+          INC       PATFN1FD/INC            * Health fund file
+          INC       PATFX1FD/INC            * Health fund extention
+          INC       PATINVFD/INC            * Invoice file
+          INC       PATMA1FD/INC            * Master file
+          INC       PMSPX2FD/INC            * Master File Extn 2
+          INC       PMSRESFD/INC            * Residency Details
+          INC       PMSAIDFD/INC            * Alternate Id.
+          INC       PATMCHFD/INC            * Miscellaneous Charges file    
+          INC       PATMI1FD/INC            * Admin file
+          INC       PMSVX1FD/INC            * Visit File Extension
+          INC       PMSHCPFD/INC            * Health Care Provider (Doctors)
+          INC       TFILEVAR/INC            * Generate Temp File Name
+          INC       VISPAYFD/INC            * Visit Based Payer Details (H/F)
+          INC       VISPMAFD/INC            * Visit Based Payer Member Accts 
+          INC       WEBERRFD/INC            * Web Server Error Logging.
+.
+EXTFILE1  FILE      ASCII,FIXED=256
+.
+TEMPFILE  IFILE     SQL, FIXED=17, KEY="U1-8"
+TEMPFIL2  IFILE     SQL, FIXED=17, KEY="U9-16"
+.
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+TMPINVNO  DIM       8        8         1     Invoice Number
+TMPVISNO  DIM       8        8         9     Admission/Visit Number
+.
+. End of Record                        17
+.
+TEMPSUMM  IFILE     SQL, FIXED=30, KEY="U1-8,9-14"
+.
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+TMPSADMN  DIM       8        8         1     Admission No
+TMPSCHRG  DIM       6        6         9     Charge Type - EDI Equiv.
+TMPSAMNT  DIM       15       15        15    Charge Amount
+.
+. End of Record                        30
+.
+EXT1FILE  IFILE     SQL,FIXED=100, KEY="U1-8,9-11,16-27"
+.
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+EXVISNO   DIM       8        8         1     Visit No
+EXSEQNO   DIM       3        3         9     Sequence no.
+EXSEGMT   DIM       4        4         12    XML Segment Ident.
+EXSPSEQ   DIM       12       12        16    Special sequences
+EXDATAFL  DIM       72       72        28    Data Area
+.
+.                end of record         100
+.                                           * Document Identifier ************
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+.EXVISNO  DIM       8        8         1     Visit No
+.EXSEQNO  DIM       3        3         9     Sequence no.           "  1"
+.EXSEGMT  DIM       4        4         12    XML Segment Ident.     "BGM " 
+.EXSPSEQ  DIM       12       12        16    Special sequences      "    "
+EXDOCID   DIM       3        3         28    Document Code          "850"
+EXDOCNO   DIM       15       15        31    Document Number
+EXEXDTE   DIM       8        8         46    Extract Date           'ccyymmdd'
+EXEXTME   DIM       4        4         54    Extract Time           'hhmm'
+EXADIQL   DIM       2        2         58    ADI Ident              "ST"
+EXADIIN   DIM       6        6         60    ADI Indicator          "FS" or "CA"
+.EXSPAR1  DIM       34       34        66    Spare
+.
+.                end of record         100
+.                                           * Invoice Details ****************
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+.EXVISNO  DIM       8        8         1     Visit No
+.EXSEQNO  DIM       3        3         9     Sequence no.           "  2"
+.EXSEGMT  DIM       4        4         12    XML Segment Ident.     "BIL "
+.EXSPSEQ  DIM       12       12        16    Special sequences      "    "
+.                                            * Invoice, Admission, Discharge
+EXBILTY   DIM       3        3         28    Invoice Type           "09 "
+EXBILAM   DIM       15       15        31    Invoice Amount
+EXBILCT   DIM       2        2         46    Invoice Category
+EXADATE   DIM       8        8         48    Admission Date         'ccyymmdd'
+EXATIME   DIM       4        4         56    Admission Time         'hhmm'
+EXDDATE   DIM       8        8         60    Discharge Date         'ccyymmdd'
+EXDTIME   DIM       4        4         68    Discharge Time         'hhmm'
+EXSDATE   DIM       10       10        72    Start Pat.Mangagement Date
+EXEDATE   DIM       10       10        82    End Pat.Mangagement Date
+EXINVNO   DIM       8        8         92    Invoice No
+....EXSPAR2  DIM       8        8         92
+.                                           * Reference data *****************
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+.EXVISNO  DIM       8        8         1     Visit No
+.EXSEQNO  DIM       3        3         9     Sequence no.           "  3"
+.EXSEGMT  DIM       4        4         12    XML Segment Ident.     "RFF "
+.EXSPSEQ  DIM       12       12        16    Special sequences      "    "
+.                                            * Admission, ??
+EXRFF1    DIM       3        3         28    Reference Qual 1       "SMA"
+EXHOSID   DIM       6        6         31    Sender Mailbox Address
+EXRFF2    DIM       3        3         37    Reference Qual 2       "PDS"
+EXATDOC   DIM       10       10        40    Principal (Attend) Doc
+EXRFF3    DIM       3        3         50    Reference Qual 3       "LDS"
+EXLODOC   DIM       10       10        53    Assisting Local Doctor
+.EXSPAR3  DIM       37       37        63
+.                                           * Additional Info ****************
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+.EXVISNO  DIM       8        8         1     Visit No
+.EXSEQNO  DIM       3        3         9     Sequence no.           "  4"
+.EXSEGMT  DIM       4        4         12    XML Segment Ident.     "ADI "
+.EXSPSEQ  DIM       12       12        16    Special sequences      "    "
+.                                            * Various Cat. Codes, Health Fund
+EXADICC   DIM       2        2         28    Qualifier (Code)
+EXADIVL   DIM       6        6         30    Indicator (Code Table values)
+.EXSPAR4  DIM       64       64        36
+.                                           * Accomm. & Treatment Charges ****
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+.EXVISNO  DIM       8        8         1     Visit No
+.EXSEQNO  DIM       3        3         9     Sequence no.           "  5"
+.EXSEGMT  DIM       4        4         12    XML Segment Ident.     "GRP1"
+.EXSPSEQ  DIM       12       12        16    Special sequences      "ccyymmdd"
+.                                            * DRECTYP "1" and "4"
+EXNDAYQ   DIM       2        2         28    Qualifier (No.Days)    "ND"  
+EXNDAYS   DIM       6        6         30    No of Days (CCPS Cat = ND)
+EXACTY5   DIM       2        2         36    Acc.Charges - Treat.Fees "05"     
+EXACAM5   DIM       15       15        38    Treatment Fees Amount
+EXACTY6   DIM       2        2         53    Acc.Charges - Accomm.  "06"     
+EXACAM6   DIM       15       15        55    Accommodation Amount
+EXACWDQ   DIM       2        2         70    Qualified              "RT"
+EXACWDT   DIM       2        2         72    Ward Class (CT.19)
+.EXSPAR5  DIM       26       26        74
+.                                           * Misc. Charges ******************
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+.EXVISNO  DIM       8        8         1     Visit No
+.EXSEQNO  DIM       3        3         9     Sequence no.           "  6"
+.EXSEGMT  DIM       4        4         12    XML Segment Ident.     "GRP2"
+.EXSPSEQ  DIM       12       12        16    Special sequences      "ccyymmdd n"
+.                                            * DRECTYP "3" Cat "FI" 
+EXCHGTY   DIM       6        6         28    Type of Charge - HDP Equiv.
+EXCHGAM   DIM       15       15        34    Charge Amount
+EXNOTMQ   DIM       2        2         49    Qualifier (No.Times)   "NT"
+EXNOTIM   DIM       6        6         51    No.of Times
+.EXSPAR6  DIM       43       43        57
+.                                           * Theatre (Procedure) Charges ****
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+.EXVISNO  DIM       8        8         1     Visit No
+.EXSEQNO  DIM       3        3         9     Sequence no.           "  7"
+.EXSEGMT  DIM       4        4         12    XML Segment Ident.     "GRP3"
+.EXSPSEQ  DIM       12       12        16    Special sequences      "ccyymmdd n"
+.                                            * DRECTYP "2" - Theatre
+EXPRDTQ   DIM       3        3         28    Qualifier (Date of Op) "804"
+EXPRDTE   DIM       8        8         31    Date of Oper.          'ccyymmdd'
+EXPRTYQ   DIM       2        2         39    Qualifier - Nature of Op."NO"
+.                                                      - Op.Code    "OC"
+EXPRCOD   DIM       6        6         41    Op.Code or CCPS Table 18
+EXDOCAQ   DIM       3        3         47    Qualifier - Anaest.    "NDS"
+EXDOCAN   DIM       10       10        50    Anaesthist Doc. Code
+EXPAMTQ   DIM       2        2         60    Qualifier - Surgeon Fee "01"
+.                                                      - Anaesth.Fee "02"
+.                                                      - Facilty Fee "03"
+.                                                      - Surgical    "04"
+EXPAMNT   DIM       15       15        62    Procedure Amount
+.EXSPAR7  DIM       23       23        77
+.                                           * Patient Details ****************
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+.EXVISNO  DIM       8        8         1     Visit No
+.EXSEQNO  DIM       3        3         9     Sequence no.           "  8"
+.EXSEGMT  DIM       4        4         12    XML Segment Ident.     "GRP4"
+.EXSPSEQ  DIM       12       12        16    Special sequences      " 1"
+.                                            * Patient Particulars   
+EXPANAM   DIM       66       66        28    Patient Name
+.                                      94
+.EXSPSEQ  DIM       12       12        16    Special sequences      " 2"
+EXPAIDN   DIM       17       17        28    Patients Identity No.
+EXPAIDT   DIM       2        2         45    Patients Identity Type
+EXPANAT   DIM       2        2         47    Patients Nationality
+EXPASEX   DIM       2        2         49    Patients Sex
+EXPARAC   DIM       2        2         51    Patients Race
+EXPADOB   DIM       8        8         53    Patients Date-of-Birth
+EXPAADQ   DIM       1        1         61    Qualifier - Address type "X"
+EXPAPCD   DIM       10       10        62    Patients Post Code
+.                                      72
+.EXSPSEQ  DIM       12       12        16    Special sequences      " 3"
+EXPAAD1   DIM       35       35        28    Patients Address Line 1
+EXPAAD2   DIM       35       35        63    Patients Address Line 2
+.                                      98
+.EXSPSEQ  DIM       12       12        16    Special sequences      " 4"
+EXPAAD3   DIM       35       35        28    Patients Address Line 3
+EXPAAD4   DIM       35       35        63    Patients Address Line 4
+.                                      98
+.                                           * Payer Details ******************
+.Name     Type   Length   Physical   Start   Description
+.----     ----   ------   --------   -----   -----------
+.EXVISNO  DIM       8        8         1     Visit No
+.EXSEQNO  DIM       3        3         9     Sequence no.           "  9"
+.EXSEGMT  DIM       4        4         12    XML Segment Ident.     "GRP5"
+.EXSPSEQ  DIM       12       12        16    Special sequences      "nnn 1"
+.                                            * Payers Particulars
+EXPYNAM   DIM       66       66        28    Payers Name
+.                                      94
+.EXSPSEQ  DIM       12       12        16    Special sequences      "nnn 2"
+EXPYTYP   DIM       2        2         28    Payer Type (Medisave)  "MS"
+EXPYACC   DIM       17       17        30    Payers MediSave Account No.
+EXPYIDC   DIM       17       17        47    Payers Identity No.
+EXPYIDT   DIM       2        2         64    Payers Identity Type
+EXPYADQ   DIM       1        1         65    Payers Address Type    "X"
+.                                      67
+.EXSPSEQ  DIM       12       12        16    Special sequences      "nnn 3"
+EXPYAD1   DIM       35       35        28    Payers Address Line 1
+EXPYAD2   DIM       35       35        63    Payers Address Line 2
+.                                      98
+.EXSPSEQ  DIM       12       12        16    Special sequences      "nnn 4"
+EXPYAD3   DIM       35       35        28    Payers Address Line 3
+EXPYAD4   DIM       35       35        63    Payers Address Line 4
+.                                      98
+.EXSPSEQ  DIM       12       12        16    Special sequences      "nnn 5"
+EXPYPCD   DIM       10       10        28    Payers Post Code
+EXPYBLQ   DIM       2        2         38    Qualifier Payment      "08"
+EXPYAMT   DIM       15       15        40    Payment Amount -- or --      
+EXPYPCT   DIM       7        7         55    Payment Percentage           
+EXPYREQ   DIM       2        2         62    Relationship Qualifier "RE"
+EXPYREC   DIM       6        6         64    Relationship Code
+.                                      70
+.
+. ----- Program variables -----
+.
+ADDARR    DIM       35[5]
+ADDNO     FORM      2
+ALTCATCL  DIM       3
+.
+BATCHNUM  DIM       8
+BATCHNO   DIM       6
+BSTATDES  DIM       14
+BSTATDS1  INIT      "Sent          "
+BSTATDS2  INIT      "Acknowledged  "
+BSTATDS3  INIT      "Unacknowledged"
+.
+CNTRCEFR  FORM      1
+CONTRCID  DIM       8
+CEFFDATE  DIM       8
+CURRDATE  DIM       8
+CALLPOSN  FORM      1
+CMDLINE   DIM       60
+CHKDIGIT  DIM       1
+CHNGCL    FORM      1
+COUNT     FORM      5
+.
+EFFDATE   DIM       8
+ERRMSG    DIM       60
+HEDMSG    DIM       60
+ERRCT     FORM      6                       * Error counter
+ERRFLG    FORM      1                       * Error flag
+EXTFILNM  DIM       8
+EXTFNAME  DIM       127                     * Extract file name
+EXTRCNT   FORM      5
+.
+FIELD1    FORM      2
+FIELD2    FORM      2
+FILENAME  DIM       8
+FILENO    DIM       6
+FORM1A    FORM      1
+FORM1B    FORM      1
+FORM1C    FORM      1
+FORM1D    FORM      1
+FORM1E    FORM      1
+FORM3     FORM      3
+FORM4B    FORM      4
+FORM6A    FORM      6
+FORM7     FORM      7
+FORM8A    FORM      8
+FORM12P2  FORM      12.2
+FOUND     FORM      1
+FROMDATE  DIM       8
+FRSTDATE  DIM       8
+.
+GP3CNT    FORM      3
+GSTCODE   DIM       6
+HEADFDAT  DIM       18
+HEADTDAT  DIM       18
+.
+ITEMNO    DIM       9
+INAMTNEW  FORM      12.2
+INAMTSAV  FORM      12.2
+INDEXVAL  FORM      2
+INFMSG    DIM       60
+.
+KEY2A     DIM       2
+KEY21A    DIM       21
+KEY26A    DIM       26
+LASTDATE  DIM       8
+MSG0DONE  FORM      1
+.
+PASSNO    FORM      1
+RECDCN1   FORM      6
+RECDCNT   FORM      6
+RESUBMN   FORM      1
+.
+SAVBTHN   FORM      8                       * save batch number
+SAVKEY18  DIM       18
+STATDESC  DIM       6
+SAVFDATE  DIM       8
+SAVINVNO  DIM       8
+SAVTDATE  DIM       8
+SAVDAYS   FORM      4
+SAVDAYZ   FORM      4.1
+SEGCNT    FORM      6
+SUMVALUE  FORM      8
+.
+TMPFILNM  DIM       8
+TMPSUMNM  DIM       8
+TMPKEY1   DIM       8[18]
+TMPKEY2   DIM       24[15]
+TODATE    DIM       8
+TOTRECOU  FORM      6
+CHRGAMT   FORM      12.2
+GSTNAMT   FORM      12.2
+TOTLAMT   FORM      12.2
+TOTAMTCT  FORM      12.2                     * Total amount counter
+WORKAMT   FORM      12.2
+TSTDATE   DIM       8
+VISDATE   DIM       8
+WORKDATE  DIM       8
+.
+DIM2A     DIM       2
+DIM2B     DIM       2
+DIM2C     DIM       2
+DIM3      DIM       3
+DIM4      DIM       4
+DIM4A     DIM       4
+DIM4B     DIM       4
+DIM5      DIM       5
+DIM6      DIM       6
+DIM7      DIM       7
+DIM8      DIM       8
+DIM8A     DIM       8
+DIM9A     DIM       9
+DIM9B     DIM       9
+DIM9C     DIM       9
+DIM9D     DIM       9
+DIM9E     DIM       9
+DIM10A    DIM       10
+DIM10B    DIM       10
+DIM10C    DIM       10
+DIM10D    DIM       10
+DIM10E    DIM       10
+DIM10F    DIM       10
+DIM10G    DIM       10
+DIM10H    DIM       10
+DIM12A    DIM       12
+DIM12B    DIM       12
+DIM12C    DIM       12
+DIM16     DIM       16
+DIM18     DIM       18
+DIM20     DIM       20
+DIM23     DIM       23
+DIM26     DIM       26
+DIM60     DIM       60
+DIM80     DIM       80
+DIM120    DIM       120
+.
+HRS       DIM       2
+MINS      DIM       2
+.
+PAGENUMB  FORM      3
+PATHNAME  DIM       100
+PRTINVN   DIM       8
+.
+ATZSTRNG  INIT      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+.
+CATAI     INIT      "AI"
+CATBT     INIT      "BT"
+CATC      INIT      "C "
+CATCL     INIT      "CL"
+CATDD     INIT      "DD"
+CATFI     INIT      "FI"
+CATFN     INIT      "FN"
+CATOZ     INIT      "OZ"
+CATP5     INIT      "P5"
+CATS      INIT      "S "
+CATU1     INIT      "U1"
+CATVA     INIT      "VA"
+.
+. 
+GRTRTHAN  INIT      ">"
+SLSH      INIT      "/"
+TILDA30   INIT      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+XML       INIT      ".xml"
+ZERO4     INIT      "0000"
+.
+.
+PRGID     INIT      "IBAADT08"
+PRGNAM    INIT      "CCPS Claims Extract"
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                   ML0000                                   *
+.*                                 Main Module                                *
+.******************************************************************************
+ML0000    CALL      INIT0000                * Initialise variables & open files
+.
+ML1000    CALL      OPTN0000                * Keyin Options     
+          BRANCH    EXIT,ML9999             * EXIT
+.
+          MOVE      "99",CLNO               * force Page header
+          CALL      CONTQST                 * Continue Processing ?
+          BRANCH    CEXIT,ML2000:           * 1 = Yes
+                          ML1000:           * 2 = No
+                          ML9999            * 3 = Cancel
+          GOTO      ML1000
+.
+ML2000    CALL      SELT0000                * Select qualifying Invoices
+          BRANCH    EXIT,ML8000             * zero invoices selected?
+.
+          COMPARE   FIVE,OPTION             * is this re-extract Batch?
+          GOTO      ML4000 IF EQUAL         * then bypass PASSNO=1 edits
+.
+ML3000    MOVE      ONE,PASSNO
+          CALL      EXTR0000                * edit selected invoices
+          BRANCH    EXIT,ML8000             * no valid invoices selected
+.
+ML4000    MOVE      TWO,PASSNO
+          MOVE      "99",CLNO               * force Page header
+          CALL      EXTR0000                * extract selected invoices
+          CALL      PREP0000                * prep Extract file
+          CALL      WRIT0000                * write XML extract file
+          CALL      UPHED000                * Update the batch header
+.
+ML5000    CALL      TAIL0000
+          GOTO      ML1000
+.
+ML8000    DISPLAY   *P1:24,*EL,"No Invoices selected for Extraction",*W2
+          GOTO      ML5000
+.
+ML9999    MOVE      ZERO,EXIT
+          CALL      KILL0000                * Kill tempfile
+          CALL      KILX0000                * Kill Extract file
+          CHAIN     PGM
++
+.******************************************************************************
+.*                                  INIT0000              Called by: ML0000   *
+.*                       Initialise Variable & Open Files                     *
+.******************************************************************************
+INIT0000  CALL      DISPHEAD                * Display screen heading
+.
+          DISPLAY   *P56:24,"Opening controlf"
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"patcodes"
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patdo1af"
+          OPEN      PATDO1A1,"patdo1af"
+.
+          DISPLAY   *P64:24,"patdschf"
+          OPEN      PATDSCH1,"patdschf"
+.
+          DISPLAY   *P64:24,"patdtraf"
+          OPEN      PATDTRA1,"patdtraf"
+          OPEN      PATDTRA2,"patdtraf"
+          OPEN      PATDTRA3,"patdtraf"
+          OPEN      PATDTRA4,"patdtraf"
+.
+          DISPLAY   *P64:24,"patebhaf"
+          OPEN      PATEBHA1,"patebhaf"
+          OPEN      PATEBHA2,"patebhaf"
+.
+          DISPLAY   *P64:24,"patfn1af"
+          OPEN      PATFN1A1,"patfn1af"
+.
+          DISPLAY   *P64:24,"patfx1af"
+          OPEN      PATFX1A1,"patfx1af"
+.
+          DISPLAY   *P64:24,"patinvrf"
+          OPEN      PATINVR1,"patinvrf"
+          OPEN      PATINVR3,"patinvrf"
+.
+....      DISPLAY   *P64:24,"patitemn"
+....      OPEN      PATITEM1,"patitemn"
+.
+          DISPLAY   *P64:24,"patma1af"
+          OPEN      PATMA1A1,"patma1af"
+.
+          DISPLAY   *P64:24,"patmx1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          DISPLAY   *P64:24,"pmsaidaf"
+          OPEN      PMSAIDA1,"pmsaidaf"
+.
+          DISPLAY   *P64:24,"pmsresaf"
+          OPEN      PMSRESA1,"pmsresaf"
+.
+          DISPLAY   *P64:24,"patmchgf"
+          OPEN      PATMCHG1,"patmchgf"
+.
+          DISPLAY   *P64:24,"patmi1af"
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PATMI1A8,"patmi1af"
+.
+          DISPLAY   *P64:24,"pmsvx1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          DISPLAY   *P64:24,"patedtaf"
+          OPEN      PATEDTA1,"patedtaf"
+          OPEN      PATEDTA2,"patedtaf"
+          OPEN      PATEDTA3,"patedtaf"
+          OPEN      PATEDTA4,"patedtaf"
+.
+          DISPLAY   *P64:24,"vispayaf"
+          OPEN      VISPAYA1,"vispayaf"
+          OPEN      VISPAYA2,"vispayaf"
+.
+          DISPLAY   *P64:24,"vispmaaf"
+          OPEN      VISPMAA1,"vispmaaf"
+.
+          DISPLAY   *P64:24,"outsitaf"
+          OPEN      OUTSITA1,"outsitaf"
+.
+          OPEN      PMSHCPA1,"pmshcpaf"          * Health Care Provider
+.
+          READ      CONTROLF,ZERO;*85,IBCNUGST
+          READ      CONTROLF,TEN;*79,CAPPRVNO
+          READ      CONTROLF,TEN3;*245,CHOSTYP
+          READ      CONTROLF,TWENTY;*193,PTCNDCLM
+          READ      CONTROLF,TWENTY1;*225,PTCNEIMO
+          READ      CONTROLF,EIGHTY8;*59,PTCNI10D
+          READ      CONTROLF,HUND03;*198,PTCNDAYB,*199,PTCNDAYL,*204,PTCNDAYG
+          READ      CONTROLF,HUND03;*218,PTCNUCCP
+          READ      CONTROLF,HUND10;*116,PTCNEDIH,*118,PTCNEDIO,*178,PTCNORIG
+.
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          CLOCK     TIME,CTIMEIS
+          MOVE      ONE,CNEWDS
+.
+INIT2000  MOVE      ZERO,EXIT
+.
+          MOVE      "99",CLNO               * force first page
+.
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                  OPTN0000              Called by: ML0000   *
+.*                                Select Option                               *
+.******************************************************************************
+OPTN0000  MOVE      ZERO,EXIT
+          MOVE      ZERO,OPTION
+.
+          MATCH     "1",PTCNUCCP            * PTCNUCCP "1" = Yes
+          GOTO      OPTN0500 IF EQUAL
+.
+          DISPLAY   *P1:24,"Hospital not using the CCPS EDI Module. "; 
+          PRINT     *N,*1,"Hospital not using the CCPS EDI Module. "; 
+          CALL      HITEXIT
+          GOTO      OPTN9500
+.
+OPTN0500  MATCH     SP8,PTCNEDIH
+          IF        @EQUAL
+            DISPLAY   *P1:24,*B,"EDI Hospital Code blank. ";
+            PRINT     *N,*1,"EDI Hospital Code blank. ";
+            CALL      HITENTER
+            GOTO      OPTN9500
+          ENDIF
+.
+          MATCH     SP70,PTCNEDIO
+          IF        @EQUAL
+            DISPLAY   *P1:24,*B,"EDI Extract Outbound Path blank. ";
+            PRINT     *N,*1,"EDI Extract Outbound Path blank. ";
+            CALL      HITENTER
+            GOTO      OPTN9500
+          ENDIF
+.
+          MATCH     SP70,PTCNORIG
+          IF        @EQUAL
+            DISPLAY   *P1:24,*B,"EDI Originator blank. ";
+            PRINT     *N,*1,"EDI Originator blank. ";
+            CALL      HITENTER
+            GOTO      OPTN9500
+          ENDIF
+.
+OPTN1000  MOVE      ZERO,EXIT
+          MOVE      ZERO,OPTION
+          HLINE     *G37,2,55,80
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,"Submission Type   :":
+                    *P40:4,"1 = Inpatient Medical only":
+                    *P40:5,"2 = Inpatient Claims":
+                    *P40:6,"3 = Outpatient Claims":
+                    *P40:7,"4 = Cancellations":
+                    *P40:8,"5 = Re-extract Batch":
+                    *P1:10,"Date Range - From : __/__/____":
+                    *P40:10,"(optional for Submission Types 1 to 4":
+                    *P1:11,"           -   To : __/__/____":
+                    *P40:11,"     - default is 'start' to 'finish')":
+                    *P1:15,"Batch Number      : ___":
+                    *P40:15,"(mandatory for Submission Type 5)";
+.
+OPTN2000  KEYIN     *P21:4,*V2LON,*DV,UNDLN2,*P21:4,OPTION;
+.
+          BRANCH    OPTION,OPTN3000,OPTN3000,OPTN3000,OPTN3000,OPTN3000
+          IF        OPTION = 0
+            GOTO      OPTN9500
+          ENDIF
+.
+          BEEP
+          GOTO      OPTN1000
+.
+OPTN3000  MOVE      ZERO,EXIT                *               Keyin From Date
+          MOVE      TWENTY1,CCOL             * Set Up Column
+          MOVE      TEN,CVERT                * Set Up Veritcal
+          CALL      FDAT0000                 * Keyin From Date
+          IF        EXIT = 1
+            MOVE      "00000000",FROMDATE
+            IF        OPTION = 5
+              DISPLAY   *P21:10,"           ";   * re-extract Batch
+            ELSE
+              DISPLAY   *P21:10,"Start      ";
+            ENDIF
+          ENDIF
+.
+.                                            *               Keyin To Date
+          MOVE      TWENTY1,CCOL             * Set Up Column
+          MOVE      TEN1,CVERT               * Set Up Vertical
+          CALL      TDAT0000                 * Keyin To Date
+          IF        EXIT = 1
+            MOVE      "99999999",TODATE
+            IF        OPTION = 5
+              DISPLAY   *P21:11,"           ";   * re-extract Batch
+            ELSE
+              DISPLAY   *P21:11,"Finish     ";
+            ENDIF
+          ENDIF
+.
+          CALL      VDAT0000                 * Fromdate after Todate ?
+          BRANCH    EXIT,OPTN3000  
+.
+OPTN4000  IF        OPTION = 5
+.                                            * re-extract Batch
+            CALL      GETSCR00
+            CALL      GBAT0000               * keyin next Batch Number
+            BRANCH    EXIT,OPTN1000
+          ELSE
+            KEYIN     *P21:15,*V2LON,*DV,UNDLN2,*P21:15,ANS;    * dummy Keyin
+            MOVE      SP8,BATCHNUM
+            DISPLAY   *P21:15,BATCHNUM;
+          ENDIF
+.
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++ 
+.**************************************************************************
+.*                               FDAT0000            Called by: OPTN0000  *
+.*                           input From Date                              *
+.**************************************************************************
+FDAT0000  CALL      IDAT0000                 * Initialize Date Variable
+          CALL      KEYDATE                  * Keyin Date
+          BRANCH    OVRCD,FDAT9900           * No input, exit
+          PACK      FROMDATE,CCENT,CYEAR,CMON,CDAY
+.
+          MATCH     FROMDATE,CURRDATE
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,*B,"Date Must Not be in the future. ";
+            CALL      HITENTER
+            GOTO      FDAT0000
+          ENDIF
+.
+          GOTO      FDAT9999
+.
+FDAT9900  MOVE      "1",EXIT                * Exit
+.
+FDAT9999  RETURN
++
+.**************************************************************************
+.*                               TDAT0000            Called by: OPTN0000  *
+.*                           input To Date                                *
+.**************************************************************************
+TDAT0000  CALL      IDAT0000                 * Initialize Date Variable
+          CALL      KEYDATE                  * Keyin Date
+          BRANCH    OVRCD,TDAT9900           * No input, return to fromdate
+          PACK      TODATE,CCENT,CYEAR,CMON,CDAY
+.
+          MATCH     TODATE,CURRDATE
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,*B,"Date Must Not be in the future. ";
+            CALL      HITENTER
+            GOTO      TDAT0000
+          ENDIF
+.
+          GOTO      TDAT9999
+.
+TDAT9900  MOVE      "1",EXIT                 * Exit
+.
+TDAT9999  RETURN
++
+.**************************************************************************
+.*                                 IDAT0000           Called by: FDAT0000 *
+.*                         Initialize Date Variables             TDAT0000 *
+.**************************************************************************
+IDAT0000  MOVE      ZERO,CCANLDTE
+          MOVE      CCC,CCENT
+          MOVE      SP2,CYEAR
+          MOVE      SP2,CMON
+          MOVE      SP2,CDAY
+          MOVE      ZERO,EXIT
+.
+IDAT9999  RETURN
++
+.**************************************************************************
+.*                                 VDAT0000           Called by: FDAT0000 *
+.*                         Validate Date Variables               TDAT0000 *
+.*    Returns:  EXIT    = FALSE (0)  Dates Valid continue processing      *
+.*                        TRUE  (1)  Dates NOT valid exit                 *
+.**************************************************************************
+VDAT0000  MATCH     FROMDATE,TODATE             * Fromdate after Todate ?
+          GOTO      VDAT9900 IF LESS
+.
+          UNPACK    SP70,HEADFDAT,HEADTDAT
+          MATCH     "00000000",FROMDATE
+          IF        !@EQUAL
+            CLEAR     HEADFDAT
+            APPEND    "from ",HEADFDAT
+            UNPACK    FROMDATE,KEY4,KEY2,KEY2A
+            APPEND    KEY2A,HEADFDAT 
+            APPEND    "/",HEADFDAT
+            APPEND    KEY2,HEADFDAT 
+            APPEND    "/",HEADFDAT
+            APPEND    KEY4,HEADFDAT 
+            RESET     HEADFDAT
+          ENDIF
+          MATCH     "99999999",TODATE
+          IF        !@EQUAL
+            CLEAR     HEADTDAT
+            APPEND    "to ",HEADTDAT
+            UNPACK    TODATE,KEY4,KEY2,KEY2A
+            APPEND    KEY2A,HEADTDAT 
+            APPEND    "/",HEADTDAT
+            APPEND    KEY2,HEADTDAT 
+            APPEND    "/",HEADTDAT
+            APPEND    KEY4,HEADTDAT 
+            RESET     HEADFDAT
+          ENDIF
+            
+          MOVE      FALSE,EXIT
+          GOTO      VDAT9999
+.
+VDAT9900  DISPLAY   *P1:24,*EL,*B,"From date must be before To date. ";
+          CALL      HITENTER
+          MOVE      TRUE,EXIT
+.
+VDAT9999  RETURN
++
+.******************************************************************************
+.*                                  GBAT0000              Called by: ML0000   *
+.*                       Re-extract previously extracted batch                *
+.******************************************************************************
+GBAT0000  KEYIN     *P21:15,*V2LON,*JR,BATCHNUM
+.
+          PACK      BATCHNUM,BATCHNUM,SP8
+          MATCH     SP8,BATCHNUM                 * nothing input ?
+          GOTO      GBAT9100 IF EQUAL            * yes - exit
+.
+          UNPACK    BATCHNUM,DIM7,ANS
+          MATCH     QUEST,ANS                    * "?" input ?
+          IF        @EQUAL
+            CALL      DBAT0000                   * yes - display all batches
+            CALL      PUTSCR00
+            GOTO      GBAT0000                   * get next batch number
+          ENDIF
+.
+          TYPE      BATCHNUM                     * numeric input ?
+          IF        !@EQUAL
+            BEEP                                 * no - error
+            GOTO      GBAT0000
+          ENDIF
+.
+          MOVE      BATCHNUM,KEY8
+          CALL      RDPTEBH1
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Batch number not on file.  ";
+            CALL      HITENTER
+            GOTO      GBAT0000
+          ENDIF
+.
+GBAT9000  MOVE      ZERO,EXIT
+          GOTO      GBAT9999
+.
+GBAT9100  MOVE      ONE,EXIT
+GBAT9999  RETURN 
++
+.***************************************************************************
+.*                             DBAT0000               Called by: GBAT0000  *
+.*                 Display all batches in reverse sequence                 *
+.***************************************************************************
+.
+DBAT0000  CALL      BHED0000                     * display batch headings
+.
+          MOVE      ONE,CPAGENO                  * Initialise page number
+          MOVE      FOUR,CVERT                   * Reset line number
+          MOVE      ZERO,FIELD1                  * Reset record count
+.
+          PACK      KEY8,TILDA30
+          CALL      RSPTEBH1                     * position in file
+DBAT1000  CALL      RPPTEBH1                     * read previous record
+          BRANCH    OVRCD,DBAT5000               * end of file
+.
+          ADD       ONE,CVERT                    * increment line count
+.
+          COMPARE   TWENTY3,CVERT                * page full ?
+          GOTO      DBAT4000 IF NOT LESS         * yes
+.
+DBAT3000  ADD       ONE,FIELD1
+.
+          UNPACK    PTEHDTBC,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,DIM10A
+.
+          UNPACK    SP30,DIM10B,DIM10C
+          MATCH     SP8,PTEHDTBC
+          GOTO      DBAT3100 IF EQUAL
+.
+          UNPACK    PTEHSTDT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPDATE,DIM10B
+.
+DBAT3100  MATCH     SP8,PTEHDTBC
+          GOTO      DBAT3200 IF EQUAL
+.
+          UNPACK    PTEHEDDT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPDATE,DIM10C
+.
+DBAT3200  MOVE      "Medical only",DIM12A
+          MOVE      "Clinical    ",DIM12B
+          MOVE      "Cancellation",DIM12C
+          LOAD      DIM12A,PTEHEETP,DIM12B,DIM12C
+.
+          UNPACK    PTEHTMBC,DIM5,ANS,ANS,ANS
+.
+          MOVE      "Extracted     ",BSTATDES
+          LOAD      BSTATDES,PTEHFLAG,BSTATDS1,BSTATDS2,BSTATDS3
+.
+.         Display the line item on the screen
+.
+          DISPLAY   *P1:CVERT,*V2LON,FIELD1,*HOFF,*P7:CVERT,PTEHBTHN:
+                    *P17:CVERT,DIM10A,*P28:CVERT,DIM5:
+                    *P35:CVERT,DIM12A,*P49:CVERT,DIM10B:
+                    *P59:CVERT,DIM10C:
+                    *P69:CVERT,BSTATDES
+          MOVE      PTEHBTHN,TMPKEY1[FIELD1]
+          GOTO      DBAT1000
+.
+.         new page needed
+.
+DBAT4000  BRANCH    CPAGENO,DBAT4500
+.
+.         in middle pages : Next & First options
+.
+DBAT4100  MOVE      "1",CALLPOSN                 * set call position
+          CALL      KEYA0000                     * keyin response
+          BRANCH    EXIT,DBAT9999:               * exit
+                         DBAT7000:               * next
+                         DBAT8000                * previous
+          GOTO      DBAT6000                     * number entered
+.
+.         on first page : Next option
+.
+DBAT4500  MOVE      "2",CALLPOSN                 * set call position
+          CALL      KEYA0000                     * keyin response
+          BRANCH    EXIT,DBAT9999:               * exit
+                         DBAT7000:               * next
+                         DBAT5900                * previous
+          GOTO      DBAT6000                     * number entered
+.
+.         end of data
+.
+DBAT5000  BRANCH    CPAGENO,DBAT5500
+.
+.         in middle pages : First option
+.
+DBAT5100  MOVE      "3",CALLPOSN                 * set call position
+          CALL      KEYA0000                     * keyin response
+          BRANCH    EXIT,DBAT9999:               * exit
+                         DBAT5900:               * next
+                         DBAT8000                * prev
+          GOTO      DBAT6000                     * number entered
+.
+.         on first page : No options
+.
+DBAT5500  MOVE      "4",CALLPOSN                 * set call position
+          CALL      KEYA0000                     * keyin response
+          BRANCH    EXIT,DBAT9999:               * exit
+                         DBAT5900:               * next
+                         DBAT5900                * previous
+          GOTO      DBAT6000                     * number entered
+.
+DBAT5900  BEEP
+DBAT5910  BRANCH    CALLPOSN,DBAT4100,DBAT4500,DBAT5100,DBAT5500
+.
+.         number entered
+.
+DBAT6000  MOVE      TMPKEY1[FORM2],KEY8
+          CALL      RDPTEBH1                     * record on file ?
+          BRANCH    OVRCD,DBAT5900               * no - shouldn't happen
+.
+.         Display claim details for selected batch
+.
+          MOVE      TMPKEY1[FORM2],BATCHNUM
+          CALL      DALL0000                     * display claim invoices
+.
+.         Resdisplay batch listing
+.
+          MOVE      TMPKEY1[1],KEY8              * redisplay screen
+          CALL      RDPTEBH1                     * record on file ?
+          BRANCH    OVRCD,DBAT0000               * no - shouldn't happen
+.
+          CALL      BHED0000                     * redisplay header
+          MOVE      FIVE,CVERT                   * set scrren variables
+          DISPLAY   *P1:CVERT,*EF
+          MOVE      ZERO,FIELD1
+          GOTO      DBAT3000
+.
+.         next screen selected
+.
+DBAT7000  MOVE      FIVE,CVERT
+          ADD       ONE,CPAGENO
+          DISPLAY   *P1:CVERT,*EF
+          MOVE      ZERO,FIELD1
+          GOTO      DBAT3000
+.
+.         previous screen selected
+.
+DBAT8000  MOVE      TMPKEY1[1],KEY8
+          CALL      RDPTEBH1                     * reread first record on screen
+          MOVE      ZERO,FORM2                   * initialise count
+          WHILE     FORM2 <= 17
+            CALL      RKPTEBH1                   * read next record
+            BRANCH    OVRCD,DBAT0000             * eof - shouldn't happen
+.
+            ADD       ONE,FORM2                  * increment count
+          DO
+.
+          MOVE      FIVE,CVERT                   * reset line position
+          SUB       ONE,CPAGENO                  * decrement page number
+          MOVE      ZERO,FIELD1                  * reset record counter
+          DISPLAY   *P1:CVERT,*EF
+          GOTO      DBAT3000
+.
+DBAT9999  RETURN
++
+.*****************************************************************************
+.*                           DALL0000                  Called by: MAIN0000   *
+.*                  Display all the invoices for a batch          DBAT0000   *
+.*****************************************************************************
+.
+DALL0000  MOVE      ZERO,EXIT
+.
+          MOVE      "Medical only",DIM12A
+          MOVE      "Clinical    ",DIM12B
+          MOVE      "Cancellation",DIM12C
+          LOAD      DIM12A,PTEHEETP,DIM12B,DIM12C
+.
+          MOVE      "Extracted     ",BSTATDES
+          LOAD      BSTATDES,PTEHFLAG,BSTATDS1,BSTATDS2,BSTATDS3
+.
+          DISPLAY   *P1:4,*EF,"Batch Number   :",*V2LON,PTEHBTHN,*HOFF:
+                    *P1:5,"Submission Type: ",*V2LON,DIM12A,*HOFF:
+                    *P40:5,"Status : ",*V2LON,BSTATDES,*HOFF:
+                    *P47:6,"EDI",*P59:6,"CCPS",*P73:6,"Batch":
+                    *P1:7,*ULON,"Admission":
+                    *P11:7,"Invoice ":
+                    *P20:7,"U/R No. ":
+                    *P29:7,"Invoice Amount ":
+                    *P46:7,"Status    ":
+                    *P58:7,"Status    ":
+                    *P71:7,"Prev":
+                    *P76:7,"Next"
+.
+          MOVE      ONE,PAGENUMB                 * Initialise page number
+          MOVE      SEVEN,EVERT                  * Reset line number
+          MOVE      ZERO,FIELD2                  * Reset record count
+.
+          PACK      KEY24,BATCHNUM,SP30
+          CALL      RSPTEDT3                     * Position for batch #
+DALL1000  CALL      RKPTEDT3                     * read next record
+          BRANCH    OVRCD,DALL5000               * end of file
+.
+          MATCH     PTETBATN,BATCHNUM            * same batch still ?
+          GOTO      DALL5000 IF NOT EQUAL        * no - finished list
+.
+          MATCH     "00000000",PTETNBAT 
+          GOTO      DALL1000 IF EQUAL
+.
+          ADD       ONE,EVERT                    * increment line count
+.
+          COMPARE   TWENTY3,EVERT                * page full ?
+          GOTO      DALL4000 IF NOT LESS         * yes
+.
+DALL3000  ADD       ONE,FIELD2
+.
+          DISPLAY   *P1:EVERT,PTETADMN,*P11:EVERT,PTETINVN,*P20:EVERT,PTETURNO
+.
+          MOVE      PTETINVN,KEY8
+          CALL      RDINV1
+          IF        OVRCD = 1
+            DISPLAY   *P42:EVERT,"Unknown"
+          ELSE
+            DISPLAY   *P29:EVERT,PINVAMT
+          ENDIF
+.
+          MOVE      "Not Sent ",DIM9A
+          MOVE      "Error    ",DIM9B
+          MOVE      "Extracted",DIM9C
+          MOVE      "Sent     ",DIM9D
+          MOVE      "Acknowldg",DIM9E
+          LOAD      DIM9A,PTETFLAG,DIM9B,DIM9C,DIM9D,DIM9E
+.
+          MOVE      "Not Sent  ",DIM10A
+          MOVE      "Extracted ",DIM10B
+          MOVE      "First Subm",DIM10C
+          MOVE      "Approv Pen",DIM10D
+          MOVE      "Approved  ",DIM10E
+          MOVE      "Amendment ",DIM10F
+          MOVE      "Can/Resub ",DIM10G
+          MOVE      "Cancelled ",DIM10H
+          LOAD      DIM10A,PTETFLAG,DIM10B,DIM10C,DIM10D,DIM10E,DIM10F,DIM10G:
+                                    DIM10H
+.
+          UNPACK    PTETPBAT,DIM4,DIM4A
+          UNPACK    PTETNBAT,DIM4,DIM4B
+.
+          DISPLAY   *P46:EVERT,DIM9A,*P58:EVERT,DIM10A:
+                    *P71:EVERT,DIM4A,*P76:EVERT,DIM4B
+.
+          PACK      TMPKEY2[FIELD2],PTETBATN,PTETADMN,PTETINVN
+          GOTO      DALL1000
+.
+.         new page needed
+.
+DALL4000  BRANCH    PAGENUMB,DALL4500
+.
+.         in middle pages : Next & First options
+.
+DALL4100  MOVE      "1",CALLPOSN                 * set call position
+          CALL      KEYB0000                     * keyin response
+          BRANCH    EXIT,DALL9999:               * exit
+                         DALL7000:               * next
+                         DALL8000                * previous
+          GOTO      DALL6000                     * Re-extract entered
+.
+.         on first page : Next option
+.
+DALL4500  MOVE      "2",CALLPOSN                 * set call position
+          CALL      KEYB0000                     * keyin response
+          BRANCH    EXIT,DALL9999:               * exit
+                         DALL7000:               * next
+                         DALL5900                * previous
+          GOTO      DALL6000                     * Re-extract entered
+.
+.         end of data
+.
+DALL5000  BRANCH    PAGENUMB,DALL5500
+.
+.         in middle pages : First option
+.
+DALL5100  MOVE      "3",CALLPOSN                 * set call position
+          CALL      KEYB0000                     * keyin response
+          BRANCH    EXIT,DALL9999:               * exit
+                         DALL5900:               * next
+                         DALL8000                * prev
+          GOTO      DALL6000                     * Re-extract entered
+.
+.         on first page : No options
+.
+DALL5500  MOVE      "4",CALLPOSN                 * set call position
+          CALL      KEYB0000                     * keyin response
+          BRANCH    EXIT,DALL9999:               * exit
+                         DALL5900:               * next
+                         DALL5900                * previous
+          GOTO      DALL6000                     * Re-extract entered
+.
+DALL5900  BEEP
+DALL5910  BRANCH    CALLPOSN,DALL4100,DALL4500,DALL5100,DALL5500
+.
+.         Post re-extraction selected
+.
+DALL6000  MOVE      ZERO,EXIT
+          GOTO      DALL9999
+.
+.         next screen selected
+.
+DALL7000  MOVE      EIGHT,EVERT
+          ADD       ONE,PAGENUMB
+          DISPLAY   *P1:EVERT,*EF
+          MOVE      ZERO,FIELD2
+          GOTO      DALL3000
+.
+.         previous screen selected
+.
+DALL8000  MOVE      TMPKEY2[1],KEY24
+          CALL      RDPTEDT3                     * reread first record on screen
+          MOVE      ZERO,FORM2                   * initialise count
+          WHILE     FORM2 <= 14
+            CALL      RPPTEDT3                   * read previous record
+            BRANCH    OVRCD,DALL0000             * eof - shouldn't happen
+.
+            MATCH     PTETBATN,BATCHNUM          * same batch still ?
+            GOTO      DALL0000 IF NOT EQUAL      * no - finished list
+.
+            ADD       ONE,FORM2                  * increment count
+          DO
+.
+          MOVE      EIGHT,EVERT                  * reset line position
+          SUB       ONE,PAGENUMB                 * decrement page number
+          MOVE      ZERO,FIELD2                  * reset record counter
+          DISPLAY   *P1:EVERT,*EF
+          GOTO      DALL3000
+.
+DALL9999  RETURN
++
+.*********************************************************************
+.*                  KEYB0000                    Called by : DALL0000 *
+.*        Keyin response to question                        DADM0000 *
+.*        Returns : EXIT = 0    Re-extraction entered                *
+.*                  EXIT = 1      Exit   entered                     *
+.*                  EXIT = 2      Next   entered                     *
+.*                  EXIT = 3      Prev   entered                     *
+.*********************************************************************
+.
+KEYB0000  DISPLAY   *P1:24,*EL,"Re-(",*V2LON,ANSE,*HOFF,")xtract, e(":
+                    *V2LON,ANSX,*HOFF,")it";
+          MOVE      TEN9,CCOL
+          IF        CALLPOSN = 1 | CALLPOSN = 2
+            DISPLAY   ", (",*V2LON,ANSN,*HOFF,")ext";
+            ADD       EIGHT,CCOL
+          ENDIF
+          IF        CALLPOSN = 1 | CALLPOSN = 3
+            DISPLAY   ", p(",*V2LON,ANSR,*HOFF,")evious";
+            ADD       TEN2,CCOL
+          ENDIF
+.
+          DISPLAY   " :";
+          ADD       FOUR,CCOL
+.
+KEYB1000  KEYIN     *PCCOL:24,*DV,UNDLN2:
+                    *PCCOL:24,*V2LON,*JR,DIM2:
+                    *PCCOL:24,*DV,DIM2
+          PACK      DIM2,DIM2,SP2
+          UNPACK    DIM2,ANS,ANS
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSE,ANS                * re-Extraction selected ?
+          GOTO      KEYB1500 IF NOT EQUAL   * No 
+.
+KEYB1200  DISPLAY   *P1:24,*EL,"Re-extraction selected. Ok to Continue (":
+                               *V2LON,ANSY,*HOFF,SLASH:
+                               *V2LON,ANSN,*HOFF,") ? ";
+.
+          KEYIN     *P48:24,*V2LON,ANS
+.
+          REP       UPPLOW,ANS
+          MATCH     ANSY,ANS
+          IF        @EQUAL
+KEYB1300    KEYIN     *P1:24,*EL,"Is batch a resubmission (",*V2LON,*DV,ANS:
+                      *HOFF,*DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ? ":
+                      *V2LON,ANS
+            REP       UPPLOW,ANS
+            MATCH     ANS,ANSY
+            IF        @EQUAL
+              MOVE      ONE,RESUBMN
+              GOTO      KEYB9000
+            ENDIF
+.
+            MATCH     ANS,ANSN
+            IF        @EQUAL
+              MOVE      ZERO,RESUBMN
+              GOTO      KEYB9000
+            ENDIF
+            BEEP
+            GOTO      KEYB1300
+          ENDIF
+.
+          MATCH     ANSN,ANS
+          GOTO      KEYB0000 IF EQUAL
+. 
+          BEEP
+          GOTO      KEYB1200
+.
+KEYB1500  MATCH     ANSX,ANS                * eXit selected ?
+          GOTO      KEYB9100 IF EQUAL       * yes
+.
+          MATCH     ANSN,ANS                * next page selected ?
+          GOTO      KEYB9200 IF EQUAL       * yes
+.
+          MATCH     ANSR,ANS                * previous page selected ?
+          GOTO      KEYB9300 IF EQUAL       * yes
+.
+KEYB2000  BEEP
+          GOTO      KEYB1000
+.
+.         number entered directly
+.
+KEYB5000  MOVE      DIM2,FORM2
+.
+          COMPARE   FORM2,ZERO              * number < 1 ?
+          GOTO      KEYB2000 IF NOT LESS    * yes - invalid
+.
+          COMPARE   FORM2,FIELD2            * number in range ?
+          GOTO      KEYB2000 IF LESS        * no - too high
+.
+.         set the exit flag
+.
+KEYB9000  MOVE      ZERO,EXIT               * Re-extract selected
+          GOTO      KEYB9999
+.
+KEYB9100  MOVE      ONE,EXIT                * exit  
+          GOTO      KEYB9999
+.
+KEYB9200  MOVE      TWO,EXIT                * next
+          GOTO      KEYB9999
+.
+KEYB9300  MOVE      THREE,EXIT              * previous
+          GOTO      KEYB9999
+.
+KEYB9999  RETURN
++
+.*****************************************************************************
+.*                              BHED0000               Called by: DBAT0000   *
+.*                Display the headings for the batch listing                 *
+.*****************************************************************************
+.
+BHED0000  DISPLAY   *P1:4,*EF,*ULON,"Item":
+                    *P7:4,"Batch No.":
+                    *P17:4,"Date      ":
+                    *P28:4,"Time ":
+                    *P35:4,"Batch Type  ":
+                    *P49:4,"Strt Date":
+                    *P59:4,"End Date ":
+                    *P69:4,"Status"
+.
+BHED9999  RETURN
++
+.*****************************************************************************
+.*                  KEYA0000                           Called by : DBAT0000  *
+.*        Keyin response to question                                         *
+.*        Returns : EXIT = 0      Number entered                             *
+.*                  EXIT = 1      Exit   entered                             *
+.*                  EXIT = 2      Next   entered                             *
+.*                  EXIT = 3      Prev   entered                             *
+.*****************************************************************************
+.
+KEYA0000  DISPLAY   *P1:24,*EL,"Select item, e(",*V2LON,ANSX,*HOFF,")it";
+          MOVE      TEN9,CCOL
+          IF        CALLPOSN = 1 | CALLPOSN = 2
+            DISPLAY   ", (",*V2LON,ANSN,*HOFF,")ext";
+            ADD       EIGHT,CCOL
+          ENDIF
+          IF        CALLPOSN = 1 | CALLPOSN = 3
+            DISPLAY   ", p(",*V2LON,ANSR,*HOFF,")evious";
+            ADD       TEN2,CCOL
+          ENDIF
+.
+          DISPLAY   " :  ";
+          ADD       FOUR,CCOL
+.
+KEYA1000  KEYIN     *PCCOL:24,*DV,UNDLN2:
+                    *PCCOL:24,*V2LON,*JR,DIM2:
+                    *PCCOL:24,*DV,DIM2
+          PACK      DIM2,DIM2,SP2
+          UNPACK    DIM2,ANS,ANS
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSX,ANS                * exit selected ?
+          GOTO      KEYA9100 IF EQUAL       * yes
+.
+          MATCH     ANSN,ANS                * next page selected ?
+          GOTO      KEYA9200 IF EQUAL       * yes
+.
+          MATCH     ANSR,ANS                * previous page selected ?
+          GOTO      KEYA9300 IF EQUAL       * yes
+.
+          TYPE      DIM2
+          GOTO      KEYA5000 IF EQUAL       * a number entered
+.
+KEYA1500  BEEP
+          GOTO      KEYA1000
+.
+.         number entered directly
+.
+KEYA5000  MOVE      DIM2,FORM2
+.
+          COMPARE   FORM2,ZERO              * number < 1 ?
+          GOTO      KEYA1500 IF NOT LESS    * yes - invalid
+.
+          COMPARE   FORM2,FIELD1            * number in range ?
+          GOTO      KEYA1500 IF LESS        * no - too high
+.
+.         set the exit flag
+.
+          MOVE      ZERO,EXIT               * number selected
+          GOTO      KEYA9999
+.
+KEYA9100  MOVE      ONE,EXIT                * exit
+          GOTO      KEYA9999
+.
+KEYA9200  MOVE      TWO,EXIT                * next
+          GOTO      KEYA9999
+.
+KEYA9300  MOVE      THREE,EXIT              * previous
+          GOTO      KEYA9999
+.
+KEYA9999  RETURN
++
+.******************************************************************************
+.*                                  SELT0000              Called by: ML2000   *
+.*                    Select all Invoices that satisfy Options                *
+.******************************************************************************
+SELT0000  MOVE      ZERO,EXIT
+          MOVE      ZERO,RECDCN1
+          CALL      CTMP0000                * Create Temp file             
+.
+.                   Option  1 IP-M   2 IP-C   3 OP-C   4 Canc   5 Btch
+          BRANCH    OPTION,SELT1000,SELT1000,SELT1000,SELT1000,SELT7000
+          GOTO      SELT9500
+.
+SELT1000  MOVE      SP30,KEY26
+          CALL      RSPTEDT1
+.
+SELT2000  CALL      RKPTEDT1
+          BRANCH    OVRCD,SELT9000
+.
+          COMPARE   TWO,PTETFLAG            * check EDI Status for 0 or 1
+          GOTO      SELT9000 IF NOT LESS    * finished
+.
+          MATCH     "1",PTETEXCL            * is it Excluded?
+          GOTO      SELT2000 IF EQUAL
+.
+          MATCH     FROMDATE,PTETINDT       * check date range
+          GOTO      SELT2000 IF LESS
+          MATCH     PTETINDT,TODATE
+          GOTO      SELT2000 IF LESS
+.
+.                          I/P Med  I/P Clm  O/P Clm  Cancels
+          BRANCH    OPTION,SELT3000,SELT3000,SELT4000,SELT5000
+.
+.                   ----------------------- * check "Inpatients"
+SELT3000  MATCH     "3",PTETISYS
+          GOTO      SELT2000 IF NOT EQUAL
+.
+          MOVE      PTETCCST,FORM2          * check if "not sent" or "resubmit"
+          IF        FORM2 = 0 | FORM2 = 7
+            GOTO      SELT3500
+          ENDIF
+          GOTO      SELT2000 IF NOT EQUAL
+.
+.                                           * check Inv.Date >= Discharge Date
+SELT3500  PACK      KEY8,PTETADMN,SP8
+          CALL      RDDSCH1
+          BRANCH    OVRCD,SELT2000          * not discharged, bypass invoice
+          MATCH     DDATE,PTETINDT
+          GOTO      SELT2000 IF LESS        * bypass Invoices before disch date
+.
+          IF        OPTION = 1
+            MATCH     "0",PTETINTY          * Option 1 for Medical only ("0")TCH
+            GOTO      SELT6000 IF EQUAL
+          ELSE
+            MATCH     "1",PTETINTY          * Option 2 for Claims ("1")
+            GOTO      SELT6000 IF EQUAL
+          ENDIF
+          GOTO      SELT2000
+.
+.                   ----------------------- * Option 3 - check "Outpatients"
+SELT4000  MATCH     "2",PTETISYS
+          GOTO      SELT2000 IF NOT EQUAL
+.
+          MATCH     "1",PTETINTY            * Claims ("1")
+          IF        @EQUAL
+            MOVE      PTETCCST,FORM2        * check if "not sent" or "resubmit"
+            IF        FORM2 = 0 | FORM2 = 7
+              GOTO      SELT6000
+            ENDIF
+          ENDIF
+          GOTO      SELT2000
+
+.
+.                   ----------------------- * OPTION 4 - Cancellations
+SELT5000  MOVE      PTETCCST,FORM2
+          COMPARE   EIGHT,FORM2             * CCPS Status - 8 = Cancel/Resubmit
+          GOTO      SELT6000 IF EQUAL
+          COMPARE   NINE,FORM2              * CCPS Status - 9 = Cancel
+          GOTO      SELT6000 IF EQUAL
+          GOTO      SELT2000
+.
+.
+.                                           * Invoice acceptable - write temp
+SELT6000  PACK      KEY8,PTETADMN,SP8
+          CALL      RDTEMP2
+          IF        OVRCD = 1
+            MOVE      PTETINVN,TMPINVNO
+            MOVE      PTETADMN,TMPVISNO
+            CALL      WRTEMP2               * write Invoice no to temp file
+            ADD       ONE,RECDCN1
+          ELSE
+            MATCH     PTETINVN,TMPINVNO
+            IF        @LESS
+              MOVE      PTETINVN,TMPINVNO
+              CALL      UPTEMP2
+            ENDIF
+          ENDIF
+.
+          MOVE      ZERO,PTETFLAG           * set EDI flag to "0" on all Inv.s
+          CALL      UPPTEDT1                * for the Admission/Visit
+          GOTO      SELT2000
+.
+.                   ----------------------- * read a batch to write to temp
+SELT7000  PACK      KEY24,BATCHNUM,SP30
+          CALL      RSPTEDT3
+.
+SELT8000  CALL      RKPTEDT3
+          BRANCH    OVRCD,SELT9000
+.
+          MATCH     BATCHNUM,PTETBATN
+          GOTO      SELT9000 IF NOT EQUAL
+.
+          PACK      KEY8,PTETADMN,SP8
+          CALL      RDTEMP2
+          IF        OVRCD = 1
+            MOVE      PTETINVN,TMPINVNO
+            MOVE      PTETADMN,TMPVISNO
+            CALL      WRTEMP2               * write Invoice no to temp file
+            ADD       ONE,RECDCN1
+          ELSE
+            MATCH     PTETINVN,TMPINVNO
+            IF        @LESS
+              MOVE      PTETINVN,TMPINVNO
+              CALL      UPTEMP2
+            ENDIF
+          ENDIF
+.
+          PACK      KEY26,PTETFLAG,PTETADMN,PTETINVN,PTETBATN
+          CALL      RDPTEDT1
+          BRANCH    OVRCD,SELT8000
+.
+          MOVE      ZERO,PTETFLAG           * set EDI flag to "0" on all Inv.s
+          CALL      UPPTEDT1                * for the Admission/Visit
+          GOTO      SELT8000
+.
+.
+SELT9000  MOVE      RECDCN1,RECDCNT
+          COMPARE   ZERO,RECDCN1
+          GOTO      SELT9999 IF NOT EQUAL
+.
+SELT9500  MOVE      ONE,EXIT
+. 
+SELT9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000              Called by: ML0000   *
+.*                             Print Report Header                            *
+.******************************************************************************
+HEAD0000  CALL      HEAD80                  * Print 80 column header
+          MOVE      "8",CLNO
+.
+          PACK      KEY30,HEADFDAT,HEADTDAT,SP30
+          MATCH     SP30,KEY30
+          IF        !@EQUAL
+            PRINT     *20,"Period ";
+            MATCH     SP20,HEADFDAT
+            IF        !@EQUAL
+              PRINT     HEADFDAT;
+            ENDIF
+            PRINT     HEADTDAT
+            ADD       "1",CLNO
+          ENDIF
+.
+          IF        PTCNEIMO = 1
+            PRINT     *20,"Running in Test Mode - errors will be extracted"
+          ENDIF
+.
+          IF        OPTION = 1
+            MOVE      "Extract 'Medical only'   ",HEDMSG
+          ENDIF
+          IF        OPTION = 2
+            MOVE      "Extract Inpatient Claims   ",HEDMSG
+          ENDIF
+          IF        OPTION = 3
+            MOVE      "Extract Outpatient Claims  ",HEDMSG
+          ENDIF
+          IF        OPTION = 4
+            MOVE      "Extract 'Cancellations'    ",HEDMSG
+          ENDIF
+          IF        OPTION = 5
+            MOVE      "Re-extract Batch    ",HEDMSG
+          ENDIF
+.
+          IF        PASSNO = 2
+            CLEAR     DIM80
+            APPEND    HEDMSG,DIM80
+            APPEND    "    Batch -",DIM80
+            APPEND    BATCHNO,DIM80
+            APPEND    "    Extract File - ",DIM80
+            APPEND    EXTFNAME,DIM80
+            RESET     DIM80
+            PRINT     *1,DIM80
+            CALL      UND80
+            PRINT     *1,"| Inv No | Adm No | Message",*80,"|"
+          ELSE
+            PRINT     *20,HEDMSG
+            CALL      UND80
+            PRINT     *1,"| Inv No | Adm No | Error",*80,"|"
+          ENDIF
+.
+          CALL      UND80
+          MOVE      SP8,PRTINVN
+.
+HEAD9999  RETURN
++
+.******************************************************************************
+.*                                  TAIL0000              Called by: ML0000   *
+.*                              Print Report Tail                             *
+.******************************************************************************
+TAIL0000  CALL      UND80
+.
+          COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS    * Line counter >= 55 lines
+.
+          MOVE      ERRCT,FORM6A
+          PRINT     *N,*1,"Total Records Read      : ",RECDCN1:
+                    *N,*1,"Total Number of Errors  : ",FORM6A:
+                    *N,*N,*1,"Total Records Extracted : ",TOTRECOU:
+                    *N,*1,"Total Invoice Amount    : ",TOTAMTCT
+.
+          IF        RECDCNT = 0
+            PRINT     *N,*1,"No Extract file created"
+          ELSE
+            PRINT     *N,*1,"Extract File - ",EXTFNAME,*35,"Batch -",BATCHNO
+          ENDIF
+.
+TAIL2000  PRINT     *N,*N,"*** End of Report ***"
+.
+TAIL9000  MOVE      ZERO,EXIT
+TAIL9999  RETURN
++
+.******************************************************************************
+.*                             CTMP0000                 Called by:            *
+.*                        create temporary file                               *
+.******************************************************************************
+CTMP0000  CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TMPFILNM
+.
+          CALL      KILL0000
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TMPFILNM,CMDLINE
+          APPEND    " 17 U1-8 U9-16",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPFILE,TMPFILNM
+          OPEN      TEMPFIL2,TMPFILNM
+.
+          CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,TMPSUMNM
+.
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TMPSUMNM,CMDLINE
+          APPEND    " 30 U1-8,9-14",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPSUMM,TMPSUMNM
+.
+          CALL      CLER0000                * empty it if Oracle
+.         
+CTMP9999  RETURN
++
+.******************************************************************************
+.*                             KILL0000                  Called by:           *
+.*                   erase temporary file                                     *
+.******************************************************************************
+KILL0000  CLOSE     TEMPFILE
+          CLOSE     TEMPFIL2
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TMPFILNM,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          CLOSE     TEMPSUMM
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TMPSUMNM,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+KILL9999  RETURN
++
+.******************************************************************************
+.*                             CLER0000                 Called by:            *
+.*               close and erase the temporary file                           *
+.******************************************************************************
+.
+CLER0000  PACK      KEY8,SP8
+          CALL      RSTEMP1
+          CALL      RKTEMP1
+          BRANCH    OVRCD,CLER9999
+.
+          PACK      KEY8,TMPINVNO
+          CALL      DETEMP1
+.
+	  GOTO      CLER0000
+.
+CLER9999  RETURN
++
+.******************************************************************************
+.*                             EXTR0000                   Called by: ML0000   *
+.*               Ectract Invoice details for XML Extract                      *
+.******************************************************************************
+EXTR0000  MOVE      ZERO,EXIT
+          MOVE      ZERO,TOTAMTCT           * Clear the total amount counter
+          MOVE      ZERO,TOTRECOU
+          UNPACK    SP30,FRSTDATE,LASTDATE,VISDATE
+.
+          IF        PASSNO = 1
+            DISPLAY   *P1:24,*EL,"Validating : ";
+          ELSE
+            DISPLAY   *P1:24,*EL,"Extracting : ";
+            CALL      CEXT0000              * create temporary Extract file
+          ENDIF
+.
+          MOVE      SP8,KEY8
+          CALL      RSTEMP2
+.                                           * read thru selected Visits   
+EXTR1000  CALL      RKTEMP2
+          BRANCH    OVRCD,EXTR9000          * end-of-file
+          MOVE      ZERO,ERRFLG 
+.
+          IF        OPTION = 5
+            PACK      KEY24,TMPVISNO,TMPINVNO,BATCHNUM,SP30
+          ELSE
+            PACK      KEY24,TMPVISNO,TMPINVNO,SP30
+          ENDIF
+          CALL      RDPTEDT4                * read latest Invoice for Adm/Vis
+          BRANCH    OVRCD,EXTR8100          * error 1 - delete temp record
+.
+.                                      ****** Read Master files
+          MOVE      ZERO,INAMTSAV
+          MOVE      ZERO,INAMTNEW           * re-calc Invoice Amount/s
+          MOVE      ZERO,FORM1
+.
+          PACK      KEY16,TMPVISNO,SP8
+          CALL      RSPTINV3                * Position on 1st Inv. for Visit
+EXTR1100  CALL      RKPTINV3
+          BRANCH    OVRCD,EXTR1400
+.
+          MATCH     DPINVADM,TMPVISNO
+          GOTO      EXTR1400 IF NOT EQUAL
+.
+          ADD       PINVAMT,INAMTSAV        * save Invoice(s) Amount
+          ADD       PTINCRTT,INAMTSAV       * subtract any Credits (-ve sign)
+          MOVE      ONE,FORM1
+          GOTO      EXTR1100                * get next Invoice       
+.
+.
+.
+EXTR1400  PACK      KEY8,TMPINVNO,SP8       * re-read latest Invoice 
+          CALL      RDPTINV1
+          IF        OVRCD = 1 | FORM1 = 0
+            MOVE      " Missing Invoice file record",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+          IF        INAMTSAV = 0
+            MOVE      " Visit is fully credited",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+.                             A&E      OUT      INP
+EXTR1500  BRANCH    PINVSYS,EXTR1700,EXTR2000,EXTR3000
+.
+EXTR1700  MOVE      " Invoice has incorrect System flag of ",DIM60
+          PACK      ERRMSG,DIM60,DPINVSYS
+          CALL      ERMSG000                * Print an error message
+          GOTO      EXTR8000
+.
+.         Outpatient Invoice for processing ***********************************
+.
+EXTR2000  MOVE      PINVSITE,KEY6
+          CALL      RDSITA1
+          IF        OVRCD = 1
+            MOVE      " Missing Outpatient Site record",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+          MATCH     SP3,OSTFILE
+          IF        @EQUAL
+            MOVE      " Missing Outpatient Site prefix",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+          PACK      CFNAME,OSTFILE,FILBB1A1
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OUTBB1A1,CFNAME
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            MOVE      " Cannot Open Outpatient Booking B File ",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+          PACK      CFNAME,OSTFILE,FILBOKA6
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OUTBOKA6,CFNAME
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            MOVE      " Cannot Open Outpatient Booking A File ",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+          PACK      CFNAME,OSTFILE,FILCLIA1
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OUTCLIA1,CFNAME
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            MOVE      " Cannot Open Outpatient Clinic File ",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+          PACK      CFNAME,OSTFILE,FILDTRO5
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OUTDTRO5,CFNAME
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            MOVE      " Cannot Open Outpatient Transaction File ",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+          PACK      KEY8,PTETADMN,SP8
+          CALL      RDBOKB1
+          IF        OVRCD=1                 
+            MOVE      " Missing Outpatient Booking B record",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.                                           * setup for Alternate Claim type 
+EXTR2050  MOVE      OBACOMP,ACLAIM
+.
+.         Get corresponding outbokaf record for visit number
+.
+          PACK      KEY36,PTETADMN,SP20,SP20
+          CALL      RDSBOKA6                * position on visit no.
+          CALL      RDKBOKA6                * read next record
+          IF        OVRCD = 1
+            MOVE      " Missing Outpatient Booking A record",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+          MOVE      OBAOUTNO,DIM8
+          MATCH     PTETADMN,DIM8           * same visit no. still ?
+          IF        !@EQUAL
+            MOVE      " Missing Outpatient Booking A record",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+          PACK      KEY20,OBASITE,OBACLIN,OBADATE
+          CALL      RDCLIA1                 * clinic record on file ?
+          IF        OVRCD = 1
+            CALL      RDPCLIA1              * no - read previous record
+            IF        OVRCD = 1
+              MOVE      " Missing Outpatient Clinic record",ERRMSG
+              CALL      ERMSG000            * Print an error message
+              GOTO      EXTR8000
+            ENDIF
+.
+            MATCH     OBASITE,OCASITE       * same site still ?
+            IF        !@EQUAL
+              MOVE      " Missing Outpatient Clinic record",ERRMSG
+              CALL      ERMSG000            * no - Print an error message
+              GOTO      EXTR8000
+            ENDIF
+.
+            MATCH     OBACLIN,OCACLIN       * same clinic still ?
+            IF        !@EQUAL
+              MOVE      " Missing Outpatient Clinic record",ERRMSG
+              CALL      ERMSG000            * no - Print an error message
+              GOTO      EXTR8000
+            ENDIF
+          ENDIF
+.
+.         Clinic record found, so get clinic doctor code
+.
+          MATCH     SP6,OCADOCT             * clinic doctor code blank ?
+          IF        @EQUAL
+            MOVE      " Missing Doctor Code on Outpatient Clinic record",ERRMSG
+            CALL      ERMSG000              * yes - Print an error message
+            GOTO      EXTR3500
+          ENDIF
+.
+          MOVE      OCADOCT,KEY6
+          CALL      RDDOCT1                 * doctor code on file ?
+          IF        OVRCD = 1
+            MOVE      " Missing Doctor record",ERRMSG
+            CALL      ERMSG000              * no - Print an error message
+            GOTO      EXTR3500
+          ENDIF
+.
+          MATCH     SP10,DPROV
+          IF        @EQUAL
+            MOVE      " Missing Doctor Provider Number",ERRMSG
+            CALL      ERMSG000              * no - Print an error message
+            GOTO      EXTR3500
+          ENDIF
+.
+          PACK      EXATDOC,DPROV,SP10
+          MOVE      OBADATE,VISDATE         * save Visit date for Document No.
+.
+          GOTO      EXTR3500
+.
+.         Inpatient Invoices for processing ***********************************
+.
+EXTR3000  PACK      KEY8,PTETADMN,SP8
+          CALL      RDMISS1                 * Read an admin file record
+          IF        OVRCD=1                 
+            MOVE      " Missing Admission record",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+          MOVE      ADOCTA,KEY6
+          CALL      RDDOCT1                 * doctor code on file ?
+          IF        OVRCD = 1
+            MOVE      " Missing Doctor record",ERRMSG
+            CALL      ERMSG000              * no - Print an error message
+            GOTO      EXTR3100
+          ENDIF
+.
+          MATCH     SP10,DPROV
+          IF        @EQUAL
+            MOVE      " Missing Doctor Provider Number",ERRMSG
+            CALL      ERMSG000              * no - Print an error message
+            GOTO      EXTR3100
+          ENDIF
+.
+          PACK      EXATDOC,DPROV,SP10
+.         
+EXTR3100  CALL      CLPATDSC                * Clear disch file variables
+          IF        ASTAT <> 3              
+            MOVE      " Patient has not been discharged",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      EXTR8000
+          ENDIF
+.
+          PACK      KEY8,PTETADMN,SP8
+          CALL      RDDSCH1                 * Read a disch file record
+          IF        OVRCD=1
+            MOVE      " Missing Discharge record",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+          MOVE      ADATE,VISDATE           * save Admis date for Document No.
+.
+.
+.         All Invoices for processing (Inpat & Outpat ) ***********************
+.                                           * check if Alternate Claim type 
+EXTR3500  MOVE      ZERO,CHNGCL
+          UNPACK    SP30,THCSCOD,ALTCATCL
+          IF        PINVSYS = 2
+            MOVE      OBACOMP,ACLAIM        * overkill - done at EXTR2050
+          ENDIF
+.
+          PACK      KEY5,CATCL,ACLAIM,SP5
+          CALL      RDCODE1                 * Cat."CL"
+          IF        OVRCD = 0
+            MATCH     SP3,THCSCOD
+            IF        !@EQUAL
+              MOVE      THCSCOD,ALTCATCL    * pick up the Alternate CL code
+              MATCH     SP3,ALTCATCL
+              GOTO      EXTR3600 IF EQUAL
+              PACK      KEY5,CATCL,ALTCATCL,SP5
+              CALL      RDCODE1
+              IF        OVRCD = 0
+                MOVE      ONE,CHNGCL        * use Alternate Claim type
+              ENDIF
+            ENDIF
+          ELSE
+            CLEAR     ERRMSG
+            APPEND    " Claim Type (Cat.CL) '",ERRMSG
+            APPEND    ACLAIM,ERRMSG
+            APPEND    "' is not valid",ERRMSG
+            RESET     ERRMSG
+            CALL      ERMSG000            * Print an error message
+          ENDIF
+.
+EXTR3600  PACK      KEY8,PINVUR,SP8
+          CALL      RDMAST1                 * Read a master file record
+          IF        OVRCD=1
+            MOVE      " Missing Master file record",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+          CALL      RDPMPX21
+          IF        OVRCD=1
+            MOVE      " Missing Master Extn.2 file record",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+          PACK      KEY31,PINVUR,SP30
+          CALL      RSPMAID1
+EXTR3700  CALL      RKPMAID1                * Read alternate id. (for long UR)
+          BRANCH    OVRCD,EXTR3900
+.
+          MATCH     PINVUR,PMAIURNO
+          GOTO      EXTR3900 IF NOT EQUAL
+          MATCH     "1",PMAIDISU
+          GOTO      EXTR3700 IF NOT EQUAL
+          GOTO      EXTR4000
+.
+EXTR3900  MOVE      " Missing Alternate Id. record",ERRMSG
+          CALL      ERMSG000                * Print an error message
+.
+EXTR4000  BRANCH    ERRFLG,EXTR8000         * errors detected
+.
+EXTR4010  CALL      D1BGM000                * set up Hospital data  
+          CALL      D2BIL000                * set up Invoice data
+          CALL      D3RFF000                * set up Reference data
+          CALL      D4ADI000                * set up Additional data
+          CALL      D5GP1000                * set up Accommodation data
+.
+          COMPARE   TWO,PINVSYS             * is this Outpatients?
+          IF        @EQUAL
+            CALL      D6GPO000              * set up O/P Charges data      
+          ELSE
+            CALL      D6GP2000              * set up Inpatient Charges data
+          ENDIF
+......... CALL      D7GP3000 .............. * set up Theatre data
+.
+          CALL      D8GP4000                * set up Patient Details
+          MATCH     "1",PTETINTY            * is it a Claim?
+          GOTO      EXTR5000 IF NOT EQUAL
+          CALL      D9GP5000                * set up Payer Details
+.
+.
+EXTR5000  BRANCH    ERRFLG,EXTR8000         * errors detected
+          CALL      INVAMT00                * process Invoice amount
+          GOTO      EXTR1000
+.
+.
+.
+.                                           * flag Error and remove from Temp
+EXTR8000  PACK      KEY24,TMPVISNO,SP20
+          CALL      RSPTEDT4
+EXTR8020  CALL      RKPTEDT4
+          BRANCH    OVRCD,EXTR8100
+          MATCH     TMPVISNO,PTETADMN
+          GOTO      EXTR8100 IF NOT EQUAL
+          MOVE      "1",PTETFLAG            * set EDI Status to "error"
+          CALL      UPPTEDT4                * re-write Status record
+          GOTO      EXTR8020
+.
+EXTR8100  BRANCH    PTCNEIMO,EXTR1000       * test "running in test mode"
+          PACK      KEY8,TMPVISNO,SP8
+          CALL      DETEMP2                 * remove Adm/Visit from processing
+          SUB       ONE,RECDCNT
+          CALL      RSTEMP2
+          GOTO      EXTR1000
+.
+EXTR9000  COMPARE   ZERO,RECDCNT
+          GOTO      EXTR9999 IF NOT EQUAL
+          MOVE      ONE,EXIT
+.         
+EXTR9999  RETURN
++
+.******************************************************************************
+.*                                  D1BGM000              Called by: EXTR0000 *
+.*                            Set up Hospital data                           *
+.******************************************************************************
+D1BGM000  MOVE      ZERO,EXIT               * set up Hospital data  
+.
+          MOVE      PTETADMN,EXVISNO        * Visit No.
+          MOVE      "  1",EXSEQNO
+          MOVE      "BGM ",EXSEGMT
+.
+          MOVE      "850",EXDOCID
+          MATCH     SP8,VISDATE
+          IF        @EQUAL
+            MOVE      CURRDATE,VISDATE
+          ENDIF
+          UNPACK    VISDATE,DIM4
+.
+          CALL      CKDG0000                * get the check digit for visit #
+          UNPACK    PTETADMN,ANS,ANS,DIM6
+          PACK      EXDOCNO,PTCNEDIH,DIM4,DIM6,CHKDIGIT,SP30
+          MOVE      CURRDATE,EXEXDTE
+          UNPACK    CTIMEIS,HRS,DIM1,MINS
+          PACK      EXEXTME,HRS,MINS,SP4
+          REP       " 0",EXEXTME
+.
+          MOVE      "ST",EXADIQL
+          MOVE      "FS",EXADIIN            * Submission Type = First Submission
+          COMPARE   FIVE,OPTION             * check if Option 5 - Cancellations
+          GOTO      D1BGM100 IF NOT EQUAL
+          MOVE      "CA",EXADIIN            * Submission Type = Cancellation
+.
+.
+D1BGM100  BRANCH    PASSNO,D1BGM999,D1BGM800
+          GOTO      D1BGM999
+.
+.
+.                                           * write extract record in Pass 2
+D1BGM800  PACK      EXDATAFL,EXDOCID,EXDOCNO,EXEXDTE,EXEXTME,EXADIQL:
+                             EXADIIN,SP70
+          PACK      EXSPSEQ,SP30            * special sequences
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1 
+.
+D1BGM999  RETURN
++
+.******************************************************************************
+.*                                  D2BIL000              Called by: EXTR0000 *
+.*                            Set up Invoice data                             *
+.******************************************************************************
+D2BIL000  MOVE      ZERO,EXIT               * set up Invoice data
+.
+          MOVE      "  2",EXSEQNO
+          MOVE      "BIL ",EXSEGMT
+.
+          MOVE      "09 ",EXBILTY           * Bill Type 
+          MOVE      PINVNO,EXINVNO
+.....     MOVE      PINVAMT,EXBILAM         * Invoice Amount - to be re-calced
+          MOVE      INAMTSAV,EXBILAM        * Total Inv.Amount - to be re-calced
+          MOVE      "OU",EXBILCT
+          COMPARE   TWO,PINVSYS             * is this Outpatients?
+          GOTO      D2BIL300 IF EQUAL
+.
+.                          * how is Day Surg. or Day Hospital being recorded
+          MOVE      "IN",EXBILCT
+.
+D2BIL100  MOVE      ADATE,EXADATE           * Inpatient Dates
+          UNPACK    ATIME,DIM2A,DIM1,DIM2B
+          PACK      EXATIME,DIM2A,DIM2B
+          MOVE      DDATE,EXDDATE
+          UNPACK    DTIME,DIM2A,DIM1,DIM2B
+          PACK      EXDTIME,DIM2A,DIM2B
+.                                           * set Header date range
+          MATCH     FRSTDATE,DDATE
+          IF        @LESS
+            MOVE      DDATE,FRSTDATE
+          ENDIF
+          MATCH     DDATE,LASTDATE
+          IF        @LESS
+            MOVE      DDATE,LASTDATE
+          ENDIF
+          
+.                          * what are Start & End 'Patient Management Dates' ??
+          MOVE      SP8,EXSDATE
+          MOVE      SP8,EXEDATE
+          PACK      EXSDATE,EXADATE,SP10
+          PACK      EXEDATE,EXDDATE,SP10
+.
+          BRANCH    PASSNO,D2BIL999,D2BIL800
+          GOTO      D2BIL999
+.
+D2BIL300  MOVE      OBADATE,EXADATE         * Outpatient Dates
+          UNPACK    OTBBASTM,DIM2A,DIM1,DIM2B
+          PACK      EXATIME,DIM2A,DIM2B
+          MOVE      OBADATE,EXDDATE
+          MATCH     SP5,OTBBDPTM
+          IF        @EQUAL
+            MOVE      "18",DIM2A            * 18:00 for JHS
+            MOVE      "00",DIM2B
+          ELSE
+            UNPACK    OTBBDPTM,DIM2A,DIM1,DIM2B
+          ENDIF
+          PACK      EXDTIME,DIM2A,DIM2B
+.                                           * set Header date range
+          MATCH     FRSTDATE,OBADATE
+          IF        @LESS
+            MOVE      OBADATE,FRSTDATE
+          ENDIF
+          MATCH     OBADATE,LASTDATE
+          IF        @LESS
+            MOVE      OBADATE,LASTDATE
+          ENDIF
+.
+.                          * what are Start & End 'Patient Management Dates' ??
+          MOVE      SP8,EXSDATE
+          MOVE      SP8,EXEDATE
+          PACK      EXSDATE,EXADATE,SP10
+          PACK      EXEDATE,EXDDATE,SP10
+.
+          BRANCH    PASSNO,D2BIL999,D2BIL800
+          GOTO      D2BIL999
+.
+.                                           * write extract record in Pass 2
+D2BIL800  PACK      EXDATAFL,EXBILTY,EXBILAM,EXBILCT,EXADATE,EXATIME:
+                             EXDDATE,EXDTIME,EXSDATE,EXEDATE,EXINVNO,SP70
+          PACK      EXSPSEQ,SP30            * Special sequences
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1 
+.
+D2BIL999  RETURN
++
+.******************************************************************************
+.*                                  D3RFF000              Called by: EXTR0000 *
+.*                            Set up Reference data                           *
+.******************************************************************************
+D3RFF000  MOVE      ZERO,EXIT               * set up Reference data
+.
+          MOVE      "  3",EXSEQNO
+          MOVE      "RFF ",EXSEGMT
+.
+          MOVE      SMA,EXRFF1
+          PACK      EXHOSID,PTCNORIG,SP10
+          MOVE      PDS,EXRFF2
+          MOVE      LDS,EXRFF3
+          MOVE      SP10,EXLODOC
+.
+.
+          BRANCH    PASSNO,D3RFF999,D3RFF800
+          GOTO      D3RFF999
+.
+.                                           * write extract record in Pass 2
+D3RFF800  PACK      EXDATAFL,EXRFF1,EXHOSID,EXRFF2,EXATDOC,EXRFF3:
+                             EXLODOC,SP70
+          PACK      EXSPSEQ,SP30            * Special sequences
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1 
+.
+D3RFF999  RETURN
++
+.******************************************************************************
+.*                                  D4ADI000              Called by: EXTR0000 *
+.*                            Set up Additional data                          *
+.******************************************************************************
+D4ADI000  MOVE      ZERO,EXIT               * set up Additional data
+          MOVE      ZERO,COUNT
+.
+          MOVE      "  4",EXSEQNO
+          MOVE      "ADI ",EXSEGMT
+.
+          MOVE      "CC",EXADICC            * Ins. Claim Ind
+          MOVE      "0",EXADIVL             * Default - Not MediShield
+.                                           * check for a MediShield Payer
+          PACK      KEY14,PTETADMN,SP20
+          CALL      RSVSPAY1
+D4ADI100  CALL      RKVSPAY1
+          BRANCH    OVRCD,D4ADI150
+          MATCH     VSPAVISN,PTETADMN
+          GOTO      D4ADI150 IF NOT EQUAL
+.
+          PACK      KEY6,VSPAPAYC,SP10
+          CALL      RDVSPAY1
+          BRANCH    OVRCD,D4ADI150
+.                                           * PTFXEXTR = 1 - MediSave
+.                                                        2 - MediShield
+.                                                        3 - MS approved Ins.Co
+          COMPARE   PTFXEXTR,ONE
+          GOTO      D4ADI100 IF LESS
+.                                           * MediShield or Insur. Plan selected
+          MOVE      "1",EXADIVL
+.
+D4ADI150  IF        PASSNO = 2
+            CALL      WRADI000
+          ENDIF
+.
+.                                           * SP - Speciality  ***************
+D4ADI200  IF        PASSNO = 2
+            MOVE      "SP",EXADICC
+            MOVE      "19",EXADIVL          * 19 = Oncology
+            CALL      WRADI000
+          ENDIF
+.                                           * check for RC - Reason for Cancel
+D4ADI300  COMPARE   FIVE,OPTION             * only Option 5 - Cancellation
+          GOTO      D4ADI400 IF NOT EQUAL
+.
+          MATCH     SP1,PTETRCAL
+          IF        @EQUAL
+            MOVE      " Reason for Cancellation is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+            GOTO      D4ADI350
+          ENDIF
+.
+          MOVE      PTETRCAL,ANS
+          REP       "H-P-",ANS
+          MATCH     "-",ANS
+          IF        !@EQUAL
+            MOVE      " Reason for Cancellation not 'H' or 'P'",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.            
+D4ADI350  IF        PASSNO = 2
+            MOVE      "RC",EXADICC
+            MOVE      PTETRCAL,EXADIVL
+            CALL      WRADI000
+          ENDIF
+.
+.                                           * CR - Country of Residence ******
+D4ADI400  PACK      KEY8,PURNO
+          CALL      RDPMRES1
+          BRANCH    OVRCD,D4ADI500
+.
+          UNPACK    SP20,EXADIVL,THCSCOD
+          PACK      KEY5,CATC,PMRSCONT,SP5
+          CALL      RDCODE1                 * Cat. "C "
+          UNPACK    THCSCOD,EXADIVL,DIM2A
+          IF        OVRCD = 1 
+            CLEAR     ERRMSG
+            APPEND    " Country Code '",ERRMSG
+            APPEND    PMRSCONT,ERRMSG
+            APPEND    "' does not exist",ERRMSG
+            RESET     ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ELSE
+            MATCH    SP2,EXADIVL
+            IF       @EQUAL
+              CLEAR     ERRMSG
+              APPEND    " Country Code '",ERRMSG
+              APPEND    PMRSCONT,ERRMSG
+              APPEND    "' has no CCPS Equivalent",ERRMSG
+              RESET     ERRMSG
+              CALL      ERMSG000            * Print an error message
+            ENDIF
+          ENDIF
+.
+          IF        PASSNO = 2
+            MOVE      "CR",EXADICC
+            CALL      WRADI000
+          ENDIF
+.
+D4ADI500  COMPARE   TWO,PINVSYS             * is this Outpatients? <==========
+          GOTO      D4ADI700 IF EQUAL
+.
+.                                           * AT - Admission Type ************
+D4ADI550  UNPACK    SP20,EXADIVL,THCSCOD    
+          PACK      KEY5,CATU1,AUSR1,SP5    
+          CALL      RDCODE1                 * Cat. "U1"
+          UNPACK    THCSCOD,EXADIVL,DIM2
+          MATCH     SP2,EXADIVL
+          IF        @EQUAL
+            CLEAR     ERRMSG
+            APPEND    " Admitting Type (Cat.U1) '",ERRMSG
+            APPEND    AUSR1,ERRMSG
+            APPEND    "' has no CCPS equivalent",ERRMSG
+            RESET     ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+          IF        PASSNO = 2
+            MOVE      "AT",EXADICC
+            CALL      WRADI000
+          ENDIF
+.
+.                                           * AD - Admitting Source **********
+          UNPACK    SP20,EXADIVL,THCSCOD
+          PACK      KEY5,CATS,ASRCE,SP5    
+          CALL      RDCODE1                 * Cat. "S "
+          UNPACK    THCSCOD,EXADIVL,DIM2
+          MATCH     SP2,EXADIVL
+          IF        @EQUAL
+            CLEAR     ERRMSG
+            APPEND    " Admitting Source (Cat.S) '",ERRMSG
+            APPEND    ASRCE,ERRMSG
+            APPEND    "' has no CCPS equivalent",ERRMSG
+            RESET     ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+          IF        PASSNO = 2
+            MOVE      "AD",EXADICC
+            CALL      WRADI000
+          ENDIF
+.
+.                                           * TO - Type of Outcome ***********
+D4ADI600  UNPACK    SP20,EXADIVL,THCSCOD
+          MOVE      "1",ANS
+          PACK      EXADIVL,ANS,SP6
+          MATCH     SP3,DDEST
+          IF        @EQUAL
+            MOVE      " Discharge Destination is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ELSE
+            PACK      KEY5,CATDD,DDEST,SP5    
+            CALL      RDCODE1               * Cat. "DD"
+            UNPACK    THCSCOD,EXADIVL,DIM2
+            MATCH     SP2,EXADIVL
+            IF        @EQUAL
+              CLEAR     ERRMSG
+              APPEND    " Disch.Dest. (Cat.DD) '",ERRMSG
+              APPEND    DDEST,ERRMSG
+              APPEND    "' has no Outcome equivalent",ERRMSG
+              RESET     ERRMSG
+              CALL      ERMSG000            * Print an error message
+            ENDIF
+          ENDIF
+.
+          IF        PASSNO = 2
+            MOVE      "TO",EXADICC
+            CALL      WRADI000
+          ENDIF
+.
+.                                           * FD - Final Diagnosis ***********
+          MATCH     SP8,PTDSDDRG
+          GOTO      D4ADI800 IF EQUAL
+.
+          IF        PASSNO = 2
+            MOVE      "FD",EXADICC
+            MOVE      PTDSDDRG,EXADIVL
+            CALL      WRADI000
+          ENDIF
+.
+          GOTO      D4ADI800
+.
+.         *********************************** Outpatients *********************
+D4ADI700  MOVE      ZERO,EXIT
+.                                           * TO - Type of Outcome ***********
+          UNPACK    SP20,EXADIVL,THCSCOD
+          MOVE      "1",ANS
+          PACK      EXADIVL,ANS,SP6
+          MATCH     SP3,OTBBOUTC
+          IF        @EQUAL
+            MOVE      " OP Outcome (Cat.OZ) is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ELSE
+            PACK      KEY5,CATOZ,OTBBOUTC,SP5    
+            CALL      RDCODE1               * Cat. "OZ"
+            UNPACK    THCSCOD,EXADIVL,DIM2
+            MATCH     SP2,EXADIVL
+            IF        @EQUAL
+              CLEAR     ERRMSG
+              APPEND    " OP Outcome (Cat.OZ) '",ERRMSG
+              APPEND    DDEST,ERRMSG
+              APPEND    "' has no Outcome equivalent",ERRMSG
+              RESET     ERRMSG
+              CALL      ERMSG000            * Print an error message
+            ENDIF
+          ENDIF
+.
+          IF        PASSNO = 2
+            MOVE      "TO",EXADICC
+            CALL      WRADI000
+          ENDIF
+.
+.                                           * DW - Outpatient Ward ***********
+          IF        PASSNO = 2
+            MOVE      "C",EXADIVL
+            MOVE      "DW",EXADICC
+            CALL      WRADI000
+          ENDIF
+.
+.                                           * Edit Claim Type - OBACOMP
+          PACK      KEY5,CATCL,OBACOMP,SP5
+          CALL      RDCODE1                 * Cat."CL"
+          IF        OVRCD = 1
+            CLEAR     ERRMSG
+            APPEND    " Claim Type (Cat.CL) '",ERRMSG
+            APPEND    OBACOMP,ERRMSG
+            APPEND    "' is not valid",ERRMSG
+            RESET     ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+.         
+.                                           * EC - Exceptional Case ***********
+D4ADI800  COMPARE   "15000",PINVAMT
+          GOTO      D4ADI999 IF LESS
+.
+          IF        PASSNO = 2
+            MOVE      "EC",EXADICC
+            MOVE      "01",EXADIVL
+            CALL      WRADI000
+          ENDIF
+.
+D4ADI999  RETURN
++
+.******************************************************************************
+WRADI000    PACK      EXADIVL,EXADIVL,SP10
+            MATCH     SP6,EXADIVL
+            GOTO      WRADI999 IF EQUAL
+.
+WRADI100    PACK      EXDATAFL,EXADICC,EXADIVL,SP70
+            ADD       ONE,COUNT
+            MOVE      COUNT,FORM2
+            PACK      EXSPSEQ,SP8,FORM2,SP10
+            PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+            CALL      WREXTR1
+.
+WRADI999    RETURN
++
+.******************************************************************************
+.*                                  D5GP1000              Called by: EXTR0000 *
+.*                            Set up Accommodation data                       *
+.******************************************************************************
+D5GP1000  MOVE      ZERO,EXIT               * set up Accommodation data
+          MOVE      ZERO,COUNT
+.
+          COMPARE   TWO,PINVSYS             * is this Outpatients?
+          GOTO      D5GP1999 IF EQUAL       * yes - bypass Accom routine
+.
+          UNPACK    SP30,EXACTY5,EXACTY6
+          UNPACK    SP30,EXACAM5,EXACAM6
+.
+          MOVE      "  5",EXSEQNO
+          MOVE      "GRP1",EXSEGMT
+.
+.                                           * read thru DTR Accomm (TRECTYPE=1)
+          PACK      KEY18,PTETADMN,ONE,SP20
+          CALL      RDSDTRN3
+.
+D5GP1100  CALL      RDKDTRN3
+          BRANCH    OVRCD,D5GP1900          * end of Accommodation/Treatments
+.
+          MATCH     DTADMNO,PTETADMN
+          GOTO      D5GP1900 IF LESS
+          MATCH     SP8,TREF
+          GOTO      D5GP1100 IF EQUAL
+          COMPARE   ONE,TRECTYPE
+          GOTO      D5GP1900 IF NOT EQUAL
+.
+.                                           * Accomm record found - save data
+          REP       " 0",PTDTCRST
+          MATCH     "0",PTDTCRST            * Is this DTR "Credited" (1 or 2)?
+          GOTO      D5GP1100 IF NOT EQUAL   * then bypass this DTR.
+.
+          ADD       ONE,COUNT
+          PACK      SAVKEY18,DTADMNO,DTRECTYP,TMISGRP,DTTRANSN1,SP20
+          PACK      SAVFDATE,DTFCENT,DTFYEAR,DTFMONTH,DTFDAY,SP10
+          REP       " 0",SAVFDATE
+          PACK      SAVTDATE,TTCENT,TTYEAR,TTMONTH,TTDAY,SP10
+          REP       " 0",SAVTDATE
+          PACK      SAVINVNO,TREF,SP8
+.
+          MOVE      "ND",EXNDAYQ
+          MOVE      TNODAYS,SAVDAYS  
+          PACK      EXNDAYS,SP2,SAVDAYS     * No of Days - FORM 4
+          CALL      GETNODYS                * check if partial days required
+.
+          MOVE      "06",EXACTY6
+          ASSIGN    (TPATAMTT+PTDTGSTM),CHRGAMT
+          IF        CHNGCL = 1
+            CALL      GTBFEE00              * get diff bed fee if an Alt Cat.CL
+          ENDIF
+          PACK      EXACAM6,CHRGAMT,SP20
+          ADD       CHRGAMT,INAMTNEW        * re-calc Invoice Amount
+.
+.                                           * Ward Class ********************
+          MOVE      "RT",EXACWDQ         
+          UNPACK    SP20,EXACWDT,THCSCOD
+          MATCH     SP3,PTDTBTYP
+          IF        @EQUAL
+            MOVE      " Bed Type is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ELSE
+            PACK      KEY5,CATBT,PTDTBTYP,SP10
+            CALL      RDCODE1                 * Cat. "BT"
+            MOVE      THCSCOD,EXACWDT
+            MATCH     SP2,EXACWDT
+            IF        @EQUAL
+              CLEAR     ERRMSG
+              APPEND    " Bed Type '",ERRMSG
+              APPEND    PTDTBTYP,ERRMSG
+              APPEND    "' has no Ward Class equivalent",ERRMSG
+              RESET     ERRMSG
+              CALL      ERMSG000            * Print an error message
+            ENDIF
+          ENDIF
+.
+.
+.                                           * now find the Treatment records 
+.                                           * for same dates. (DTRECTYP = 4)
+          PACK      KEY23,PTETADMN,SAVINVNO,FOUR,SP20
+          CALL      RDSDTRN4
+          MOVE      ZERO,FORM4
+          MOVE      ZERO,CHRGAMT
+          MOVE      ZERO,TOTLAMT
+.                                           * read thru DTR recd type 4 - there
+.                                           * should be 1 for each date between
+.                                           *  Accom. DTR From and To Dates
+D5GP1200  CALL      RDKDTRN4
+          BRANCH    OVRCD,D5GP1500          * end of Accommodation/Treatments
+.
+          MATCH     DTADMNO,PTETADMN
+          GOTO      D5GP1500 IF LESS
+          MATCH     SAVINVNO,TREF
+          GOTO      D5GP1200 IF NOT EQUAL
+          COMPARE   FOUR,TRECTYPE
+          GOTO      D5GP1500 IF NOT EQUAL
+.
+          REP       " 0",PTDTCRST
+          MATCH     "0",PTDTCRST            * Is this DTR "Credited" (1 or 2)?
+          GOTO      D5GP1200 IF NOT EQUAL
+.
+          PACK      WORKDATE,DTFCENT,DTFYEAR,DTFMONTH,DTFDAY,SP20
+          REP       " 0",WORKDATE
+          MATCH     SAVFDATE,WORKDATE
+          GOTO      D5GP1200 IF LESS
+          MATCH     WORKDATE,SAVTDATE
+          GOTO      D5GP1500 IF LESS
+.
+          ADD       ONE,FORM4
+          ASSIGN    (TPATAMTT+PTDTGSTM),CHRGAMT
+.
+.                                           * find a new charge if there is an
+.                                           * alternate Cat "CL"
+          IF        CHNGCL = 1
+....        PACK      KEY3,ALTCATCL,SP3
+....        PACK      ITEMNO,TITEMNO,SP10
+....        PACK      EFFDATE,WORKDATE,SP10
+            PACK      KEY29,ALTCATCL,SP6,SP3,TITEMNO,WORKDATE
+            CALL      GETMISC0              * read Misc.Item for new Cat. CL
+            BRANCH    EXIT,D5GP1400         * Item is invalid, bypass changes
+.
+            ADD       MPATPOR,MHFPOR        * get replacement charge from misc.
+            COMPARE   ZERO,MHFPOR
+            IF        !@EQUAL
+              MOVE      MHFPOR,CHRGAMT      * set replacement charge for Misc
+              IF        IBCNUGST = 2 & PTDTGSTA = 1
+                MOVE      PTDTGSTC,GSTCODE
+                CALL      CALCGST0
+                ADD       GSTNAMT,CHRGAMT
+              ENDIF
+            ENDIF
+          ENDIF
+.
+D5GP1400  ADD       CHRGAMT,TOTLAMT         * add Treatment charges 
+          ADD       CHRGAMT,INAMTNEW        * add to re-calc Invoice Amount
+.
+          GOTO      D5GP1200                * get next DTR "4"
+.
+D5GP1500  MOVE      "05",EXACTY5 
+          PACK      EXACAM5,TOTLAMT,SP20
+.
+          COMPARE   SAVDAYS,FORM4           * Accom TNODAYS vs No.Treatm't Days
+          GOTO      D5GP1600 IF NOT LESS  
+.
+          CLEAR     ERRMSG
+          IF        FORM4 = 0
+            APPEND    " No Treatment records for ",ERRMSG
+          ELSE
+            MOVE      FORM4,FORM2
+            APPEND    " Only ",ERRMSG
+            APPEND    FORM2,ERRMSG
+            APPEND    " Treatment records for ",ERRMSG
+          ENDIF
+          UNPACK    SAVFDATE,DIM4A,DIM2A,DIM2B
+          PACK      DIM10A,DIM2B,SLSH,DIM2A,SLSH,DIM4A
+          APPEND    DIM10A,ERRMSG
+          MATCH     SAVFDATE,SAVTDATE
+          IF        !@EQUAL
+            APPEND    " to ",ERRMSG
+            UNPACK    SAVTDATE,DIM4A,DIM2A,DIM2B
+            PACK      DIM10B,DIM2B,SLSH,DIM2A,SLSH,DIM4A
+            APPEND    DIM10B,ERRMSG
+          ENDIF
+          RESET     ERRMSG
+...       CALL      ERMSG000                * - output message - not error
+          MOVE      ERRMSG,INFMSG
+          CALL      INMSG000
+. 
+.                                           * reposition on the Accomm record
+D5GP1600  MOVE      SAVKEY18,KEY18
+.
+          BRANCH    PASSNO,D5GP1100,D5GP1800
+          GOTO      D5GP1100
+.
+.                                           * write extract record in Pass 2
+D5GP1800  PACK      EXDATAFL,EXNDAYQ,EXNDAYS,EXACTY5,EXACAM5,EXACTY6:
+                             EXACAM6,EXACWDQ,EXACWDT,SP70
+          MOVE      COUNT,FORM4
+          PACK      WORKDATE,DTFCENT,DTFYEAR,DTFMONTH,DTFDAY,SP20
+          REP       " 0",WORKDATE
+          PACK      EXSPSEQ,WORKDATE,FORM4,SP20
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+          GOTO      D5GP1100
+.
+.
+D5GP1900  MOVE      ZERO,EXIT
+.
+D5GP1999  RETURN
++
+.******************************************************************************
+.*                                  D6GP2000              Called by: EXTR0000 *
+.*                  Set up Misc. Charges data - Inpatients                    *
+.******************************************************************************
+D6GP2000  MOVE      ZERO,EXIT               * set up Charges data
+          MOVE      ZERO,COUNT
+          CALL      CLSUM000                * clear the temp Summary table
+.
+          MOVE      "  6",EXSEQNO
+          MOVE      "GRP2",EXSEGMT
+.
+.                                           * read thru Misc. DTRs (TRECTYPE=3)
+          PACK      KEY18,PTETADMN,THREE,SP20
+          CALL      RDSDTRN3
+.
+D6GP2100  CALL      RDKDTRN3
+          BRANCH    OVRCD,D6GP2800          * end of Miscellaneous Charges   
+.
+          MATCH     DTADMNO,PTETADMN
+          GOTO      D6GP2800 IF LESS
+          COMPARE   THREE,TRECTYPE          * end of Miscellaneous Charges
+          GOTO      D6GP2800 IF NOT EQUAL
+          REP       " 0",PTDTCRST
+          MATCH     "0",PTDTCRST            * is Item Credited ?
+          GOTO      D6GP2100 IF NOT EQUAL   * 1= Inv.Fully Cred. 2= Item Cred.
+.
+.                                           * default for "Other Charges not
+D6GP2150  MOVE      "ZZ9999",EXCHGTY        *         in CCPS Code Table 20"
+          COMPARE   ZERO,TSERVS
+          IF        @EQUAL
+            MOVE      ONE,TSERVS
+          ENDIF
+          MOVE      TSERVS,FORM2
+          ASSIGN    (TPATAMTT+PTDTGSTM),WORKAMT
+          ASSIGN    (WORKAMT/FORM2),CHRGAMT    * save the charge amount
+.
+.                                           * check if Alternate Claim type 
+          PACK      KEY3,ACLAIM,SP5         * Key 3 used for GETMISC0
+          IF        CHNGCL = 1
+            PACK      KEY3,ALTCATCL,SP5
+          ENDIF
+.                                           * read the Misc.Item table
+...       PACK      ITEMNO,TITEMNO,SP10
+          PACK      EFFDATE,DTFCENT,DTFYEAR,DTFMONTH,DTFDAY,SP20
+          REP       " 0",EFFDATE
+          PACK      KEY29,KEY3,SP6,SP3,TITEMNO,EFFDATE,SP10
+          CALL      GETMISC0                * read Misc.Item record
+          GOTO      D6GP2100
+.
+.                                           * process valid misc.item
+D6GP2300  MATCH     SP10,PTMCEDIE
+          IF        !@EQUAL 
+            MOVE      PTMCEDIE,EXCHGTY      * EDI Equiv code - CCPS Table 20
+          ELSE
+            CLEAR     INFMSG
+            APPEND    " Item No. '",INFMSG
+            APPEND    TITEMNO,INFMSG
+            APPEND    "' has no CCPS Equiv - 'ZZ9999' used",INFMSG
+            RESET     INFMSG
+            CALL      INMSG000
+          ENDIF
+.
+.                                           * get new value if using Alt Cat.CL
+          IF        CHNGCL = 1     
+            ADD       MPATPOR,MHFPOR        * get replacement charge from misc.
+            COMPARE   ZERO,MHFPOR
+            IF        !@EQUAL
+              MOVE      MHFPOR,CHRGAMT      * set replacement charge for Misc
+.                                           *
+              IF        IBCNUGST = 2 & PTDTGSTA = 1
+                MOVE      PTDTGSTC,GSTCODE
+                CALL      CALCGST0          * calculate new GST amount
+                ADD       GSTNAMT,CHRGAMT
+              ENDIF
+            ENDIF
+          ENDIF
+.
+.
+D6GP2500  MOVE      CHRGAMT,EXCHGAM
+          COMPARE   ZERO,TSERVS
+          IF        @EQUAL
+            MOVE      ONE,TSERVS
+          ENDIF
+          MOVE      TSERVS,FORM2
+          ASSIGN    (CHRGAMT*FORM2),WORKAMT
+          ADD       WORKAMT,INAMTNEW      * re-calc Invoice Amount
+.
+D6GP2600  MOVE      "NT",EXNOTMQ
+....      MOVE      TSERVS,EXNOTIM
+          MOVE      "     0",EXNOTIM
+.
+          BRANCH    PASSNO,D6GP2100,D6GP2700
+          GOTO      D6GP2100
+.
+.                                           * write Item to temp Summary file
+D6GP2700  PACK      KEY14,PTETADMN,EXCHGTY,SP20
+          CALL      RDTSUM1
+          IF        OVRCD = 1
+            MOVE      PTETADMN,TMPSADMN
+            MOVE      EXCHGTY,TMPSCHRG
+            MOVE      WORKAMT,TMPSAMNT
+            CALL      WRTSUM1
+          ELSE
+            MOVE      TMPSAMNT,FORM12P2
+            ADD       WORKAMT,FORM12P2
+            MOVE      FORM12P2,TMPSAMNT
+            CALL      UPTSUM1
+          ENDIF
+          GOTO      D6GP2100
+.
+.                                           * write extract record in Pass 2
+D6GP2800  COMPARE   TWO,PASSNO
+          GOTO      D6GP2900 IF NOT EQUAL
+.
+          PACK      KEY14,SP20
+          CALL      RSTSUM1
+.
+D6GP2850  CALL      RKTSUM1
+          BRANCH    OVRCD,D6GP2900
+.
+          MATCH     PTETADMN,TMPSADMN
+          GOTO      D6GP2850 IF NOT EQUAL
+
+          PACK      EXDATAFL,TMPSCHRG,TMPSAMNT,EXNOTMQ,EXNOTIM,SP70
+          ADD       ONE,COUNT
+....      PACK      WORKDATE,DTFCENT,DTFYEAR,DTFMONTH,DTFDAY,SP20
+....      REP       " 0",WORKDATE
+....      MOVE      COUNT,FORM2
+....      PACK      EXSPSEQ,WORKDATE,FORM2,SP20
+          PACK      EXSPSEQ,COUNT,SP20
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+          GOTO      D6GP2850
+.
+D6GP2900  MOVE      ZERO,EXIT
+.
+D6GP2999  RETURN
++
+.******************************************************************************
+.*                                  D6GPO000              Called by: EXTR0000 *
+.*                  Set up Misc. Charges data - Outpatients                   *
+.******************************************************************************
+D6GPO000  MOVE      ZERO,EXIT               * set up Charges data
+          MOVE      ZERO,COUNT
+          CALL      CLSUM000                * clear the temp Summary table
+.
+          MOVE      "  6",EXSEQNO
+          MOVE      "GRP2",EXSEGMT
+.
+.                                           * read thru Misc. DTRs (DOTRECTY=1)
+          PACK      KEY26,PTETADMN,SP30
+          CALL      RDSDTRO5
+.
+D6GPO100  CALL      RDKDTRO5
+          BRANCH    OVRCD,D6GPO800          * end of Miscellaneous Charges
+.
+          MATCH     DOTNUMB,PTETADMN
+          GOTO      D6GPO800 IF LESS
+          COMPARE   ONE,OTRECTYP            * end of Miscellaneous Charges
+          GOTO      D6GPO120 IF EQUAL
+          COMPARE   SIX,OTRECTYP            * Theatre item
+          GOTO      D6GPO100 IF NOT EQUAL
+.
+D6GPO120  REP       " 0",OTDTCRST
+          MATCH     "0",OTDTCRST            * Is Invoice or Item "Credited" ?
+          GOTO      D6GPO100 IF NOT EQUAL   * then bypass this Item.
+.
+                                            * default for "Other Charges not
+D6GPO150  MOVE      "ZZ9999",EXCHGTY        *         in CCPS Code Table 20"
+          MOVE      OTPATAMT,CHRGAMT        * save the charge amount
+          COMPARE   ZERO,OTSERVS
+          IF        @EQUAL
+            MOVE      ONE,OTSERVS
+          ENDIF
+          MOVE      OTSERVS,FORM2
+          ASSIGN    (OTPATAMT+OTDTGSTM),WORKAMT
+          ASSIGN    (WORKAMT/FORM2),CHRGAMT    * save the charge amount
+.
+.                                           * check if Alternate Claim type 
+          PACK      KEY3,OBACOMP,SP5
+          IF        CHNGCL = 1
+            PACK      KEY3,ALTCATCL,SP5
+          ENDIF
+.                                           * read the Misc.Item table
+...       MOVE      OTITEMNO,ITEMNO
+...       PACK      EFFDATE,OTDDATE,SP20
+...       REP       " 0",EFFDATE
+          PACK      KEY29,KEY3,SP6,SP3,OTITEMNO,OTDDATE,SP10
+          CALL      GETMISC0
+          BRANCH    EXIT,D6GPO100           * error occured - read next    
+          GOTO      D6GPO300
+.
+.                                           * process valid misc.item
+D6GPO300  MATCH     SP10,PTMCEDIE
+          IF        !@EQUAL
+            MOVE      PTMCEDIE,EXCHGTY      * EDI Equiv code - CCPS Table 20
+          ELSE
+            CLEAR     INFMSG
+            APPEND    " Item No. '",INFMSG
+            APPEND    OTITEMNO,INFMSG
+            APPEND    "' has no CCPS Equiv - 'ZZ9999' used",INFMSG
+            RESET     INFMSG
+            CALL      INMSG000
+          ENDIF
+.
+.                                           * get new value if using Alt Cat.CL
+          IF        CHNGCL = 1     
+            ADD       MPATPOR,MHFPOR        * get replacement charge from misc.
+            COMPARE   ZERO,MHFPOR
+            IF        !@EQUAL
+              MOVE      MHFPOR,CHRGAMT      * set replacement charge for Misc.
+.                                           *
+              IF        IBCNUGST = 2 & OTDTGSTA = 1
+                MOVE      OTDTGSTC,GSTCODE
+                CALL      CALCGST0          * calculate new GST amount
+                ADD       GSTNAMT,CHRGAMT
+              ENDIF
+            ENDIF
+          ENDIF
+.
+.
+D6GPO500  MOVE      CHRGAMT,EXCHGAM
+          COMPARE   ZERO,OTSERVS
+          IF        @EQUAL
+            MOVE      ONE,OTSERVS
+          ENDIF
+          MOVE      OTSERVS,FORM2
+          ASSIGN    (CHRGAMT*FORM2),WORKAMT
+          ADD       WORKAMT,INAMTNEW      * re-calc Invoice Amount
+.
+D6GPO600  MOVE      "NT",EXNOTMQ
+....      MOVE      OTSERVS,EXNOTIM
+          MOVE      "     0",EXNOTIM
+.
+          BRANCH    PASSNO,D6GPO100,D6GPO700
+          GOTO      D6GPO100
+.
+.                                           * write Item to temp Summary file
+D6GPO700  PACK      KEY14,PTETADMN,EXCHGTY,SP20
+          CALL      RDTSUM1
+          IF        OVRCD = 1
+            MOVE      PTETADMN,TMPSADMN
+            MOVE      EXCHGTY,TMPSCHRG
+            MOVE      WORKAMT,TMPSAMNT
+            CALL      WRTSUM1
+          ELSE
+            MOVE      TMPSAMNT,FORM12P2
+            ADD       WORKAMT,FORM12P2
+            MOVE      FORM12P2,TMPSAMNT
+            CALL      UPTSUM1
+          ENDIF
+          GOTO      D6GPO100
+.
+.                                           * write extract record in Pass 2
+D6GPO800  COMPARE   TWO,PASSNO
+          GOTO      D6GPO900 IF NOT EQUAL
+.
+          PACK      KEY14,SP20
+          CALL      RSTSUM1
+.
+D6GPO850  CALL      RKTSUM1
+          BRANCH    OVRCD,D6GPO900
+.
+          MATCH     PTETADMN,TMPSADMN
+          GOTO      D6GPO850 IF NOT EQUAL
+
+          PACK      EXDATAFL,TMPSCHRG,TMPSAMNT,EXNOTMQ,EXNOTIM,SP70
+          ADD       ONE,COUNT
+....      PACK      WORKDATE,DTFCENT,DTFYEAR,DTFMONTH,DTFDAY,SP20
+....      REP       " 0",WORKDATE
+....      MOVE      COUNT,FORM2
+....      PACK      EXSPSEQ,WORKDATE,FORM2,SP20
+          PACK      EXSPSEQ,COUNT,SP20
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+          GOTO      D6GPO850
+.
+D6GPO900  MOVE      ZERO,EXIT
+.
+D6GPO999  RETURN
++
+.******************************************************************************
+.*                                  D7GP3000              Called by: EXTR0000 *
+.*                            Set up Theatre data                             *
+.*           still not finished (not yet needed) - difficult to set up        *
+.******************************************************************************
+D7GP3000  MOVE      ZERO,EXIT               * set up Theatre data
+.
+          MOVE      PTETADMN,EXVISNO
+          MOVE      "  7",EXSEQNO
+          MOVE      "GRP3",EXSEGMT
+.         
+.                                           * read thru Theatre DTR(TRECTYPE=2)
+          PACK      KEY18,PTETADMN,TWO,SP20
+          CALL      RDSDTRN3
+.         
+D7GP3100  CALL      RDKDTRN3
+          BRANCH    OVRCD,D7GP3900          * end of Theatre records       
+.         
+          MATCH     DTADMNO,PTETADMN
+          GOTO      D7GP3900 IF LESS
+          COMPARE   THREE,TRECTYPE
+          GOTO      D7GP3900 IF NOT EQUAL   * end of Theatre records
+.
+.
+          BRANCH    PASSNO,D7GP3100,D7GP3800
+          GOTO      D7GP3100
+.
+.                                           * write extract record in Pass 2
+D7GP3800  PACK      EXDATAFL,EXPRDTQ,EXPRDTE,EXPRTYQ,EXPRCOD,EXDOCAQ:
+                             EXDOCAN,EXPAMTQ,EXPAMNT,SP70
+          PACK      EXSPSEQ,SP30            * Special sequences
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+          GOTO      D7GP3100
+.
+D7GP3900  MOVE      ZERO,EXIT
+.
+D7GP3999  RETURN
++
+.******************************************************************************
+.*                                  D8GP4000              Called by: EXTR0000 *
+.*                            Set up Patient Details                          *
+.******************************************************************************
+D8GP4000  MOVE      ZERO,EXIT               * set up Patient Details
+.
+          MOVE      PTETADMN,EXVISNO
+          MOVE      "  8",EXSEQNO
+          MOVE      "GRP4",EXSEGMT
+.
+          SQUEEZE   PSNAME                  * Patient Name *******************
+          PACK      DIM60,PSNAME,COMMA,SP1,PGNAME
+          PACK      EXPANAM,DIM60,SP30,SP30
+.
+          SQUEEZE   PMAIALID
+          PACK      EXPAIDN,PMAIALID,SP20   * Patient ID. ********************
+.
+          UNPACK    SP20,EXPAIDT,THCSCOD    * Identity Type ******************
+          PACK      KEY5,CATAI,PMAITYPE
+          CALL      RDCODE1
+          UNPACK    THCSCOD,EXPAIDT
+          MATCH     SP2,EXPAIDT
+          IF        @EQUAL
+            CLEAR     ERRMSG
+            MATCH     SP3,PMAITYPE
+            IF        @EQUAL
+              MOVE      " Identity Type in Alt.Id. is blank",ERRMSG
+            ELSE
+              APPEND    " Identity Type '",ERRMSG
+              APPEND    PMAITYPE,ERRMSG
+              APPEND    "' has no CCPS equivalent",ERRMSG
+              RESET     ERRMSG
+            ENDIF
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+          UNPACK    SP20,EXPANAT,THCSCOD    * Nationality ********************
+          MATCH     SP3,PMPXABRG
+          IF        @EQUAL
+            MOVE      " Patient's Nationality is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ELSE
+            PACK      KEY5,CATVA,PMPXABRG,SP5
+            CALL      RDCODE1               * Cat. "VA" Aboriginality
+            UNPACK    THCSCOD,EXPANAT,DIM2
+            MATCH     SP2,EXPANAT
+            IF        @EQUAL
+              CLEAR     ERRMSG
+              APPEND    " Nationality code '",ERRMSG
+              APPEND    PMPXABRG,ERRMSG
+              APPEND    "' has no CCPS equivalent",ERRMSG
+              RESET     ERRMSG
+              CALL      ERMSG000              * Print an error message
+            ENDIF
+          ENDIF
+.
+          PACK      EXPASEX,PSEX,SP2        * Sex ***************************
+          REP       "IURU",EXPASEX          * only F, M & U are valid
+.
+          UNPACK    SP20,EXPARAC,THCSCOD    * Race **************************
+          MATCH     SP3,PUSR5 
+          IF        @EQUAL
+            MOVE      " Patient's Race is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ELSE
+            PACK      KEY5,CATP5,PUSR5,SP5
+            CALL      RDCODE1               * Cat. "P5"
+            UNPACK    THCSCOD,EXPARAC,DIM2A
+            MATCH     SP2,EXPARAC
+            IF        @EQUAL
+              CLEAR     ERRMSG
+              APPEND    " Race code '",ERRMSG
+              APPEND    PUSR5,ERRMSG
+              APPEND    "' has no CCPS equivalent",ERRMSG
+              RESET     ERRMSG
+              CALL      ERMSG000              * Print an error message
+            ENDIF
+          ENDIF
+.
+          PACK      EXPADOB,PBDATE          * Date of Birth ******************
+          MATCH     SP8,EXPADOB
+          IF        @EQUAL
+            MOVE      " Patient's Date of Birth is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+          MOVE      "X",EXPAADQ             * Patient's Address **************
+          PACK      EXPAAD1,PADD1
+          PACK      EXPAAD2,PADD2
+          PACK      EXPAAD3,PSUBRB
+          PACK      EXPAAD4,PADD4
+          PACK      EXPAPCD,PPOST
+.
+.
+          BRANCH    PASSNO,D8GP4999,D8GP4800
+          GOTO      D8GP4999
+.
+.                                           * write extract records in Pass 2
+.
+D8GP4800  PACK      EXSPSEQ,SP9,ONE,SP10    * GRP4 Part 1
+          PACK      EXDATAFL,EXPANAM,SP70
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+.
+          PACK      EXSPSEQ,SP9,TWO,SP10    * GRP4 Part 2
+          PACK      EXDATAFL,EXPAIDN,EXPAIDT,EXPANAT,EXPASEX,EXPARAC:
+                             EXPADOB,EXPAADQ,EXPAPCD,SP70
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+.
+          PACK      EXSPSEQ,SP9,THREE,SP10  * GRP4 Part 3
+          PACK      EXDATAFL,EXPAAD1,EXPAAD2,SP70
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+.
+          PACK      EXSPSEQ,SP9,FOUR,SP10   * GRP4 Part 4
+          PACK      EXDATAFL,EXPAAD3,EXPAAD4,SP70
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+.
+D8GP4999  RETURN
++
+.******************************************************************************
+.*                                  D9GP5000              Called by: EXTR0000 *
+.*                            Set up Payer Details                            *
+.******************************************************************************
+D9GP5000  MOVE      ZERO,EXIT               * set up Payer Details         
+          MOVE      ZERO,COUNT
+          MOVE      ZERO,FOUND
+.
+          MOVE      PTETADMN,EXVISNO
+          MOVE      "  9",EXSEQNO
+          MOVE      "GRP5",EXSEGMT
+.
+.                                           * check if MediSave is the Payer
+          PACK      KEY23,PTETADMN,SP20 
+          CALL      RSVSPAY1
+.                                           * read Payer records for this Inv.
+D9GP5100  CALL      RKVSPAY1
+          BRANCH    OVRCD,D9GP5999          * Medisave not found
+.
+          MATCH     VSPAVISN,PTETADMN       * still this Admission/Visit ?
+          GOTO      D9GP5999 IF LESS        * no Payers for this Admission
+.
+.                                           * read the Health Fund 
+          PACK      KEY6,VSPAPAYC,SP6
+          CALL      RDPTFX11
+          BRANCH    OVRCD,D9GP5100          * Health Fund not found
+.
+          COMPARE   ONE,PTFXEXTR            * is this MediSave ?
+          GOTO      D9GP5100 IF NOT EQUAL
+.
+.                                           * MediSave found - read Payer Accts
+          PACK      KEY23,PTETADMN,SP20
+          CALL      RSVSPMA1
+.                                           * read Payer Accounts for this Inv.
+D9GP5200  CALL      RKVSPMA1
+          BRANCH    OVRCD,D9GP5800
+.
+          MATCH     VSPMVISN,PTETADMN
+          GOTO      D9GP5800 IF NOT EQUAL
+.
+          MOVE      ONE,FOUND
+          PACK      EXPYNAM,VSPMMNAM,SP30,SP30    * Payer's Name **************
+          MOVE      "MS",EXPYTYP
+          PACK      EXPYACC,VSPMMACN,SP20   * MediSave Account no. ************
+          MATCH     SP10,EXPYACC
+          IF        @EQUAL
+            MOVE      " Payer's MediSave Acct.no. is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+          PACK      EXPYIDC,VSPMMPID,SP10   * Payer's Id. number **************
+          MATCH     SP2,EXPYIDC
+          IF        @EQUAL
+            MOVE      " Payer's Identity No. is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+          PACK      EXPYIDT,VSPMMPIT        * Payer's Id type *****************
+          MATCH     SP2,EXPYIDT
+          IF        @EQUAL
+            MOVE      " Payer's Id. Type is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+          MOVE      "X",EXPYADQ             * Payer's Address *****************
+          PACK      EXPYAD1,VSPMMAD1,SP30
+          PACK      EXPYAD2,VSPMMAD2,SP30
+          PACK      EXPYAD3,VSPMMAD3,SP30
+          PACK      EXPYAD4,VSPMMAD4,SP30
+          PACK      EXPYPCD,VSPMMPCD,SP10
+          MOVE      "08",EXPYBLQ
+          PACK      EXPYAMT,VSPMEAMT,SP10   * Payer's Amount *****************
+          MOVE      VSPMEPEC,FORM3          * Payer's Percentage *************
+          MOVE      FORM3,FORM7
+          PACK      EXPYPCT,FORM7,SP10   
+          IF        VSPMEAMT > 0
+            IF        FORM3 > 0
+              MOVE      " Both Payer Amount & Payer Percentage are used",ERRMSG
+              CALL      ERMSG000
+            ENDIF
+          ELSE
+            IF        FORM3 = 0
+              MOVE      " Both Payer Amount & Payer Percentage are zero",ERRMSG
+              CALL      ERMSG000
+            ENDIF
+          ENDIF 
+.
+          MOVE      "RE",EXPYREQ
+          PACK      EXPYREC,VSPMRLTP,SP10   * Payer's Relationship ***********
+          MATCH     SP6,EXPYREC
+          IF        @EQUAL
+            MOVE      " Payer's Relationship Code is blank",ERRMSG
+            CALL      ERMSG000              * Print an error message
+          ENDIF
+.
+D9GP5300  BRANCH    PASSNO,D9GP5200,D9GP5500
+          GOTO      D9GP5200
+.
+.
+D9GP5500  ADD       ONE,COUNT                              
+.                                           * write extract record in Pass 2
+          PACK      EXSPSEQ,COUNT,SP4,ONE,SP10  * GRP5 Part 1
+          PACK      EXDATAFL,EXPYNAM,SP70
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+.
+          PACK      EXSPSEQ,COUNT,SP4,TWO,SP10  * GRP5 Part 2
+          PACK      EXDATAFL,EXPYTYP,EXPYACC,EXPYIDC,EXPYIDT,SP70
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+.
+          PACK      EXSPSEQ,COUNT,SP4,THREE,SP10 * GRP5 Part 3
+          PACK      EXDATAFL,EXPYAD1,EXPYAD2,SP70
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+.
+          PACK      EXSPSEQ,COUNT,SP4,FOUR,SP10 * GRP5 Part 4
+          PACK      EXDATAFL,EXPYAD3,EXPYAD4,SP70
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+.
+          PACK      EXSPSEQ,COUNT,SP4,FIVE,SP10 * GRP5 Part 5
+          PACK      EXDATAFL,EXPYPCD,EXPYBLQ,EXPYAMT,EXPYPCT,EXPYREQ:
+                             EXPYREC,SP70
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      WREXTR1
+.
+          GOTO      D9GP5200
+.
+.
+D9GP5800  COMPARE   ZERO,FOUND
+          GOTO      D9GP5999 IF NOT EQUAL
+          MATCH     "1",PTETINTY            * is it a Claim
+          GOTO      D9GP5999 IF NOT EQUAL
+.
+          MOVE      " No MediSave Payer Accounts for this Invoice",ERRMSG
+          CALL      ERMSG000                * Print an error message
+.
+D9GP5999  RETURN
++
+.******************************************************************************
+.*                                  INVAMT00              Called by: EXTR0000 *
+.*                         Process Invoice amount                             *
+.******************************************************************************
+INVAMT00  BRANCH    PASSNO,INVAMT99         * dont process on pass 1
+.
+.                                           * check if using Alternate Claim Cd.
+          BRANCH    CHNGCL,INVAMT20
+          GOTO      INVAMT90                * no
+.
+INVAMT20  COMPARE   ONE,INAMTNEW            * stop dodgy totals
+          GOTO      INVAMT90 IF LESS
+.
+          SUB       ".02",INAMTNEW          * force a round down
+          DIV       FIVE,INAMTNEW
+          MULT      FIVE,INAMTNEW
+.
+          COMPARE   INAMTSAV,INAMTNEW
+          GOTO      INVAMT90 IF NOT LESS
+.
+          MOVE      PTETADMN,EXVISNO
+          MOVE      "  2",EXSEQNO
+          MOVE      "BIL ",EXSEGMT
+          PACK      EXSPSEQ,SP30
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP30
+          CALL      RDEXTR1
+.
+          MOVE      INAMTNEW,EXBILAM        * insert new Invoice Amount
+.
+          PACK      EXDATAFL,EXBILTY,EXBILAM,EXBILCT,EXADATE,EXATIME:
+                             EXDDATE,EXDTIME,EXSDATE,EXEDATE,EXINVNO,SP70
+          CALL      UPEXTR1 
+.
+          CLEAR     INFMSG
+          MOVE      " Invoice amount ",DIM16
+          MOVE      " changed to ",DIM12A
+          APPEND    DIM16,INFMSG
+          APPEND    INAMTSAV,INFMSG
+          APPEND    DIM12A,INFMSG
+          APPEND    INAMTNEW,INFMSG
+          RESET     INFMSG
+          CALL      INMSG000
+.
+          MOVE      INAMTNEW,INAMTSAV      * set new value for Totals
+.
+INVAMT90  ADD       INAMTSAV,TOTAMTCT       * add invoice to total amount
+          ADD       ONE,TOTRECOU            * count records written
+.
+INVAMT99  RETURN
+.******************************************************************************
+.*                                  WRIT0000              Called by: ML4000   *
+.*                         Write XML Extract file                             *
+.******************************************************************************
+WRIT0000  MOVE      ZERO,EXIT
+          COMPARE   ZERO,RECDCNT 
+          GOTO      WRIT9999 IF EQUAL
+.
+          PACK      KEY23,SP30
+          CALL      RSEXTR1                 * position on extract tempfile
+.
+WRIT2000  CALL      RKEXTR1
+          BRANCH    OVRCD,WRIT9000          * end-of-file
+.
+WRIT2500  MOVE      EXSEQNO,FORM3
+          BRANCH    FORM3,WRIT3000:         * segment BGM  - Seq 1
+                          WRIT3500:         * segment BIL  - Seq 2
+                          WRIT4000:         * segment RFF  - Seq 3
+                          WRIT4500:         * segment ADI  - Seq 4
+                          WRIT5000:         * segment GRP1 - Seq 5
+                          WRIT5500:         * segment GRP2 - Seq 6
+                          WRIT6000:         * segment GRP3 - Seq 7 ... not used
+                          WRIT6500:         * segment GRP4 - Seq 8
+                          WRIT7000          * segment GRP5 - Seq 9
+.
+          GOTO      WRIT2000
+.
+.
+.                                           * write BEGIN Message for an Invoice
+WRIT3000  BRANCH    MSG0DONE,WRIT3100
+.
+          WRITE     EXTFILE1,SEQ;EN,MSG0000 * end prev. Invoice with </message>
+          WRITE     EXTFILE1,SEQ;ST,MSG0000 * <message>
+          CALL      XMLUNB00                * start new Invoice with "unb" seg
+.
+WRIT3100  MOVE      ZERO,MSG0DONE
+.
+          UNPACK    EXDATAFL,EXDOCID,EXDOCNO,EXEXDTE,EXEXTME,EXADIQL:
+                             EXADIIN
+.
+          STRIP     EXDOCNO
+          CLEAR     DIM120
+          PACK      DIM120,ST,BGM0000,ST,BGM0001,EXDOCID,EN,BGM0001:
+                           ST,BGM0002,EXDOCNO,EN,BGM0002
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          CLEAR     DIM120
+          PACK      DIM120,ST,BGM0003,EXEXDTE,EN,BGM0003,ST,BGM0004:
+                              EXEXTME,EN,BGM0004,EN,BGM0000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+          ADD       ONE,SEGCNT              * Segments count
+.
+          STRIP     EXADIIN
+          CLEAR     DIM120
+          PACK      DIM120,ST,ADI0000,ST,ADI0001,EXADIQL,EN,ADI0001:
+                           ST,ADI0002,EXADIIN,EN,ADI0002,EN,ADI0000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          ADD       ONE,SEGCNT              * Segments count
+          ADD       ONE,EXTRCNT
+          GOTO      WRIT2000
+.
+.                                           * write BIL Invoice details
+WRIT3500  UNPACK    EXDATAFL,EXBILTY,EXBILAM,EXBILCT,EXADATE,EXATIME:
+                             EXDDATE,EXDTIME,EXSDATE,EXEDATE,EXINVNO
+.
+          STRIP     EXBILTY
+          SQUEEZE   EXBILAM
+          CLEAR     DIM120
+          PACK      DIM120,ST,BIL0000,ST,BIL0001,EXBILTY,EN,BIL0001:
+                           ST,BIL0002,EXBILAM,EN,BIL0002
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          CLEAR     DIM120
+          PACK      DIM120,ST,BIL0003,EXINVNO,EN,BIL0003,ST,BIL0004:
+                           EXBILCT,EN,BIL0004,EN,BIL0000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+          ADD       ONE,SEGCNT              * Segments count
+.
+          CLEAR     DIM120
+          PACK      DIM120,ST,DTM0000,ST,DTM0001,N800,EN,DTM0001:
+                           ST,DTM0002,EXADATE,EN,DTM0002,ST,DTM0003:
+                           EXATIME,EN,DTM0003,EN,DTM0000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+          ADD       ONE,SEGCNT              * Segments count
+.
+          MATCH     SP8,EXDDATE
+          IF        !@EQUAL
+            CLEAR     DIM120
+            PACK      DIM120,ST,DTM0000,ST,DTM0001,N801,EN,DTM0001:
+                             ST,DTM0002,EXDDATE,EN,DTM0002,ST,DTM0003:
+                             EXDTIME,EN,DTM0003,EN,DTM0000
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+            ADD       ONE,SEGCNT              * Segments count
+          ENDIF
+.                                           * check for Patient Management
+          MATCH     SP8,EXSDATE
+          IF        !@EQUAL
+            CLEAR     DIM120
+            PACK      DIM120,ST,DTM0000,ST,DTM0001,N802,EN,DTM0001:
+                             ST,DTM0002,EXSDATE,EN,DTM0002,EN,DTM0000
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+            CLEAR     DIM120
+            PACK      DIM120,ST,DTM0000,ST,DTM0001,N803,EN,DTM0001:
+                             ST,DTM0002,EXEDATE,EN,DTM0002,EN,DTM0000
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+            ADD       TWO,SEGCNT              * Segments count
+          ENDIF
+          GOTO      WRIT2000
+.
+.                                           * write RFF Reference data
+WRIT4000  UNPACK    EXDATAFL,EXRFF1,EXHOSID,EXRFF2,EXATDOC,EXRFF3:
+                             EXLODOC
+.
+          STRIP     EXHOSID
+          CLEAR     DIM120
+          PACK      DIM120,ST,RFF0000,ST,RFF0001,EXRFF1,EN,RFF0001:
+                           ST,RFF0002,EXHOSID,EN,RFF0002,EN,RFF0000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+          ADD       ONE,SEGCNT              * Segments count
+.
+          STRIP     EXATDOC
+          CLEAR     DIM120
+          PACK      DIM120,ST,RFF0000,ST,RFF0001,EXRFF2,EN,RFF0001:
+                           ST,RFF0002,EXATDOC,EN,RFF0002,EN,RFF0000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+          ADD       ONE,SEGCNT              * Segments count
+.
+          STRIP     EXLODOC
+          CLEAR     DIM120
+          PACK      DIM120,ST,RFF0000,ST,RFF0001,EXRFF3,EN,RFF0001:
+                           ST,RFF0002,EXLODOC,EN,RFF0002,EN,RFF0000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+          ADD       ONE,SEGCNT              * Segments count
+.
+          GOTO      WRIT2000
+.
+.                                           * write ADI2 Additional Info
+WRIT4500  UNPACK    EXDATAFL,EXADICC,EXADIVL
+.
+          STRIP     EXADIVL
+          CLEAR     DIM120
+          PACK      DIM120,ST,AD20000,ST,AD20001,EXADICC,EN,AD20001:
+                           ST,AD20002,EXADIVL,EN,AD20002,EN,AD20000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          ADD       ONE,SEGCNT              * Segments count
+          GOTO      WRIT2000
+.
+.                                           * write GRP1 Accomm. and Treatment
+WRIT5000  UNPACK    EXDATAFL,EXNDAYQ,EXNDAYS,EXACTY5,EXACAM5,EXACTY6:
+                             EXACAM6,EXACWDQ,EXACWDT
+.
+          SQUEEZE   EXNDAYS
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP10000,ST,GP11000,ST,GP11001,EXNDAYQ,EN:
+                           GP11001,ST,GP11002,EXNDAYS,EN,GP11002,EN,GP11000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          MATCH     SP2,EXACTY5             * check if any Treatment Fees
+          IF        !@EQUAL
+            SQUEEZE   EXACAM5
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP12000,ST,GP12001,EXACTY5,EN,GP12001:
+                             ST,GP12002,EXACAM5,EN,GP12002,EN,GP12000
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+          MATCH     SP2,EXACTY6             * check if any Accomm.Fees
+          IF        !@EQUAL
+            SQUEEZE   EXACAM6
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP12000,ST,GP12001,EXACTY6,EN,GP12001:
+                             ST,GP12002,EXACAM6,EN,GP12002,EN,GP12000
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+.
+          SQUEEZE   EXACWDT
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP13000,ST,GP13001,EXACWDQ,EN,GP13001:
+                           ST,GP13002,EXACWDT,EN,GP13002,EN,GP13000:
+                           EN,GP10000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          ADD       ONE,SEGCNT              * Segments count
+          GOTO      WRIT2000
+.
+.                                           * write GRP2 Charges
+WRIT5500  UNPACK    EXDATAFL,EXCHGTY,EXCHGAM,EXNOTMQ,EXNOTIM
+.
+          SQUEEZE   EXCHGAM
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP20000,ST,GP21000,ST,GP21001,EXCHGTY:
+                           EN,GP21001,ST,GP21002,EXCHGAM,EN,GP21002:
+                           EN,GP21000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          SQUEEZE   EXNOTIM
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP22000,ST,GP22001,EXNOTMQ,EN,GP22001:
+                           ST,GP22002,EXNOTIM,EN,GP22002,EN,GP22000:
+                           EN,GP20000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          ADD       ONE,SEGCNT              * Segments count
+          GOTO      WRIT2000
+.
+.                                           * write GRP3 Procedure Charges
+.................................... This doesn't seem to be the best ........
+WRIT6000  UNPACK    EXDATAFL,EXPRDTQ,EXPRDTE,EXPRTYQ,EXPRCOD,EXDOCAQ:
+                             EXDOCAN,EXPAMTQ,EXPAMNT
+.
+          ADD       ONE,GP3CNT              * EXPAMTQ & EXPAMNT occur 4 times
+          IF        GP3CNT = 1
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP30000,ST,GP31000,ST,GP31001,EXPRDTQ:
+                             EN,GP31001,ST,GP31002,EXPRDTE,EN,GP31002:
+                             EN,GP31000
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+            STRIP     EXPRCOD
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP32000,ST,GP32001,EXPRTYQ,EN,GP32001:
+                             ST,GP32002,EXPRCOD,EN,GP32002
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+            STRIP     EXDOCAN
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP33000,ST,GP33001,EXDOCAQ,EN,GP33001:
+                             ST,GP33002,EXDOCAN,EN,GP33002,EN,GP33000
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+.
+          SQUEEZE   EXPAMNT
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP34000,ST,GP34001,EXPAMTQ,EN,GP34001:
+                           ST,GP34002,EXPAMNT,EN,GP34002,EN,GP34000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          IF        GP3CNT = 4
+            WRITE     EXTFILE1,SEQ;EN,GP30000
+          ENDIF
+.
+          ADD       ONE,SEGCNT              * Segments count
+          GOTO      WRIT2000
+.
+.                                           * write GRP4 Patient Details & Addr
+.
+WRIT6500  UNPACK    EXSPSEQ,DIM8A,DIM2,DIM2A   * identify which GRP4 record
+          MOVE      DIM2,FORM2
+          BRANCH    FORM2,WRIT6501,WRIT6502,WRIT6503,WRIT6504
+.
+WRIT6501  UNPACK    EXDATAFL,EXPANAM
+          GOTO      WRIT2000
+.
+WRIT6502  UNPACK    EXDATAFL,EXPAIDN,EXPAIDT,EXPANAT,EXPASEX,EXPARAC:
+                             EXPADOB,EXPAADQ,EXPAPCD
+          GOTO      WRIT2000
+.
+WRIT6503  UNPACK    EXDATAFL,EXPAAD1,EXPAAD2
+          GOTO      WRIT2000
+.
+WRIT6504  UNPACK    EXDATAFL,EXPAAD3,EXPAAD4
+.
+          STRIP     EXPANAM
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP40000,ST,GP41000,ST,GP41001,EXPANAM,EN,GP41001
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          STRIP     EXPAIDN
+          STRIP     EXPAIDT
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP41002,EXPAIDN,EN,GP41002,ST,GP41003:
+                           EXPAIDT,EN,GP41003
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          SQUEEZE   EXPANAT
+          STRIP     EXPASEX
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP41004,EXPANAT,EN,GP41004,ST,GP41005:
+                           EXPASEX,EN,GP41005
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP41006,EXPARAC,EN,GP41006,ST,GP41007:
+                           EXPADOB,EN,GP41007
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          CLEAR     DIM120
+....      PACK      DIM120,ST,GP41008,EN,GP41008,EN,GP41000
+          PACK      DIM120,EN,GP41000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+.                                           * remove blank bits of Address
+          MOVE      ZERO,ADDNO
+          PACK      ADDARR[1],SP30,SP30
+          PACK      ADDARR[2],SP30,SP30
+          PACK      ADDARR[3],SP30,SP30
+          PACK      ADDARR[4],SP30,SP30
+          PACK      ADDARR[5],SP30,SP30
+          MATCH     SP10,EXPAAD1            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPAAD1,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+          MATCH     SP10,EXPAAD2            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPAAD2,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+          MATCH     SP10,EXPAAD3            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPAAD3,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+          MATCH     SP10,EXPAAD4            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPAAD4,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+          MATCH     SP10,EXPAPCD            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPAPCD,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+.
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP42000,ST,GP42001,EXPAADQ,EN,GP42001
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP42002,ADDARR[1],SP3,EN,GP42002
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          IF        ADDNO > 1
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP42003,ADDARR[2],SP3,EN,GP42003
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+          IF        ADDNO > 2
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP42004,ADDARR[3],SP3,EN,GP42004
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+          IF        ADDNO > 3
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP42005,ADDARR[4],SP3,EN,GP42005
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+          IF        ADDNO > 4
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP42006,ADDARR[5],SP3,EN,GP42006
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+          WRITE     EXTFILE1,SEQ;*-,EN,GP42000,EN,GP40000
+.
+          ADD       ONE,SEGCNT              * Segments count
+          GOTO      WRIT2000
+.
+.                                           * write GRP5 Payer Details & Addr
+.        
+WRIT7000  UNPACK    EXSPSEQ,DIM8A,DIM2      * identify which GRP5 record
+          MOVE      DIM2,FORM2
+          BRANCH    FORM2,WRIT7001,WRIT7002,WRIT7003,WRIT7004,WRIT7005
+.
+WRIT7001  UNPACK    EXDATAFL,EXPYNAM
+          GOTO      WRIT2000
+.
+WRIT7002  UNPACK    EXDATAFL,EXPYTYP,EXPYACC,EXPYIDC,EXPYIDT
+          GOTO      WRIT2000
+.
+WRIT7003  UNPACK    EXDATAFL,EXPYAD1,EXPYAD2
+          GOTO      WRIT2000
+.
+WRIT7004  UNPACK    EXDATAFL,EXPYAD3,EXPYAD4
+          GOTO      WRIT2000
+.
+WRIT7005  UNPACK    EXDATAFL,EXPYPCD,EXPYBLQ,EXPYAMT,EXPYPCT,EXPYREQ,EXPYREC
+.
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP50000,ST,GP51000,ST,GP51001,EXPYTYP:
+                           EN,GP51001
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          STRIP     EXPYACC
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP51002,EXPYACC,EN,GP51002,EN,GP51000 
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          STRIP     EXPYNAM
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP52000,ST,GP52001,EXPYNAM,EN,GP52001
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          STRIP     EXPYIDC
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP52002,EXPYIDC,EN,GP52002
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP52003,EXPYIDT,EN,GP52003,EN,GP52000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+.                                           * remove blank bits of Address
+          MOVE      ZERO,ADDNO
+          PACK      ADDARR[1],SP30,SP30
+          PACK      ADDARR[2],SP30,SP30
+          PACK      ADDARR[3],SP30,SP30
+          PACK      ADDARR[4],SP30,SP30
+          PACK      ADDARR[5],SP30,SP30
+          MATCH     SP10,EXPYAD1            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPYAD1,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+          MATCH     SP10,EXPYAD2            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPYAD2,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+          MATCH     SP10,EXPYAD3            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPYAD3,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+          MATCH     SP10,EXPYAD4            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPYAD4,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+          MATCH     SP10,EXPYPCD            * clean up address lines
+          IF        !@EQUAL
+            ADD     ONE,ADDNO
+            PACK    ADDARR[ADDNO],EXPYPCD,SP30
+            STRIP   ADDARR[ADDNO]
+          ENDIF
+.
+          WRITE     EXTFILE1,SEQ;ST,GP53000,ST,GP53001,EXPYADQ,EN,GP53001
+.
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP53002,ADDARR[1],SP3,EN,GP53002
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+          IF        ADDNO > 1
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP53003,ADDARR[2],SP3,EN,GP53003
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+          IF        ADDNO > 2
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP53004,ADDARR[3],SP3,EN,GP53004
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+          IF        ADDNO > 3
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP53005,ADDARR[4],SP3,EN,GP53005
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+          IF        ADDNO > 4
+            CLEAR     DIM120
+            PACK      DIM120,ST,GP53006,ADDARR[5],SP3,EN,GP53006
+            WRITE     EXTFILE1,SEQ;*+,DIM120
+          ENDIF
+.
+          WRITE     EXTFILE1,SEQ;EN,GP53000
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP54000,ST,GP54001,EXPYBLQ,EN,GP54001
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          SQUEEZE   EXPYAMT
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP54002,EXPYAMT,EN,GP54002
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          SQUEEZE   EXPYPCT
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP54003,EXPYPCT,EN,GP54003,EN,GP54000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          WRITE     EXTFILE1,SEQ;ST,GP55000,ST,GP55001,EXPYREQ,EN,GP55001
+.
+          STRIP     EXPYREC
+          CLEAR     DIM120
+          PACK      DIM120,ST,GP55002,EXPYREC,EN,GP55002,EN,GP55000
+          WRITE     EXTFILE1,SEQ;*+,DIM120
+.
+          WRITE     EXTFILE1,SEQ;EN,GP50000
+.
+          ADD       ONE,SEGCNT              * Segments count
+          GOTO      WRIT2000
+.
+.
+.
+WRIT9000  MOVE      ZERO,EXIT
+          CALL      UPEDT000                * update patedtaf and other stuff
+.
+          CALL      XMLUNT00                * send Message Trailer
+.
+WRIT9999  RETURN
++
+.******************************************************************************
+.*                                  UPEDT000              Called by: WRIT0000 *
+.*                 Update "patedtaf" and write "message end"                  *
+.******************************************************************************
+UPEDT000  MOVE      ZERO,EXIT
+.
+          MOVE      SP8,KEY8                * read thru all Visits processed &
+          CALL      RSTEMP2                 * update flags & batchno
+UPEDT100  CALL      RKTEMP2
+          BRANCH    OVRCD,UPEDT900          * end-of-file
+.
+          PACK      KEY24,TMPVISNO,SP30
+          CALL      RSPTEDT4
+UPEDT200  CALL      RKPTEDT4
+          BRANCH    OVRCD,UPEDT900
+.
+          MATCH     TMPVISNO,PTETADMN
+          GOTO      UPEDT100 IF NOT EQUAL
+.
+.
+.....     BRANCH    PTCNEIMO,UPEDT200       * return if in "Test" mode
+.
+.                           1 IP-M   2 IP-C   3 OP-C   4 Canc   5 Batch
+          BRANCH    OPTION,UPEDT500,UPEDT500,UPEDT500,UPEDT600,UPEDT800
+.
+UPEDT500  MOVE      TWO,PTETFLAG            * set EDI Status to "extracted"
+          MOVE      " 2",PTETCCST           * set CCPS Status to "extracted"
+          MOVE      BATCHNO,FORM8A
+          MOVE      FORM8A,PTETBATN         * set Batch Number
+          CALL      UPPTEDT4
+          GOTO      UPEDT200
+.
+.                                           * Cancellations
+UPEDT600  MOVE      PTETCCST,FORM2          * save CCPS status
+.
+          MOVE      BATCHNO,FORM8A
+          MOVE      FORM8A,PTETNBAT         * set this batch no. in old record
+          CALL      UPPTEDT4
+.
+.                                           * now create a Cancellation record
+          MOVE      TWO,PTETFLAG            * set EDI Status to "extracted"
+          MOVE      " 9",PTETCCST           * set CCPS Status to "Cancelled"
+          MOVE      PTETBATN,PTETPBAT       * move old batch no to previous
+          MOVE      FORM8A,PTETBATN         * set this batch number
+          MOVE      SP8,PTETNBAT
+          IF        FORM2 = 8
+            MOVE      "00000000",PTETNBAT
+          ENDIF
+.
+          PACK      KEY16,PTETINVN,PTETBATN
+          CALL      WRPTEDT2                * write the new record
+.                                           * now set status flags
+          IF        FORM2 = 8
+.                                           * set up new record for re-submit
+            MOVE      ZERO,PTETFLAG         * set EDI Status to "not sent"
+            MOVE      " 7",PTETCCST         * set CCPS Status to "resubmit"
+            MOVE      PTETBATN,PTETPBAT     * move old batch no to previous
+            MOVE      SP8,PTETBATN
+            MOVE      SP8,PTETNBAT
+            PACK      KEY16,PTETINVN,PTETBATN
+            CALL      WRPTEDT2              * write the new record
+          ENDIF
+          GOTO      UPEDT200
+.
+.
+UPEDT800  MOVE      TWO,PTETFLAG            * set EDI Status to "extracted"
+          MOVE      " 2",PTETCCST           * set CCPS Status to "extracted"
+          CALL      UPPTEDT4
+          GOTO      UPEDT200
+.
+.
+UPEDT900  MOVE      ZERO,EXIT
+....      WRITE     EXTFILE1,SEQ;EN,MSG0000,EN,UCFMSG,GRTRTHAN
+....      MOVE      ZERO,MSG0DONE           * <message> tag sent
+.
+UPEDT999  RETURN
++
+.******************************************************************************
+.*                                  PREP0000              Called by: ML4000   *
+.*                     Prep extract files and reset variables                 *
+.******************************************************************************
+PREP0000  BRANCH    PASSNO,PREP9999
+.
+          COMPARE   ZERO,RECDCNT
+          GOTO      PREP9999 IF EQUAL
+.
+.
+PREP1000  MOVE      " 88",PRXCODE           * System Lock Sector 88
+          CALL      GETSLK00                * Get System Lock-Sector 88
+.
+.                                           * BATCH Number *******************
+          COMPARE   FIVE,OPTION             * Option 5 - Re-submit Batch
+          IF        @EQUAL
+            UNPACK    BATCHNUM,DIM2,BATCHNO
+            MOVE      BATCHNO,FORM6A
+          ELSE                              * Options 1,2,3 & 4 -submit new btch
+            READ      CONTROLF,NINTY8;*157,PTCNBTHN
+            UNPACK    PTCNBTHN,DIM2,BATCHNO
+            MOVE      BATCHNO,FORM6A
+.
+            COMPARE   "999999",FORM6A
+            IF        @EQUAL
+              MOVE      ZERO,PTCNBTHN       * Initialise the batch number
+            ENDIF
+.
+            ADD       ONE,PTCNBTHN          * Increment next batch number
+            WRITAB    CONTROLF,NINTY8;*157,PTCNBTHN
+          ENDIF
+.
+.                                           * EDI File number ****************
+. ---------------------- now using Batch No. for File No. --------------------
+....      READ      CONTROLF,TWENTY1;*240,PTCNEDIF
+....      UNPACK    PTCNEDIF,DIM1,FILENO
+....      ADD       ONE,PTCNEDIF
+....      WRITAB    CONTROLF,TWENTY1;*240,PTCNEDIF
+. ----------------------------------------------------------------------------
+.                                           * use Batch No. for File No.
+          UNPACK    FORM6A,FILENO    
+.
+          CALL      RELSLK00                * Release System Lock-Sector 88
+.
+          MOVE      FORM6A,SAVBTHN
+          MOVE      FORM6A,BATCHNO          * new batch number
+.
+PREP2000  REP       " 0",FILENO 
+          PACK      FILENAME,PTCNEDIH,FILENO 
+          PACK      EXTFNAME,FILENAME,XML
+          STRIP     PTCNEDIO
+          PACK      PATHNAME,SP30,SP30,SP30,SP10
+          CLEAR     PATHNAME
+          PACK      PATHNAME,PTCNEDIO,EXTFNAME
+          PREP      EXTFILE1,PATHNAME
+.
+          DISPLAY   *P27:23,*V2LON,FILENAME,*HOFF
+.                                                 * Option 5 - re-extract batch
+          IF        OPTION <> 5
+            MOVE      SAVBTHN,PTEHBTHN
+            PACK      PTEHHFGP,PTETPAYC,SP10
+            MOVE      SP8,PTEHSTDT
+            MOVE      SP8,PTEHEDDT
+            MOVE      ZERO,PTEHBHTL
+            MOVE      RECDCNT,PTEHTRIB
+            CALL      IBACLOCK
+            PACK      PTEHDTBC,CCC,CYY,CMM,CDD
+            REP       " 0",PTEHDTBC
+            MOVE      CTIMEIS,PTEHTMBC
+            MOVE      PASSCODE,PTEHOPER
+            MOVE      ZERO,PTEHEETP
+            LOAD      PTEHEETP,OPTION,ZERO,ONE,ONE,TWO      * set Extract Type
+            MOVE      FILENAME,PTEHEFNM
+            MOVE      ZERO,PTEHFLAG
+            PACK      PTEHSPAR,SP30,SP10
+            CALL      WRPTEBH1
+          ENDIF
+.                                           * write the xml header record
+          CALL      XMLHED00
+.
+          CALL      XMLUNB00                * start Extract with Hospital info.
+.
+PREP9000  MOVE      ZERO,EXIT
+PREP9999  RETURN
++
+.******************************************************************************
+.*                             UPHED000                 Called by: ML4000     *
+.*                  Update Batch Header with Counts & Totals                  *
+.******************************************************************************
+UPHED000  MOVE      ZERO,EXIT
+          PACK      KEY8,SAVBTHN
+          CALL      RDPTEBH1
+          BRANCH    OVRCD,UPHED800
+.
+          MOVE      FRSTDATE,PTEHSTDT
+          MOVE      LASTDATE,PTEHEDDT
+          MOVE      TOTAMTCT,PTEHBHTL
+          MOVE      TOTRECOU,PTEHTRIB
+          MOVE      ZERO,PTEHFLAG
+.
+          CALL      UPPTEBH1
+          GOTO      UPHED999
+.
+UPHED800  MOVE      ONE,EXIT
+.
+UPHED999  RETURN
++
+.******************************************************************************
+.*                             XMLHED00                 Called by: PREP0000   *
+.*                  create and write xml header data                          *
+.******************************************************************************
+XMLHED00  MOVE      ZERO,EXIT
+.                                           * write xml version data
+          MOVE      RECDCNT,DIM6
+          WRITE     EXTFILE1,SEQ;HED0001,HED0002,HED0003,*+,DIM6,*-,HED0004
+.
+          WRITE     EXTFILE1,SEQ;ST,MSG0000 * <message>
+          MOVE      ONE,MSG0DONE            * <message> tag sent
+.
+XMLHED99  RETURN
+.
+.******************************************************************************
+.*                             XMLUNB00                 Called by:            *
+.*                  create and write xml "unb/unh" data                       *
+.******************************************************************************
+XMLUNB00  MOVE      ZERO,EXIT
+.
+.                                           * UNB Segment ********************
+          MOVE      "1",DIM1
+          SQUEEZE   PTCNORIG                * Originator (usually = JHS1)
+          MOVE      "C01T.C01T001",DIM20    * Receiver
+.
+          WRITE     EXTFILE1,SEQ;ST,UNB0000,ST,UNB0001,UNOA,EN,UNB0001:
+                                 ST,UNB0002,DIM1,EN,UNB0002
+          WRITE     EXTFILE1,SEQ;ST,UNB0003,*+,PTCNORIG,*-,EN,UNB0003
+          WRITE     EXTFILE1,SEQ;ST,UNB0004,ZZ,EN,UNB0004
+          WRITE     EXTFILE1,SEQ;ST,UNB0005,*+,DIM20,*-,EN,UNB0005,ST,UNB0006:
+                                 ZZ,EN,UNB0006
+          WRITE     EXTFILE1,SEQ;ST,UNB0007,EN,UNB0007,ST,UNB0008,EN,UNB0008:
+                                 ST,UNB0009,EN,UNB0009,ST,UNB0010,UCFMSG:
+                                 EN,UNB0010,EN,UNB0000
+          ADD       ONE,SEGCNT
+.
+.                                           * UNH Segment ********************
+          REP       " 0",FILENO
+.
+          WRITE     EXTFILE1,SEQ;ST,UNH0000,ST,UNH0001,CURRDATE,FILENO:
+                                 EN,UNH0001
+          WRITE     EXTFILE1,SEQ;ST,UNH0002,UCFMSG,EN,UNH0002,ST,UNH0003:
+                                 N011,EN,UNH0003,EN,UNH0000
+          ADD       ONE,SEGCNT
+.
+XMLUNB99  RETURN
++
+.******************************************************************************
+.*                             XMLUNT00                 Called by:            *
+.*                  create and write xml "unt/unz" message trailer            *
+.******************************************************************************
+XMLUNT00  MOVE      ZERO,EXIT
+.
+.                                           * UNT Segment ********************
+..XXX     ADD       ONE,SEGCNT
+..XXX     MOVE      SEGCNT,DIM6
+..XXX     WRITE     EXTFILE1,SEQ;ST,UNT0000,ST,UNT0001,*+,DIM6,*-,EN,UNT0001
+..XXX     WRITE     EXTFILE1,SEQ;ST,UNT0002,CURRDATE,FILENO,EN,UNT0002:
+..XXX                            EN,UNT0000
+..XXX
+..XXX     WRITE     EXTFILE1,SEQ;ST,UNZ0000,ST,UNZ0001,*+,DIM6,*-,EN,UNZ0001
+..XXX     WRITE     EXTFILE1,SEQ;ST,UNZ0002,UCFMSG,EN,UNZ0002,EN,UNZ0000
+.
+.                                           * write -  "</message></UCFMSG>"
+          WRITE     EXTFILE1,SEQ;EN,MSG0000,EN,UCFMSG,GRTRTHAN
+          MOVE      ZERO,MSG0DONE           * <message> tag sent
+.
+XMLUNT99  RETURN
+.******************************************************************************
+.*                             CEXT0000                 Called by: EXTR0000   *
+.*                      create extract file                                   *
+.******************************************************************************
+CEXT0000  CALL      TFILENAM                     * Generate temporary file name
+          MOVE      TFILNAME,EXTFILNM
+.
+          CALL      KILX0000
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    EXTFILNM,CMDLINE
+          APPEND    " 100 U1-8,9-11,16-27",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      EXT1FILE,EXTFILNM
+.
+          CALL      CLEX0000                * empty it if Oracle
+.
+CEXT9999  RETURN
++
+.******************************************************************************
+.*                             KILX0000                  Called by:           *
+.*                       erase Extract file                                   *
+.******************************************************************************
+KILX0000  CLOSE     EXT1FILE
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    EXTFILNM,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+KILX9999  RETURN
++
+.******************************************************************************
+.*                             CLEX0000                 Called by:            *
+.*               close and erase the extract file                             *
+.******************************************************************************
+.
+CLEX0000  PACK      KEY23,SP30
+          CALL      RSEXTR1
+          CALL      RKEXTR1
+          BRANCH    OVRCD,CLEX9999
+.
+          PACK      KEY23,EXVISNO,EXSEQNO,EXSPSEQ,SP20
+          CALL      DEEXTR1
+.
+          GOTO      CLEX0000
+.
+CLEX9999  RETURN
++
+.
+CLSUM000  PACK      KEY14,SP20
+          CALL      RSTSUM1
+          CALL      RKTSUM1
+          BRANCH    OVRCD,CLSUM999
+          PACK      KEY14,TMPSADMN,TMPSCHRG,SP20
+          CALL      DETSUM1
+          GOTO      CLSUM000
+.
+CLSUM999  RETURN
+.******************************************************************************
+.*                                  ERMSG000              Called by: Lots     *
+.*                             Print Error Message                            *
+.******************************************************************************
+.
+ERMSG000  COMPARE   ONE,PASSNO
+          GOTO      ERMSG999 IF NOT EQUAL   * Not validating, writing details
+.
+          COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS    * Line counter >= 55 lines
+.
+          PACK      ERRMSG,ERRMSG,SP30,SP30
+          MATCH     PRTINVN,PTETINVN
+          IF        @EQUAL
+            PRINT     *1,"|        |        |",ERRMSG,"|"
+          ELSE
+            PRINT     *1,"|",PTETINVN,"|",PTETADMN,"|",ERRMSG,"|"
+          ENDIF
+          MOVE      PTETINVN,PRTINVN
+          ADD       ONE,CLNO
+.
+          IF        PTCNEIMO = 1
+            MOVE      ZERO,ERRFLG
+          ELSE
+            MOVE      ONE,ERRFLG            * Error flag - yes 
+          ENDIF
+          ADD       ONE,ERRCT               * Increment the error counter
+.
+ERMSG999  RETURN
++
+.******************************************************************************
+.*                                  INMSG000              Called by: Lots     *
+.*                          Print Information Message                         *
+.******************************************************************************
+INMSG000  COMPARE   "55",CLNO
+          CALL      HEAD0000 IF NOT LESS    * Line counter >= 55 lines
+.
+          PACK      INFMSG,INFMSG,SP30,SP30
+          MATCH     PRTINVN,PTETINVN
+          IF        @EQUAL
+            PRINT     *1,"|        |        |",INFMSG,"|"
+          ELSE
+            PRINT     *1,"|",PTETINVN,"|",PTETADMN,"|",INFMSG,"|"
+          ENDIF
+          MOVE      PTETINVN,PRTINVN
+          ADD       ONE,CLNO
+.
+INMSG999  RETURN
++
+.******************************************************************************
+.*                                  GETNODYS              Called by:          *
+.*                          Check if Partial days are required                *
+.******************************************************************************
+GETNODYS  MOVE      SAVDAYS,SAVDAYZ
+          MATCH     SAVTDATE,DDATE
+          GOTO      GETNO999 IF NOT EQUAL
+.
+          MATCH     "2",PTCNDAYB
+          GOTO      GETNO999 IF NOT EQUAL     * TNODAYS already correct 
+.
+.         For partial charge, check the discharge time
+.         If Discharge time is less than the parameter, then no charge
+.
+          REP       " 0",DTIME
+          MATCH     DTIME,PTCNDAYL
+          GOTO      GETNO999 IF NOT LESS    * No Charge - TNODAYS correct
+.
+          MATCH     DTIME,PTCNDAYG
+          GOTO      GETNO999 IF LESS        * TNODAYS already correct
+.
+          ADD       ".5",SAVDAYZ            * Add 1/2 a day          
+          PACK      EXNDAYS,SAVDAYZ,SP6     * No of Days - FORM 4.1
+.
+GETNO999  RETURN
++
+.******************************************************************************
+.*                                  GTBFEE00              Called by:          *
+.*                        Get new Bed Fee for alternate Cat.CL                *
+.******************************************************************************
+GTBFEE00  MOVE      ZERO,EXIT
+....      PACK      KEY23,ALTCATCL,AFUNDH,AFNDTB,ATYPE,PTDTBTYP
+          PACK      KEY23,ALTCATCL,SP6,SP8,ATYPE,PTDTBTYP
+.
+          OPEN      JHSBFEA1,"jhsbfeaf"
+          PACK      KEY26,KEY23,SP3
+          CALL      RSJHBFE1
+GTBFEE10  CALL      RKJHBFE1
+          BRANCH    OVRCD,GTBFEE99
+.
+          PACK      DIM23,BFCLM,BFHFUND,BFHFTAB,BFATYPE,BFBTYPE
+          MATCH     KEY23,DIM23
+          GOTO      GTBFEE99 IF NOT EQUAL
+.
+          MOVE      BFPAT,CHRGAMT
+          ADD       BFHF,CHRGAMT
+          MULT      SAVDAYZ,CHRGAMT         * mult daily rate by no.days
+.
+.                                           * check for GST
+          COMPARE   TWO,IBCNUGST
+          GOTO      GTBFEE99 IF NOT EQUAL
+.
+          MATCH     ANSY,PTMIGSTA           * check the admission GST
+          GOTO      GTBFEE99 IF NOT EQUAL
+.
+          MOVE      PTCNAGST,GSTCODE
+          CALL      CALCGST0                * calculate the GST
+          ADD       GSTNAMT,CHRGAMT
+.
+GTBFEE99  RETURN
++
+.******************************************************************************
+.*                                  CALCGST0              Called by:          *
+.*                        Calculate GST for Accom/Misc.Items/                 *
+.******************************************************************************
+CALCGST0  MOVE      ZERO,GSTNAMT
+          MOVE      ZERO,IBGEAMNT           * zero GST percentage
+.
+          OPEN      IBAGEDA1,"ibagedaf"
+.
+          PACK      KEY8,CCC,CYY,CMM,CDD
+          REP       " 0",KEY8
+          PACK      KEY14,GSTCODE,KEY8,SP20
+          CALL      RDIBGE1
+          COMPARE   ZERO,OVRCD
+          GOTO      CALCGST5 IF EQUAL       * found GST amount for current date
+.         
+          CALL      RPIBGE1                 * read previous record
+          BRANCH    OVRCD,CALCGST9
+.
+          MATCH     GSTCODE,IBGECODE       * Same code ?
+          IF        !@EQUAL
+            MOVE      ZERO,IBGEAMNT
+            GOTO      CALCGST9
+          ENDIF
+.
+.                                            * calculate the GST
+CALCGST5  MOVE      CHRGAMT,GSTNAMT
+          MULT      IBGEAMNT,GSTNAMT
+          DIV       "100.00",GSTNAMT
+.
+CALCGST9  RETURN
++
+.******************************************************************************
+.*                                  GETMISC0              Called by:          *
+.*                        Get required Misc.Item                              *
+.******************************************************************************
+GETMISC0  MOVE      ZERO,EXIT
+.
+          CALL      PATMCHRD                * read the Misc.Item table
+          COMPARE   ZERO,EXIT
+          GOTO      GETMISC9 IF EQUAL 
+.
+GETMISC8  CLEAR     ERRMSG
+          APPEND    " Item No. ",ERRMSG
+          APPEND    ITEMNO,ERRMSG
+          IF        WKMCINAC = 1
+            APPEND    " - Misc.Item code is inactive",ERRMSG
+          ELSE
+            IF        WKMCXXDT = 1
+              APPEND    " - Misc.Item is not in date range",ERRMSG
+            ELSE
+              APPEND    " - Misc.Item code is not valid",ERRMSG
+            ENDIF
+          ENDIF
+          RESET     ERRMSG
+          CALL      ERMSG000              * Print an error message
+.
+GETMISC9  RETURN
++
+.*****************************************************************************
+.*                            CKDG0000                                       *
+.*        Calculate check digit for bgm_doc_num                              *
+.* Requires:  PTCNEDIH - 2 character Hospital code for EDI                   *
+.*            DIM4     - ccyy of Visit Date (ADATE or OBADATE or Curr.Date)  *
+.*            PTETADMN - visit number (last 6 characters)                    *
+.* Returns:   CHKDIGIT - DIM 1 check digit                                   *
+.*****************************************************************************
+.
+CKDG0000  MOVE      ZERO,SUMVALUE
+          MOVE      PTCNEDIH,DIM2
+.
+.         If first two characters are 67 or 68, then set to 01.
+.         If first two characters are 51 or 52, then set to 02.
+.
+          MOVE      DIM2,FORM2
+          IF        FORM2 = 67 | FORM2 = 68
+            MOVE      "01",DIM2
+          ENDIF
+          IF        FORM2 = 51 | FORM2 = 52
+            MOVE      "02",DIM2
+          ENDIF
+.
+.         If first character of hospital code (PTCNEDIH) is between 0-9, then
+.         Sum=5*<first character>.
+.         If first character of hospital code is not between 0-9, then
+.         Sum=position of character in alphabet string.
+.             Note - Johns Hopkins is "J1" - from CCPS CODE TABLES
+.
+          MOVE      DIM2,ANS                     * load first character
+          TYPE      ANS                          * numeric ?
+          IF        @EQUAL
+            MOVE      ANS,FORM1                  * yes
+            ASSIGN    (FORM1*5),SUMVALUE
+          ELSE
+            SCAN      ANS,ATZSTRNG               * no
+            IF        !@EOS
+              MOVEFPTR  ATZSTRNG,SUMVALUE
+            ENDIF
+            RESET     ATZSTRNG
+          ENDIF
+.
+.         If second character of hospital code (PTCNEDIH) is between 0-9, then
+.         Sum=Sum+(4*<second character>).
+.         If second character of hospital code is not between 0-9, then
+.         Sum=Sum+position of character in alphabet string.
+.
+          BUMP      DIM2                         * position on 2nd character
+          IF        !@EOS
+            MOVE      DIM2,ANS                   * load 2nd character
+            TYPE      ANS                        * numeric ?
+            IF        @EQUAL
+              MOVE      ANS,FORM1                * yes
+              ASSIGN    ((FORM1*4)+SUMVALUE),SUMVALUE
+            ELSE
+              SCAN      ANS,ATZSTRNG             * no
+              IF        !@EOS
+                MOVEFPTR  ATZSTRNG,FORM2
+                ADD       FORM2,SUMVALUE
+              ENDIF
+              RESET     ATZSTRNG
+            ENDIF
+          ENDIF
+.
+.         Set INDEXVAL to (<first digit of century>*10) +
+.         <second digit of century>
+.
+          MOVE      DIM4,ANS
+          MOVE      ANS,FORM1A
+          UNPACK    DIM4,ANS,ANS
+          MOVE      ANS,FORM1B
+          ASSIGN    ((FORM1A*10)+FORM1B),INDEXVAL
+.
+.         Sum=Sum+(3*<first digit of year>) + (2*<second digit of year>)
+.
+          UNPACK    DIM4,ANS,ANS,ANS
+          MOVE      ANS,FORM1A
+          UNPACK    DIM4,ANS,ANS,ANS,ANS
+          MOVE      ANS,FORM1B
+          ASSIGN    ((3*FORM1A)+(2*FORM1B)+SUMVALUE),SUMVALUE
+.
+.         Sum=Sum+(7*<position3 digit of visit number>)
+.
+          UNPACK    PTETADMN,ANS,ANS,ANS
+          MOVE      ANS,FORM1A
+          ASSIGN    ((7*FORM1A)+SUMVALUE),SUMVALUE
+.
+.    Then -
+.         Sum=Sum+(6*<position4 digit of visit number>)
+.                +(5*<position5 digit of visit number>)
+.                +(4*<position6 digit of visit number>)
+.                +(3*<position7 digit of visit number>)
+.                +(2*<position8 digit of visit number>)
+.
+          UNPACK    PTETADMN,ANS,ANS,ANS,ANS
+          MOVE      ANS,FORM1A
+          UNPACK    PTETADMN,ANS,ANS,ANS,ANS,ANS
+          MOVE      ANS,FORM1B
+          UNPACK    PTETADMN,ANS,ANS,ANS,ANS,ANS,ANS
+          MOVE      ANS,FORM1C
+          UNPACK    PTETADMN,ANS,ANS,ANS,ANS,ANS,ANS,ANS
+          MOVE      ANS,FORM1D
+          UNPACK    PTETADMN,ANS,ANS,ANS,ANS,ANS,ANS,ANS,ANS
+          MOVE      ANS,FORM1E
+          ASSIGN    ((6*FORM1A)+(5*FORM1B)+(4*FORM1C)+(3*FORM1D)+(2*FORM1E)+SUMVALUE),SUMVALUE
+.
+.         Sum=Sum+(INDEXVAL mod 19)
+.
+          ASSIGN    ((INDEXVAL%19)+SUMVALUE),SUMVALUE
+.
+.         Sum=11-(Sum mod 11)
+.
+          ASSIGN    (11-(SUMVALUE%11)),SUMVALUE
+.
+          LOAD      CHKDIGIT,SUMVALUE,ANSA,ANSB,ANSC,ANSD,ANSE,ANSF,ANSG,ANSH:
+                                      ANSI,ANSZ,ANSJ
+.
+CKDG9999  RETURN
++
+.==============================================================================
+.                Tempfile I/O
+.==============================================================================
+RSTEMP1   RESET     KEY8
+          READ      TEMPFILE,KEY8;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    TEMPFILE;TMPINVNO,TMPVISNO
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMP1   MOVE      ZERO,OVRCD
+          READKP    TEMPFILE;TMPINVNO,TMPVISNO
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY8 
+          READ      TEMPFILE,KEY8;TMPINVNO,TMPVISNO
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   RESET     KEY8
+          WRITE     TEMPFILE,KEY8;TMPINVNO,TMPVISNO
+          RETURN
+.
+DETEMP1   RESET     KEY8
+          DELETE    TEMPFILE,KEY8
+          RETURN
+.
+.
+RSTEMP2   RESET     KEY8
+          READ      TEMPFIL2,KEY8;;
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          READKS    TEMPFIL2;TMPINVNO,TMPVISNO
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMP2   MOVE      ZERO,OVRCD
+          READKP    TEMPFIL2;TMPINVNO,TMPVISNO
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      TEMPFIL2,KEY8;TMPINVNO,TMPVISNO
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP2   RESET     KEY8
+          WRITE     TEMPFIL2,KEY8;TMPINVNO,TMPVISNO
+          RETURN
+.
+UPTEMP2   UPDATE    TEMPFIL2;TMPINVNO,TMPVISNO
+          RETURN
+.
+DETEMP2   RESET     KEY8
+          DELETE    TEMPFIL2,KEY8
+          RETURN
++
+.==============================================================================
+.                Tempsumm I/O
+.==============================================================================
+RSTSUM1   RESET     KEY14
+          READ      TEMPSUMM,KEY14;;
+          RETURN
+.
+RKTSUM1   MOVE      ZERO,OVRCD
+          READKS    TEMPSUMM;TMPSADMN,TMPSCHRG,TMPSAMNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTSUM1   MOVE      ZERO,OVRCD
+          RESET     KEY14
+          READ      TEMPSUMM,KEY14;TMPSADMN,TMPSCHRG,TMPSAMNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTSUM1   RESET     KEY14
+          WRITE     TEMPSUMM,KEY14;TMPSADMN,TMPSCHRG,TMPSAMNT
+          RETURN
+.
+UPTSUM1   UPDATE    TEMPSUMM;TMPSADMN,TMPSCHRG,TMPSAMNT
+          RETURN
+.
+DETSUM1   RESET     KEY14
+          DELETE    TEMPSUMM,KEY14
+          RETURN
++
+.==============================================================================
+.                Extract I/O
+.==============================================================================
+RSEXTR1   RESET     KEY23
+          READ      EXT1FILE,KEY23;;
+          RETURN
+.
+RKEXTR1   MOVE      ZERO,OVRCD
+          READKS    EXT1FILE;EXVISNO,EXSEQNO,EXSEGMT,EXSPSEQ,EXDATAFL
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPEXTR1   MOVE      ZERO,OVRCD
+          READKP    EXT1FILE;EXVISNO,EXSEQNO,EXSEGMT,EXSPSEQ,EXDATAFL
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDEXTR1   MOVE      ZERO,OVRCD
+          RESET     KEY23
+          READ      EXT1FILE,KEY23;EXVISNO,EXSEQNO,EXSEGMT,EXSPSEQ,EXDATAFL
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPEXTR1   UPDATE    EXT1FILE;EXVISNO,EXSEQNO,EXSEGMT,EXSPSEQ,EXDATAFL
+          RETURN
+.
+WREXTR1   RESET     KEY23
+          WRITE     EXT1FILE,KEY23;EXVISNO,EXSEQNO,EXSEGMT,EXSPSEQ,EXDATAFL
+          RETURN
+.
+DEEXTR1   RESET     KEY23
+          DELETE    EXT1FILE,KEY23
+          RETURN
++
+.==============================================================================
+.
+          INC       STD001IO
+          INC       CLPATDSC
+          INC       PATMCHRD               * Miscellaneous Charges read routine
+          INC       TFILENAM                * Generate Temp File Name
+.
+          INC       IBAGEDIO/INC            * GST Rates                  
+          INC       IBASEQIO/INC            * Sequential Numbers File
+          INC       OUTBOAIO/INC            * Outpatient Booking Table A
+          INC       OUTBB1IO/INC            * Outpatient Booking Table B
+          INC       OUTCLIIO/INC            * Outpatient Clinic Table
+          INC       OUTSITIO/INC            * Outpatient Site File
+          INC       OUTDTRIO/INC            * Outpatient DTR Trans Details
+          INC       PATCODIO/INC            * Codes file
+          INC       PATCFAIO/INC
+          INC       PATDO1IO/INC            * Doctor File
+          INC       PATBFEIO/INC            * Bed fees
+          INC       PMSCIDIO/INC            * Contract ID
+          INC       PATDSCIO/INC            * Disch file
+          INC       PATDTRIO/INC            * DTR file
+          INC       PATEBHIO/INC            * EDI batch header file
+....      INC       PATEDSIO/INC    ********* Patient EDI Summmary Table
+          INC       PATEDTIO/INC            * Patient CCPS EDI Summmary Table
+          INC       PATFN1IO/INC            * Health fund file
+          INC       PATFX1IO/INC            * Health fund extention
+          INC       PATINVIO/INC            * Invoice file
+          INC       PATMA1IO/INC            * Master file
+          INC       PMSPX2IO/INC            * Master File Extn 2
+          INC       PMSRESIO/INC            * Residency Details
+          INC       PMSAIDIO/INC            * Alternate Id.
+          INC       PATMCHIO/INC            * Miscellaneous Charges file    
+          INC       PATMI1IO/INC            * Admin file
+          INC       PMSVX1IO/INC            * Visit File Extension
+          INC       PMSHCPIO/INC            * Health Care Provider (Doctors)
+          INC       VISPAYIO/INC            * Visit Based Payer Details (H/F)
+          INC       VISPMAIO/INC            * Visit Based Payer Member Accts 
+          INC       WEBERRIO/INC            * Web Server Error Logging
+.

@@ -1,0 +1,1810 @@
+. Program  : ABFRFINV
+.
+. Function : This include produces NWAU/ABF calculations for Non-Admitted
+.            Referral/Contacts
+.
+.*******************************************************************************
+. Modification : 
+.            V11.03.07 10/07/2023  J.Tan          TSK 0923703
+.                      Fixed Hospital Remoteness for multi hospital
+.            V11.03.06 07/06/2023  J.Tan    TSK 0923703
+.                      Mod to use 6 decimal places for ABF calculations
+.                      Added ATreat (Hospital remoteness area)
+.            V11.03.05 27/04/2023  J.Tan    TSK 0930981
+.                      Increased variable size of array for Encounter
+.            V11.03.04 19/04/2023  J.Tan    TSK 0930981
+.                      Fixed set up monthly encounter (ENCOUNTR)
+.                      Mod NOT to delete ABF records if Referral is closed
+.            V11.03.03 11/01/2023 J.Tan    TSK 0906597
+.                      Added Residential value adjustment
+.            V11.03.02 24/11/2022 J.Tan    TSK 0906597
+.                      Mod Calendar Monthly referral to charge monthly
+.                      Fixed checking Contract Close off date
+.            V11.03.01 16/11/2022 J.Tan    TSK 0906597
+.                      Mod to set Effective date to use Active date if not blank
+.            V11.01.00 16/08/2022 J.Tan    TSK 0906597
+.                      Created
+.*******************************************************************************
+.
+.         Processing Referral ABF/NWAU Calculations for a Visit number/Referral
+.
+ABFRFINV  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,HUND06;*225,ALCNDEVP
+          READ      CONTROLF,HUND06;*247,ALCNCIEP  * Clinic Id population
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          MOVE      SP70,PMVXMHOS
+          OPEN      PMSVX1A1,"pmsvx1af"
+          PACK      KEY8,ALREVISN
+          CALL      RDPMVX11
+          BRANCH    OVRCD,ABFR9999            * invalid admission
+.
+          MOVE      ALREURNO,KEY8
+          CALL      RDPMPX21
+          BRANCH    OVRCD,ABFR9999         * missing master record
+.
+          CALL      IREF0000               * Initialise fields
+.
+          CALL      CMRF0000               * Calendar Month referral ?
+          BRANCH    MREFFLAG,ABFR4000      * yes
+.
+          MATCH     "1",ALRESTAT
+          GOTO      ABFR9999 IF NOT EQUAL  * Not active
+.
+          CALL      MABF0000               * Delete existing Patient ABF det.
+          CALL      SPRG0000               * Check Program type
+          CALL      ENCN0000               * Loop through Referral Encounter
+          GOTO      ABFR9999
+.
+.         Process Monthly charges for Calendar Month referral
+.
+ABFR4000  CALL      MABF0000               * Delete existing Patient ABF det.
+.
+.         Only generates ABF for referral with status active,closed,inactive
+.
+          MOVE      ZERO,F1
+          MOVE      ALRESTAT,F1
+          BRANCH    F1,ABFR4200,ABFR4200,ABFR4200
+          GOTO      ABFR9999
+.
+ABFR4200  MATCH     SP70,ALREDACT          * Active date
+          GOTO      ABFR9999 IF EQUAL      * Not active
+.
+          MOVE      ALREDACT,KEY6          * Start from Active date (CCYYMM)
+.
+          MOVE      ZERO,ENDRMNTH          * End date for Monthly referral
+          PACK      KEY8,CCC,CYY,CMM       * default to Use Current Month
+.
+          MATCH     "2",ALRESTAT           * Closed ?
+          IF        @EQUAL
+            MATCH     SP70,ALREDCLO        * Check Close date
+            IF        !@EQUAL
+              MOVE      ALREDCLO,KEY8      * Use Closed date
+            ENDIF
+          ENDIF
+.
+          MATCH     "3",ALRESTAT           * Inactive ?
+          IF        @EQUAL
+            MATCH     SP70,ALREDINA        * Check Date Inactive
+            IF        !@EQUAL
+              MOVE      ALREDINA,KEY8      * Use Date Inactive
+            ENDIF
+          ENDIF
+.
+          REP       " 0",KEY8
+          MOVE      SP70,D6
+          UNPACK    KEY8,D6
+          MOVE      D6,ENDRMNTH            * ccyymm
+.
+ABFR5000  MOVE      ZERO,FORM6
+          MOVE      KEY6,FORM6             * Active month referral
+          COMPARE   FORM6,ENDRMNTH         * check Active month against End date
+          GOTO      ABFR9999 IF LESS
+.
+          MOVE      "2",CNTRTYPE            * Calendar month contact
+          PACK      ENCOUNTR,ANSM,KEY6,SP70 * Calendar month
+          PROC      RFIV0000
+          BRANCH    EXIT,ABFR9999
+.
+          MATCH     "IBAHMS59",PRGID
+          IF        @EQUAL
+            MOVE      ALREVISN,ADMISSNO
+            CALL      PDAT0000              * Print data
+          ENDIF
+.
+          UNPACK    ENCOUNTR,ANS,KEY6       * Calendar month
+          MOVE      ZERO,FORM6
+          MOVE      KEY6,FORM6
+.
+          UNPACK    KEY6,KEY4,KEY2
+          MATCH     "12",KEY2            * check if we have reached End of year
+          IF        @EQUAL
+            MOVE      "99",KEY2
+            PACK      KEY6,KEY4,KEY2
+            MOVE      KEY6,FORM6
+            ADD       ONE,FORM6          * start from January
+          ENDIF
+.
+          ADD       ONE,FORM6
+          MOVE      FORM6,KEY6           * next Referral month
+.
+          GOTO      ABFR5000
+.
+ABFR9999  RETURN
++
+.******************************************************************************
+.         Check for Calendar month referral from Department code
+.         Return Exit = 0 - Calendar month referral
+.                Exit = 1 - Contacts/Encounter
+.******************************************************************************
+CMRF0000  MOVE      ZERO,MREFFLAG
+          MOVE      SP70,RDEPCODE
+          MOVE      SP70,TIERCODE
+          MATCH     SP70,ALREDEPT
+          GOTO      CMRF9999 IF EQUAL
+.
+          MOVE      "CG",KEY2
+          MOVE      ALREDEPT,KEY3
+          PACK      KEY5,KEY2,ALREDEPT         * Department code
+          CALL      RDCODE1
+          BRANCH    OVRCD,CMRF9999
+.
+          UNPACK    PTCDUDF9,KEY2
+          MATCH     "CG",PTCDUDF9
+          GOTO      CMRF4000 IF EQUAL
+.
+          MATCH     "zG",PTCDUDF9
+          IF        @EQUAL
+            MOVE      ALREEVPR,KEY3            * Event Program/Stream
+            GOTO      CMRF2000
+          ENDIF
+.
+          MATCH     "lF",PTCDUDF9
+          GOTO      CMRF4000 IF NOT EQUAL
+.
+          MOVE      ALREUC06,KEY3           * UDF 6/Program Stream
+.
+CMRF2000  PACK      KEY5,KEY2,KEY3
+          CALL      RDCODE1
+          BRANCH    OVRCD,CMRF9999
+.
+CMRF4000  MOVE      KEY5,RDEPCODE           * Referral key
+.
+          MATCH     "C",TCINDC40
+          GOTO      CMRF9999 IF NOT EQUAL
+.
+.         for Calendar Month Referral, use UDF 10 for Tier 2 code
+.
+          MOVE      ONE,MREFFLAG            * Calendar Month Referral
+          UNPACK    PTCDUD10,TIERCODE       * UDF 10 for Tier 2 code
+.
+CMRF9999  RETURN
++
+.******************************************************************************
+.         Encounters
+.         loop through Encounter file, checking for multiple contacts         
+.******************************************************************************
+ENCN0000  MOVE      ZERO,CONTNUMB
+          PACK      KEY32,ALREVISN,SP70
+          CALL      RSALENC6               * Call Positional read routine
+ENCN1000  CALL      RKALENC6               * Call Sequential read
+          BRANCH    OVRCD,ENCN6000
+.
+          MATCH     ALREVISN,ALENVISN
+          GOTO      ENCN6000 IF NOT EQUAL  * different visit
+.
+          MATCH     "1",ALENRSTA           * Cancelled
+          GOTO      ENCN1000 IF EQUAL
+.
+          MATCH     SP70,ALENSDEP
+          IF        @EQUAL
+            MOVE      ALREDEPT,ALENSDEP
+          ENDIF
+.
+          CALL      SCON0000             * set contacts fields
+          PACK      KEY62,EPISURNO,EPISHOSP,EPISENCT,EPISCAMP,EPISIDCD:
+                          EPISACLS,EPISPRGM,EPISCLIN,EPISDATE,EPISDMOD:
+                          EPISDSET,EPISINDI,EPISSESS,SP70
+.
+.         Checking for multiple contacts encounter that have same value
+.
+          CALL      MCON0000             * Check for multiple contact
+          GOTO      ENCN1000
+.
+.         Process ABF NWAU calculations only for each service event contacts
+.
+ENCN6000  COMPARE   ZERO,CONTNUMB
+          GOTO      ENCN9999 IF EQUAL
+.
+ENCN7000  MOVE      ZERO,ECNTNUMB
+ENCN8000  ADD       ONE,ECNTNUMB
+          COMPARE   ECNTNUMB,CONTNUMB
+          GOTO      ENCN9999 IF LESS
+.
+.         Contact type = 0 for First Daily
+.                        1 for Subsequent Daily
+.                        2 for Calendar Month
+.
+          MOVE      ZERO,CNTRTYPE                * Type of contact 
+          UNPACK    SP70,KEY16,KEY1
+.
+          UNPACK    ENCRNUMB[ECNTNUMB],KEY16,KEY1
+          MOVE      KEY1,CNTRTYPE
+          CALL      RDALENC1
+          BRANCH    OVRCD,ENCN8000
+.
+          MATCH     SP70,ALENSDEP
+          IF        @EQUAL
+            MOVE      ALREDEPT,ALENSDEP
+          ENDIF
+.
+          PACK      ENCOUNTR,ALENENCT,SP70    * Encounter number
+          PROC      RFIV0000
+          BRANCH    EXIT,ENCN8000
+.
+.         Print the encounters that are within the date range of the report
+.
+          MATCH     "IBAHMS59",PRGID
+          IF        @EQUAL
+            MATCH     FRMDATE,ALENSDAT       * Checks end date with Servicedate
+            GOTO      ENCN8000 IF LESS
+            MATCH     ALENSDAT,ENDDATE       * Checks end date with Servicedate
+            GOTO      ENCN8000 IF LESS
+.
+            MOVE      ALREVISN,ADMISSNO
+            CALL      PDAT0000              * Print data
+          ENDIF
+          GOTO      ENCN8000
+.
+ENCN9999  RETURN
++
+.******************************************************************************
+.         Save Contact details
+.******************************************************************************
+SCON0000  CALL      CLEP0000               * Clear episode variables
+.
+          PACK      EPISURNO,ALREURNO,SP70 * Patient Identifier
+          PACK      EPISHOSP,PMVXMHOS,SP70 * Organisation Identifier
+          PACK      EPISENCT,ALREVISN,SP70 * Referral Identifier
+.
+          PACK      KEY3,ALENSDEP          * Department code
+          CALL      RDALDEP1
+          IF        OVRCD=0
+            PACK      EPISCAMP,ALDEVECC,SP70 * Episode Campus code
+          ENDIF
+.
+          PACK      EPISIDCD,ALREVISN,SP70 * Episode Identifier
+.
+          CALL      WPVA0000               * Episode Program/Stream
+.
+          CALL      GCLS0000               * Get Contact Account class
+.
+          CALL      WPVB0000               * Episode Clinic Identifier
+.
+          PACK      EPISDATE,ALENSDAT,SP70 * Contact Date
+          PACK      EPISDMOD,ALENUC38,SP70 * Contact Delivery mode
+.
+          PACK      EPISDSET,ALENUC40,SP70 * Contact Delivery setting
+.
+          CALL      WPIX0000               * Load Indigenous status
+.
+          CALL      CSES0000               * Load Contact session type
+.
+SCON9999  RETURN
++
+.******************************************************************************
+.         Check for Multiple contacts
+.******************************************************************************
+MCON0000  MOVE      ZERO,F3
+MCON1000  ADD       ONE,F3
+          COMPARE   F3,CONTNUMB
+          GOTO      MCON8000 IF LESS
+.
+          MATCH     KEY62,CONTFLDS[F3]
+          GOTO      MCON1000 IF NOT EQUAL  * check next contact encounter
+.
+          ADD       ONE,CONTNUMB
+          MOVE      "1",KEY1               * Flag for same contact
+          PACK      ENCRNUMB[CONTNUMB],ALENVISN,ALENENCT,KEY1,SP70
+.
+          GOTO      MCON9999               * same as previous encounter
+.
+MCON8000  ADD       ONE,CONTNUMB
+          MOVE      KEY62,CONTFLDS[CONTNUMB]   * New contact
+          MOVE      "0",KEY1
+          PACK      ENCRNUMB[CONTNUMB],ALENVISN,ALENENCT,KEY1,SP70
+MCON9999  RETURN
++
+.******************************************************************************
+.         Clear Contacts fields
+.******************************************************************************
+CLEP0000  MOVE      SP70,EPISURNO  * Patient Idenfifier
+          MOVE      SP70,EPISHOSP  * Organisation Identifier ??
+          MOVE      SP70,EPISENCT  * Referral Identifier
+          MOVE      SP70,EPISCAMP  * Episode Campus code
+          MOVE      SP70,EPISIDCD  * Episode Identifier
+          MOVE      SP70,EPISACLS  * Contact Account Class
+          MOVE      SP70,EPISPRGM  * Episode Program/Stream
+          MOVE      SP70,EPISCLIN  * Episode Clinic Identifier
+          MOVE      SP70,EPISDATE  * Contact Date
+          MOVE      SP70,EPISDMOD  * Contact Delivery mode
+          MOVE      SP70,EPISDSET  * Contact Delivery setting
+          MOVE      SP70,EPISINDI  * Contact Indigenaous status
+          MOVE      SP70,EPISSESS  * Contact Session type
+.
+CLEP9999  RETURN
++
+.******************************************************************************
+.         Initialiase the array of Visit No/Encounter and Contacts fields
+.******************************************************************************
+IREF0000  MOVE      ONE,F3
+          WHILE     F3 <= 998
+            MOVE      SP70,CONTFLDS[F3]       * Contact fields
+            MOVE      SP70,ENCRNUMB[F3]       * Visit no/Encounter no
+            ADD       ONE,F3
+          DO
+          MOVE      SP70,CONTRCID
+IREF9999  RETURN
++
+.******************************************************************************
+.         Set Program type
+.******************************************************************************
+SPRG0000  MOVE      ZERO,MISCPRGM
+          MATCH     SP3,ALREDEPT                 * blank department ?
+          GOTO      SPRG9000 IF EQUAL            * yes - error
+.
+          PACK      KEY5,ANSC,ANSG,ALREDEPT
+          CALL      RDCODE1                      * department code on file ?
+          BRANCH    OVRCD,SPRG9000               * no - error
+.
+          MOVE      TCINDC8,ANS
+          TYPE      ANS                          * indicator 8 numeric ?
+          GOTO      SPRG9000 IF EQUAL            * yes - error
+.
+          MATCH     "E",ANS
+          IF        @EQUAL
+            MOVE      TEN,MISCPRGM               * HEN
+            GOTO      SPRG2000
+          ENDIF
+.
+          MATCH     "L",ANS
+          IF        @EQUAL
+            MOVE      TEN1,MISCPRGM               * TPN
+            GOTO      SPRG2000
+          ENDIF
+.
+          MATCH     "D",ANS
+          IF        @EQUAL
+            MOVE      TEN2,MISCPRGM               * HBD
+            GOTO      SPRG2000
+          ENDIF
+.
+          MATCH     "V",ANS
+          IF        @EQUAL
+            MOVE      TEN3,MISCPRGM               * VALP
+            GOTO      SPRG2000
+          ENDIF
+.
+          MOVE      ZERO,FORM1
+          REP       "A5H2S7O8M3P4R6T9I1",ANS
+          MOVE      ANS,FORM1
+          COMPARE   ZERO,FORM1                   * VINAH program type ?
+          GOTO      SPRG9000 IF EQUAL            * yes - error
+.
+          MOVE      FORM1,MISCPRGM               * load program type
+.
+SPRG2000  MOVE      ZERO,EXIT
+          GOTO      SPRG9999
+.
+SPRG9000  MOVE      ONE,EXIT
+SPRG9999  RETURN
++
+.******************************************************************************
+.         Load contact account class
+.******************************************************************************
+GCLS0000  MOVE      SP70,EPISACLS
+.
+          BRANCH    MISCPRGM,GCLS1000:           * HARP
+                             GCLS9999:           * HBPCCT
+                             GCLS9999:           * Medi-Hotel
+                             GCLS1000:           * Palliative Care
+                             GCLS1000:           * Post Acute Care
+                             GCLS1000:           * RIR
+                             GCLS1000:           * SACS
+                             GCLS1000:           * Specialist O/P Clinic
+                             GCLS1000:           * TCP
+                             GCLS9999:           * HEN
+                             GCLS9999:           * TPN
+                             GCLS1000:           * HBD
+                             GCLS1000            * VALP
+.
+.         Set default values for compensable related fields
+GCLS1000  MATCH     SP3,ALENCOMP                 * cont. account class blank ?
+          GOTO      GCLS9999 IF EQUAL
+.
+          PACK      KEY5,ANSC,ANSL,ALENCOMP
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,GCLS9999
+.
+          MATCH     SP1,TCINDC12                 * blank indicator ?
+          GOTO      GCLS9999 IF EQUAL
+.
+          MATCH     ANSA,TCINDC12                * armed services ?
+          IF        @EQUAL
+            MOVE      "AS",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSC,TCINDC12                * Other Compensables ?
+          IF        @EQUAL
+            MOVE      "OO",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+.         NDIS only applies to HARP, PAC, RIR and SACS
+.
+          BRANCH    MISCPRGM,GCLS2000:           * HARP
+                             GCLS9999:           * HBPCCT
+                             GCLS9999:           * Medi-Hotel
+                             GCLS3000:           * Palliative Care
+                             GCLS2000:           * Post Acute Care
+                             GCLS2000:           * RIR
+                             GCLS2000:           * SACS
+                             GCLS3000:           * Specialist O/P Clinic
+                             GCLS3000:           * TCP
+                             GCLS9999:           * HEN
+                             GCLS9999:           * TPN
+                             GCLS2000:           * HBD
+                             GCLS2000            * VALP
+.
+GCLS2000  MATCH     ANSD,TCINDC12                * no - NDIS A/C class ?
+          GOTO      GCLS3000 IF NOT EQUAL        * no
+.
+          MOVE      "ND",EPISACLS                * yes
+          GOTO      GCLS9999
+.
+GCLS3000  MATCH     ANSE,TCINDC12                * Ineligible: Hospital Exempt ?
+          IF        @EQUAL
+            MOVE      "ME",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSF,TCINDC12                * Ineligible: Asylum Seeker ?
+          IF        @EQUAL
+            MOVE      "MF",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSI,TCINDC12                * Private Patient:  Insured ?
+          IF        @EQUAL
+            MOVE      "PI",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSJ,TCINDC12                * Prisoner ?
+          IF        @EQUAL
+            MOVE      "JP",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSL,TCINDC12                * Common Law Recoveries ?
+          IF        @EQUAL
+            MOVE      "CL",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSM,TCINDC12                * Private Clinic: MBS Funding ?
+          IF        @EQUAL
+            MOVE      "QM",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSN,TCINDC12                * Seamen ?
+          IF        @EQUAL
+            MOVE      "SS",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSO,TCINDC12                * Private Patient: Other Payer?
+          IF        @EQUAL
+            MOVE      "PO",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSP,TCINDC12                * Public Eligible ?
+          IF        @EQUAL
+            MOVE      "MP",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+          MATCH     ANSQ,TCINDC12                * C'wealth Funded:  TCP ?
+          IF        @EQUAL
+            MOVE      "QT",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSR,TCINDC12                * Reciprocal Agreement ?
+          IF        @EQUAL
+            MOVE      "MA",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSS,TCINDC12                * Private Patient: Self Funded?
+          IF        @EQUAL
+            MOVE      "PS",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANST,TCINDC12                * TAC ?
+          IF        @EQUAL
+            MOVE      "TA",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSV,TCINDC12                * DVA ?
+          IF        @EQUAL
+            MOVE      "VX",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSW,TCINDC12                * workersafe victoria ?
+          IF        @EQUAL
+            MOVE      "WC",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+          MATCH     ANSX,TCINDC12                * Other Non-compensable ?
+          IF        @EQUAL
+            MOVE      "XX",EPISACLS              * yes
+            GOTO      GCLS9999
+          ENDIF
+.
+GCLS9999  RETURN
++
+.******************************************************************************
+.         Load Episode Program
+.         from VINAH017 - label WPV10610
+.******************************************************************************
+WPVA0000  MOVE      SP70,EPISPRGM
+.
+          BRANCH    MISCPRGM,WPVA9999:           * HARP
+                             WPVA9999:           * HBPCCT
+                             WPVA9999:           * Medi-Hotel
+                             WPVA0618:           * Palliative Care
+                             WPVA9999:           * Post Acute Care
+                             WPVA9999:           * RIR
+                             WPVA9999:           * SACS
+                             WPVA0615:           * Specialist O/P Clinic
+                             WPVA9999:           * TCP
+                             WPVA9999:           * HEN
+                             WPVA9999:           * TPN
+                             WPVA9999:           * HBD
+                             WPVA9999            * VALP
+.
+.         For contacts, use contact service department
+.
+WPVA0615  MATCH     SP3,ALENSDEP                 * service department blank ?
+          GOTO      WPVA9999 IF EQUAL
+
+          MOVE      ALENSDEP,KEY3
+          GOTO      WPVA0625
+.
+.         For episodes, use event program or department
+.
+WPVA0618  MATCH     "1",ALCNDEVP
+          GOTO      WPVA0620 IF NOT EQUAL
+.
+          MATCH     SP3,ALREEVPR                 * blank event program ?
+          GOTO      WPVA0620 IF EQUAL            * yes - use department
+          MOVE      ALREEVPR,DIM3
+.
+          MOVE      "zG",KEY2
+          PACK      KEY5,KEY2,DIM3
+          CALL      RDCODE1                      * event program code on file ?
+          BRANCH    OVRCD,WPVA0620               * no - use department
+.
+          MATCH     SP4,THCSCOD                  * blank HDP Default ?
+          GOTO      WPVA0620 IF EQUAL            * yes - use department
+.
+.         The HDP Default has a value, so now proceed to get the program
+.         stream value from the Cat lF record
+.
+          MOVE      THCSCOD,DIM3
+          GOTO      WPVA0630
+.
+WPVA0620  MATCH     SP3,ALREDEPT                 * blank field ?
+          GOTO      WPVA9999 IF EQUAL
+.
+          MOVE      ALREDEPT,KEY3
+WPVA0625  CALL      RDALDEP1                     * code on file ?
+          BRANCH    OVRCD,WPVA9999
+.
+          MOVE      ALDEPRGS,DIM3                * load def. program/stream code
+.
+WPVA0630  MATCH     SP3,DIM3                     * program/stream blank ?
+          GOTO      WPVA9999 IF EQUAL
+.
+          MOVE      "lF",KEY2
+          PACK      KEY5,KEY2,DIM3
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,WPVA9999
+.
+          MATCH     SP4,THCSCOD                  * HDP Default blank ?
+          GOTO      WPVA9999 IF EQUAL
+.
+          SQUEEZE   THCSCOD
+          TYPE      THCSCOD                      * HDP Default numeric ?
+          IF        !@EQUAL
+            GOTO      WPVA9999
+          ENDIF
+.
+WPVA0690  MOVE      THCSCOD,EPISPRGM    * save Episode Program/Stream
+WPVA9999  RETURN
++
+.******************************************************************************
+.         Load contact clinic identifier
+.         (Specialist Outpatient Clinic only)
+.         VINAH017 label WPV2000
+.******************************************************************************
+WPVB0000  MOVE      SP70,EPISCLIN
+.
+          BRANCH    MISCPRGM,WPVB9999:           * HARP
+                             WPVB9999:           * HBPCCT
+                             WPVB9999:           * Medi-Hotel
+                             WPVB9999:           * Palliative Care
+                             WPVB9999:           * Post Acute Care
+                             WPVB9999:           * RIR
+                             WPVB9999:           * SACS
+                             WPVB2100:           * Specialist O/P Clinic
+                             WPVB9999:           * TCP
+                             WPVB9999:           * HEN
+                             WPVB9999:           * TPN
+                             WPVB9999:           * HBD
+                             WPVB9999            * VALP
+.         First, determine which method we are using to populate this field
+.
+WPVB2100  MOVE      ALCNCIEP,FORM1
+          BRANCH    FORM1,WPVB2300:              * use clinic id
+                          WPVB2200               * use Cat CG (BHS-CAR 285465)
+          GOTO      WPVB2800                     * use clinic type
+.
+.         Try to use Cat CG to determine if we are using clinic type
+.         or clinic id to populate contact clinic identifier
+.
+WPVB2200  CALL      CTCG0000
+          BRANCH    EXIT,WPVB3000:               * error getting CG assoc. #
+                         WPVB2400                * use linked appointment
+          GOTO      WPVB2900                     * clinic id/type returned
+.
+.         Use Clinic ID to populate this field
+.
+WPVB2300  MATCH     SP8,ALENLINK                 * linked visit blank ?
+          GOTO      WPVB3000 IF EQUAL
+.
+.         Try getting the clinic id from the linked visit file.
+.
+WPVB2400  PACK      KEY16,ALREVISN,ALENLINK
+          CALL      RDALLNK1                     * linked visit record on file ?
+          IF        OVRCD = 1
+            CALL      GCID0000                   * no - try outbokaf/outcanaf
+            BRANCH    EXIT,WPVB3000              * error
+            GOTO      WPVB2900
+          ENDIF
+.
+          MATCH     SP6,ALENCLIN                 * clinic id blank ?
+          GOTO      WPVB3000 IF EQUAL
+.
+          MOVE      ALLNCLIN,EPISCLIN            * load clinic id
+          GOTO      WPVB2900
+.
+.         Use Clinic Type to populate this field
+.
+WPVB2800  MATCH     SP6,ALRECTYP                 * clinic type blank ?
+          GOTO      WPVB3000 IF EQUAL
+.
+          MOVE      ALRECTYP,EPISCLIN            * load clinic type
+.
+WPVB2900  SQUEEZE   EPISCLIN
+.
+WPVB3000  MATCH     SP3,ALREDEPT                 * blank field ?
+          GOTO      WPVB9000 IF EQUAL
+.
+          MOVE      ALREDEPT,KEY3
+          CALL      RDALDEP1                     * code on file ?
+          BRANCH    OVRCD,WPVB9000
+.
+          MATCH     SP3,ALDECSEP
+          GOTO      WPVB9000 IF EQUAL
+.
+. E013 Contact provider code 9999 is for emergency use only.
+. Only to be used under the direction of the health department
+.
+          MATCH     "9999",ALDECSEP
+          GOTO      WPVB9000 IF EQUAL
+.
+          STRIP     ALDECSEP
+          APPEND    ALDECSEP,EPISCLIN
+.
+WPVB9000  APPEND    SP70,EPISCLIN
+          RESET     EPISCLIN
+.
+WPVB9999  RETURN
++
+.*****************************************************************************
+.         Load Indigenous Status
+.*****************************************************************************
+WPIX0000  MOVE      SP70,EPISINDI                * load aboriginality
+.
+          BRANCH    MISCPRGM,WPIX2200:           * HARP
+                             WPIX2200:           * HBPCCT
+                             WPIX9999:           * Medi-Hotel
+                             WPIX2200:           * Palliative Care
+                             WPIX2200:           * Post Acute Care
+                             WPIX2200:           * RIR
+                             WPIX2200:           * SACS
+                             WPIX2200:           * Specialist O/P Clinic
+                             WPIX2200:           * TCP
+                             WPIX9999:           * HEN
+                             WPIX9999:           * TPN
+                             WPIX2200:           * HBD
+                             WPIX2200            * VALP
+
+WPIX2200  MATCH     SP3,PMPXABRG                 * blank code ?
+          GOTO      WPIX9999 IF EQUAL
+.
+          PACK      KEY5,ANSV,ANSA,PMPXABRG
+          CALL      RDCODE1                      * code found ?
+          BRANCH    OVRCD,WPIX9999
+.
+          MATCH     SP4,THCSCOD                  * HDP Default blank ?
+          GOTO      WPIX9999 IF EQUAL
+.
+          UNPACK    THCSCOD,ANS,ANS              * use 2nd character
+          TYPE      ANS                          * HDP Default numeric ?
+          IF        !@EQUAL
+            GOTO      WPIX9999
+          ENDIF
+.
+.         Check if HDP default is valid
+.
+          MOVE      ANS,FORM1
+          BRANCH    FORM1,WPIX2400:              * Aboriginal
+                          WPIX2400:              * Torres Strait Islander
+                          WPIX2400:              * Aboriginal & TSI
+                          WPIX2400:              * Not indigenous
+                          WPIX9999:              * Not valid
+                          WPIX9999:              * Not valid
+                          WPIX9999:              * Not valid
+                          WPIX2400:              * unable to ask
+                          WPIX2400               * refused to answer
+          GOTO      WPIX9999
+.
+WPIX2400  MOVE      ANS,EPISINDI                 * load aboriginality
+WPIX9999  RETURN
++
+.*****************************************************************************
+.         Load Contact Session type
+.*****************************************************************************
+CSES0000  MOVE      SP70,EPISSESS                * Contact Session type
+.
+          BRANCH    MISCPRGM,CSES1000:           * HARP
+                             CSES9999:           * HBPCCT
+                             CSES9999:           * Medi-Hotel
+                             CSES1000:           * Palliative Care
+                             CSES1000:           * Post Acute Care
+                             CSES1000:           * RIR
+                             CSES1000:           * SACS
+                             CSES1000:           * Specialist O/P Clinic
+                             CSES9999:           * TCP
+                             CSES9999:           * HEN
+                             CSES9999:           * TPN
+                             CSES1000:           * HBD
+                             CSES1000            * VALP
+.
+CSES1000  MOVE      "zI",KEY2
+          PACK      KEY5,KEY2,ALENUC35
+          CALL      RDCODE1                      * code on file ?
+          BRANCH    OVRCD,CSES9999
+.
+          MOVE      THCSCOD,EPISSESS             * Contact Session type
+CSES9999  RETURN
++
+.*****************************************************************************
+.*                              CTCG0000                                     *
+.*        Use Cat CG to determine whether to use Clinic Id or Clinic Type    *
+.*        to populate Contact Clinic Identifier.                             *
+.*****************************************************************************
+.
+.         Get the Cat CG record associated with the department
+.
+CTCG0000  MATCH     SP3,ALREDEPT                 * department code blank ?
+          GOTO      CTCG9100 IF EQUAL
+
+          PACK      KEY5,ANSC,ANSG,ALREDEPT
+          CALL      RDCODE1                      * department code on file ?
+          BRANCH    OVRCD,CTCG9100
+.
+.         If associated number is set to "1", then use clinic type from
+.         the Episode referral as the Contact Clinic Identifier
+.
+          COMPARE   ONE,TCFORM6
+          GOTO      CTCG1000 IF NOT EQUAL
+.
+          MATCH     SP6,ALRECTYP
+          GOTO      CTCG9100 IF EQUAL
+.
+          UNPACK    ALRECTYP,EPISCLIN
+          GOTO      CTCG9000
+.
+.         If associated number is set to "2", then use clinic id from
+.         the Episode referral as the Contact Clinic Identifier
+.
+CTCG1000  COMPARE   TWO,TCFORM6
+          GOTO      CTCG2000 IF NOT EQUAL
+.
+          MATCH     SP6,ALRECLID
+          GOTO      CTCG9100 IF EQUAL
+
+          UNPACK    ALRECLID,EPISCLIN
+          GOTO      CTCG9000
+.
+.         The associated number is not valid for clinic id or clinic
+.         type, so check if there is a linked appointment.  If there
+.         is, we can get the clinic id via the appointment, otherwise,
+.         generate an error
+.
+CTCG2000  MATCH     SP8,ALENLINK
+          GOTO      CTCG9200 IF NOT EQUAL
+.
+          GOTO      CTCG9100
+.
+CTCG9000  MOVE      ZERO,EXIT
+          GOTO      CTCG9999
+.
+CTCG9100  MOVE      ONE,EXIT
+          GOTO      CTCG9999
+.
+CTCG9200  MOVE      TWO,EXIT
+
+CTCG9999  RETURN
++
+.*****************************************************************************
+.*                              GCID0000                                     *
+.*   Get the clinic id from outbokaf or outcanaf, based on the visit number  *
+.* Requires: ALENLINK - visit number of record being processed               *
+.* Returns:  EPSCLIN - Contact Clinic Identifier                             *
+.*           EXIT  0 = Clinic ID found                                       *
+.*                 1 = Clinic ID not found                                   *
+.*****************************************************************************
+.
+.         First see if there is a booking record for the visit (outbokaf)
+.
+GCID0000  MOVE      SP6,KEY6
+          CALL      RDSSITA1                     * position at start of file
+GCID0500  CALL      RDKSITA1                     * read next record
+          BRANCH    OVRCD,GCID9100               * end of file - error
+.
+          MATCH     SP3,OSTFILE                  * file prefix blank ?
+          GOTO      GCID0500 IF EQUAL            * yes - get next record
+.
+          PACK      FILENAMO,OSTFILE,FILBOKA6    * open outbokaf
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OUTBOKA6,FILENAMO
+          TRAPCLR   IO
+          BRANCH    OVRCD,GCID5000
+.
+          PACK      KEY36,ALENLINK,SP30
+          CALL      RDSBOKA6                     * position on visit #
+          CALL      RDKBOKA6                     * read next record
+          IF        OVRCD = 1
+            CLOSE     OUTBOKA6                   * eof - check outcanaf
+            GOTO      GCID5000
+          ENDIF
+.
+          MOVE      ALENLINK,FORM8
+          COMPARE   FORM8,OBAOUTNO               * same visit still ?
+          IF        !@EQUAL
+            CLOSE     OUTBOKA6                   * no - check outcanaf
+            GOTO      GCID5000
+          ENDIF
+.
+          MATCH     SP6,OBACLIN                  * yes - blank clinic id ?
+          IF        @EQUAL
+            CLOSE     OUTBOKA6                   * yes - error
+            GOTO      GCID9100
+          ENDIF
+.
+.         A matching record has been found, so use this clinic id
+.
+          MOVE      OBACLIN,EPISCLIN
+.
+          CLOSE     OUTBOKA6
+          GOTO      GCID9000
+.
+.         There was no booking record for the visit, so check if it was
+.         cancelled (outcanaf)
+.
+GCID5000  PACK      FILENAMO,OSTFILE,FILCANA1    * open outcanaf
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      OUTCANA1,FILENAMO
+          TRAPCLR   IO
+          BRANCH    OVRCD,GCID0500
+.
+          MOVE      ALENLINK,KEY8
+          CALL      RDOTCAN1                     * cancelled visit on file ?
+          IF        OVRCD = 1
+            CLOSE     OUTCANA1                   * no
+            GOTO      GCID0500
+          ENDIF
+.
+          MATCH     SP6,OPCNCLIN                 * yes - blank clinic id ?
+          IF        @EQUAL
+            CLOSE     OUTCANA1                   * yes - error
+            GOTO      GCID9100
+          ENDIF
+.         A booking cancellation record was found, so use this clinic id
+.
+          MOVE      OPCNCLIN,EPISCLIN
+.
+          CLOSE     OUTCANA1
+.
+GCID9000  MOVE      ZERO,EXIT
+          GOTO      GCID9999
+.
+GCID9100  MOVE      ONE,EXIT
+.
+GCID9999  RETURN
++
+.*******************************************************************************
+.         Deleting existing ABF Patient details
+.*******************************************************************************
+MABF0000  PACK      KEY27,ALREVISN,SP70
+          CALL      RSPTABF1
+          CALL      RKPTABF1
+          BRANCH    OVRCD,MABF9999
+.
+          MATCH     ALREVISN,PTABADMN       * Same admission no ?
+          GOTO      MABF9999 IF NOT EQUAL
+.
+          MATCH     SP70,PTABINVN
+          GOTO      MABF9999 IF NOT EQUAL  * Invoice must be blank
+.
+          PACK      KEY27,PTABADMN,PTABENCT,PTABINVN,PTABADJT
+          CALL      DEPTABF1
+          GOTO      MABF0000
+.
+MABF9999  RETURN
++
+.******************************************************************************
+.
+          DEFPROC   RFIV0000
+.
+          INC       OUTPWOFD/INC
+          INC       PATABFFD/INC
+          INC       PMSADJFD/INC
+          INC       PMSHCPFD/INC
+          INC       PATFX1FD/INC
+          INC       PATCFAFD/INC
+          INC       PMSCIDFD/INC
+          INC       PMSNEPFD/INC
+.
+MDISFLAG  FORM      1        * Multidisciplinary Clinic
+FORM104   FORM      10.4
+CEFFDATE  DIM       8
+CNTRCEFR  FORM      1
+.
+          CALL      OVAR0000                  * Initialise variables
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      PATABFA1,"patabfaf"
+          TRAPCLR   IO
+          BRANCH    OVRCD,RFIV9800
+.
+          OPEN      OUTPWOA1,"outpwoaf"
+          OPEN      OUTPWOA2,"outpwoaf"
+.
+          OPEN      PMSADJA1,"pmsadjaf"
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          BRANCH    MREFFLAG,RFIV1000   * Calendar Month Referral
+.
+          CALL      CDIR0000        * Contact must be direct
+          BRANCH    EXIT,RFIV9000
+.
+          CALL      PRES0000        * Patient must be present at the Contact
+          BRANCH    EXIT,RFIV9000
+.
+          CALL      DELM0000        * Contact Delivery mode
+          BRANCH    EXIT,RFIV9000
+.
+          CALL      CINP0000        * Contact Inpatient flag
+          BRANCH    EXIT,RFIV9000
+.
+          CALL      DELS0000        * Contact Delivery setting
+          BRANCH    EXIT,RFIV9000
+.
+          CALL      MEDS0000                  * Check Medical Staff
+.
+          CALL      RTER0000                  * Work out Referral Tier code
+          MOVE      ALENSDAT,CEFFDATE         * Service date
+          GOTO      RFIV2000
+.
+.         Calendar Month Referral
+.
+RFIV1000  MOVE      ALRECOMP,ALENCOMP         * Compensation code
+          UNPACK    ENCOUNTR,ANS,KEY6         * Encounter monthly
+.
+          MOVE      "00",KEY2
+          PACK      CEFFDATE,KEY6,KEY2,SP70
+          REP       "00",CEFFDATE
+.
+RFIV2000  MATCH     SP70,ALENCOMP
+          GOTO      RFIV9000 IF EQUAL
+.
+          PACK      KEY5,ANSC,ANSL,ALENCOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD,RFIV9000
+.
+          MATCH     "N",TCINDC2               * NWAU calculated ?
+          GOTO      RFIV9000 IF NOT EQUAL
+.
+          CALL      KCNT0000                  * search for a valid Contract ID
+          BRANCH    EXIT,RFIV9000
+.
+          PACK      CONTRCID,CONTRCID,SP70
+          MATCH     SP70,CONTRCID
+          GOTO      RFIV9000 IF EQUAL         * Can not find Contract
+.
+          MOVE      OTPWPWEI,PWAMOUNT         * PW
+.
+          MOVE      "062",KEY3                * Patient PW
+          MOVE      OTPWPWEI,FORM104
+          CALL      IABF0000                  * Write to ABF Patient details
+.
+          CALL      UTIE0000                  * Update Tier 2 code
+          CALL      OADJ0000                  * Get Adjustment value
+          CALL      MNPO0000                  * Check multiple NEP values
+          CALL      OABF0000                  * Calculate ABF amount
+.
+          MOVE      "071",KEY3                * Type of contact
+          PACK      ADJMDESC,SP70,SP70
+          MOVE      "First Daily",ADJMDESC
+          IF        CNTRTYPE=1
+            MOVE      "Subsequent Daily",ADJMDESC
+          ELSE
+            IF        CNTRTYPE=2
+              MOVE      "Calendar Month",ADJMDESC
+            ENDIF
+          ENDIF
+          CALL      IABF0000                  * Write to ABF Patient details
+.
+          MOVE      ZERO,EXIT
+          GOTO      RFIV9999
+.
+RFIV9000  MOVE      ALREVISN,KEY8             * Admission number
+          CALL      DPAB0000                  * delete records in ABF details
+.
+RFIV9800  MOVE      ONE,EXIT
+RFIV9999  GOTO      NDOT9999
++
+.*******************************************************************************
+.         Initialise variables
+.*******************************************************************************
+OVAR0000  MOVE      ZERO,AINDAMNT
+          MOVE      ZERO,ARESAMNT
+          MOVE      ZERO,ANMCAMNT
+          MOVE      ZERO,ATAAMNTS
+          MOVE      ZERO,NEPAMNTS
+          MOVE      ZERO,PWAMOUNT
+          MOVE      ZERO,ABFCHRGE
+          PACK      ADJMDESC,SP70,SP70
+          MOVE      ZERO,MEDSTAFF
+          MOVE      ZERO,MDISFLAG
+.
+OVAR9999  RETURN
++
+.******************************************************************************
+.         Contact must be direct
+.******************************************************************************
+CDIR0000  MOVE      ZERO,EXIT
+          MATCH     SP70,ALENUC35
+          GOTO      CDIR9999 IF EQUAL
+.
+          MOVE      "zI",KEY2
+          PACK      KEY5,KEY2,ALENUC35
+          CALL      RDCODE1
+          BRANCH    OVRCD,CDIR9999
+.
+          UNPACK    THCSCOD,KEY1
+          MATCH     "3",KEY1                 * Indirect Contact ?
+          GOTO      CDIR9999 IF NOT EQUAL
+.
+          MOVE      ONE,EXIT
+CDIR9999  RETURN
++
+.******************************************************************************
+.         Patient must be present at the contact (HDP Eq.=10,11,12,13
+.******************************************************************************
+PRES0000  MOVE      ZERO,EXIT
+          MATCH     SP70,ALENUC37
+          GOTO      PRES9000 IF EQUAL
+.
+          MOVE      "zK",KEY2
+          PACK      KEY5,KEY2,ALENUC37
+          CALL      RDCODE1
+          BRANCH    OVRCD,PRES9000
+.
+          MOVE      ZERO,FORM2
+          UNPACK    THCSCOD,KEY2
+          SQUEEZE   KEY2
+          MOVE      KEY2,FORM2
+          BRANCH    FORM2,PRES9000,PRES9000,PRES9000,PRES9000,PRES9000:
+                          PRES9000,PRES9000,PRES9000,PRES9000,PRES9999:
+                          PRES9999,PRES9999,PRES9999
+.
+PRES9000  MOVE      ONE,EXIT
+PRES9999  RETURN
++
+.******************************************************************************
+.         Contact must be delivered in person,via telephone,via teleconference
+.         or via written means
+.******************************************************************************
+DELM0000  MOVE      ZERO,EXIT
+          MATCH     SP70,ALENUC38
+          GOTO      DELM9000 IF EQUAL
+.
+          MOVE      "zL",KEY2
+          PACK      KEY5,KEY2,ALENUC38
+          CALL      RDCODE1
+          BRANCH    OVRCD,DELM9000
+.
+          MOVE      ZERO,FORM1
+          UNPACK    THCSCOD,KEY1
+          SQUEEZE   KEY1
+          MOVE      KEY1,FORM1
+          COMPARE   NINE,FORM1                   * Not Applicable ?
+          GOTO      DELM9999 IF NOT EQUAL
+.
+DELM9000  MOVE      ONE,EXIT
+DELM9999  RETURN
++
+.******************************************************************************
+.         Patient can not be an Inpatient at any health service at the time
+.         the non-admitted service was delivered
+.******************************************************************************
+CINP0000  MOVE     ZERO,EXIT
+          MATCH    SP70,ALENLINK
+          GOTO     CINP9999 IF EQUAL
+.
+          MOVE     ALENLINK,KEY8
+          CALL     RDMISS1
+          BRANCH   OVRCD,CINP9999
+.
+.         Check if the contact was prior to the admission 
+.
+          MATCH     ADATE,ALENSDAT               * contact start date<adm date ?
+          GOTO      CINP9999 IF LESS             * yes - get next record
+          IF        @EQUAL
+            MATCH     ATIME,ALENSTIM             * contact start time<adm time ?
+            GOTO      CINP9999 IF LESS           * yes - get next record
+          ENDIF
+.         The contact is on or after the admission, so check if the
+.         patient was admitted when the contact took place.
+.
+          BRANCH    ASTAT,CINP9999:              * pre-admission
+                          CINP9000:              * current admission
+                          CINP1000:              * discharged
+                          CINP9000:              * on-leave
+                          CINP9999               * cancelled
+.
+          GOTO      CINP9999                     * shouldn't happen
+.
+CINP1000  MOVE      AADMNO,KEY8
+          CALL      RDDSCH1                      * discharge record found ?
+          BRANCH    OVRCD,CINP9999               * no - get next record
+.
+          MATCH     ALENSDAT,DDATE               * discharge before contact ?
+          GOTO      CINP9999 IF LESS             * yes - get next record
+          GOTO      CINP9000 IF NOT EQUAL        * discharge date greater
+.
+.         Same day, so check times
+.
+          MATCH     ALENSTIM,DTIME               * discharge before contact ?
+          GOTO      CINP9999 IF LESS             * yes - get next record
+.
+.         Patient was admitted when contact took place
+.
+CINP9000  MOVE      ONE,EXIT
+CINP9999  RETURN
++
+.******************************************************************************
+.         Contact can not occur in the Emergency Department
+.             Contact Delivery Setting
+.******************************************************************************
+DELS0000  MOVE      ZERO,EXIT
+          MATCH     SP70,ALENUC40
+          GOTO      DELS9000 IF EQUAL
+.
+          MOVE      "zN",KEY2
+          PACK      KEY5,KEY2,ALENUC40
+          CALL      RDCODE1
+          BRANCH    OVRCD,DELS9000
+.
+          MOVE      ZERO,FORM2
+          UNPACK    THCSCOD,KEY2
+          SQUEEZE   KEY2
+          MOVE      KEY2,FORM2
+          COMPARE   TEN3,FORM2        * Hospital setting - EMR Depart?
+          GOTO      DELS9999 IF NOT EQUAL
+.
+DELS9000  MOVE      ONE,EXIT
+DELS9999  RETURN
++
+.*******************************************************************************
+.         Search for a Contract id by looping PW file
+.*******************************************************************************
+KCNT0000  MOVE      ZERO,EXIT
+          PACK      KEY9,TIERCODE,SP70
+          CALL      RSOTPWO2
+KCNT2000  CALL      RKOTPWO2
+          BRANCH    OVRCD,KCNT9000
+.
+          MATCH     TIERCODE,OTPWTIER          * Same Tier 2 code ?
+          GOTO      KCNT9000 IF NOT EQUAL
+.
+.         Search for a valid contract at the start of active month
+.
+          IF         MREFFLAG=1
+            MATCH     SP70,CONTRCID
+            GOTO      KCNT4000 IF NOT EQUAL
+          ENDIF
+.
+          MOVE      OTPWCNTR,KEY6
+          CALL      VALCONTR                * Validate Contract ID
+          BRANCH    EXIT,KCNT2000
+.
+.         Checking the Close Off date
+.
+KCNT4000  MATCH     SP70,PMCICLDT
+          IF        !@EQUAL
+            IF         MREFFLAG=1
+              MATCH     PMCICLDT,CEFFDATE
+              IF        !@LESS
+                MATCH     SP70,CONTRCID
+                GOTO      KCNT2000 IF EQUAL        * search for next contract
+                GOTO      KCNT9000
+              ENDIF
+            ELSE
+              MATCH     PMCICLDT,CEFFDATE
+              GOTO      KCNT2000 IF NOT LESS       * search for next contract
+            ENDIF
+          ENDIF
+.
+          MOVE      OTPWCNTR,CONTRCID
+          MOVE      ZERO,EXIT
+          GOTO      KCNT9999
+.
+KCNT9000  MOVE      ONE,EXIT
+KCNT9999  RETURN
++
+.*******************************************************************************
+.         Update Tier 2 code
+.*******************************************************************************
+UTIE0000  MATCH     SP70,TIERCODE
+          GOTO      UTIE9999 IF EQUAL         * Blank code
+.
+          PACK      KEY5,ANSN,ANSC,TIERCODE
+          CALL      RDCODE1
+          BRANCH    OVRCD,UTIE9999
+.
+          MOVE      "032",KEY3              * Tier 2 code
+          MOVE      ZERO,FORM104
+          MOVE      " - ",D3
+          PACK      ADJMDESC,TIERCODE,D3,TDESC,SP70     * Tier 2 description
+          CALL      IABF0000                * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+UTIE9999  RETURN
++
+.*******************************************************************************
+.         Get Adjustment value
+.*******************************************************************************
+OADJ0000  MOVE      "009",PMAJADJT
+          PACK      KEY9,CONTRCID,PMAJADJT,SP70
+          CALL      RDPMADJ1
+          IF        OVRCD=1
+            MOVE      ZERO,PMAJADJV       * Adjustment value
+          ENDIF
+          CALL      OIND0000              * Indigenous adjustment
+.
+          CALL      ORES0000              * Remoteness area adjustment
+.
+          MOVE      "020",PMAJADJT
+          PACK      KEY9,CONTRCID,PMAJADJT,SP70
+          CALL      RDPMADJ1
+          IF        OVRCD=1
+            MOVE      ZERO,PMAJADJV       * Adjustment value
+          ENDIF
+          CALL      MDCL0000              * Multidisciplinary clinic adjus.
+.
+          CALL      ETRE0000              * Check Hospital treatment remoteness
+.
+          PACK      KEY5,ANSC,ANSL,ALENCOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD,OADJ9999
+.
+          MATCH     "B",TCINDC22
+          IF        @EQUAL
+            MOVE      "026",PMAJADJT
+            GOTO      OADJ8000
+          ENDIF
+.
+          MATCH     "C",TCINDC22
+          IF        @EQUAL
+            MOVE      "027",PMAJADJT
+            GOTO      OADJ8000
+          ENDIF
+.
+          MATCH     SP70,TCINDC22
+          GOTO      OADJ2000 IF EQUAL
+          MATCH     "A",TCINDC22
+          GOTO      OADJ9999 IF NOT EQUAL
+.
+OADJ2000  MOVE      "025",PMAJADJT
+.
+OADJ8000  PACK      KEY9,CONTRCID,PMAJADJT,SP70
+          CALL      RDPMADJ1
+          IF        OVRCD=0
+            CALL      ONEP0000            * NEP
+          ENDIF
+.
+OADJ9999  RETURN
++
+.*******************************************************************************
+.         Check Residential remoteness area adjustment
+.*******************************************************************************
+ORES0000  OPEN      IBAPOST1,"ibapostf"
+          PACK      KEY45,PSUBRB,SP70
+          PACK      KEY56,PMVXPOST,KEY45,PADD4,SP70
+          CALL      RDIBPOS1
+          COMPARE   ZERO,OVRCD
+          GOTO      ORES2000 IF EQUAL
+.
+          PACK      KEY56,PMVXPOST,KEY45,SP70
+          CALL      RSIBPOS1
+          CALL      RKIBPOS1
+          BRANCH    OVRCD,ORES9999
+.
+          MATCH     PMVXPOST,IBPOPCOD
+          GOTO      ORES9999 IF NOT EQUAL     * Different postcode
+.
+ORES2000  MATCH     SP70,IBPORRAV
+          GOTO      ORES9999 IF EQUAL
+.
+          MATCH     "R2   ",IBPORRAV
+          IF        @EQUAL
+            MOVE      "004",PMAJADJT
+            MOVE      "016",KEY3           * Patient remoteness area adjust.
+          ELSE
+            MATCH     "RA3  ",IBPORRAV
+            IF        @EQUAL
+              MOVE      "005",PMAJADJT
+              MOVE      "017",KEY3         * Patient remoteness area adjust.
+            ELSE
+              MATCH     "RA4  ",IBPORRAV
+              IF        @EQUAL
+                MOVE      "007",PMAJADJT
+                MOVE      "019",KEY3       * Patient remoteness area adjust.
+              ELSE
+                GOTO      ORES9999
+              ENDIF
+            ENDIF
+          ENDIF
+          PACK      KEY9,CONTRCID,PMAJADJT,SP70
+          CALL      RDPMADJ1
+          IF        OVRCD=1
+            MOVE      ZERO,PMAJADJV       * Adjustment value
+          ENDIF
+          MOVE      PMAJADJV,FORM104   * Adjustment value
+          CALL      IABF0000             * Write to ABF Patient details
+          MOVE      PMAJADJV,ARESAMNT    * Residential value adjust.
+ORES9999  RETURN
++
+.*******************************************************************************
+.         Patient Treatment remoteness (Hospital)
+.*******************************************************************************
+ETRE0000  MOVE      PMAJADJV,FORM104       * Adjustment value
+          UNPACK    SP70,KEY8,KEY45,KEY3
+.
+          READ      CONTROLF,TEN3;CHADD1,CHADD2,CHPOST
+          PACK      KEY8,CHPOST,SP70      * Postcode
+          PACK      KEY45,CHADD2,SP70     * Suburb
+.
+          OPEN      PATHSPA1,"pathspaf"
+          PACK      KEY3,SP70
+          CALL      RSPTHSP1
+          CALL      RKPTHSP1
+          BRANCH    OVRCD,ETRE1000
+.
+          IF        IBCNMHOS=1
+            PACK      KEY3,PMVXMHOS,SP70
+            CALL      RDPTHSP1
+          ENDIF
+.
+          PACK      KEY8,PTHSPCOD,SP7 0   * Postcode
+          PACK      KEY45,PTHSADD2,SP70   * Suburb
+          PACK      KEY3,PTHSADD3,SP70    * State
+.
+ETRE1000  OPEN      IBAPOST1,"ibapostf"
+          PACK      KEY56,KEY8,KEY45,KEY3,SP70
+          CALL      RDIBPOS1
+          COMPARE   ZERO,OVRCD
+          GOTO      ETRE2000 IF EQUAL
+.
+          PACK      KEY56,KEY8,KEY45,SP70
+          CALL      RSIBPOS1
+          CALL      RKIBPOS1
+          BRANCH    OVRCD,ETRE9999
+.
+          MATCH     KEY8,IBPOPCOD
+          GOTO      ETRE9999 IF NOT EQUAL     * Different postcode
+.
+ETRE2000  MATCH     SP70,IBPORRAV
+          GOTO      ETRE9999 IF EQUAL
+.
+          MATCH     "RA3  ",IBPORRAV
+          IF        @EQUAL
+            MOVE      "023",PMAJADJT
+            MOVE      "036",KEY3        * Pat.Treatment remoteness area adj
+            MOVE      "Hospital Area Remote",ADJMDESC
+          ELSE
+            MATCH     "RA4  ",IBPORRAV
+            IF        @EQUAL
+              MOVE      "024",PMAJADJT
+              MOVE      "037",KEY3      * Pat.Treatment remoteness area adj
+              MOVE      "Hospital Area Very Remote",ADJMDESC
+            ELSE
+              GOTO      ETRE9999
+            ENDIF
+          ENDIF
+.
+          PACK      KEY9,CONTRCID,PMAJADJT,SP70
+          CALL      RDPMADJ1
+          IF        OVRCD=1
+            MOVE      ZERO,PMAJADJV       * Adjustment value
+          ENDIF
+          MOVE      PMAJADJV,FORM104   * Adjustment value
+          CALL      IABF0000           * Write to ABF Patient details
+          MOVE      PMAJADJV,ATAAMNTS  * Pat.Treatment value adjust.
+          PACK      ADJMDESC,SP70,SP70
+.
+ETRE9999  RETURN
++
+.******************************************************************************
+.        Check for Claim code Multiple NEP Values
+.******************************************************************************
+MNPO0000  MATCH     SP70,ALENCOMP
+          GOTO      MNPO9999 IF EQUAL
+.
+          MOVE      "CL",KEY2
+          PACK      KEY5,KEY2,ALENCOMP
+          CALL      RDCODE1
+          BRANCH    OVRCD,MNPO9999
+.
+          MOVE      ZERO,OVRCD               * assume file exists
+          TRAP      OVERCOND IF IO           * trap for error openning file
+          OPEN      PMSNEPA1,"pmsnepaf"      * open kiwicard file
+          TRAPCLR   IO
+          BRANCH    OVRCD,MNPO9999           * open failed
+.
+          MOVE      " 2",DIM2                * Outpatient
+          PACK      KEY58,CONTRCID,DIM2,KEY2,Z70
+          CALL      RSPMNEP1
+MNPO1000  CALL      RPPMNEP1
+          BRANCH    OVRCD,MNPO9999
+.
+          MATCH     PMNECNTR,CONTRCID        * Same contract id ?
+          GOTO      MNPO9999 IF NOT EQUAL
+.
+          MATCH     DIM2,PMNEVTYP            * Check for type of visit
+          GOTO      MNPO9999 IF NOT EQUAL
+.
+          MATCH     "1",PMNEACTV
+          GOTO      MNPO1000 IF EQUAL        * Inactive
+.
+          MATCH     KEY2,PMNECODE
+          IF        !@EQUAL
+            MATCH     SP70,PMNECODE          * check for blank Code set
+            GOTO      MNPO1000 IF NOT EQUAL
+          ENDIF
+.
+          CALL      CDCM0000                 * Check indicators
+          BRANCH    EXIT,MNPO1000            * Check next record
+.
+MNPO9999  RETURN
++
+.******************************************************************************
+.        Check for Indicator number and value
+.        Exit = 1 (Not valid)
+.******************************************************************************
+CDCM0000  MATCH     SP70,PMNEINDC
+          GOTO      CDCM2000 IF EQUAL     * Blank Indicator number
+.
+          STRIP     PMNEINDC
+          MOVE      ZERO,F2
+          MOVE      PMNEINDC,F2
+.
+.         Check indicator number and value of patient claim code
+.
+          MOVE      SP70,KEY1
+          LOAD      KEY1,F2,TCINDC1,TCINDC2,TCINDC3,TCINDC4,TCINDC5:
+                            TCINDC6,TCINDC7,TCINDC8,TCINDC9,TCINDC10:
+                            TCINDC11,TCINDC12,TCINDC13,TCINDC14,TCINDC15:
+                            TCINDC16,TCINDC17,TCINDC18,TCINDC19,TCINDC20:
+                            TCINDC21,TCINDC22,TCINDC23,TCINDC24,TCINDC25:
+                            TCINDC26,TCINDC27,TCINDC28,TCINDC29,TCINDC30:
+                            TCINDC31,TCINDC32,TCINDC33,TCINDC34,TCINDC35:
+                            TCINDC36,TCINDC37,TCINDC38,TCINDC39,TCINDC40:
+                            TCINDC41
+.
+          STRIP     PMNEINDV
+          PACK      D1,PMNEINDV,SP70
+          MATCH     KEY1,D1
+          GOTO      CDCM9000 IF NOT EQUAL
+.
+CDCM2000  MOVE      PMNENEPP,NEPAMNTS  * NEP value Adjust.
+          MOVE      PMNENEPP,FORM104   * Adjustment value
+          MOVE      SP70,ADJMDESC
+          MOVE      "061",KEY3         * NEP adjust.
+          CALL      IABF0000           * Write to ABF Patient details
+          MOVE      ZERO,EXIT
+          GOTO      CDCM9999
+.
+CDCM9000  MOVE      ONE,EXIT
+CDCM9999  RETURN
++
+.*******************************************************************************
+.         Calculate ABF amount
+.*******************************************************************************
+OABF0000  IF        CNTRTYPE=1
+            MOVE      ZERO,FORM106     * Subsequent Daily will have zero NWAU
+            GOTO      OABF2000
+          ENDIF
+.
+.         {PW x APaed x (1 + ARes + AInd +  ANMC) x (1 + ATreat)} x NEP
+.         Note: APaed=1
+.
+          MOVE      ONE,F106A
+          ADD       ARESAMNT,F106A           * A_Res
+          ADD       AINDAMNT,F106A           * A_Ind
+          ADD       ANMCAMNT,F106A           * + A_NMC
+.
+          MOVE      ONE,F106B                * 1
+          ADD       ATAAMNTS,F106B           * + ATreat
+.
+          MOVE      PWAMOUNT,FORM106         * PW
+          MULT      F106A,FORM106            * x (1+A_Res+A_Ind+A_NMC)
+          MULT      F106B,FORM106            * x (1 + ATreat)
+.
+OABF2000  IF        FORM106<0
+            MOVE      ZERO,FORM106
+          ENDIF
+          MOVE      FORM106,NWAUAMNT       * save NWAU amount with 6 decimal
+.
+          MOVE      SP70,KEY19
+          MOVE      NWAUAMNT,KEY19          * NWAU amount in 6 decimal places
+          SQUEEZE   KEY19
+          PACK      ADJMDESC,KEY19,SP70,SP20
+.
+          MOVE      FORM106,FORM104        * Adjustment value
+          MOVE      "053",KEY3
+          CALL      IABF0000               * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+          MULT      NEPAMNTS,FORM106       * NEP 
+          MOVE      FORM106,ABFCHRGE       * ABF Charge
+.
+OABF9999  RETURN
++
+.*******************************************************************************
+.         Check Indigenous Adjustment
+.*******************************************************************************
+OIND0000  MATCH     SP70,PMPXABRG          * Aboriginality
+          GOTO      OIND9999 IF EQUAL
+.
+          PACK      KEY5,ANSV,ANSA,PMPXABRG
+          CALL      RDCODE1
+          BRANCH    OVRCD,OIND9999
+.
+          MOVE      "021",KEY3
+          MOVE      ZERO,FORM104
+.
+          MATCH     "4",TCINDC2
+          GOTO      OIND2000 IF EQUAL  * Not Aboriginal
+          MATCH     "9",TCINDC2
+          GOTO      OIND2000 IF EQUAL  * Not stated
+.
+          MOVE      PMAJADJV,FORM104   * Adjustment value
+          MOVE      PMAJADJV,AINDAMNT  * Indigeneous value adjust.
+.
+OIND2000  MOVE      " - ",D3
+          PACK      ADJMDESC,PMPXABRG,D3,TDESC,SP70
+          CALL      IABF0000           * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+OIND9999  RETURN
++
+.*******************************************************************************
+.         Multidisciplinary clinic adjustment
+.*******************************************************************************
+MDCL0000  MOVE      "033",KEY3
+.
+          IF        MDISFLAG=1
+            MOVE      "Yes",D3
+            MOVE      PMAJADJV,ANMCAMNT  * Multidisciplinary clinic value adjus.
+            MOVE      PMAJADJV,FORM104   * Adjustment value
+          ELSE
+            MOVE      "No ",D3
+            MOVE      ZERO,FORM104
+          ENDIF
+          PACK      ADJMDESC,D3,SP70      * Description of adjustment
+          CALL      IABF0000              * Write to ABF Patient details
+          PACK      ADJMDESC,SP70,SP70
+.
+MDCL9999  RETURN
++
+.*******************************************************************************
+.         NEP Adjustment
+.*******************************************************************************
+ONEP0000  MOVE      PMAJADJV,NEPAMNTS  * NEP value Adjust.
+.
+          MOVE      PMAJADJV,FORM104   * Adjustment value
+          MOVE      "061",KEY3         * NEP adjust.
+          CALL      IABF0000           * Write to ABF Patient details
+ONEP9999  RETURN
++
+.*******************************************************************************
+.         Write to ABF Patient details
+.*******************************************************************************
+IABF0000  MOVE      ALREVISN,PTABADMN        * Admission number
+          MOVE      ENCOUNTR,PTABENCT        * Encounter number
+          MOVE      SP70,PTABINVN            * Blank Inv.no for tobe invoiced
+          MOVE      KEY3,PTABADJT            * Type of adjustment
+.
+          PACK      KEY27,PTABADMN,PTABENCT,PTABINVN,PTABADJT,SP70
+          CALL      RDPTABF1
+          BRANCH    OVRCD,IABF1000
+.
+          MOVE      FORM104,PTABADJV       * Value of adjustment
+          PACK      PTABCDES,ADJMDESC,SP70    * Description of adjustment
+.
+          PACK      PTABUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTABUDAT
+          CLOCK     TIME,PTABUTIM
+          MOVE      WBSEUID,PTABUUID
+          CALL      UPPTABF1
+.
+          GOTO      IABF9999
+.
+IABF1000  CALL      CLPATABF                 * Clear fields
+          MOVE      "5",PTABABFT             * Type of ABF Details
+          UNPACK    KEY27,PTABADMN,PTABENCT,PTABINVN,PTABADJT
+          MOVE      FORM104,PTABADJV       * Value of adjustment
+          PACK      PTABCDES,ADJMDESC,SP70    * Description of adjustment
+.
+          PACK      PTABCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTABCDAT
+          CLOCK     TIME,PTABCTIM
+          MOVE      WBSEUID,PTABUUID
+.
+          CALL      RAPTABF1
+          IF        OVRCD=1
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRPTABF1
+            TRAPCLR   IO
+          ENDIF
+.
+IABF9999  RETURN
++
+.******************************************************************************
+.         Medical Staff or Non Medical Staff attending
+.******************************************************************************
+MEDS0000  MOVE      ALENHCP,KEY10
+          CALL      RDPMHCP1
+          BRANCH    OVRCD,MEDS9999
+.
+          MATCH     SP70,PMHCSPC1
+          GOTO      MEDS9999 IF EQUAL
+.
+          PACK      KEY5,ANSD,ANST,PMHCSPC1
+          CALL      RDCODE1
+          BRANCH    OVRCD,MEDS9999
+.
+          MATCH     "M",PTCDUD10
+          IF        @EQUAL
+            MOVE      "1",MEDSTAFF     * Medical Staff
+          ELSE
+            MATCH     "N",PTCDUD10
+            IF        @EQUAL
+              MOVE      "2",MEDSTAFF   * Non Medical Staff
+            ENDIF
+          ENDIF
+MEDS9999  RETURN
++
+.******************************************************************************
+.         Get Referral/Contact Tier code             
+.         Tier 2 code from cat zG, IF or CG
+.            - bhs from cat zG,
+.            - stv from cat IF
+.         Multdisciplinary contact from cat zH (ind2=M)
+.******************************************************************************
+RTER0000  MOVE      SP70,TIERCODE
+          MOVE      RDEPCODE,KEY5                  * Referral Department
+          CALL      RDCODE1
+          BRANCH    OVRCD,RTER9999
+.
+          IF        MEDSTAFF=1
+            UNPACK    PTCDUD10,TIERCODE            * Medical staff - UDF 10
+          ELSE
+            IF        MEDSTAFF=2
+              UNPACK    PTCDUD11,TIERCODE          * Non Medical Staff - UDF 11
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,ALENUC34
+          IF        !@EQUAL
+            MOVE      "zH",KEY2
+            PACK      KEY5,KEY2,ALENUC34             * Referral Contact Purpose
+            CALL      RDCODE1
+            IF        OVRCD=0
+              MATCH     "M",TCINDC2
+              IF        @EQUAL
+                MOVE      ONE,MDISFLAG               * Multidisciplinary Contact
+              ENDIF
+            ENDIF
+          ENDIF
+          GOTO     RTER9999
+.
+RTER9999  RETURN
++
+.*******************************************************************************
+.         Deleting existing ABF Patient details (patabfaf)
+.*******************************************************************************
+DPAB0000  PACK      KEY27,KEY8,SP70
+          CALL      RSPTABF1
+          CALL      RKPTABF1
+          BRANCH    OVRCD,DPAB9999
+.
+          MATCH     KEY8,PTABADMN       * Same admission no ?
+          GOTO      DPAB9999 IF NOT EQUAL
+.
+          MATCH     SP70,PTABINVN
+          GOTO      DPAB9999 IF NOT EQUAL  * Invoice must be blank
+.
+          PACK      KEY27,PTABADMN,PTABENCT,PTABINVN,PTABADJT
+          CALL      DEPTABF1
+          GOTO      DPAB0000
+.
+DPAB9999  RETURN
++
+.******************************************************************************
+
+.
+         INC       CLPATABF
+         INC       VALCONTR
+         INC       GETCNEFF
+.
+         INC       OUTPWOIO/INC
+         INC       PATABFIO/INC
+         INC       PMSADJIO/INC
+         INC       PMSHCPIO/INC
+         INC       PATFX1IO/INC
+         INC       PATCFAIO/INC
+         INC       PMSCIDIO/INC
+         INC       PMSNEPIO/INC
+         INC       IBAOVRIO/INC
+.
+NDOT9999  ENDPROC

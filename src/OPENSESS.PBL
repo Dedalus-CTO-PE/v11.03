@@ -1,0 +1,413 @@
+.*******************************************************************************
+.*                              OPENSESS.PBL                                   *
+.*             Common routines used by OUTWEB05 and IBAOUT13                   *
+.*             to open outpatient sessions                                     *
+.*******************************************************************************
+.* Mods:                                                                       *
+.* V11.00.01 03/12/2020  Ebon Clements    TSK 0876663                          *
+.*           Created include                                              
+.*******************************************************************************
+.------------------------------------------------------------
+.              Total Slots & Time Statistics
+.   Returns  SLCOUNT : Total Slots Scheduled
+.            STATTIME: Total Time Scheduled
+.                                         called by: OUTSES00
+.------------------------------------------------------------
+SLOTOT00  MOVE      ZERO,SLCOUNT
+          MOVE      ZERO,NEWSLOTS
+          MOVE      ZERO,REVSLOTS
+          MOVE      ZERO,SPCSLOTS
+.
+          PACK      KEY18,WBSESIT,OTCLI001,OTMAS001,OTMAS002,SP70
+          CALL      RDMASA1          * Get Slot duration for total time stat
+          BRANCH    OVRCD,SLOTOT99
+.
+          PACK      KEY28,WBSESIT,OTHED002,OTHED003,OTHED004:
+                          OTHED005,OTHED006,SP70
+          CALL      RDOTHED1
+          BRANCH    OVRCD,SLOTOT99
+.
+          UNPACK    OTHESTRT,KEY2,KEY1,MIN   * (HH:MM) Start Session Time
+          MOVE      KEY2,STRTHOUR
+          MOVE      MIN,STRTMIN
+.
+          UNPACK    OTHESEND,KEY2,KEY1,MIN   * (HH:MM) End Session Time
+          MOVE      KEY2,ENDHOUR
+          MOVE      MIN,ENDMIN
+.
+          IF        STRTMIN > ENDMIN
+            ASSIGN    STRTMIN-ENDMIN,MINTIME
+            ASSIGN    SIXTY-MINTIME,MINTIME
+            ASSIGN    ENDHOUR-STRTHOUR,F2
+            ASSIGN    F2-ONE,F2
+          ELSE
+            ASSIGN    ENDMIN-STRTMIN,MINTIME
+            ASSIGN    ENDHOUR-STRTHOUR,F2
+          ENDIF
+.
+          PACK      STATTIME,F2,COLON,MINTIME
+          REP       " 0",STATTIME
+.
+          PACK      KEY31,WBSESIT,OTHED002,OTHED003,OTHED004:
+                          OTHED005,OTHED006,SP70
+          CALL      RDSMASB1
+SLOTOT10  CALL      RDKMASB1
+          BRANCH    OVRCD,SLOTOT99
+          MATCH     WBSESIT,OMBSITE
+          GOTO      SLOTOT99 IF NOT EQUAL
+          MATCH     OTHED002,OMBCLIN
+          GOTO      SLOTOT99 IF NOT EQUAL
+          MATCH     OTHED003,DOMBDAY
+          GOTO      SLOTOT99 IF NOT EQUAL
+          MATCH     OTHED004,OMBSTRT
+          GOTO      SLOTOT99 IF NOT EQUAL
+          MATCH     OTHED005,OTMBSHNO
+          GOTO      SLOTOT99 IF NOT EQUAL
+          MATCH     OTHED006,OTMBSDAT
+          GOTO      SLOTOT99 IF NOT EQUAL
+.
+          PACK      KEY5,ANSC,ANSV,OMBVTYP,SP70
+          CALL      RDCODE1
+          BRANCH    OVRCD,SLOTOT10
+.
+          MATCH     ANSU,TCINDC6       * Skip unavailable slots
+          GOTO      SLOTOT10 IF EQUAL
+.
+          ADD       ONE,SLCOUNT        * Increment Slot counter
+          COMPARE   ZERO,OMBEXSL
+          GOTO      SLOTOT10 IF NOT EQUAL
+.
+          CALL      CSLT0000           * Count Slots
+          GOTO      SLOTOT10
+.
+SLOTOT99  RETURN
+.
+.**********************************************************************
+.*                               CSLT0000                             *
+.*        Count Slots                                                 *
+.**********************************************************************
+CSLT0000  MOVE      "CV",KEY2
+          PACK      KEY5,KEY2,OMBVTYP
+          CALL      RDCODE1
+          BRANCH    OVRCD,CSLT9999
+.
+          MATCH     ANSN,TCINDC1
+          GOTO      CSLT2000 IF NOT EQUAL
+          ADD       ONE,NEWSLOTS
+          GOTO      CSLT9999
+.
+CSLT2000  MATCH     ANSR,TCINDC1
+          GOTO      CSLT3000 IF NOT EQUAL
+          ADD       ONE,REVSLOTS
+          GOTO      CSLT9999
+.
+CSLT3000  MATCH     ANSS,TCINDC1
+          GOTO      CSLT9999 IF NOT EQUAL
+          ADD       ONE,SPCSLOTS
+          GOTO      CSLT9999
+.
+CSLT9999  RETURN
+.
+.------------------------------------------------------------
+. Loop through months and save Sessions
+. Set and save session details for each month
+.                                         called by: OUTSES00
+.------------------------------------------------------------
+SAVMON00  MOVE      ONE,MONTHNO
+          MOVE      ONE,WEEKNO
+          WHILE     (MONTHNO<=12)
+            CALL      IBACLOCK
+            WRITE     HTMLFILE;"<!-- ":
+                               "Month Number : ",MONTHNO:
+                               " Started : ",CTIMEIS:
+                               " -->"
+            WHILE     (WEEKNO<=5)
+              CALL      OPNSES00
+              ADD       ONE,WEEKNO
+            DO
+            ADD       ONE,MONTHNO
+            MOVE      ONE,WEEKNO
+          DO
+SAVMON99  RETURN
+.
+.------------------------------------------------------------
+. Open Session
+.------------------------------------------------------------
+OPNSES00  MATCH     SP70,MTHDTE[MONTHNO][WEEKNO]      * = corresponding date
+          GOTO      OPNSES99 IF EQUAL
+          MATCH     OTHESDAT,MTHDTE[MONTHNO][WEEKNO]  * = corresponding date
+          GOTO      OPNSES99 IF LESS
+          MATCH     SP70,OTHEDTCC
+          IF        !@EQUAL
+            MATCH     MTHDTE[MONTHNO][WEEKNO],OTHEDTCC
+            GOTO      OPNSES99 IF LESS
+          ENDIF
+.
+          PACK      KEY25,WBSESIT,OTCLI001,MTHDTE[MONTHNO][WEEKNO],OTMAS002,SP70
+OPNSES50  CALL      RDSESA1
+          IF        OVRCD=1
+            CALL      SESSAV00  * Save Variables for Clinic Open Session
+.
+            PACK      KEY25,OSESITE,OSECLIN,OSEDATE,OSESTRT,SP70
+            TRAP      WRTRAP IF IO
+            CALL      WRSESA1
+            TRAPCLR   IO
+          ENDIF
+.
+          MOVE      OSEDATE,USAGDATE    * DATE OF CLINIC
+          CALL      SESBOK00 * Set up booking record for template record
+.
+OPNSES99  RETURN
+.
+WRTRAP    NORETURN
+          GOTO        OPNSES50
+.
+.
+.------------------------------------------------------------
+. Moves cgi variables into file variables
+.------------------------------------------------------------
+SESSAV00  MOVE      WBSESIT,OSESITE    * SITE CODE
+          MOVE      OTCLI001,OSECLIN   * CLINIC ID
+          MOVE      MTHDTE[MONTHNO][WEEKNO],OSEDATE  * Usage Date (CCYYMMDD)
+          MOVE      OTMAS002,OSESTRT   * Session Start time
+          MOVE      OTMAS001,OSEDAY   * DAY INDICATOR 1=Mon
+          MOVE      SLCOUNT,OSESLOTS   * TOTAL SLOTS SCHEDULED
+          MOVE      ZERO,OSESLOTB      * TOTAL SLOTS BOOKED
+          MOVE      STATTIME,OSETIMES  * TOTAL TIME SCHEDULED
+          MOVE      SP70,OSETIMEU      * TOTAL TIME USED
+          MOVE      ZERO,OSEBNEW       * NUMBER OF NEW PATIENTS
+          MOVE      ZERO,OSEBRV        * NUMBER OF RE-VISITING PATIENTS
+          MOVE      ZERO,OSEBSPC       * NUMBER OF SPECIAL PATIENTS
+.
+          MOVE      NEWSLOTS,OSESSLTN
+          MOVE      REVSLOTS,OSESSLTR
+          MOVE      SPCSLOTS,OSESSLTS
+.
+          MOVE      ZERO,OSEANEW       * NUMBER OF NEW PATIENTS
+          MOVE      ZERO,OSEARV        * NUMBER OF RE-VISITING PATIENTS
+          MOVE      ZERO,OSEASPC       * NUMBER OF SPECIAL PATIENTS
+          MOVE      SP70,OSESCSTT      * CLINIC STATUS
+          MOVE      SP70,OSESCOMM      * CLEAR SESSION COMMENTS
+          MOVE      OTHECTYP,OSESCTYP  * CLINIC TYPE
+          MOVE      OTHESHNO,OSESSHNO  * SCHEDULE NUMBER
+          MOVE      OTHESDAT,OSESSDAT  * SCHEDULE DATE
+          MOVE      SP70,OSESGHCP      * Group Session HCP
+          MOVE      SP70,OSESPARE      * SPARE
+.
+SESSAV99  RETURN
+.
+.
+.-----------------------------------------------------------------
+. As each session is saved in SAVMON00, SESBOK00 is called
+. to sav a Clinic Session Booking record for each template record.
+. Parameters :
+.             USAGDATE: Session Date is passed in.
+.                                             called by: SAVMON00
+.-----------------------------------------------------------------
+SESBOK00  * Read Clinic Master File A to obtain OMATYP: Clinic Type as
+.         * is needed for the save to Clinic Session Booking file A
+.
+          PACK      KEY18,WBSESIT,OTCLI001,OTMAS001,OTMAS002,SP70
+          CALL      RDMASA1
+          BRANCH    OVRCD,SESBOK99
+.
+          PACK      KEY28,WBSESIT,OTHED002,OTHED003,OTHED004:
+                          OTHED005,OTHED006,SP70
+          CALL      RDOTHED1
+          BRANCH    OVRCD,SESBOK99
+.
+.         Update the last open session date in the slot template header
+.
+          MATCH     USAGDATE,OTHEDATE
+          GOTO      SESBOK05 IF NOT LESS
+.
+          MOVE      USAGDATE,OTHEDATE
+          CALL      UPOTHED1
+.
+.         Update the last open session date in the master record
+.
+SESBOK05  MATCH     USAGDATE,OMADATE
+          GOTO      SESBOK10 IF NOT LESS
+.
+          MOVE      USAGDATE,OMADATE
+          CALL      UPMASA1
+.
+.         Loop over the template
+.
+SESBOK10  PACK      KEY31,OTHESITE,OTHECLIN,OTHEWDAY,OTHESTRT:
+                          OTHESHNO,OTHESDAT,SP70
+          CALL      RDSMASB1
+SESBOK20  CALL      RDKMASB1
+          BRANCH    OVRCD,SESBOK99
+          MATCH     OTHESITE,OMBSITE          * Site ID
+          GOTO      SESBOK99 IF NOT EQUAL
+          MATCH     OTHECLIN,OMBCLIN          * Clinic ID
+          GOTO      SESBOK99 IF NOT EQUAL
+          MATCH     OTHEWDAY,DOMBDAY          * Day Indicator
+          GOTO      SESBOK99 IF NOT EQUAL
+          MATCH     OTHESTRT,OMBSTRT          * Start Time
+          GOTO      SESBOK99 IF NOT EQUAL
+          MATCH     OTHESHNO,OTMBSHNO         * Schedule Number
+          GOTO      SESBOK99 IF NOT EQUAL
+          MATCH     OTHESDAT,OTMBSDAT         * Schedcule Date
+          GOTO      SESBOK99 IF NOT EQUAL
+.
+.         Set up the booking record for this template record
+.
+          MOVE      OMBSITE,OBASITE       * Site Code
+          MOVE      OMBCLIN,OBACLIN       * Clinic ID
+          MOVE      USAGDATE,OBADATE      * Date of Clinic
+          MOVE      OMBSTRT,OBASTRT       * Start Time
+          MOVE      OMBSLOT,OBASLOT       * Slot Number
+          MOVE      OMBTIME,OBATIME       * Slot Time
+          MOVE      OTHECTYP,OBACTYP        * Clinic Type
+          MOVE      ZEROUR,OBAURNO        * U/R Number
+          MOVE      ZERO,OBAOUTNO         * Outpatient Number
+.
+          MOVE      "CV",CATEGORY
+          MOVE      OMBVTYP,CODE
+          CALL      GETCOD00
+          MATCH     "U",TCINDC6
+          IF        @EQUAL
+            MOVE      SEVEN,OBASTAT       * Slot Status Unavailable
+          ELSE
+            MOVE      ZERO,OBASTAT        * Slot Status
+          ENDIF
+.
+          MOVE      OMBVTYP,OBAVISIT      * Visit Type(N,R,S) Code =CV
+          MOVE      OMBDAY,OBADAY         * Day Indicator
+          MOVE      OTMBRESV,OTBARESV     * number of reserved days
+          MOVE      ZERO,OBAEXSL          * Parent Slots or Non Extended Slots
+          MOVE      SP4,OBAFINST          * Final Stats Report MTH/YEAR
+          MOVE      SP2,OBALOCK           * Locking
+          MOVE      ZERO,OBAPXRAY         * Xray Pulling List indicator
+          MOVE      SP20,OBABKDTE         * Book Date/Time
+          MOVE      ZERO,OBAPULL          * Pulling List Indicator
+          MOVE      SP3,OBASESST          * Session Status Code(CS)
+          MOVE      SP10,OBADISCH         * Discharge Status(DO)
+          MOVE      SP10,OBASPARA         * Spare
+.
+          MOVE      OBASLOT,SLOTOPT  * Save the slot number for Special & New
+.
+.         Check if the record already exists
+.
+          PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT
+          CALL      RDABOKA1
+          BRANCH    OVRCD,SESBOK30        * Write new record
+          GOTO      SESBOK20              * Read in the next template record
+.
+SESBOK30  PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT
+          CALL      WRBOKA1
+          CALL      BOKMLT00    * Check for Multi-Hospitals
+          CALL      BOKAUD00    * Clinic Session Booking File A Audit
+.
+.         Check if this is a new or special slot
+.
+          MATCH     OBAVISIT,SP3     * Visit Type (N,R,S)
+          GOTO      SESBOK20 IF EQUAL
+          MOVE      "CV",KEY2       * Visit Type Category
+          PACK      KEY5,KEY2,OBAVISIT
+          CALL      RDCODE1
+          BRANCH    OVRCD,SESBOK20
+.
+          IF        TCFORM6=0
+            MOVE      ONE,TCFORM6
+          ENDIF
+.
+          MOVE      TCFORM6,OMANEWSL        * new slot
+          MOVE      TCFORM6,OMASPCSL        * special slot
+.
+          COMPARE   ONE,TCFORM6             * check for extended slots
+          GOTO      SESBOK20 IF EQUAL
+.
+          MOVE      TCFORM6,FORM2           * No. of slots for new patients
+          MOVE      ZERO,COUNTS
+.
+          GOTO      SESBOK50
+.
+.         Loop until all extra slots have been written
+.
+SESBOK50  ADD       ONE,COUNTS
+          COMPARE   FORM2,COUNTS
+          GOTO      SESBOK20 IF EQUAL  * Extra Slots Written get to next record
+
+          CALL      RDKMASB1
+          BRANCH    OVRCD,SESBOK99
+          MATCH     OTHESITE,OMBSITE
+          GOTO      SESBOK99 IF NOT EQUAL
+          MATCH     OTHECLIN,OMBCLIN
+          GOTO      SESBOK99 IF NOT EQUAL
+          MATCH     OTHEWDAY,DOMBDAY
+          GOTO      SESBOK99 IF LESS
+          MATCH     OTHESTRT,OMBSTRT
+          GOTO      SESBOK99 IF NOT EQUAL
+          MATCH     OTHESHNO,OTMBSHNO
+          GOTO      SESBOK99 IF NOT EQUAL
+          MATCH     OTHESDAT,OTMBSDAT
+          GOTO      SESBOK99 IF NOT EQUAL
+.
+.         Setup an extended record for this point
+.
+          MOVE      OMBSITE,OBASITE
+          MOVE      OMBCLIN,OBACLIN
+          MOVE      OMBSTRT,OBASTRT
+          MOVE      OMBSLOT,OBASLOT
+          MOVE      OMBTIME,OBATIME
+          MOVE      OTHECTYP,OBACTYP
+          MOVE      ZEROUR,OBAURNO
+          MOVE      ZERO,OBAOUTNO
+          MOVE      OMBVTYP,OBAVISIT
+          MOVE      OMADAY,OBADAY
+          MOVE      OTMBRESV,OTBARESV * Number of reserved days
+          MOVE      SLOTOPT,OBAEXSL   * Moves Parent Slot No.into Ext Slot Field
+          MOVE      SP4,OBAFINST
+          MOVE      SP10,OBADISCH
+          MOVE      SP10,OBASPARA
+.
+.         Check if a record already exists at this point
+.
+          PACK      KEY28,OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT
+          CALL      RDABOKA1
+          BRANCH    OVRCD,SESBOK60
+          GOTO      SESBOK50         * Increment and write Extended slot (loop)
+.
+.         Write a new record
+.
+SESBOK60  MOVE      THREE,OBASTAT    * Extended slot
+          PACK      KEY28 WITH OBASITE,OBACLIN,OBADATE,OBASTRT,OBASLOT
+          CALL      WRBOKA1
+          CALL      BOKAUD00         * Clinic Session Booking File A Audit
+          GOTO      SESBOK50         * Increment and write Extended slot (loop)
+.
+SESBOK99  RETURN
+.
+.----------------------------------------------------------------
+.  Write audit, if control file variable (HOAUDA) is switched on
+.                                             called by: SESBOK00
+.----------------------------------------------------------------
+BOKAUD00  BRANCH    HOAUDA,BOKAUD99     * Audit not switched on!
+          CLOCK     TIME,OTBAAUDT              * Time of change
+          PACK      OTBAAUDD,CCC,CYY,CMM,CDD   * Date of change
+          REP       " 0",OTBAAUDD
+          MOVE      "A",OTBAAUDR     * Added record
+          MOVE      PASSCODE,OTBAAUDO
+          MOVE      PORT,OTBAAUDP
+          MOVE      ONE,OTBAAUDS
+          PACK      KEY19,OTBAAUDD,OTBAAUDT,OTBAAUDP,OTBAAUDR
+          CALL      AWOTBOA          * write audit
+.
+BOKAUD99  RETURN
+.
+.------------------------------------------------------------------
+.  Write a record to the Open Sessions
+.                                              called by : SESBOK00
+.------------------------------------------------------------------
+BOKMLT00  PACK      KEY34,OTMAHOSP,OMASITE,OTMACLSE,OMACLIN,OBADATE,OMASTART
+          CALL      RAOTOSF1
+            IF        OVRCD=1
+              UNPACK    KEY34,OTOSHOSP,OTOSSITE,OTOSSESS,OTOSCLID:
+                              OTOSDATE,OTOSTIME
+              MOVE      OTHECTYP,OTOSCTYP
+              CALL      WROTOSF1
+            ENDIF
+BOKMLT99  RETURN

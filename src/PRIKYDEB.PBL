@@ -1,0 +1,601 @@
+.
+.
+.         PRIKYDEB.PBL
+.         ------------
+.         Subroutine to key in either a Debtor or U/R number
+.
+.         Requires : PRICONFD.INC       PRIDBTFD.INC       
+.                    PATMA1FD.INC       PRIHDBFD.INC       
+.                    PATGSRFD.INC       PRIINVFD.INC       
+.                    PRIVRDEB.INC
+.                    PATSNDX            PATSRCH (and associated files for
+.                                                this include)
+.                    [ Keyin Column in CCOL  ]
+.                    [ Keyin Row    in CVERT ]
+.                                       PATIOMAS.INC
+.                    PRIHDBIO.INC       PATGSRIO.INC
+.                    PRIINVIO.INC       PRIDBTIO.INC
+.                    THIRTY3       FORM      "33"
+.
+.         Returns  : Debtor or U/R number in VDEBTOR
+.                    Debtor details in PRIDBTFD variables
+.                    PMI details in INC       PATMA1FD variables
+.                    File used in VSCANPMI (0=Debtor file, 1=PMI file)
+.                    Debtor name in VDEBNAME
+.                    Debtor address in VDEBADD*
+.                    Debtor Person responsible for a/c name in VPRANAME
+.                    Debtor Person responsible for a/c address in VPRAADD*
+.                    OVRCD=1 if <RETURN> or spaces entered on keyin, 
+.                            otherwise 0
+.
+.         Component routines used in main subroutine :
+.         --------------------------------------------
+.         SNSEARCH - PMI file search
+.         DMSEARCH - Debtors file search
+.         LDDETAIL - Loads debtor/PMI details into V variables
+.         FORMNAME - Formats a name string (surname, Init1, init2, etc)
+.         PACKNAME - Formats a name string (title, init1, init2, etc, surname)
+.
+.         MODS: 
+.         V9.03.02  17/03/2004  Lina Vo          CAR 44110
+.                   Added skip Merge patient message when PGM=IBARSH in
+.                   LDDETAIL for web scheduled programs.
+.         V9.03.01  01/03/2004  Lina Vo
+.                   Removed use of PRIDBTFD & IO.
+.         V9.00.02  06/11/2002  J.Tan 
+.                   Mods to check for merge U/R
+.         V9.00.01  13/06/2001  Steve Armstrong     ACT PMI mods
+.                   Fixed bug in accepting 8 digit PMI U/R numbers
+.*        V5.10.B01 05/04/2001  Glenn Saunders                                *
+.*                  Replace references of PATSUR (now defunkt) with PATGSR.   *
+.         V5.07.01  09/06/1999  Greg Horvat
+.                   Recompiled for PRIINVIO - Fixed problem with direct read
+.                   08/10/1998  Glenn Berry      5.07 changes
+.******************************************************************************
+.               V5.01 09/06/89 K.Peak       SRF  4212
+.                     Checked if include being used by receipting system
+.               V5.02 22.08.89  E.Phan      SRF 102081
+.                     Fixed read of invoice file. (INVP1 -> INVP3)
+.               V5.03 08.11.89  D.Di.Paola  SRF 102922
+.                     Fixed exit point on debtor surn search if no match found
+.               V5.04 10/01/90  E.Phan      SRF 598
+.                     Serv Doct wiped out for multiple inv. Saved & restored.
+.               V5.05 22/05/90  S.O'Gorman  SRF 105028
+.                     Cleared invoice dollar amounts if no P.R.A found
+.               V5.06 06/09/90  D.Di.Paola  SRF 106274
+.                     Cleared invoice dollar amounts if no P.R.A found.
+.               V5.07 18/10/90  D.Di.Paola  SRF 106485   SRF 106817
+.                     Fixed for extra digit on debtor when entering PMI No.
+.                     by moving debtor no. to purno and then moving purno
+.                     back to debtor no. if reading pmi master....
+.
+.               V6.00 11/06/91  DIG
+.                     Modified this include to work properly for release 6
+.                     07/10/92  Steve Armstrong
+.                     Modified to accept alphanumerics for debtor number with
+.                     VDEBTOR changed to a DIM8
+.            V5.03.00 17/07/95  Paul Howells     SRF 610623
+.                     allow alphanumeric UR number.                        
+.            V5.03.01 04/08/1995  Steve Armstrong  
+.                     Mods to right justify numeric debtor number without
+.                     using form field (as leading zero is lost-Austin # at HRH)
+.                     Also fixed passing of U/R number after returning from
+.                     PMI search and added same facility for debtor number.
+.                     
+.
+.------------------------------------------------------------------------------
+.
+PRIKYDEB  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,THIRTY3;*180,PRCNURCH
+          MOVE      ZERO,OVRCD
+          MOVE      ZERO,VSCANPMI                * set PMI/Debtor flag
+          MOVE      SP9,VDIM9
+          MOVE      ZERO,VDEBTOR
+.
+.         Get debtor number
+.
+..        KEYIN     *P1:24,*EL,"(If U/R required, precede the code with a '":
+..                  *DV,PRCNURCH,"')":
+          KEYIN     *PCCOL:CVERT,*DV,UNDLN9:
+                    *PCCOL:CVERT,*V2LON,VDIM9:
+                    *PCCOL:CVERT,*DV,VDIM9
+.
+          RESET     VDIM9
+          GOTO      PRIKY990 IF EOS            * nothing entered
+.
+...          SCAN      PRCNURCH,VDIM9             * see if special character for
+...          GOTO      PRIKY100 IF NOT EQUAL        U/R keyin has been entered 
+.
+          MOVE      ONE,VSCANPMI               * yes - scan PMI file
+.
+.------ see if a ? has been entered ------
+.
+PRIKY100  RESET     VDIM9
+          SCAN      QUEST,VDIM9                * see if ? entered
+          GOTO      PRIKY300 IF NOT EQUAL        
+.
+.         "?" option
+.
+          MOVE      ONE,SSCREEN             * set flag for screen restore
+          BRANCH    VSCANPMI,PRIKY200       * PMI search
+.
+..          CALL      DMSEARCH              * Surname search on the Debtors file
+.
+          MOVE      ZERO,OVRCD
+.
+..          IF        SRCHFLAG = 1
+..            GOTO    PRIKY500
+..          ELSE
+..            GOTO      PRIKY990              * (E)xit
+..          ENDIF
+.
+.------ do the surname search for the PMI file ------
+.
+PRIKY200  MOVE      CVERT,CLNO              * Save CVERT in a handy variable
+          ADD       ONE,CVERT
+          DISPLAY   *P1:CVERT,*EF
+          ADD       ONE,CVERT
+          DISPLAY   *P1:CVERT,*V2LON,"*** Patient Master Index name search ***"
+          ADD       TWO,CVERT
+          MOVE      TWO,SRCHOPT             * (Refer to PATSRCH.PBL)
+.
+          CALL      STRCT000                * Surname search on the PMI file
+.
+          MOVE      ZERO,OVRCD
+.
+          IF        SRCHFLAG = 1
+            MOVE      CPPURNO,VDEBTOR       * item selected
+            GOTO      PRIKY500
+          ELSE
+            GOTO      PRIKY990              * (E)xit selected
+          ENDIF
+.
+.------ Continue entered, so return for keyin again ------
+.
+PRIKY230  MOVE      CLNO,CVERT
+          GOTO      PRIKYDEB
+.
+.------ ? has not been entered ------
+.
+PRIKY300  MATCH     "IBARCP99",PGM          * receipting program ?
+          GOTO      PRIKY320 IF NOT EQUAL   * no
+.
+          MOVE      ONE,SRCHFLAG
+.
+.------ set up the VDEBTOR field with the correct value for validation ------
+.
+PRIKY320  COMPARE   ZERO,VSCANPMI           * see if we have a debtor number
+          GOTO      PRIKY350 IF EQUAL
+.
+          UNPACK    VDIM9,ANS,VDIM8         * extract the U/R part of the keyin
+          MATCH     ANS,SP1
+          IF        !@EQUAL
+            MOVE      VDIM9,VDIM8          
+          ENDIF
+.
+          GOTO      PRIKY360
+.
+.------ we have a debtor number ------
+.
+PRIKY350  MOVE      VDIM9,VDIM8
+.
+.------ If debtor number, allow alphnumerics.  If PMI number allow only numerics
+.       at this stage.
+.------ If numeric right justify, if alphanumeric left justify
+.
+PRIKY360  RESET     VDIM8
+          IF        VSCANPMI = 1
+             TYPE      VDIM8
+             GOTO      PRIKY380 IF NOT EQUAL
+.
+.            SRF 611037 - If this is a numeric PMI number, then right justify
+.            the number so that any leading zeros will not be lost (at HRH
+.            they have numbers for the Austin Hospital that are prefixed with
+.            zeros)
+.
+             MOVELPTR  VDIM8,FORM1
+             IF        FORM1 = 8
+               MOVE      VDIM8,VDEBTOR
+             ELSE
+               LOAD      VDEBTOR,FORM1,SP7,SP6,SP5,SP4,SP3,SP2,SP1
+               ENDSET    VDEBTOR
+               APPEND    VDIM8,VDEBTOR
+               RESET     VDEBTOR      
+             ENDIF
+             GOTO      PRIKY500
+          ELSE
+             TYPE      VDIM8                   * numeric ?
+             GOTO      PRIKY400 IF NOT EQUAL   * no     
+          ENDIF 
+.  
+          MOVE      VDIM8,VFORM8 
+          MOVE      VFORM8,VDEBTOR 
+          GOTO      PRIKY500 
+.
+PRIKY380  CALL      RGHJ0000                   * right justify alpha ur number
+.  
+PRIKY400  MOVE      VDIM8,VDEBTOR
+          PACK      VDEBTOR,VDEBTOR,SP8
+PRIKY500  CALL      LDDETAIL             * load debtor/PMI details into vars.
+          BRANCH    OVRCD,PRIKY900,PRIKYDEB
+.
+          DISPLAY   *PCCOL:CVERT,*V2LON,SP1,VDEBTOR;
+.
+          RETURN
+.
+PRIKY900  BRANCH    VSCANPMI,PRIKY950
+.
+          DISPLAY   *P1:24,*EL,*B,"Debtor number not valid. ";
+          CALL      HITENTER
+.
+          GOTO      PRIKYDEB
+.
+PRIKY950  DISPLAY   *P1:24,*EL,*B,"PMI number not valid. ";
+          CALL      HITENTER
+.
+          GOTO      PRIKYDEB
+.
+PRIKY990  MOVE      ONE,OVRCD                    * set flag to exit
+          RETURN
+.
+.****************************************************************************
+. RGHJ0000 - Right justify alphanumeric U/R number
+.****************************************************************************
+RGHJ0000  MOVE      VDIM8,URDIM8
+          MOVE      SP8,VDIM8
+          SQUEEZE   URDIM8
+          GOTO      RGHJ9999 IF EOS
+.
+          SETLPTR   VDIM8
+          GOTO      RGHJ9999 IF EOS
+          ENDSET    VDIM8
+          ENDSET    URDIM8
+.
+RGHJ1000  CMOVE     URDIM8,VDIM8
+          BUMP      URDIM8,-1 
+          GOTO      RGHJ5000 IF EOS
+          BUMP      VDIM8,-1 
+          GOTO      RGHJ9999 IF EOS
+.
+          GOTO      RGHJ1000
+.
+.-------- Pack with spaces
+.
+RGHJ5000  BUMP      VDIM8,-1 
+          GOTO      RGHJ9999 IF EOS
+          CMOVE     SP1,VDIM8
+.
+          GOTO      RGHJ5000
+.
+RGHJ9999  RESET     VDIM8 
+          SETLPTR   VDIM8
+          RETURN
+.------------------------------------------------------------------------------
+.         Performs a Surname search on the Debtor file
+.         Requires : All the "SS" variables
+.                    PRIDBTFD.INC
+.                    PRIVRDEB.INC
+.                    PATDBTIO.INC
+.         Output   : Displays within subroutine
+.------------------------------------------------------------------------------
+.
+DMSEARCH  MOVE      SP20,SSSNAME
+          PACK      SSGNAME,SP10,SP4
+          MOVE      ZERO,SRCHFLAG
+          MOVE      ZERO,FORM2
+.
+          MOVE      CVERT,VCVERT
+          ADD       ONE,VCVERT
+          DISPLAY   *P1:VCVERT,*EF
+          ADD       ONE,VCVERT
+          DISPLAY   *P1:VCVERT,*V2LON,"*** Debtor Master name search ***"
+          ADD       TWO,VCVERT
+.
+.         Get debtor number
+.
+          KEYIN     *P1:VCVERT,*EF,"Surname:",*DV,UNDLN20:
+                    *P9:VCVERT,*V2LON,SSSNAME
+.
+          RESET     SSSNAME
+          GOTO      DMEXIT IF EOS                * nothing entered
+.
+          CMATCH    SP1,SSSNAME                  * see if spaces were entered
+          GOTO      DMEXIT IF EQUAL
+.
+.         Get given name
+.
+DMGIVEN   KEYIN     *P30:VCVERT,*EL,"Given:",*DV,UNDLN10,*DV,UNDLN4:
+                    *P36:VCVERT,*V2LON,SSGNAME
+          RESET     SSGNAME
+.
+DMSCAN    DISPLAY   *P1:VCVERT,*EF,*ULON,"Item",*P6:VCVERT,"Debtor  ":
+                    *P15:VCVERT,"Patient's Name",SP10,SP9:
+                    *P49:VCVERT,"  D.O.B.  ",*P60:VCVERT,"Address",SP10,SP2
+.
+          ADD       ONE,VCVERT                   * set screen line
+          MOVE      ZERO,SSFOUND                 * set flag - no record found
+.
+. skip search PP debtor - no longer used
+.
+          GOTO      DMSCEXIT
+.
+...          PACK      PRDBSNAM WITH SSSNAME,SP20
+...          PACK      PRDBGNAM WITH SSGNAME,SP30
+.
+...          PACK      KEY53 WITH PRDBSNAM,PRDBGNAM,SP10
+...          CALL      RSPRDB2                      * position in file using
+.                                                * surname/given name
+...DMSCANON  CALL      RKPRDB2                      * read next record
+...          BRANCH    OVRCD OF DMSCEXIT            * end of file
+.
+...          MATCH     PRDBSNAM,SSSNAME             * same surname ?
+...          GOTO      DMSCEXIT IF NOT EQUAL        * no
+.
+...          MATCH     VSP14,SSGNAME                * given name entered ?
+...          GOTO      DMOKGIV IF EQUAL             * no
+.
+...          MATCH     PRDBGNAM,SSGNAME             * surname matches ?
+...          GOTO      DMSCANON IF NOT EQUAL        * no - get next record
+.
+...DMOKGIV   MOVE      PRDBGNAM,VDIM15
+.
+...DMDISPLY  UNPACK    PRDBDOBH,CCENT,CYEAR,CMON,CDAY
+...          CALL      PACDATE
+...          ADD       ONE,FORM2                    * increment record counter
+...          DISPLAY   *P1:VCVERT,*V2LON,FORM2,*P6:VCVERT,PRDBDEBT:
+...                    *P15:VCVERT,PRDBSNAM,*P36:VCVERT,VDIM15:
+...                    *P48:VCVERT,SP1,CPCDATE,*P60:VCVERT,PRDBADD1
+...          ADD       ONE,VCVERT                   * increment screen line count
+...          MOVE      PRDBDEBT,DEBTNUM[FORM2],PRDBDEBT * load debtor number array
+...          MOVE      ONE,SSFOUND                  * set record found flag
+.
+...DMCHKLN   COMPARE   "23",VCVERT                  * page full ?
+...          GOTO      DMKEYOPT IF NOT LESS         * yes
+...          GOTO      DMSCANON                     * no
+.
+.         Page full so get user response
+.
+DMKEYOPT  CALL      DOPTN000
+          BRANCH    EXIT,DMEXIT:                 * exit selected
+                         DMSSRCH:                * search selected
+                         DMSEARCH                * next selected
+.
+.         Debtor number selected
+.
+          MOVE      DEBTNUM[ALTFORM2],VDEBTOR     * load debtor number
+          GOTO      DMCONT
+.
+DMSSRCH   
+...          COMPARE   "23",VCVERT                  * make sure we have a full
+...          GOTO      DMSMORE IF NOT LESS            page for searching more
+.
+          BEEP
+          GOTO      DMKEYOPT
+.
+.------ we want to search more ------
+.
+...DMSMORE   MOVE      CVERT,VCVERT                 * reset screen line number
+...          ADD       FIVE,VCVERT
+...          DISPLAY   *P1:VCVERT,*EF
+...          MOVE      ZERO,FORM2                   * reset record counter
+...          GOTO      DMSCANON                     * get next record
+.
+.         No more records to display
+.
+DMSCEXIT  BRANCH    SSFOUND OF DMSCEND           * records already found
+          DISPLAY   *P1:24,*EL,*B," No matching records found. ";
+          CALL      HITENTER
+          GOTO      DMKEYOPT
+.
+DMSCEND   DISPLAY   *P1:24,*EL,*V2LON:
+                    *P50:24,"** No more patients **",*W2;
+          GOTO      DMKEYOPT
+.
+DMCONT    MOVE      ONE,SRCHFLAG                 * set search completed flag
+.
+DMEXIT    RETURN
++
+.**************************************************************************
+.*                             DOPTN000                Called by:         *
+.*                   get the option selected                              *
+.* Returns: EXIT 0 = valid item selected                                  *
+.*               1 = exit selected                                        *
+.*               2 = search selected                                      *
+.*               3 = next selected                                        *
+.**************************************************************************
+.
+DOPTN000  KEYIN     *P1:24,*EL,"Select item, (":
+                    *V2LON,*DV,ANSE,*HOFF,")xit,":
+                    " (",*V2LON,*DV,ANSS,*HOFF,")earch more,":
+                    " (",*V2LON,*DV,ANSN,*HOFF,")ext ? ",*DV,UNDLN2:
+                    *P46:24,*JR,*V2LON,CKYIDEF2:
+                    *P46:24,*DV,CKYIDEF2
+.
+          PACK      CKYIDEF2,CKYIDEF2,SP2
+          TYPE      CKYIDEF2                * numeric
+          GOTO      DOPTN500 IF EQUAL       * yes
+.
+          REP       "s2S2n3N3e1E1",CKYIDEF2
+          MOVE      CKYIDEF2,FORM1
+          BRANCH    FORM1,DOPTN700:         * exit
+                          DOPTN800:         * search
+                          DOPTN900          * next
+.
+          BEEP                              * invalid
+          GOTO      DOPTN000
+.
+DOPTN500  MOVE      CKYIDEF2,ALTFORM2
+          IF        (ALTFORM2 < 1 | ALTFORM2 > FORM2)
+            BEEP
+            GOTO      DOPTN000
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      DOPTN999
+.
+DOPTN700  MOVE      ONE,EXIT
+          GOTO      DOPTN999
+.
+DOPTN800  MOVE      TWO,EXIT
+          GOTO      DOPTN999
+.
+DOPTN900  MOVE      THREE,EXIT
+.
+DOPTN999  RETURN
++
+.******************************************************************************
+.
+.         Miscellaneous routines
+.
+.------------------------------------------------------------------------------
+.         Load debtors details
+.------------------------------------------------------------------------------
+.
+LDDETAIL  MOVE      ONE,OVRCD
+          BRANCH    VSCANPMI,LDDET200
+.
+.         Get debtor details
+.
+...          MOVE      SP30,PRDBSNAM
+...          MOVE      SP30,PRDBGNAM
+...          MOVE      SP30,FNSNAME
+...          MOVE      VDEBTOR,KEY8
+...          CALL      RDPRDB1
+...          BRANCH    OVRCD,LDDET900
+.
+...          MOVE      PRDBSNAM,FNSNAME
+...          MOVE      SP30,VDEBNAME
+...          MATCH     SP20,PRDBSNAM
+...          GOTO      LDGOTSNM IF NOT EQUAL
+...          MOVE      "[Missing Surname]",PRDBSNAM
+...LDGOTSNM  PACK      VDEBNAME WITH PRDBSNAM,SP30
+...          RESET     VDEBNAME,30
+...LDSLOOP   CMATCH    SP1,VDEBNAME
+...          GOTO      LDSEND IF NOT EQUAL
+...          BUMP      VDEBNAME,-1
+...          GOTO      LDSLOOP
+...LDSEND    APPEND    ",",VDEBNAME
+...          APPEND    SP1,VDEBNAME
+...          APPEND    PRDBGNAM,VDEBNAME
+...          RESET     VDEBNAME
+.
+          MOVE      "Unknown Debtor",VDEBNAME
+          PACK      VDEBNAME,VDEBNAME,SP70
+.
+...          MOVE      PRDBBADD,VBADEBT
+...          MOVE      PRDBADD1,VDEBADD1
+...          MOVE      PRDBADD2,VDEBADD2
+...          MOVE      PRDBADD3,VDEBADD3
+...          MOVE      PRDBPOST,VDEBPOST
+.
+          MOVE      SP70,VBADEBT
+          MOVE      SP70,VDEBADD1
+          MOVE      SP70,VDEBADD2
+          MOVE      SP70,VDEBADD3
+          MOVE      SP70,VDEBPOST
+.
+          MOVE      SP10,VDOB
+...          MATCH     SP8,PRDBDOBH                 * any dob ?
+...          GOTO      LDSRESP IF EQUAL             * no
+.
+...          UNPACK    PRDBDOBH,CCENT,CYEAR,CMON,CDAY
+...          PACK      VDOB,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR
+.
+...LDSRESP   PACK      VPRANAME,PRDBRNAM,SP30
+...          MOVE      PRDBRAD1,VPRAADD1
+...          MOVE      PRDBRAD2,VPRAADD2
+...          MOVE      PRDBRAD3,VPRAADD3
+...          MOVE      PRDBRPOS,VPRAPOST
+.
+...          MOVE      PRDBTELP,VDEBTELP
+...          MOVE      PRDBTELB,VDEBTELB
+...          MOVE      PRDBRTEP,VPRATELP
+...          MOVE      PRDBRTEB,VPRATELB
+...          MOVE      PRDBRREL,VPRARELP
+.
+          MOVE      SP70,VPRANAME
+          MOVE      SP70,VPRAADD1
+          MOVE      SP70,VPRAADD2
+          MOVE      SP70,VPRAADD3
+          MOVE      SP70,VPRAPOST
+.
+          MOVE      SP70,VDEBTELP
+          MOVE      SP70,VDEBTELB
+          MOVE      SP70,VPRATELP
+          MOVE      SP70,VPRATELB
+          MOVE      SP70,VPRARELP
+.
+          GOTO      LDDET800
+.
+.         Get PMI details
+.
+LDDET200  MOVE      SP30,PSNAME
+          MOVE      SP30,PGNAME
+          MOVE      SP30,FNSNAME
+          MOVE      VDEBTOR,PURNO
+          MOVE      PURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,LDDET900
+.
+.         Check for merge U/R
+.
+LDDET210  COMPARE   ONE,PSTAT
+          GOTO      LDDET220 IF NOT EQUAL
+          MOVE      PPSNAME,PURNO
+.
+          MATCH     "IBARSH",PGM
+          GOTO      LDDET215 IF EQUAL
+.
+          KEYIN     *P1:24,*EL,*B: 
+                    "This U/R is merged with ",*V2LON,*DV,PURNO,*HOFF:
+                    ". Hit ",*V2LON,"<ENTER>",*HOFF," to continue, or ":
+                    *V2LON,"A",*HOFF:
+                    " to abort : ",*V2LON,ANS,*P1:24,*EL;
+          CMATCH    ANSA,ANS
+          IF        @EQUAL
+            MOVE      TWO,OVRCD
+            GOTO      LDDET900
+          ENDIF
+.
+LDDET215  MOVE      PURNO,VDEBTOR
+          MOVE      PURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,LDDET900
+          GOTO      LDDET210
+.
+.         Load display variables
+.
+LDDET220  MOVE      PSNAME,FNSNAME
+          MOVE      SP30,VDEBNAME
+          MATCH     SP30,PSNAME
+          GOTO      LDGOTSN1 IF NOT EQUAL
+          MOVE      "[Missing Surname]",PSNAME
+LDGOTSN1  MOVE      PSNAME,VDEBNAME
+          RESET     VDEBNAME,30
+LDSLOO1   CMATCH    SP1,VDEBNAME
+          GOTO      LDSEN1 IF NOT EQUAL
+          BUMP      VDEBNAME,-1
+          GOTO      LDSLOO1
+LDSEN1    APPEND    ",",VDEBNAME
+          APPEND    SP1,VDEBNAME
+          APPEND    PGNAME,VDEBNAME
+          RESET     VDEBNAME
+.
+          MOVE      PBDEBT,VBADEBT
+          MOVE      PADD1,VDEBADD1
+          MOVE      PADD2,VDEBADD2
+          MOVE      PSUBRB,VDEBADD3
+          MOVE      PPOST,VDEBPOST
+          MOVE      PTELEP,VDEBTELP
+          MOVE      PTELEB,VDEBTELB
+.
+          MOVE      SP10,VDOB
+          MATCH     SP8,PBDATE                   * any dob ?
+          GOTO      LDDET800 IF EQUAL            * no
+.
+          UNPACK    PBDATE,CCENT,CYEAR,CMON,CDAY
+          PACK      VDOB,CDAY,SLASH,CMON,SLASH,CCENT,CYEAR
+.
+LDDET800  MOVE      ZERO,OVRCD
+.
+LDDET900  RETURN

@@ -1,0 +1,49 @@
+.
+.         INC       BOKCANIO.INC
+.
+.         FILE  I/O REQUESTS FOR BOOKING CANCELLATIONS
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY12   DIM             12             KEY FOR BOKCANA1
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE PATAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+RDSCANA1 RESET     KEY12
+         READ      BOKCANA1,KEY12;;
+         RETURN  
+.
+RDACANA1 MOVE      ZERO,OVRCD
+         RESET     KEY12
+         READ      BOKCANA1,KEY12;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDCANA1  MOVE      ZERO,OVRCD
+         RESET     KEY12
+         READ      BOKCANA1,KEY12;BCTYPE,BCCANC,BCDATE,BCCANCL,BCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+RDKCANA1 MOVE      ZERO,OVRCD
+         READKS    BOKCANA1;BCTYPE,BCCANC,BCDATE,BCCANCL,BCSPARE
+         GOTO      OVERCOND IF OVER
+         RETURN  
+.
+WRCANA1  RESET     KEY12
+.
+         WRITE      BOKCANA1,KEY12;KEY12,BCCANCL,BCSPARE
+         RETURN  
+.
+UPCANA1  UPDATE    BOKCANA1;BCTYPE,BCCANC,BCDATE,BCCANCL,BCSPARE
+         RETURN  
+.
+DECANA1  RESET     KEY12
+         DELETE    BOKCANA1,KEY12
+         RETURN
+.

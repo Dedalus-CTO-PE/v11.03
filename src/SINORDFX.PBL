@@ -1,0 +1,869 @@
+.----------------------------------------------------------------------
+. SINORDFX - Fax Purchase Order 
+.
+.  Returns  EXIT    (0=faxed 1=missing or locked)
+.
+.  Requires SIPAPON (Purchase order number)
+.           NOPRINT (0=print from this routine, 1=print elsewhere)
+.           SELPRINT called prior to this routine   } These two requirements
+.           Open Files : IBACODE1 + IBAPRINT1       } exist in function SELPRT00
+.           Includes   : IBACODFD/INC IBAPRNFD/INC
+.                        IBAIOCOD/INC IBAIOPRN/INC IBAPRINT
+.                        SINTMPDF/INC SINCODFD/IO  SINORIFD/IO  APSMASFD/IO
+.                        SINSIAFD/IO  SINPOAFD/IO  SINPOBFD/INC SINPOCFD/INC
+.                        SINPODFD/IO
+.           Note : already includes IBAPASFD & IBAPASIO
+.
+.
+.  Modifications
+.
+.  24/09/2007  Sandra Barcham    CAR 147373
+.              Change print of faxed purchase order to use apmaur2 not apmasfax
+.  18/03/2003  Davin  Quote 15040
+.              Print new delivery point in header (if parameter on)
+.----------------------------------------------------------------------
+SINORDFX  READ      CONTROLF,TWENTY3;*124,HORDDES 
+          READ      CONTROLF,TWENTY6;*248,HPURCHP
+          CALL      LCKPO000                * Lock P/O
+          BRANCH    OVRCD,SINFAX99,SINFAX99
+.
+          CALL      RDCON000                * Read Control File Details
+.
+          CALL      OPNPRINT
+.
+          CALL      FORD0000                * print routine
+          BRANCH    EXIT,SINFAX99           * could not print ?
+.                                           * check if anything to print
+          CALL      UUSIPA1
+.
+          IF        NOPRINT=0
+            IF        !(CPAGENO>0)
+              DISPLAY   *P1:24,*B,*EL,"Nothing to Print for PO ",SIPAPON," - ";
+              CALL      HITENTER
+              DISPLAY   *P1:24,*EL;
+              GOTO      SINFAX99
+            ENDIF
+            DISPLAY   *P1:24,*EL;
+          ENDIF
+.
+          MOVE      APMAUR2,FAXNUMB
+          CALL      FAXPRINT
+.
+SINFAX99  RETURN
+.------------------------------------------------------------
+. Lock Purchase Order
+.------------------------------------------------------------
+LCKPO000  PACK      KEY7,SIPAPON,SP70            * lock purchase order record
+          CALL      RLSIPA1
+          BRANCH    OVRCD,LCKPO100,LCKPO200             * 1=missing, 2=locked
+          GOTO      LCKPO999
+.
+LCKPO100  DISPLAY   *P1:24,*EL,"Purchase Order ":
+                    *V2LON,SIPAPON,*HOFF," Does Not Exist - ";
+          CALL      HITENTER
+          MOVE      ONE,OVRCD
+          GOTO      LCKPO999
+.
+LCKPO200  KEYIN     *P1:24,*EL,"Purchase Order Locked - (":
+                    *V2LON,"R",*HOFF,")etry or e(":
+                    *V2LON,"X",*HOFF,")it ? ",*V2LON,ANS
+          PACK      ANS,ANS,SP70
+          REP       UPPLOW,ANS
+          MOVE      TWO,OVRCD
+          MATCH     "X",ANS
+          GOTO      LCKPO999 IF EQUAL
+          MATCH     "E",ANS
+          GOTO      LCKPO999 IF EQUAL
+          GOTO      LCKPO000
+.
+LCKPO999  RETURN
+.------------------------------------------------------------
+. Read Control File Details
+.------------------------------------------------------------
+RDCON000  READ      CONTROLF,TEN3;CHADD1,CHADD2,CHPOST:
+                                 *129,CHTELEB
+.
+          MOVE      "30",MAXITEMS  * NEED TO ADJUST
+.
+          RETURN
+.------------------------------------------------------------
+. FORD - Fax Order
+.        Requires SIPAPON (Purchase order number)
+.        Returns  EXIT    (0=printed 1=missing or locked)
+.------------------------------------------------------------
+FORD0000  DISPLAY   *P1:24,*EL,"Faxing Purchase Order ",*V2LON,SIPAPON;
+          MOVE      ZERO,CPAGENO                 * reset page no.
+          MOVE      "999",CLNO                   * init last line number
+          MOVE      ZERO,TF7P2                   * clear total
+          MOVE      "1",COUNTFL1                 * count number of pages
+          MOVE      "0",COUNTFL2
+          CALL      WFAX0000                     * print details
+.
+          MOVE      CPAGENO,F2B                  * save total page number
+          MOVE      ZERO,CPAGENO                 * reset page no.
+          MOVE      "999",CLNO                   * init last line number
+          MOVE      ZERO,TF7P2                   * clear total
+          MOVE      "0",COUNTFL1                 * count number of pages
+          CALL      WFAX0000                     * print details
+.
+          COMPARE   ZERO,CPAGENO
+          CALL      ENDF0000 IF NOT EQUAL        * print end of purchase order
+.
+FORD9000  MOVE      ZERO,EXIT                    * everything is cool !!
+FORD9999  RETURN
+.----------------------------------------------------------------------
+. FHED - print report                               Called by PORD
+.----------------------------------------------------------------------
+FHED0000  IF        (COUNTFL1=0)&(COUNTFL2=0)&(CPAGENO>0)
+            CALL      FILPAG00              * fill to end of page if printing
+          ENDIF
+.
+          ADD       ONE,CPAGENO             * next page
+          MOVE      "0",CLNO                * reset line number
+.
+          COMPARE   ONE,COUNTFL1
+          GOTO      FHED9999 IF EQUAL       * just counting pages ?
+          COMPARE   ONE,COUNTFL2
+          GOTO      FHED9999 IF EQUAL       * just counting pages ?
+.
+          REP       " 0",SIPADCN            * check if cancelled
+          MATCH     "00000000",SIPADCN
+          IF        @EQUAL
+            REP       " 0",SIPADCM          * check if completed
+            MATCH     "00000000",SIPADCM
+            IF        @EQUAL
+              REP       " 0",SIPADPR        * check if reprint
+              MATCH     "00000000",SIPADPR
+              IF        @EQUAL
+                MOVE      SP70,KEY20
+              ELSE
+                MOVE      " Reprint            ",KEY20
+              ENDIF
+            ELSE
+              MOVE      "Completed ",KEY10
+              UNPACK    SIPADCM,CCENT,CYEAR,CMON,CDAY
+              CALL      PACDATE
+              PACK      KEY20,KEY10,CPCDATE,SP70
+            ENDIF
+          ELSE
+            MOVE      "Cancelled ",KEY10
+            UNPACK    SIPADCN,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE
+            PACK      KEY20,KEY10,CPCDATE,SP70
+          ENDIF
+.
+          PACK      KEY10,CCC,CYY,CMM,CDD,SP70
+          REP       " 0",KEY10
+          UNPACK    KEY10,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          UNPACK    SP70,SIORHOSP,SIOREXT
+          PACK      KEY3,SIPAORI,SP70
+          CALL      RDSIOR1
+.
+          UNPACK    SP70,APMASN1,APMASN2
+          UNPACK    SP70,APMASA1,APMASA2
+          UNPACK    SP70,APMASA3,APMASPC,APMASTEL,APMAUR2
+          UNPACK    SP70,APMASCON
+          PACK      KEY5,SIPASUP,SP70
+          CALL      RDAPMA1
+.
+          MOVE      SP70,SICDDESC
+          MATCH     SP70,SIPAMES
+          IF        !@EQUAL
+            MOVE      "ME ",KEY3
+            PACK      KEY6,KEY3,SIPAMES,SP70
+            CALL      RDSICD1
+          ENDIF
+          PACK      MESSDESK,SICDDESC,SP70
+.
+          MOVE      SP70,SICDDESC
+          MATCH     SP70,SIPACON
+          IF        !(@EQUAL)
+            MOVE      "CF ",KEY3
+            PACK      KEY6,KEY3,SIPACON,SP70
+            CALL      RDSICD1
+          ENDIF
+          PACK      CONFDESK,SICDDESC,SP70
+.
+          MOVE      CPAGENO,F2A
+.
+          MOVE      SP70,SIWADES
+          PACK      KEY5,SIPAWAR,SP70
+          CALL      RDSIWA1
+.
+          CALL      FSUPP000             * Format Supplier Name & Address
+.
+          READ      CONTROLF,SIXTY3;*241,SNCOMDPC   * multiple delivery point
+          COMPARE   ONE,SNCOMDPC
+          IF        @EQUAL
+            MOVE      SIPAMDP,KEY3
+            CALL      RDSIDP1
+          ENDIF
+.
+          IF        HPURCHP=16
+            PRINT        "To Supplier: ",APMACRD:
+                         *38,"Deliver To:":
+                         *79,"Order:  ",SIPAPON:
+                      *N,SUPLIN1:
+                         *38,SIPADEL:
+                         *79,"Page :",F2A,"  of ",F2B:
+                      *N,SUPLIN2:
+                         *38,MESSDESK:
+                         *79,"Date : ",CPCDATE:
+                      *N,SUPLIN3:
+                         *38,"Enquiries: ",SIPAICN:
+                      *N,SUPLIN4:
+                         *38,"Phn:       ",SIOREXT:
+                      *N,SUPLIN5:
+                         *38,"Fax:       ",SIORUR1:
+                      *N,"Ph.: ",APMASTEL:
+                         *38,KEY20:
+                      *N,"Fax: ",APMAUR2:
+                         *38,CONFDESK:
+                      *N,"----------------------------------------------":
+                        "-----------------------------------------------":
+                      *N,"Line No  Supplier Part Number         Quantity":
+                        "  Unit and       Cost      Unit Price     Value":
+                      *N," Stk No  and Description                      ":
+                        "  Delivery Date  Centre":
+                      *N,"----------------------------------------------":
+                        "-----------------------------------------------"
+          ELSE
+            IF        SNCOMDPC=1
+            PRINT        "To Supplier: ",APMACRD:
+                         *38,"Deliver To:":
+                         *79,"Order:  ",SIPAPON:
+                      *N,SUPLIN1:
+                         *38,SIDPADD1:
+                         *79,"Page :",F2A,"  of ",F2B:
+                      *N,SUPLIN2:
+                         *38,SIDPADD2:
+                         *79,"Date : ",CPCDATE:
+                      *N,SUPLIN3:
+                         *38,"Enquiries: ",SIPAICN:
+                      *N,SUPLIN4:
+                         *38,"Phn:       ",SIOREXT:
+                      *N,SUPLIN5:
+                         *38,"Fax:       ",SIORUR1:
+                      *N,"Ph.: ",APMASTEL:
+                         *38,CONFDESK:
+                      *N,"Fax: ",APMAUR2:
+                         *38,MESSDESK,*76,KEY20:
+                      *N,"----------------------------------------------":
+                        "-----------------------------------------------":
+                      *N,"Line No  Supplier Part Number         Quantity":
+                        "  Unit and       Cost      Unit Price     Value":
+                      *N," Stk No  and Description                      ":
+                        "  Delivery Date  Centre":
+                      *N,"----------------------------------------------":
+                        "-----------------------------------------------"
+            ELSE
+            PRINT        "To Supplier: ",APMACRD:
+                         *38,"Deliver To:":
+                         *79,"Order:  ",SIPAPON:
+                      *N,SUPLIN1:
+                         *38,SIPADEL:
+                         *79,"Page :",F2A,"  of ",F2B:
+                      *N,SUPLIN2:
+                         *38,"Enquiries: ",SIPAICN:
+                         *79,"Date : ",CPCDATE:
+                      *N,SUPLIN3:
+                         *38,"Phn:       ",SIOREXT:
+                      *N,SUPLIN4:
+                         *38,"Fax:       ",SIORUR1:
+                      *N,SUPLIN5:
+                         *38,KEY20:
+                      *N,"Ph.: ",APMASTEL:
+                         *38,CONFDESK:
+                      *N,"Fax: ",APMAUR2:
+                         *38,MESSDESK:
+                      *N,"----------------------------------------------":
+                        "-----------------------------------------------":
+                      *N,"Line No  Supplier Part Number         Quantity":
+                        "  Unit and       Cost      Unit Price     Value":
+                      *N," Stk No  and Description                      ":
+                        "  Delivery Date  Centre":
+                      *N,"----------------------------------------------":
+                        "-----------------------------------------------"
+            ENDIF
+          ENDIF
+.
+          UNPACK    SP70,DELDT1,DELDT2,DELDT3,DELDT4,DELDT5
+          UNPACK    SP70,DELDT6,DELDT7,DELDT8,DELDT9,DELDT10
+.
+FHED9999  RETURN
+.----------------------------------------------------------------------
+. WFAX - print data line                            Called by PORD
+.        Requires : COUNTFL1 (1=don't print)
+.----------------------------------------------------------------------
+WFAX0000  PACK      KEY10,SIPAPON,SP70         * loop through line items
+          CALL      RSSIPC1                    * line item loop 
+WFAX1000  CALL      RKSIPC1                    * get next line item
+          BRANCH    OVRCD,WFAX5000
+          MATCH     SIPCPON,SIPAPON            * at end of purchase order ?
+          IF        !@EQUAL
+            CALL      RPSIPC1                  * get previous details for print
+            GOTO      WFAX5000
+          ENDIF
+.
+WFAX2000  MOVE      "1",COUNTFL2               * just counting !!
+          MOVE      CLNO,SCLNO                 * save current line number
+          MOVE      CPAGENO,SCPAGENO           * save current page number
+          CALL      FAXA0000                   * count line item data lines
+.                                              * check if page will be filled
+.                                              * and if item goes over 1 page
+          IF        (CPAGENO-1=SCPAGENO)&!(CLNO>SCLNO)&!(999=SCLNO)
+            MOVE      SCLNO,CLNO               * restore current line number
+            MOVE      SCPAGENO,CPAGENO         * restore current page number
+            MOVE      "0",COUNTFL2
+            CALL      FHED0000                 * get next page
+            GOTO      WFAX2000                 * restart from next page
+          ENDIF
+.
+          IF        COUNTFL1=0
+            MOVE      SCLNO,CLNO               * restore current line number
+            MOVE      SCPAGENO,CPAGENO         * restore current page number
+            MOVE      "0",COUNTFL2
+            CALL      FAXA0000                 * print line item data lines
+          ENDIF
+.
+          GOTO      WFAX1000                   * get next line item
+.
+.---- purchase order comment loop ----
+.
+WFAX5000  PACK      KEY10,SIPAPON,SP70         * loop through purch ord comments
+          CALL      RSSIPB1
+WFAX6000  CALL      RKSIPB1                    * get next line item comment
+          BRANCH    OVRCD,WFAX9000
+          MATCH     SIPBPON,SIPAPON            * at end of comments ?
+          GOTO      WFAX9000 IF NOT EQUAL
+          MATCH     SIPBCOM,SP70               * blank line ?
+          GOTO      WFAX6000 IF EQUAL
+.
+WFAX7000  COMPARE   MAXITEMS,CLNO              * end of page ?
+          CALL      FHED0000 IF NOT LESS       * start new page
+          ADD       "1",CLNO                   * increment line number
+          IF        COUNTFL1=0
+            PRINT     *10,SIPBCOM
+          ENDIF
+          GOTO      WFAX6000
+.
+WFAX9000
+WFAX9999  RETURN
+.----------------------------------------------------------------------
+. FAXA - print line items                           Called by WFAX
+.        Requires : COUNTFL2 (1=dont print)
+.----------------------------------------------------------------------
+FAXA0000  CALL      CLRLIN00
+          PACK      LINE1,SIPCPN,SP70        * Get Part Number 
+          MATCH     SP70,SIPCCAT             * Catalog Blank ?
+          IF        @EQUAL
+            MOVE      SIPCPD,LINE2           * Not Catloged
+          ELSE
+            MOVE      SP70,SIICPD1
+            MOVE      SP70,SIICPD2
+            PACK      KEY27,SIPCCAT,SIPASUP,SIPCSUT,SP70
+            CALL      RDSIIC1
+            IF        OVRCD=0
+              MOVE      SIICPD1,LINE2        * Use Supplier Part Description
+              MOVE      SIICPD2,LINE3
+            ELSE
+              MOVE      SIPCPD,LINE2
+            ENDIF
+          ENDIF
+.
+.---- get purchase order references from contract details ----
+.
+          PACK      SISDPO1,SP70
+          PACK      SISDPO2,SP70
+          PACK      KEY45,SIPCCON,SIPASUP,SIPCCAT,SIPCCDT,SIPCSUT,SP70
+          CALL      RDSISD1
+          UNPACK    SISDPO1,LINE4
+          UNPACK    SISDPO2,LINE5
+.
+          MOVE      SIPCOQT,F7
+          ASSIGN    SIPCOQT*SIPCECT,F7P2
+          MOVE      SIPCECT,F8P4
+          IF        !(SIPCECT=-1)&(COUNTFL1=0)&(COUNTFL2=0)
+            ADD       F7P2,TF7P2
+          ENDIF
+.
+.     ---- line item comment loop ----
+.
+          MOVE      "0",PRTFLAG                * nothing printed yet !!
+          PACK      KEY13,SIPCPON,SIPCITM,SP70 * loop through line item comments
+          CALL      RSSIPD1
+FAXA2000  CALL      RKSIPD1                    * get next line item comment
+          BRANCH    OVRCD,FAXA4000
+          MATCH     SIPDPON,SIPCPON            * at end of comments ?
+          GOTO      FAXA4000 IF NOT EQUAL
+          MATCH     SIPDITM,SIPCITM            * at end of comments ?
+          GOTO      FAXA4000 IF NOT EQUAL
+          MATCH     SIPDCOM,SP70               * blank line ?
+          GOTO      FAXA2000 IF EQUAL
+.
+          CALL      FAXB0000                   * print crap
+          GOTO      FAXA2000
+.
+FAXA4000  MOVE      SP70,SIPDCOM
+          CALL      FAXB0000                   * make sure crap printed
+.
+FAXA9999  RETURN
+.------------------------------------------------------------
+. Clear LINE1..7
+.------------------------------------------------------------
+CLRLIN00  MOVE      SP70,LINE1                 * clear lines
+          MOVE      SP70,LINE2
+          MOVE      SP70,LINE3
+          MOVE      SP70,LINE4
+          MOVE      SP70,LINE5
+          MOVE      SP70,LINE6
+          MOVE      SP70,LINE7
+          RETURN
+.----------------------------------------------------------------------
+. FAXB - print line items                           Called by FAXA
+.        Requires : COUNTFL2 (1=don't print)
+.                   PRTFLAG  (1=main data already printed)
+.----------------------------------------------------------------------
+FAXB0000  BRANCH    PRTFLAG,FAXB1000
+.
+          MATCH     LINE6,SP70              * save line
+          IF        @EQUAL
+            PACK      LINE6,SIPDCOM,SP70
+            MATCH     SIPDCOM,SP70          * check if it is time to unload
+            GOTO      FAXB9999 IF NOT EQUAL
+          ELSE
+            PACK      LINE7,SIPDCOM,SP70
+          ENDIF
+.
+FAXB0100  MOVE      "0",SECTOR              * consolidate data lines
+          MATCH     SP70,LINE1
+          WHILE     @EQUAL & (SECTOR<7)
+            ADD       ONE,SECTOR
+            MOVE      LINE2,LINE1
+            MOVE      LINE3,LINE2
+            MOVE      LINE4,LINE3
+            MOVE      LINE5,LINE4
+            MOVE      LINE6,LINE5
+            MOVE      LINE7,LINE6
+            MOVE      SP70,LINE7
+            MATCH     SP70,LINE1
+          DO
+          MATCH     SP70,LINE2
+          WHILE     @EQUAL & (SECTOR<7)
+            ADD       ONE,SECTOR
+            MOVE      LINE3,LINE2
+            MOVE      LINE4,LINE3
+            MOVE      LINE5,LINE4
+            MOVE      LINE6,LINE5
+            MOVE      LINE7,LINE6
+            MOVE      SP70,LINE7
+            MATCH     SP70,LINE2
+          DO
+          MATCH     SP70,LINE3
+          WHILE     @EQUAL & (SECTOR<7)
+            ADD       ONE,SECTOR
+            MOVE      LINE4,LINE3
+            MOVE      LINE5,LINE4
+            MOVE      LINE6,LINE5
+            MOVE      LINE7,LINE6
+            MOVE      SP70,LINE7
+            MATCH     SP70,LINE3
+          DO
+          MATCH     SP70,LINE4
+          WHILE     @EQUAL & (SECTOR<7)
+            ADD       ONE,SECTOR
+            MOVE      LINE5,LINE4
+            MOVE      LINE6,LINE5
+            MOVE      LINE7,LINE6
+            MOVE      SP70,LINE7
+            MATCH     SP70,LINE4
+          DO
+          MATCH     SP70,LINE5
+          WHILE     @EQUAL & (SECTOR<7)
+            ADD       ONE,SECTOR
+            MOVE      LINE6,LINE5
+            MOVE      LINE7,LINE6
+            MOVE      SP70,LINE7
+            MATCH     SP70,LINE5
+          DO
+          MATCH     SP70,LINE6
+          WHILE     @EQUAL & (SECTOR<7)
+            ADD       ONE,SECTOR
+            MOVE      LINE7,LINE6
+            MOVE      SP70,LINE7
+            MATCH     SP70,LINE6
+          DO
+.
+          COMPARE   MAXITEMS,CLNO
+          CALL      FHED0000 IF NOT LESS
+.
+          MOVE      LINE1,KEY60                * print main line 1
+          CALL      LINBK000                 * Break up line to 30
+.
+          ADD       ONE,CLNO                   * increment line number
+          IF        COUNTFL2=0
+            IF        F8P4=-1
+              MOVE      "  T.B.A.       ",KEY13
+              MOVE      "  T.B.A.       ",KEY10
+            ELSE
+              MOVE      F8P4,KEY13
+              MOVE      F7P2,KEY10
+            ENDIF
+.
+            PRINT     *5,SIPCITM,*10,KEY30,F7:
+                      SP2,SIPCSUT,SIPCCST,SP2,KEY13,KEY10
+          ENDIF
+.
+          COMPARE   MAXITEMS,CLNO              * end of page ?
+          CALL      FHED0000 IF NOT LESS       * start new page
+.
+          MOVE      LINE1,KEY60
+          CALL      LINBK000                   * break up line neatly
+.
+          PACK      KEY60,KEY60,SP70           * print main line 2
+          MATCH     SP70,KEY60
+          IF        @EQUAL
+            MOVE      LINE2,KEY60
+            MOVE      LINE3,LINE2
+            MOVE      LINE4,LINE3
+            MOVE      LINE5,LINE4
+            MOVE      LINE6,LINE5
+            MOVE      SP70,LINE6
+          ENDIF
+          PACK      KEY60,KEY60,SP70
+          CALL      LINBK000                 * Break up line to 38
+.
+          UNPACK    SIPCEDD,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          ADD       "1",CLNO                   * increment line number
+          IF        COUNTFL2=0
+            PRINT     SIPCCAT,*10,KEY30,*52,CPCDATE
+            MATCH     SP70,CPCDATE
+            IF        !@EQUAL
+              MOVE      ZERO,F1
+              REPEAT
+                ADD       ONE,F1
+                MOVE      SP70,KEY15
+                LOAD      KEY15,F1,DELDT1,DELDT2,DELDT3,DELDT4,DELDT5:
+                                   DELDT6,DELDT7,DELDT8,DELDT9,DELDT10
+                MATCH     SP70,KEY15
+              UNTIL     @EQUAL
+              PACK      KEY15,SIPCITM,DOT,SP1,CPCDATE,SP70
+              STORE     KEY15,F1,DELDT1,DELDT2,DELDT3,DELDT4,DELDT5:
+                                 DELDT6,DELDT7,DELDT8,DELDT9,DELDT10
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,KEY60                 * print rest of data line
+          IF        !@EQUAL
+            COMPARE   MAXITEMS,CLNO            * end of page ?
+            CALL      FHED0000 IF NOT LESS     * start new page
+            ADD       "1",CLNO                 * increment line number
+            IF        COUNTFL2=0
+              PRINT     *10,KEY60
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,LINE2                 * print data line 2
+          IF        !@EQUAL
+            COMPARE   MAXITEMS,CLNO            * end of page ?
+            CALL      FHED0000 IF NOT LESS     * start new page
+            ADD       "1",CLNO                 * increment line number
+            IF        COUNTFL2=0
+              PRINT     *10,LINE2
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,LINE3                 * print data line 3
+          IF        !@EQUAL
+            COMPARE   MAXITEMS,CLNO            * end of page ?
+            CALL      FHED0000 IF NOT LESS     * start new page
+            ADD       "1",CLNO                 * increment line number
+            IF        COUNTFL2=0
+              PRINT     *10,LINE3
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,LINE4                 * print data line 4
+          IF        !@EQUAL
+            COMPARE   MAXITEMS,CLNO            * end of page ?
+            CALL      FHED0000 IF NOT LESS     * start new page
+            ADD       "1",CLNO                 * increment line number
+            IF        COUNTFL2=0
+              PRINT     *10,LINE4
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,LINE5                 * print data line 5
+          IF        !@EQUAL
+            COMPARE   MAXITEMS,CLNO            * end of page ?
+            CALL      FHED0000 IF NOT LESS     * start new page
+            ADD       "1",CLNO                 * increment line number
+            IF        COUNTFL2=0
+              PRINT     *10,LINE5
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,LINE6                 * print data line 6
+          IF        !@EQUAL
+            COMPARE   MAXITEMS,CLNO            * end of page ?
+            CALL      FHED0000 IF NOT LESS     * start new page
+            ADD       "1",CLNO                 * increment line number
+            IF        COUNTFL2=0
+              PRINT     *10,LINE6
+            ENDIF
+          ENDIF
+.
+          MATCH     SP70,LINE7                 * print data line 7
+          IF        !@EQUAL
+            COMPARE   MAXITEMS,CLNO            * end of page ?
+            CALL      FHED0000 IF NOT LESS     * start new page
+            ADD       "1",CLNO                 * increment line number
+            IF        COUNTFL2=0
+              PRINT     *10,LINE7
+            ENDIF
+          ENDIF
+.
+          MOVE      ONE,PRTFLAG                * main data printed
+          GOTO      FAXB9999
+.
+.---- print comments data ----
+.
+FAXB1000  MATCH     SP70,SIPDCOM               * print data line if not blank
+          IF        !@EQUAL
+            COMPARE   MAXITEMS,CLNO            * end of page ?
+            CALL      FHED0000 IF NOT LESS     * start new page
+            ADD       "1",CLNO                 * increment line number
+            IF        COUNTFL2=0
+              PRINT     *10,SIPDCOM
+            ENDIF
+          ENDIF
+.
+FAXB9999  RETURN
+.----------------------------------------------------------------------
+. LINBK - Break up KEY60 into two neat halves        Called by lots
+.         Requires - KEY60   (original line)
+.         Returns  - KEY30   (line 1)
+.                    KEY60   (line 2)
+.----------------------------------------------------------------------
+LINBK000  RESET     KEY60,31
+          CMATCH    SP70,KEY60
+          WHILE     !@EQUAL&!@EOS
+            BUMP      KEY60,-1
+            IF        !@EOS
+              CMATCH    SP70,KEY60
+            ENDIF
+          DO
+.
+          IF        @EOS
+            SETLPTR   KEY60
+            RESET     KEY60
+            UNPACK    KEY60,KEY30,KEY60
+          ELSE
+            LENSET    KEY60
+            RESET     KEY60
+            MOVE      KEY60,KEY30
+            PACK      KEY30,KEY30,SP70
+.
+            ENDSET    KEY60
+            SETLPTR   KEY60
+            BUMP      KEY60
+            PACK      KEY60,KEY60,SP70
+          ENDIF
+.
+          RETURN
+.----------------------------------------------------------------------
+. FILP - fill to end of purchase order                Called by FHED
+.----------------------------------------------------------------------
+FILPAG00  WHILE     MAXITEMS>CLNO
+            ADD       "1",CLNO                   * print blank lines
+            PRINT     SP1
+          DO
+          PRINT     *N,*N,*77," CONTINUED",*N,*N
+          RETURN
+.----------------------------------------------------------------------
+. ENDF - fax end of purchase order                Called by PORD
+.----------------------------------------------------------------------
+ENDF0000  WHILE     MAXITEMS>CLNO
+            ADD       "1",CLNO                   * print blank lines
+            PRINT     SP1
+          DO
+.
+.---- print total ----
+.
+          PRINT     *N,"----------------------------------------------":
+                      "-----------------------------------------------":
+                    *N,*77,"Total: ",TF7P2:
+                    *N,"----------------------------------------------":
+                      "-----------------------------------------------"
+.
+          MOVE      "2",AUDTTYPE
+          CALL      WASIPA00               * Write to Audit file
+.
+          PACK      KEY7,SIPAPON,SP70
+          CALL      RDSIPA1
+          IF        OVRCD=0
+            PACK      SIPADPR,CCC,CYY,CMM,CDD,SP70
+            REP       " 0",SIPADPR
+            CALL      UPSIPA1                    * update date printed
+          ENDIF
+.
+          MOVE      "3",AUDTTYPE
+          CALL      WASIPA00               * Write to Audit file
+.
+ENDF9999  RETURN
+.------------------------------------------------------------
+. Format Supplier Name & Address (remove blank lines)
+.------------------------------------------------------------
+FSUPP000  PACK     APMASN1,APMASN1,SP70
+          PACK     APMASN2,APMASN2,SP70
+          PACK     APMASA1,APMASA1,SP70
+          PACK     APMASA2,APMASA2,SP70
+          PACK     APMASA3,APMASA3,SP70
+.
+          MOVE     APMASN1,SUPLIN1         
+          MOVE     APMASN2,SUPLIN2         
+          MOVE     APMASA1,SUPLIN3         
+          MOVE     APMASA2,SUPLIN4         
+          MOVE     APMASA3,SUPLIN5         
+.
+          MOVE      "0",SECTOR              * consolidate data lines
+          MATCH     SP70,SUPLIN1
+          WHILE     @EQUAL & (SECTOR<5)
+            ADD       ONE,SECTOR
+            MOVE      SUPLIN2,SUPLIN1
+            MOVE      SUPLIN3,SUPLIN2
+            MOVE      SUPLIN4,SUPLIN3
+            MOVE      SUPLIN5,SUPLIN4
+            MOVE      SP70,SUPLIN5
+            MATCH     SP70,SUPLIN1
+          DO
+          MATCH     SP70,SUPLIN2
+          WHILE     @EQUAL & (SECTOR<5)
+            ADD       ONE,SECTOR
+            MOVE      SUPLIN3,SUPLIN2
+            MOVE      SUPLIN4,SUPLIN3
+            MOVE      SUPLIN5,SUPLIN4
+            MOVE      SP70,SUPLIN5
+            MATCH     SP70,SUPLIN2
+          DO
+          MATCH     SP70,SUPLIN3
+          WHILE     @EQUAL & (SECTOR<5)
+            ADD       ONE,SECTOR
+            MOVE      SUPLIN4,SUPLIN3
+            MOVE      SUPLIN5,SUPLIN4
+            MOVE      SP70,SUPLIN5
+            MATCH     SP70,SUPLIN3
+          DO
+          MATCH     SP70,SUPLIN4
+          WHILE     @EQUAL & (SECTOR<5)
+            ADD       ONE,SECTOR
+            MOVE      SUPLIN5,SUPLIN4
+            MOVE      SP70,SUPLIN5
+            MATCH     SP70,SUPLIN4
+          DO
+.
+          PACK      SUPLIN1,SUPLIN1,SP70
+          PACK      SUPLIN2,SUPLIN2,SP70
+          PACK      SUPLIN3,SUPLIN3,SP70
+          PACK      SUPLIN4,SUPLIN4,SP70
+          PACK      SUPLIN5,SUPLIN5,SP70
+.
+          MATCH     SP70,SUPLIN5
+          IF        !@EQUAL
+            STRIP     SUPLIN5
+            ENDSET    SUPLIN5
+            APPEND    ", ",SUPLIN5
+            APPEND    APMASPC,SUPLIN5
+            APPEND    SP70,SUPLIN5
+            RESET     SUPLIN5
+            GOTO      FSUPP999
+         ENDIF
+.
+          MATCH     SP70,SUPLIN4
+          IF        !@EQUAL
+            STRIP     SUPLIN4
+            ENDSET    SUPLIN4
+            APPEND    ", ",SUPLIN4
+            APPEND    APMASPC,SUPLIN4
+            APPEND    SP70,SUPLIN4
+            RESET     SUPLIN4
+            GOTO      FSUPP999
+          ENDIF
+.
+          MATCH     SP70,SUPLIN3
+          IF        !@EQUAL
+            STRIP     SUPLIN3
+            ENDSET    SUPLIN3
+            APPEND    ", ",SUPLIN3
+            APPEND    APMASPC,SUPLIN3
+            APPEND    SP70,SUPLIN3
+            RESET     SUPLIN3
+            GOTO      FSUPP999
+          ENDIF
+.
+          MATCH     SP70,SUPLIN2
+          IF        !@EQUAL
+            STRIP     SUPLIN2
+            ENDSET    SUPLIN2
+            APPEND    ", ",SUPLIN2
+            APPEND    APMASPC,SUPLIN2
+            APPEND    SP70,SUPLIN2
+            RESET     SUPLIN2
+            GOTO      FSUPP999
+          ENDIF
+.
+FSUPP999  RETURN
+.
+.******************************************************************** 
+.*                          FAXPRINT                                *
+.*                       Fax a Print File                           *
+.******************************************************************** 
+FAXPRINT  COMPARE   ZERO,CPRTFLG
+          GOTO      FAXPR999 IF NOT EQUAL
+.
+.         Check if file is of non-zero size
+.
+          CALL      SPLEMPTY
+          BRANCH    OVRCD,FAXPR800,FAXPR900
+.
+          CLEAR     KEY80
+          APPEND    "ibasin59.us1 ",KEY80
+          APPEND    SPLFILE,KEY80
+          APPEND    SP1,KEY80
+          APPEND    "#"",KEY80
+          APPEND    FAXNUMB,KEY80
+          APPEND    "#"",KEY80
+          APPEND    SP1,KEY80
+          APPEND    PASSCODE,KEY80
+          RESET     KEY80
+.
+          MOVE      "23",EVERT
+          MOVE      "3",ECOL
+          GETVAR    DIM2,KEY2,ECOL,EVERT
+          MATCH     "eX",DIM2
+          IF        @EQUAL
+            CALL      CLRBX000                * Clear the Box
+            DISPLAY   *P20:23,*V2LON,"Fax being queued. Please wait.";
+            EXECUTE   KEY80,TASKID
+            CALL      OPTNS000                * Redisplay the Option Line
+          ELSE
+            DISPLAY   *P20:24,*EL,*V2LON,"Fax being queued. Please wait";
+            EXECUTE   KEY80,TASKID
+          ENDIF
+.
+          GOTO      FAXPR900
+.
+.         Quick delete of spool file
+.
+FAXPR800  MOVE      FILENAME,CSPDESC       * name of file to be deleted
+          CALL      SPLDELET
+.
+FAXPR900  MOVE      SP8,SPLFILE
+          GOTO      FAXPR9999
+.
+FAXPR999  RETURN
+.

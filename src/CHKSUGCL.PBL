@@ -1,0 +1,182 @@
+. *****************************************************************************
+. *                                                                           *
+. * Include Name :  CHKSUGCL.PBL                                              *
+. *                                                                           *
+. * Author       :  Paul Howells                                              *
+. *                                                                           *
+. * Function     :  Subroutine to warn if the admission type is not the       *
+. *                 suggested classification.                                 *
+. *                                                                           *
+. * Files Needed :  PATMI1FD - assumes the admission file has been read.      *
+. *                                                                           *
+. * Includes req :  PATITMFD & IO                                             *
+. *                 PATMI1FD & IO                                             *
+. *                 PATSGCFD & IO                                             *
+. *                 PATCONFD                                                  *
+. *                                                                           *
+. * Parameters   :  ITCODE - Item Code                                        *
+. *                                                                           *
+. * Returns      :  KEY1 - Type of warning message                            *
+. *                 KEY20- Code description of the admission type             *
+. *                 KEY3 - Suggested admission type                           *
+. *                                                                           *
+. * Modification :                                                            *
+. *                V11.00.01 02/03/2020  J.Tan          TSK 0838262           *
+. *                          Added Effective from and to date to MBS Item file*
+. *                 V9.07.01 19/09/06 J.Tan    CAR 119336                     *
+. *                          Added claim code to suggested classification     *
+. *                 V9.04.01 13/01/05 J.Tan    CAR 52336                      *
+. *                          Mods to return KEY3 as the suggested adm type    *
+. *                 V9.03.02 21/07/04 J.Tan    CAR 51777                      *
+. *                          Mods checking for item from previous invoice     *
+. *                          Added new flag for Possible admission type update*
+. *                 V9.03.01 22/08/03 J.Tan                                   *
+. *                          Mods for WEB                                     *
+. *****************************************************************************
+          DEFPROC   CHKSUGCL
+.
+          INC       PATSGCFD/INC
+          INC       PATITMFD/INC
+.
+TEMPADT   DIM       3
+.
+CHKSUG00  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,TEN8;*143,CLOWMBS,CLOWADM:
+                                       CHIGHMBS,CHIGHADM,CTOPADM
+          READ      CONTROLF,HUND05;*130,PTCNAUAT:
+                                    *190,PTSGCOPT
+.
+          MOVE      SP10,KEY1
+          PACK      DIM8,TFCENT,TFYEAR,TFMONTH,TFDAY
+          MOVE      SP3,TEMPADT
+          COMPARE   ONE,PTSGCOPT             * check if using suggested class.
+          GOTO      CHKSUG11 IF NOT EQUAL
+.
+. ------- Obtain the classif'n from suggested class exceptions file PATSGCFD --
+.
+          OPEN      PATSGCA1,"patsgcaf"     * open exceptions file
+          PACK      KEY18,ACLAIM,AFUNDH,ITCODE,SP20  * key of fund and item
+          CALL      RDPTSGC1                * read exceptions file
+          COMPARE   ZERO,OVRCD
+          GOTO      CHKSUB10 IF EQUAL
+.
+          MATCH     SP70,AFUNDH
+          GOTO      CHKSUB04 IF EQUAL
+.
+          MOVE      SP70,PTSGCLMN           * blank claim
+          PACK      KEY18,PTSGCLMN,AFUNDH,ITCODE,SP20  * key of fund and item
+          CALL      RDPTSGC1                * read exceptions file
+          COMPARE   ZERO,OVRCD
+          GOTO      CHKSUB10 IF EQUAL
+.
+CHKSUB04  MOVE      SP70,PTSGFUND           * blank health fund
+          PACK      KEY18,ACLAIM,PTSGFUND,ITCODE,SP20  * key of fund and item
+          CALL      RDPTSGC1                * read exceptions file
+          BRANCH    OVRCD,CHKSUG11           * no record so use ICLSS
+.
+CHKSUB10  MOVE      PTSGCLSS,TEMPADT        * set up new clasification
+          GOTO      CHKSUG30   
+.
+. ------- No Suggested Classification so use default from item file ---------
+.
+CHKSUG11  OPEN      PATITEM1,"patitemn" 
+          PACK      KEY9,ITCODE,SP70
+          PACK      KEY17,KEY9,ADATE,SP10
+          CALL      PATITMRD
+          BRANCH    OVRCD,CHKSUG99
+.
+          MOVE      ICLSS,TEMPADT           * use default from MBS file (Cat A)
+          MATCH     SP3,TEMPADT
+          GOTO      CHKSUG30 IF NOT EQUAL
+.
+CHKSUG12  COMPARE   IAMT,CLOWMBS
+          GOTO      CHKSUG15 IF LESS
+          MOVE      CLOWADM,TEMPADT
+          GOTO      CHKSUG30
+.
+CHKSUG15  COMPARE   IAMT,CHIGHMBS
+          GOTO      CHKSUG20 IF LESS
+          MOVE      CHIGHADM,TEMPADT
+          GOTO      CHKSUG30
+.
+CHKSUG20  MOVE      CTOPADM,TEMPADT
+.
+.         Check for the admission type
+.
+CHKSUG30  MATCH     TEMPADT,ATYPE
+          GOTO      CHKSUG50 IF EQUAL	
+.
+          MOVE      TEMPADT,KEY3
+          MOVE      SP20,TDESC
+          PACK      KEY5,ANSA,SP1,TEMPADT
+          CALL      RDCODE1
+          BRANCH    OVRCD,CHKSUG40
+.
+          IF        PTCNAUAT<>1
+            STRIP     TDESC
+.           DISPLAY   *P1:24,*EL,*B,*V2LON,*BLINKON,"WARNING",*HOFF:
+.                     ": Adm. Type should be ",*V2LON,*+,TDESC,*HOFF,". ";
+.           CALL      HITENTER
+            MOVE      "1",KEY1
+            MOVE      TDESC,KEY20
+            GOTO      CHKSUG50
+          ENDIF
+          GOTO      CHKSUG45
+.
+CHKSUG40  IF        PTCNAUAT<>1
+.           DISPLAY   *P1:24,*EL,*B:
+.                     "Invalid Suggested Admission Type. ";
+.           CALL      HITENTER
+            MOVE      "2",KEY1
+            MOVE      TDESC,KEY20
+            GOTO      CHKSUG50
+          ENDIF
+.
+CHKSUG45  MOVE      "4",KEY1            * Possible Admission type update
+.
+.         Check if this item has been entered twice and invoiced
+.
+CHKSUG50   PACK     KEY22,AADMNO,SP20
+           OPEN     PATDTRA1,"patdtraf"
+           CALL     RDSDTRN1
+CHKSUG60   CALL     RDKDTRN1
+           BRANCH   OVRCD,CHKSUG90
+.
+           COMPARE  AADMNO,TADMNO
+           GOTO     CHKSUG90 IF NOT EQUAL
+.
+           MATCH    "00000000",TREF
+           GOTO     CHKSUG60 IF EQUAL
+.
+           BRANCH   TRECTYPE,CHKSUG60,CHKSUG70,CHKSUG70
+           GOTO     CHKSUG60
+.
+CHKSUG70   MATCH    TITEMNO,ITCODE
+           GOTO     CHKSUG60 IF NOT EQUAL
+.
+.          DISPLAY  *P1:24,*EL,*B,*V2LON,*BLINKON,"WARNING",*HOFF:
+.                   ": Item has been Entered in the Previous Invoice.";
+           MATCH     "4",KEY1
+           IF        @EQUAL
+             MOVE      "5",KEY1     * Possible adm type changed and item entered
+           ELSE
+             MOVE      "3",KEY1
+           ENDIF
+           MOVE      SP70,KEY20
+.
+CHKSUG90   UNPACK   DIM8,XCENT,XYEAR,XMON,XDAY
+           MOVE     XCENT,TFCENT
+           MOVE     XYEAR,TFYEAR
+           MOVE     XMON,TFMONTH
+           MOVE     XDAY,TFDAY
+           GOTO     CHKSUG99
++
+.
+          INC       PATITMRD
+          INC       PATSGCIO/INC
+          INC       PATITMIO/INC
+.
+OVERCOND  MOVE      ONE,OVRCD
+          RETURN
+.
+CHKSUG99  ENDPROC

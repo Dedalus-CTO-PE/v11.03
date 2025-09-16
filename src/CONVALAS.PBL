@@ -1,0 +1,550 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   CONVALAS                                                    *
+.* Desc      :   Data Migration Program to upload patient alias data from    *
+.*               a third party legacy system into the PMI webPAS module.     *
+.*****************************************************************************
+.* Date      :   25/02/2011                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through the convalas.txt file and    *
+.*               for each valid record found, it will write a new patgsrnf   *
+.*               record for the patient.                                     *
+.* Mods      :                                                               *
+.*        V10.04.01  13/03/2014  Steve Armstrong  CAR 296128                 *
+.*                   Added display of warning message if error records found *
+.*****************************************************************************
+.*        V10.02.01  05/08/2011  Steve Armstrong   CAR 248262                *
+.*                   Removed check on deceased patients                      *
+.*        V10.02.00  25/02/2011  Steve Armstrong   CAR 240678                *
+.*                   Created program                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       PATGSRFD/INC
+          INC       PATMA1FD/INC
+.
+.         PMI Alias Upload file layout - convalas.txt
+.
+ALIASUPL  FILE      HL7, FIXED=4000         * Pipe delimited upload file
+.                                             4096 is maximum
+.
+.         Fields must be pipe delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+ALASURNO  DIM       8       1     U/R number                 (patgsrnf.gsrurno)
+ALASSURN  DIM       40      9     Alias Surname              (patgsrnf.gsrsnam)
+ALASGIV1  DIM       40     49     Alias Given Name 1         (patgsrnf.gsrgnam)
+ALASGIV2  DIM       40     89     Alias Given Name 2         (patgsrnf.ptgsgnm2)
+.
+. End of Record           129
+.
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+ADDCOUNT  FORM      8             * added record count
+.
+CURRCENT  FORM      2             * current century
+CURRDATE  DIM       8             * current date
+.
+DIM44     DIM       44
+DUPCOUNT  FORM      8             * duplicate record count
+.
+ERORDESC  DIM       70
+ERORFLAG  FORM      1             * Field Validation Error Flag
+.                                     0 = No Errors on Field Validations
+.                                     1 = Errors on Field Validations
+.
+FORM10    FORM      10
+.
+MANCOUNT  FORM      8             * mandatory field error record count
+.
+RECCOUNT  FORM      8             * record read counter
+.
+TMPFIELD  DIM       8             * Field name
+TMPSTRNG  DIM       40            * Temporary string (max field length)
+.
+UNKCOUNT  FORM      8             * unknown U/R counter
+.
+VCHKFLAG  FORM      1             * Validation flag
+.                                     0 = writing data to database
+.                                     1 = only validating import data file
+.
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+PIPE      INIT      "|"
+.
+.
+.
+PRGID     INIT      "CONVALAS"
+PRGNAM    INIT      "Upload PMI Aliases"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with upload
+.
+MAIN1000  CALL      OPEN0000               * open upload file
+          BRANCH    EXIT,MAIN0100          * file not found
+.
+          CALL      ASKQ0000               * validation run only ?
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      UPLD0000               * process upload
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"patgsrnf";
+          OPEN      PATGSRN1,"patgsrnf"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          MOVE      ONE,CNOUNDLN
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run data upload                         *
+.*                        TRUE  (1)  Exit selected                           *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Data Upload"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run data upload
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999 
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000              Called by: MAIN0000   *
+.*                  Open upload file (convalas.txt)                          *
+.*****************************************************************************
+.
+OPEN0000  MOVE      ZERO,OVRCD
+.
+          TRAP      OVERCOND IF IO
+          OPEN      ALIASUPL,"convalas"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,*B,"Upload file - convalas.txt - not found.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.*****************************************************************************
+.*                               ASKQ0000              Called by: MAIN0000   *
+.*                  Ask if running validation only                           *
+.* Returns: VCHKFLAG  - validation flag                                      *
+.*                       0 = normal mode                                     *
+.*                       1 = validation only mode                            *
+.*****************************************************************************
+.
+ASKQ0000  MOVE      ANSY,ANS
+          KEYIN     *P1:10,*EL,"Validation only (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+                    *P25:10,*V2LON,*RV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS                     * Y input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DYES,*HOFF:
+                      *P35:10,"(No data will be uploaded)"
+            MOVE      ONE,VCHKFLAG               * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          MATCH     ANSN,ANS                     * N input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DNO,*HOFF:
+                      *P35:10,"(Data will be uploaded)"
+            MOVE      ZERO,VCHKFLAG              * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          GOTO      ASKQ0000                     * invalid input
+.
+ASKQ9999  RETURN
++
+.******************************************************************************
+.*                                  UPLD0000              Called by: MAIN0000 *
+.*                  Process the PMI upload file records                       *
+.******************************************************************************
+.
+UPLD0000  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      CCC,CURRCENT
+.
+          DISPLAY   *P1:13,"Processing ",*V2LON,"convalas.txt",*HOFF:
+                    *P1:15,"Started    : ",*V2LON,CTIMEIS,*HOFF:
+                    *P1:17,"U/R Number : ":
+                    *P1:18,"Surname    : ":
+                    *P1:19,"Records    : "
+.
+          MOVE      ZERO,RECCOUNT                * initialise records read
+          MOVE      ZERO,ADDCOUNT                * initialise added record count
+          MOVE      ZERO,DUPCOUNT                * initialise dup. record count
+          MOVE      ZERO,MANCOUNT                * init. mand error record count
+          MOVE      ZERO,UNKCOUNT                * init. unknown pt record count
+.
+          CALL      HEAD0000                     * Print the report header
+.
+.         Loop through upload file records
+.
+UPLD1000  READ      ALIASUPL,SEQ;ALASURNO,ALASSURN,ALASGIV1,ALASGIV2
+          GOTO      UPLD9000 IF OVER
+.
+          ADD       ONE,RECCOUNT                 * increment records read
+          IF        (RECCOUNT%1000) = 0 | RECCOUNT = 1
+            DISPLAY   *P14:17,*V2LON,ALASURNO:
+                      *P14:18,ALASSURN:
+                      *P14:19,RECCOUNT;
+          ENDIF
+.
+          REP       UPPLOW,ALASSURN
+          REP       UPPLOW,ALASGIV1
+          REP       UPPLOW,ALASGIV2
+.
+          CALL      POUT0000                     * pad out fields with spaces
+.
+          CALL      CLER0000                     * clear database variables
+          CALL      CLPATMAS
+.
+          CALL      VURN0000                     * validate U/R
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      MAND0000                     * check for Mandatory fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      SETV0000                     * set up file variables
+.
+          PACK      KEY115,GSRURNO,GSRBILL,GSRSNAM,GSRGNAM,PTGSGNM2,GSRDOB:
+                           GSRSEX
+          CALL      RAPTGSR1
+          IF        OVRCD = 1
+            BRANCH    VCHKFLAG,UPLD1000          * error checking only
+            CALL      WRPTGSR1                   * write new record
+            ADD       ONE,ADDCOUNT               * increment added record count
+          ELSE
+            MOVE      "Alias record already exists ",ERORDESC
+            CALL      PERR0000                   * print error line
+            ADD       ONE,DUPCOUNT               * increment dupl. record count
+          ENDIF
+.
+          GOTO      UPLD1000                     * get next record
+.
+.         Upload completed
+.
+UPLD9000  ASSIGN    (DUPCOUNT+MANCOUNT+UNKCOUNT),FORM10
+          IF        FORM10 > 0
+            CALL      LINE0000                   * print bottom line if errors
+          ENDIF
+.
+          COMPARE   CLNO,FIFTY7                  * room for stats ?
+          CALL      HEAD0000 IF LESS             * no - new page req'd.
+.
+          CLOCK     TIME,CTIMEIS
+          DISPLAY   *P14:19,*V2LON,RECCOUNT,*HOFF:
+                    *P1:21,"Finished   : ",*V2LON,CTIMEIS
+.
+.         Warn the user if there were any records with errors
+.
+          IF        FORM10 > 0
+            DISPLAY   *P1:22,*V2LON,*BLINKON,"Warning:  Records found with ":
+                      "errors.  Refer to error report."
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,*B,"Upload complete.  ";
+          CALL      HITENTER
+.
+          PRINT     *N:
+                    *1,"Total records read                    - ",RECCOUNT,*N:
+                    *1,"Records added                         - ",ADDCOUNT,*N:
+                    *1,"Duplicate Records detected            - ",DUPCOUNT,*N:
+                    *1,"Records with unknown U/R numbers      - ",UNKCOUNT,*N:
+                    *1,"Records with blank mandatory fields   - ",MANCOUNT:
+                    *N,*N,*1,"*** End of Report ***"
+.
+UPLD9999  RETURN
++
+.****************************************************************************
+.*                             MAND0000                Called by: UPLD0000  *
+.*                 Check for standard Mandatory fields                      *
+.* Returns: EXIT   0 = all mandatory fields are populated                   *
+.*                 1 = one or more mandatory fields are blank               *
+.*          MANCOUNT - updated count of records with mandatory fields       *
+.*                     missing                                              *
+.****************************************************************************
+.
+MAND0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MOVE      ALASURNO,TMPSTRNG
+          MOVE      "ALASURNO",TMPFIELD          * U/R Number
+          CALL      CHKM0000
+.
+          MOVE      ALASSURN,TMPSTRNG
+          MOVE      "ALASSURN",TMPFIELD          * Surname
+          CALL      CHKM0000
+.
+          MOVE      ALASGIV1,TMPSTRNG
+          MOVE      "ALASGIV1",TMPFIELD          * First Given Name
+          CALL      CHKM0000
+.
+          BRANCH    ERORFLAG,MAND9100            * errors on mand. fields
+.
+          MOVE      ZERO,EXIT                    * no errors on mand. fields
+          GOTO      MAND9999
+.
+MAND9100  ADD       ONE,MANCOUNT                 * incr. mand error record count
+          MOVE      ONE,EXIT
+.
+MAND9999  RETURN
++
+.*****************************************************************************
+.*                            CHKM0000             Called by: MAND0000       *
+.*                    Check if a mandatory field is blank                    *
+.* Requires: TMPSTRNG - field to be checked                                  *
+.*           TMPFIELD - 8 character field name                               *
+.* Returns:  ERORFLAG = 1   field is blank (error)                           *
+.*****************************************************************************
+.
+CHKM0000  MATCH     TMPSTRNG,SP70                * blank field ?
+          GOTO      CHKM9999 IF NOT EQUAL        * no - finished
+.
+          MOVE      "Mandatory Field blank ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set error flag
+.
+CHKM9999  RETURN
++
+.******************************************************************************
+.*                                  CLER0000              Called by: UPLD0000 *
+.*                    Clear all the database fields                           *
+.******************************************************************************
+.
+CLER0000  MOVE      SP70,GSRURNO
+          MOVE      ZERO,GSRBILL
+          MOVE      SP70,GSRSNAM
+          MOVE      SP70,GSRGNAM
+          MOVE      SP70,GSRSKEY
+          MOVE      SP70,GSRGKEY1
+          MOVE      SP70,GSRGKEY2
+          MOVE      ZERO,GSRSYS
+          MOVE      SP70,GSRDOB
+          MOVE      SP70,GSRSEX
+          MOVE      SP70,PTGSGNM2
+          MOVE      SP70,GSRSPARE
+.
+CLER9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000              Called by: UPLD0000 *
+.*                           Print The Report Header                 PERR0000 *
+.******************************************************************************
+.
+HEAD0000  MOVE      "- Error Report",CPHDROPT
+          CALL      HEAD132                 * Print the report header
+.
+          PRINT     *1,"< convalas.txt >"
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"U/R No.",*12,PIPE,*14,"Patient Name":
+                    *59,PIPE,*61,"Error Description",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      SEVEN,CLNO                   * initialise line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: HEAD0000  *
+.*                      Draw line across page                               *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.******************************************************************************
+.*                                  SETV0000              Called by: UPLD0000 *
+.*                       Load the record variables                            *
+.******************************************************************************
+.
+SETV0000   MOVE      ALASSURN,GSRSNAM
+           MOVE      ALASGIV1,GSRGNAM
+           MOVE      ALASGIV2,PTGSGNM2
+           CALL      SOUNDEX                     * set soundex keys
+           CALL      SOUNDX2
+           MOVE      PBDATE,GSRDOB
+           MOVE      PSEX,GSRSEX
+.
+SETV9999  RETURN
++
+.*****************************************************************************
+.*                            POUT0000             Called by: UPLD0000       *
+.*            Pad out all the record fields with spaces given that we        *
+.*            are dealing with pipe delimited records                        *
+.*****************************************************************************
+.
+POUT0000  PACK      ALASURNO,ALASURNO,SP70
+          RJUSTIFY  ALASURNO
+          PACK      ALASSURN,ALASSURN,SP70
+          PACK      ALASGIV1,ALASGIV1,SP70
+          PACK      ALASGIV2,ALASGIV2,SP70
+.
+POUT9999  RETURN
++
+.*****************************************************************************
+.*                              PERR0000           Called by: UPLD0000       *
+.*                   Print an error detail line               CHKM0000       *
+.* Requires: Valid read on PMI records (for name fields)      DERR0000       *
+.*           ERORDESC - error description                     TERR0000       *
+.*           CLNO - current page line count                   VURN0000       *
+.* Returns:  CLNO - updated page line count                   NERR0000       *
+.*                                                            VCOD0000       *
+.*****************************************************************************
+.
+PERR0000  COMPARE   CLNO,SIXTY3                  * page full ?
+          IF        @LESS
+            CALL      LINE0000                   * yes - print bottom line
+            CALL      HEAD0000                   * print header
+          ENDIF
+.
+          MOVE      PSNAME,PACSNAME              * format patient name
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          MOVE      TWO,PACFRMT
+          CALL      PACNAME
+          MOVE      PACFNAME,DIM44
+.
+          PRINT     *1,PIPE,*3,ALASURNO,*12,PIPE,*14,DIM44,*59,PIPE:
+                    *61,ERORDESC,*132,PIPE
+          ADD       ONE,CLNO                     * increment page line count
+.
+PERR9999  RETURN
++
+.*****************************************************************************
+.*                              VURN0000           Called by: UPLD0000       *
+.*                        Validate U/R Number                                *
+.* Requires: ALASURNO - U/R number (right justified)                         *
+.* Returns:  Valid read on PMI data                                          *
+.*           EXIT  0 = PMI record found - ok to continue                     *
+.*                 1 = PMI record not found - ignore record                  *
+.*          UNKCOUNT - updated count of unknown U/R numbers                  *
+.*          GSRURNO  - U/R number right justified                            *
+.*****************************************************************************
+.
+VURN0000  MATCH     SP8,ALASURNO                 * blank U/R ?
+          IF        @EQUAL
+            MOVE      "U/R missing ",ERORDESC    * yes
+            GOTO      VURN9150
+          ENDIF
+.
+          MOVE      ALASURNO,KEY8
+          CALL      RDMAST1                      * U/R on file ?
+          BRANCH    OVRCD,VURN9100               * no - error
+.
+          COMPARE   ONE,PSTAT                    * merged U/R ?
+          GOTO      VURN9000 IF NOT EQUAL        * no
+.
+.         We have a merged U/R record, so get the new U/R
+.
+          MATCH     PPSNAME,SP20                 * blank previous name field ?
+          GOTO      VURN9100 IF EQUAL            * yes - error
+.
+          MOVE      PPSNAME,ALASURNO             * no - load new U/R
+          GOTO      VURN0000                     * get new pmi record
+.
+VURN9000  MOVE      ALASURNO,GSRURNO             * load U/R number
+          MOVE      ZERO,EXIT
+          GOTO      VURN9999
+.
+VURN9100  MOVE      "PMI Record not found ",ERORDESC
+VURN9150  CALL      PERR0000                     * print error line
+          ADD       ONE,UNKCOUNT                 * increment unknown U/R count
+          MOVE      ONE,EXIT
+.
+VURN9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       CLPATMAS
+          INC       PATSNDX
+          INC       PATSNX2
+.
+          INC       PATGSRIO/INC
+          INC       PATMA1IO/INC

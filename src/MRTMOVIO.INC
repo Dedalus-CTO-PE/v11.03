@@ -1,0 +1,76 @@
+. MRTHISIO.INC
+. ============
+.
+.        FILE I/O REQUESTS FOR MEDICAL RECORDS TRACKING MOVEMENT REASON FILE
+.
+.         OVRCD   FORM     1        0 = NOT OVER
+.                                   1 = OVER
+.         KEY4    DIM      4        KEY FOR MRTMOVA1
+.
+RAMRMOV1 
+         MOVE     ZERO,OVRCD
+         RESET    KEY4
+         READ     MRTMOVA1,KEY4;ANS
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RSMRMOV1  
+         MOVE     ZERO,OVRCD
+         RESET    KEY4
+         READ     MRTMOVA1,KEY4;;
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RPMRMOV1
+         MOVE     ZERO,OVRCD
+         READKP   MRTMOVA1;MRMOREAS,MRMODESC,MRMOPERD,MRMOTYPE,MRMOINDC:
+                           MRMOSTAT,MRMOUSAG,MRMOSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RKMRMOV1
+         MOVE     ZERO,OVRCD
+         READKS   MRTMOVA1;MRMOREAS,MRMODESC,MRMOPERD,MRMOTYPE,MRMOINDC:
+                           MRMOSTAT,MRMOUSAG,MRMOSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RLMRMOV1
+         MOVE     ZERO,OVRCD
+         RESET    KEY4
+         READL    MRTMOVA1,KEY4;MRMOREAS,MRMODESC,MRMOPERD,MRMOTYPE,MRMOINDC:
+                                MRMOSTAT,MRMOUSAG,MRMOSPAR
+         GOTO     OVERLOCK IF LOCKED
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+RDMRMOV1
+         MOVE     ZERO,OVRCD
+         RESET    KEY4
+         READ     MRTMOVA1,KEY4;MRMOREAS,MRMODESC,MRMOPERD,MRMOTYPE,MRMOINDC:
+                                MRMOSTAT,MRMOUSAG,MRMOSPAR
+         GOTO     OVERCOND IF OVER
+         RETURN
+.
+UPMRMOV1   
+         UPDATE   MRTMOVA1;MRMOREAS,MRMODESC,MRMOPERD,MRMOTYPE,MRMOINDC:
+                           MRMOSTAT,MRMOUSAG,MRMOSPAR
+         RETURN
+.
+DETMOV1  
+         RESET    KEY4
+         DELETE   MRTMOVA1,KEY4
+         RETURN
+.
+WRTMOV1  
+         MOVE     ZERO,OVRCD
+         RESET    KEY4
+         WRITE    MRTMOVA1,KEY4;KEY4,MRMODESC,MRMOPERD,MRMOTYPE,MRMOINDC:
+                                     MRMOSTAT,MRMOUSAG,MRMOSPAR
+         RETURN
+.
+ULTMOV1  UNLOCK   MRTMOVA1
+         RETURN
+.
+.
+.

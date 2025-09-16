@@ -1,0 +1,90 @@
+.
+.  Mods : 08/10/92  Steve Armstrong
+.         Modified PRHDDEBT for change from FORM to DIM in FD
+.--------------------------------------------------------------
+RSPRHD1   RESET     KEY27
+          READ      PRIHDBT1,KEY27;;
+          RETURN
+.
+RAPRHD1   RESET     KEY27
+          MOVE      ZERO,OVRCD
+          READ      PRIHDBT1,KEY27;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRHD1   RESET     KEY27
+          MOVE      ZERO,OVRCD
+          READ      PRIHDBT1,KEY27;PRHDDEBT,DPRHDSCN,PRHDCLAM,PRHDACCD:
+                                  DPRHDUNQ,PRHDHFND,PRHDSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRHDUNQ,PRHDUNIQ
+          MOVE      DPRHDSCN,PRHDSCAN
+          RETURN
+.
+RKPRHD1   MOVE      ZERO,OVRCD
+          READKS    PRIHDBT1;PRHDDEBT,DPRHDSCN,PRHDCLAM,PRHDACCD:
+                             DPRHDUNQ,PRHDHFND,PRHDSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRHDUNQ,PRHDUNIQ
+          MOVE      DPRHDSCN,PRHDSCAN
+          RETURN
+.
+RPPRHD1   MOVE      ZERO,OVRCD
+          READKP    PRIHDBT1;PRHDDEBT,DPRHDSCN,PRHDCLAM,PRHDACCD:
+                             DPRHDUNQ,PRHDHFND,PRHDSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRHDUNQ,PRHDUNIQ
+          MOVE      DPRHDSCN,PRHDSCAN
+          RETURN
+.
+UPPRHD1   MOVE      PRHDUNIQ,DPRHDUNQ
+          MOVE      PRHDSCAN,DPRHDSCN
+          UPDATE    PRIHDBT1;PRHDDEBT,DPRHDSCN,PRHDCLAM,PRHDACCD:
+                             DPRHDUNQ,PRHDHFND,PRHDSPAR
+          RETURN
+.
+WRPRHD1   MOVE      PRHDUNIQ,DPRHDUNQ
+          MOVE      PRHDSCAN,DPRHDSCN
+          WRITE     PRIHDBT1,KEY27;PRHDDEBT,DPRHDSCN,PRHDCLAM,PRHDACCD:
+                                   DPRHDUNQ,PRHDHFND,PRHDSPAR
+          RETURN
+.
+DEPRHD1   RESET     KEY27
+          DELETE    PRIHDBT1,KEY27
+          RETURN
+.
+RSPRHD2   RESET     KEY8
+          READ      PRIHDBT2,KEY8;;
+          RETURN
+.
+RAPRHD2   RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READ      PRIHDBT2,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPRHD2   RESET     KEY8
+          MOVE      ZERO,OVRCD
+          READ      PRIHDBT2,KEY8;PRHDDEBT,DPRHDSCN,PRHDCLAM,PRHDACCD:
+                                  DPRHDUNQ,PRHDHFND,PRHDSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRHDUNQ,PRHDUNIQ
+          MOVE      DPRHDSCN,PRHDSCAN
+          RETURN
+.
+RKPRHD2   MOVE      ZERO,OVRCD
+          READKS    PRIHDBT2;PRHDDEBT,DPRHDSCN,PRHDCLAM,PRHDACCD:
+                             DPRHDUNQ,PRHDHFND,PRHDSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRHDUNQ,PRHDUNIQ
+          MOVE      DPRHDSCN,PRHDSCAN
+          RETURN
+.
+RPPRHD2   MOVE      ZERO,OVRCD
+          READKP    PRIHDBT2;PRHDDEBT,DPRHDSCN,PRHDCLAM,PRHDACCD:
+                             DPRHDUNQ,PRHDHFND,PRHDSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRHDUNQ,PRHDUNIQ
+          MOVE      DPRHDSCN,PRHDSCAN
+          RETURN
+.

@@ -1,0 +1,880 @@
+.***************************************************************************
+.* System    :   OPR - Theatre                                             *
+.* Program   :   IBAOPR17                                                  *
+.* Desc      :   DOCTOR'S LEAVE MAINTENANCE                                * 
+.***************************************************************************
+.* Date      :   19/11/1993                                                *
+.* Author    :   Glenn Berry                                               *
+.* Function  :   Maintain the Doctor Leave file                            * 
+.* Mods      :                                                             *
+.*        V10.04.01 23/06/2014   J.Tan           CAR 261630                *
+.*                  Removed port number from temp file name                *
+.*        V5.01.02  10/12/1993  Glenn Berry                                *
+.*                  Mods to batch screen                                   *
+.*        V5.01.03  13/12/1993  Glenn Berry                                *
+.*                  Mods to batch screen                                   *
+.***************************************************************************
+.
+.====================================================
+.  FD INCLUDES 
+.====================================================
+.
+          INC       STDGENDF
+          INC       IBASEQFD/INC            * Sequential Numbers File
+          INC       TFILEVAR/INC            * Generate Temp File Name
+          INC       WEBERRFD/INC            * Web Server Error Logging
+.
+          INC       OPRDLVFD/INC
+          INC       PATDO1FD/INC
+          INC       PATCODFD/INC
+.
+.====================================================
+. TEMPORARY FILE DESCRIPTIONS 
+.====================================================
+.
+.-- Doctor Leave Temporary File
+TMPDLVA1  IFILE     SQL, FIXED=29, KEY="U1-3"
+.
+. NAME    TYPE    LENGTH   PHYSICAL  START LOC.  DESCRIPTION
+. ----    ----    ------   --------  ----------  -----------
+DTMRECNO   DIM       3         3         1        Record Number 
+.OPDVDOCT  DIM       6         6         4        Doctor Id
+.OPDVFDTE  DIM       8         8         10       From Date
+.OPDVTDTE  DIM       8         8         18       To Date        
+.OPDVREAS  DIM       3         3         26       Reason for Leave (DH)
+.
+.End of record                           29
+.
+.
+.Redefine key fields.
+.-------------------
+TMRECNO   FORM      3                              Record Number
+.      
+.
+.====================================================
+. VARIABLE LIST
+.====================================================
+++
+NODATA    FORM      1                        * =1 if no more data
+CMDLINE   DIM       80
+CODE      DIM       2                        * Used by PATCODKY
+COUNT     FORM      2                        * record counter
+CURRPAGE  FORM      2                        * currrent page number
+CURRREC   FORM      3                        * current (last) record number
+DOCCODE   DIM       8                        * Doctor Code
+DOCNAME   DIM       50                       * Doctor Name
+FIRSTREC  FORM      3                        * record number at top of screen
+FDATE     FORM      8
+FORMFDTE  FORM      8
+FORMTDTE  FORM      8
+DATE      DIM       8 
+DATE1     DIM       10 
+DATE2     DIM       10
+DIM40     DIM       40
+SVRECNO   FORM      3                        * save variable for record number
+SVFDTE    DIM       8
+SVTDTE    DIM       8
+SVREAS    DIM       3
+FORM2P2   FORM      2.2
+INVCODE   INIT      "*** INVALID CODE ***"
+PGELIMIT  FORM      "15"                     * number of items per page
+PGENUMBER FORM      2                        * Page number
+PTCNDCQS  FORM      1
+SELCTNUM  FORM      3                        * selected record number
+TMPAFNAM  DIM       8
+VSITE     DIM       6                        * Save variable for site
+++
+PRGID     INIT      "IBAOPR17"
+PRGNAM    INIT      "Doctor Leave Maintenance"
+VERSION   INIT      "V11.03.00"
+++
+.
+.***********************************************************************
+. MAINLINE
+.***********************************************************************
+ML0000    CALL      INIT0000                 * initialization & open files
+          
+ML1000    CALL      CRTP0000                 * create temp file
+          CALL      KDOC0000                 * keyin Doctor id
+          BRANCH    EXIT,ML9100,ML9100       * no input, exitchar
+.
+          CALL      DHED0000                 * set up some variables
+          CALL      LTMP0000                 * Load records into temp file
+          BRANCH    EXIT,ML2100              * no data, default to insert mode
+          CALL      FRST0000                 * display first screen
+ML2000    CALL      QUES0000                 * ask question on line 24
+          BRANCH    EXIT,ML1000              * exitchar
+          BRANCH    OPTION,ML2100:           * insert
+                           ML2200:           * change
+                           ML2300:           * delete
+                           ML2400:           * post data
+                           ML2500:           * Cancel
+                           ML2600:           * first screen
+                           ML2700            * next screen
+.
+ML2100    CALL      INSE0000                 * insert
+          GOTO      ML2000 
+.
+ML2200    CALL      CHGE0000                 * change
+          GOTO      ML2000 
+.
+ML2300    CALL      DELE0000                 * delete
+          GOTO      ML2000
+.
+ML2400    CALL      POST0000                 * post
+          GOTO      ML1000 
+.
+ML2500    GOTO      ML1000                   * Cancel  
+.
+ML2600    CALL      FRST0000                 * first screen
+          GOTO      ML2000 
+.
+ML2700    CALL      NEXT0000                 * next screen
+          GOTO      ML2000 
+.
+ML9100    CALL      KILL0000                 * delete temp file
+.
+ML9999    CHAIN     PGM
++
+.
+.****************************************************************************
+.* INIT0000  : Initialization & open files             
+.****************************************************************************
+INIT0000  MOVE      ZERO,EXIT 
+          CALL      DISPHEAD                 * display heading
+.
+          DISPLAY   *P64:24,"controlf"; * Display the name of the control file
+          OPEN      CONTROLF,"controlf" * Open the control file
+          READ      CONTROLF,TWENTY1;*247,PTCNDCQS
+.
+          DISPLAY   *P64:24,"patcodes"
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"oprdlvaf"
+          OPEN      OPRDLVA1,"oprdlvaf"
+.
+          DISPLAY   *P64:24,"patdo1af"
+          OPEN      PATDO1A1,"patdo1af"
+          OPEN      PATDO1A2,"patdo1af"
+.
+          CALL      TFILENAM                * Get temp file name
+          MOVE      TFILNAME,TMPAFNAM
+.
+          DISPLAY   *P01:24,*EL
+.
+INIT9999  RETURN
++
+.
+.***************************************************************************
+. KDOC0000  : Keyin Doctor Id
+. Returns   : EXIT= 1   no input
+.                 = 2   exitchar
+.***************************************************************************
+KDOC0000  DISPLAY   *P2:4,*EF,"Doctor Id : ";
+          MOVE      "14",ECOL
+          MOVE      "4",EVERT                
+          MOVE      SP6,CKYIDEF6             * no default
+          MOVE      ZERO,CKYIMAND            * not mandatory
+          CALL      PATDOCKY                 * keyin Doctor Id routine
+          BRANCH    EXIT,KDOC9999:           * spaces input
+                         KDOC9999            * exitchar
+          MOVE      DOCCODE,OPDVDOCT        
+.
+          MOVE      OPDVDOCT,KEY6            * setup paramater
+          CALL      GDOC0000                 * Get Doctor Name
+          DISPLAY   *P14:4,*V2LON,DOCCODE,*HOFF,SP2,DOCNAME
+.
+KDOC9999  RETURN
++
+.
+.***************************************************************************
+. QUES0000  : Ask Question
+. Returns   : OPTION
+.             EXIT = 1  (exitchar)
+.***************************************************************************
+QUES0000  MOVE      ZERO,EXIT
+          IF        NODATA=TRUE
+            DISPLAY   *P1:24,*EL:
+                        "(",*V2LON,ANSA,*HOFF,")dd, ":
+                        "(",*V2LON,ANSM,*HOFF,")odify, ":
+                        "(",*V2LON,ANSD,*HOFF,")elete, ":
+                        "(",*V2LON,ANSP,*HOFF,")ost, ":
+                        "(",*V2LON,ANSC,*HOFF,")ancel, ":
+                        "(",*V2LON,ANSF,*HOFF,")irst? "
+            MOVE    "55",CCOL
+          ELSE
+            DISPLAY   *P1:24,*EL:
+                        "(",*V2LON,ANSA,*HOFF,")dd, ":
+                        "(",*V2LON,ANSM,*HOFF,")odify, ":
+                        "(",*V2LON,ANSD,*HOFF,")elete, ":
+                        "(",*V2LON,ANSP,*HOFF,")ost, ":
+                        "(",*V2LON,ANSC,*HOFF,")ancel, ":
+                        "(",*V2LON,ANSF,*HOFF,")irst, ":
+                        "(",*V2LON,ANSN,*HOFF,")ext? "
+            MOVE    "63",CCOL
+          ENDIF
+.
+QUES1000  KEYIN     *PCCOL:24,*EL,*V2LON,ANS
+.
+          PACK      ANS,ANS,SP1
+.
+          TYPE      ANS
+          GOTO      QUES2000 IF NOT EQUAL
+.
+          BEEP
+          GOTO      QUES1000
+.
+QUES2000  MOVE      ZERO,OPTION
+          REP       UPPLOW,ANS
+          REP       "a1A1m2M2d3D3p4P4c5C5f6F6n7N7",ANS
+          MOVE      ANS,OPTION
+.
+          IF        NODATA=TRUE
+            BRANCH    OPTION,QUES9999,QUES9999,QUES9999,QUES9999:
+                           QUES9999,QUES9999
+          ELSE
+            BRANCH    OPTION,QUES9999,QUES9999,QUES9999,QUES9999:
+                           QUES9999,QUES9999,QUES9999
+          ENDIF
+.
+          BEEP
+          GOTO      QUES1000
+.
+QUES9999  RETURN
++
+.
+.***************************************************************************
+. DHED0000  : Display header details
+.***************************************************************************
+DHED0000  MOVE      "1",CURRPAGE
+          MOVE      ZERO,CURRREC
+          DISPLAY   *P01:6,*V2LON,*ULON,"No.":
+                    *P06:6,*ULON,"Date Range    ",SP10:
+                    *P35:6,*ULON,"Reason",SP30
+.
+DHED9999  RETURN
++
+.
+.***************************************************************************
+. DPGE0000  : Display a Page of data
+. Paramaters: FIRSTREC - starting record number 
+. Returns   : NODATA  = 1 no more data after this page
+.             CVERT  - currrent line number
+.***************************************************************************
+DPGE0000  MOVE      ZERO,COUNT
+          MOVE      ZERO,NODATA
+          MOVE      "7",CVERT                * set up parameter
+          DISPLAY   *P1:7,*EF
+          PACK      KEY3,FIRSTREC,SP3
+          CALL      RSTMDLV1                 * position 
+.
+DPGE1000  CALL      RKTMDLV1
+          BRANCH    OVRCD,DPGE9100           * eof
+          MATCH     OPDVDOCT,DOCCODE         * same Doctor?
+          GOTO      DPGE9100 IF NOT EQUAL
+.
+.------   we have a valid record, so setup data for display
+.
+          ADD       ONE,CVERT                * increment line number
+          ADD       ONE,COUNT                * increment record count
+.
+          UNPACK    OPDVFDTE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,DATE1
+.
+          UNPACK    OPDVTDTE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,DATE2
+.
+          MOVE      INVCODE,TDESC
+          PACK      KEY5,ANSD,ANSH,OPDVREAS
+          CALL      RDCODE1
+.
+          DISPLAY   *P1:CVERT,*V2LON,TMRECNO,*HOFF,".",SP1,*V2LON:
+                      DATE1,*HOFF," to ",*V2LON,DATE2,*HOFF:
+                      SP5,*V2LON,OPDVREAS,*HOFF,SP2,TDESC
+.
+          COMPARE   PGELIMIT,COUNT           * reached page limit?
+          GOTO      DPGE1000 IF LESS
+          GOTO      DPGE9999
+.
+DPGE9100  MOVE      ONE,NODATA               * no more data
+.
+DPGE9999  RETURN
++
+.
+.***************************************************************************
+. INSE0000  : Insert 
+. Parameters: CURRREC -  current record number
+.             CVERT   -  current line number
+.***************************************************************************
+INSE0000  MOVE      CURRREC,SELCTNUM         * set up parameter
+          CALL      POSI0000                 * position on correct screen
+.
+INSE1000  ADD       ONE,CURRREC              * increment record count 
+          ASSIGN    (CURRREC/CURRPAGE),FORM2P2
+          IF        FORM2P2>PGELIMIT
+            ADD       ONE,CURRPAGE
+            MOVE      "8",CVERT
+            DISPLAY   *PCCOL:CVERT,*EF;
+          ELSE
+            ADD       ONE,CVERT              * increment line number
+          ENDIF
+.
+          DISPLAY   *P1:CVERT,*V2LON,CURRREC,*HOFF,".";
+.
+          MOVE      CURRREC,TMRECNO
+          CALL      KYIN0000                 * keyin the data and post
+          BRANCH    EXIT,INSE9100            * cancel the insert
+          GOTO      INSE1000                 * auto insert mode
+.
+.------   Cancel the insert
+INSE9100  DISPLAY   *P1:CVERT,*EL;
+          SUB       ONE,CVERT                * decrement line number
+          SUB       ONE,CURRREC              * decrement record count
+.
+INSE9999  RETURN
++
+.
+.***************************************************************************
+. KYIN0000   : Keyin a new record
+. Parameters : TMRECNO
+. Returns    : EXIT = 1  - Cancel input
+.***************************************************************************
+KYIN0000  MOVE      ZERO,EXIT
+          MOVE      "6",CCOL
+          UNPACK    SP10,CYEAR,CMON,CDAY     * no defaults
+          MOVE      CCC,CCENT
+          MOVE      ZERO,CKYIMAND            * not mandatory 
+          CALL      KDAT0000                 * keyin from-date
+          BRANCH    EXIT,KYIN9000            * No input - cancel insert
+          MOVE      DATE,OPDVFDTE
+.
+          DISPLAY   *P16:CVERT," to ";
+.
+KYIN2000  MOVE      "20",CCOL
+          UNPACK    SP10,CYEAR,CMON,CDAY     * no defaults
+          MOVE      CCC,CCENT
+          MOVE      ZERO,CKYIMAND            * not mandatory 
+          CALL      KDAT0000                 * keyin to-date
+          BRANCH    EXIT,KYIN0000            * no input
+          MOVE      DATE,OPDVTDTE
+          CALL      VRNG0000                 * Validate date range
+          BRANCH    EXIT,KYIN2000            * invalid range
+.
+          MOVE      "35",CCOL
+          MOVE      SP3,CKYIDEF3             * no Default code
+          MOVE      ZERO,CKYIMAND            * not mand.
+          CALL      KRES0000                 * keyin reason
+          BRANCH    EXIT,KYIN2000:           * no input
+                         KYIN9000            * exitchar
+          MOVE      DOCCODE,OPDVDOCT         * set up file variable
+          CALL      WRTMDLV1                 * up record in temp file
+          GOTO      KYIN9999
+.
+KYIN9000  MOVE      ONE,EXIT
+.
+KYIN9999  RETURN
++
+.
+.***************************************************************************
+. KYCH0000   : Keyin Changes to an existing record
+. Parameters : TMRECNO
+.***************************************************************************
+KYCH0000  MOVE      ZERO,EXIT
+          MOVE      "6",CCOL
+          UNPACK    OPDVFDTE,CCENT,CYEAR,CMON,CDAY     * defaults
+          MOVE      ONE,CKYIMAND             * mandatory field in change mode
+          CALL      KDAT0000                 * keyin from-date
+          MOVE      DATE,OPDVFDTE
+.
+          DISPLAY   *P16:CVERT," to ";
+.
+KYCH2000  MOVE      "20",CCOL
+          UNPACK    OPDVTDTE,CCENT,CYEAR,CMON,CDAY     * defaults
+          MOVE      ONE,CKYIMAND             * mandatory field in change mode
+          CALL      KDAT0000                 * keyin to-date
+          MOVE      DATE,OPDVTDTE
+          CALL      VRNG0000                 * Validate date range
+          BRANCH    EXIT,KYCH2000            * invalid range
+.
+          MOVE      "35",CCOL
+          MOVE      OPDVREAS,CKYIDEF3        * Default code
+          MOVE      ONE,CKYIMAND             * is mand
+          CALL      KRES0000                 * keyin reason
+          BRANCH    EXIT,KYCH9999:
+                         KYCH9999            * exitchar
+.
+          MOVE      DOCCODE,OPDVDOCT         * set up file variable
+          MOVE      SELCTNUM,TMRECNO         * set up file var
+          PACK      KEY3,TMRECNO
+          CALL      RSTMDLV1                 * position on record
+          CALL      UPTMDLV1                 * update record to temp file
+.
+KYCH9999  RETURN
++
+.
+.***************************************************************************
+. CHGE0000  : Change
+.***************************************************************************
+CHGE0000  CALL      QSEL0000                 * ask select question
+          BRANCH    EXIT,CHGE9999            * no input
+          CALL      POSI0000                 * position on record number
+          CALL      KYCH0000                 * make changes
+          GOTO      CHGE0000        
+.
+CHGE9999  RETURN
++
+.
+.***************************************************************************
+. DELE0000  : Delete
+.***************************************************************************
+DELE0000  CALL      QSEL0000                 * ask select question
+          BRANCH    EXIT,DELE9999            * no input
+          CALL      POSI0000                 * position on record number
+          DISPLAY   *P1:CVERT,*HON,SELCTNUM,*HOFF,".";  * highlight
+.
+          KEYIN     *P1:24,*EL,"Delete this record (",*V2LON,"Y",*HOFF:
+                      "/",*V2LON,"N",*HOFF,") ? ",ANS
+          REP       UPPLOW,ANS
+          MATCH     "Y",ANS
+          GOTO      DELE5000 IF NOT EQUAL
+.
+          DISPLAY   *P1:24,*EL,*V2LON,"** DELETING **"
+          PACK      KEY3,SELCTNUM
+          CALL      DETMDLV1                 * delete record
+          PACK      KEY3,SELCTNUM
+          CALL      RSTMDLV1                 * reposition
+.
+DELE1000  CALL      RKTMDLV1                 * read next
+          BRANCH    OVRCD,DELE2000
+          SUB       ONE,TMRECNO              * decrement record number
+          CALL      UPTMDLV1                 * update record 
+          GOTO      DELE1000
+.
+DELE2000  SUB       ONE,CURRREC              * reset current record
+          ASSIGN    (SELCTNUM-1),TMRECNO     * record before the deleted one
+          MOVE      ZERO,CURRPAGE            * set up parameter
+          CALL      POSI0000                 * position on correct page
+.
+          GOTO      DELE9999
+.
+DELE5000  DISPLAY   *P1:CVERT,*V2LON,SELCTNUM,*HOFF,".";
+.
+DELE9999  RETURN
++
+.
+.***************************************************************************
+. NEXT0000  : Next Screen
+. Parameters: NODATA
+.***************************************************************************
+NEXT0000  BRANCH    NODATA,NEXT9100
+          ASSIGN    (FIRSTREC+PGELIMIT),FIRSTREC * setup for next page
+          CALL      DPGE0000                 * display page
+          ADD       ONE,CURRPAGE
+          GOTO      NEXT9999
+.
+NEXT9100  DISPLAY   *P1:24,*EL,*B,*V2LON,"No more details for this Doctor.  ";
+          CALL      HITENTER
+.
+NEXT9999  RETURN
++
+.
+.***************************************************************************
+. FRST0000  : First Screen
+.***************************************************************************
+FRST0000
+          MOVE      ZERO,FIRSTREC            * initialize
+          CALL      DPGE0000                 * display page
+          MOVE      ONE,CURRPAGE
+.
+FRST9999  RETURN
++
+.
+.***************************************************************************
+. POST0000  : Post : deletes all records from outclvaf then write temp file
+.                    to outclvaf
+.***************************************************************************
+POST0000  DISPLAY   *P1:24,*EL,*V2LON,"** POSTING **"
+.
+.------   delete all records for this Doctor
+.
+POST1000  PACK      KEY14,DOCCODE,SP20
+          CALL      RSOPDLV1                 * reposition in outclvaf
+          CALL      RKOPDLV1                 * read next 
+          BRANCH    OVRCD,POST2000
+          MATCH     DOCCODE,OPDVDOCT         * same Doctor?
+          GOTO      POST2000 IF NOT EQUAL
+          PACK      KEY14,OPDVDOCT,OPDVFDTE
+          CALL      DEOPDLV1                 * delete record from outclvaf
+          GOTO      POST1000
+.
+.------   set up Date Last Modified
+.
+POST2000  CALL      IBACLOCK
+          PACK      OPDVLAST,CCC,CYY,CMM,CDD
+          REP       " 0",OPDVLAST
+.
+.------   loop over temp file
+.
+POST4000  PACK      KEY3,SP3
+          CALL      RSTMDLV1                 * pos read in temp file
+.
+POST5000  CALL      RKTMDLV1                 * get next record in temp file
+          BRANCH    OVRCD,POST9999
+          PACK      KEY14,OPDVDOCT,OPDVFDTE
+          CALL      RAOPDLV1                 * does record exist?
+          IF        OVRCD=1
+            CALL      WROPDLV1               * write new record
+          ELSE
+            CALL      UPOPDLV1               * update record
+          ENDIF
+.
+          GOTO      POST5000
+.
+POST9999  RETURN
++
+.
+.***************************************************************************
+. QSEL0000  : Ask Select Question
+. Returns   : SELCTNUM
+.***************************************************************************
+QSEL0000  MOVE      ZERO,EXIT
+          KEYIN     *P1:24,*EL,"Select record number : ",*V2LON,SELCTNUM
+          COMPARE   ZERO,SELCTNUM
+          GOTO      QSEL9100 IF EQUAL
+.
+          PACK      KEY3,SELCTNUM
+          CALL      RATMDLV1                 * existing read
+          IF        OVRCD=1
+            BEEP
+            GOTO      QSEL0000
+          ENDIF
+.
+          GOTO      QSEL9999
+.
+QSEL9100  MOVE      ONE,EXIT
+.
+QSEL9999  RETURN
++
+.
+.***************************************************************************
+. POSI0000  : Position on correct record 
+. Parameters: SELCTNUM - record number selected
+.             CURRPAGE - current page number
+.                      (0 = force redisplay)
+. Returns   : CURRPAGE - new current page
+.             selected record temp file variables
+.***************************************************************************
+POSI0000  ASSIGN    (SELCTNUM/PGELIMIT),FORM2P2       * work out page number
+          MOVE      FORM2P2,FORM2
+          COMPARE   FORM2P2,FORM2                     * integer?
+          IF        @EQUAL
+            MOVE      FORM2,PGENUMBER                 * yes, use this number
+          ELSE
+            ADD     "0.5",FORM2P2                     * no, round up
+            MOVE    FORM2P2,PGENUMBER
+          ENDIF
+.
+          ASSIGN    ((PGENUMBER-1)*PGELIMIT),FIRSTREC * rec no at top of page
+.
+          COMPARE   CURRPAGE,PGENUMBER                * same as current page?
+          CALL      DPGE0000 IF NOT EQUAL             * display the correct page
+          MOVE      PGENUMBER,CURRPAGE                * set current page number
+          ASSIGN    (SELCTNUM-FIRSTREC+7),CVERT       * work out position
+          PACK      KEY3,SELCTNUM
+          CALL      RDTMDLV1                          * read vars (exists)
+.
+POSI9999  RETURN
++
+.
+.***************************************************************************
+. KDAT0000  : Keyin Date 
+. Parameters: CCENT,CYEAR,CMON,CDAY - defaults
+.             CKYIMAND - 1 = mandatory
+. Returns   : DATE (ccyymmdd)
+.***************************************************************************
+KDAT0000  MOVE      ZERO,EXIT
+.
+          DISPLAY   *PCCOL:CVERT,*EL 
+.
+          CALL      KEYDATE 
+          BRANCH    OVRCD,KDAT9100
+          PACK      DATE,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",DATE
+          CALL      VOVR0000                 * Validate date for overlaps
+          IF        EXIT=1
+            MOVE      CCC,CCENT
+            UNPACK    SP20,CYEAR,CMON,CDAY
+            GOTO      KDAT0000               * Invalid Date
+          ENDIF
+.
+          GOTO      KDAT9999
+.
+KDAT9100  IF        CKYIMAND=1
+            CALL      MAND0000
+            GOTO      KDAT0000
+          ENDIF
+          MOVE      OVRCD,EXIT
+.
+KDAT9999  RETURN
++
+.
+.***************************************************************************
+. KRES0000  : Keyin Reason
+. Parameters: CKYIDEF3 - Default code
+.             CKYIMAND - 1 = mandatory
+.***************************************************************************
+KRES0000  MOVE      ZERO,EXIT
+          MOVE      "DH",CODE
+          MOVE      CCOL,ECOL
+          MOVE      CVERT,EVERT
+          CALL      PATCODKY
+          MOVE      EVERT,CVERT
+          BRANCH    EXIT,KRES9999,KRES9999   * no input, exitchar
+.
+          MOVE      ACODE,OPDVREAS
+          DISPLAY   *P40:CVERT,TDESC
+.
+KRES9999  RETURN
++
+.
+.***************************************************************************
+. VRNG0000  : Validate Date Range.  Check to date is not less than from date
+. Returns   : EXIT = 1  - Invalid Range
+.***************************************************************************
+VRNG0000  MOVE      ZERO,EXIT
+          MOVE      OPDVFDTE,FORMFDTE
+          MOVE      OPDVTDTE,FORMTDTE
+.
+          IF        FORMTDTE < FORMFDTE
+            DISPLAY   *P1:24,*EL,*B,"To Date must be greater than From Date.  ";
+            CALL      HITENTER
+            MOVE      ONE,EXIT
+          ENDIF 
+.
+VRNG9999  RETURN
++
+.
+.***************************************************************************
+. VOVR0000  : Validate date does not Overlap another
+. Parameters: DATE
+. Returns   : EXIT = 1  - Invalid Date
+.***************************************************************************
+VOVR0000  MOVE      ZERO,EXIT
+          MOVE      DATE,FDATE
+          CALL      SAVE0000                 * save variables
+.
+.------   check that date does not overlap another
+.
+          PACK      KEY3,SP3
+          CALL      RSTMDLV1                 * pos read in temp file
+.
+VOVR1000  CALL      RKTMDLV1                 * get next record in temp file
+          BRANCH    OVRCD,VOVR9000
+          COMPARE   TMRECNO,SVRECNO          * modifying current record?
+          GOTO      VOVR1000 IF EQUAL        * skip
+          MOVE      OPDVFDTE,FORMFDTE        * convert to FORM
+          MOVE      OPDVTDTE,FORMTDTE
+          IF        FDATE >= FORMFDTE & FDATE <= FORMTDTE
+            DISPLAY   *P1:24,*EL,*B,"Date range overlaps with record ":
+                        *V2LON,TMRECNO,*HOFF,".  ";
+            CALL      HITENTER
+            DISPLAY   *P1:24,*EL
+            MOVE      ONE,EXIT
+          ENDIF
+.
+          GOTO      VOVR1000
+.
+VOVR9000  CALL      REST0000                 * restore variables 
+.
+VOVR9999  RETURN
++
+.
+.******************************************************************************
+.* SAVE0000   : Save variables
+.******************************************************************************
+SAVE0000  MOVE      TMRECNO,SVRECNO
+          MOVE      OPDVFDTE,SVFDTE
+          MOVE      OPDVTDTE,SVTDTE
+          MOVE      OPDVREAS,SVREAS
+.
+SAVE9999  RETURN
++
+.
+.******************************************************************************
+.* REST0000   : Restore saved variables
+.******************************************************************************
+REST0000  MOVE      SVRECNO,TMRECNO         
+          MOVE      SVFDTE,OPDVFDTE
+          MOVE      SVTDTE,OPDVTDTE
+          MOVE      SVREAS,OPDVREAS
+.
+REST9999  RETURN
++
+.
+.******************************************************************************
+.* MAND0000   : Display Mandatory message
+.******************************************************************************
+MAND0000  DISPLAY   *P1:24,*EL,*B,"Field is mandatory.  ";
+          CALL      HITENTER
+          DISPLAY   *P1:24,*EL
+.
+MAND9999  RETURN
++
+.
+.******************************************************************************
+.* CRTP0000   : Create temporary file
+.******************************************************************************
+CRTP0000  CALL      KILL0000                * make sure old file is not there
+.
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TMPAFNAM,CMDLINE
+          APPEND    " 29 U1-3",CMDLINE
+                              
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+          OPEN      TMPDLVA1,TMPAFNAM 
+          CALL      CLET0000      * clear file
+.
+CRTP9999  RETURN
++
+.
+.******************************************************************************
+.* KILL0000   : Remove temporary file
+.******************************************************************************
+KILL0000  CLOSE     TMPDLVA1
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TMPAFNAM,CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+KILL9999  RETURN
++
+.*******************************************************************************
+.         Clear tempfile
+.*******************************************************************************
+CLET0000  MOVE      SP70,KEY3
+          CALL      RSTMDLV1
+          CALL      RKTMDLV1
+          BRANCH    OVRCD,CLET9999
+.
+          PACK      KEY3,TMRECNO
+          CALL      DETMDLV1
+          GOTO      CLET0000
+.
+CLET9999  RETURN
+.
+.******************************************************************************
+.* LTMP0000   : Load Doctor data into temp file
+.* Parameters : DOCCODE
+.* Returns    : CURRREC
+.*              EXIT = 1 (no data)
+.******************************************************************************
+LTMP0000  MOVE      ZERO,TMRECNO
+          MOVE      ZERO,EXIT
+          DISPLAY   *P1:24,*EL,"Loading :";
+          PACK      KEY14,DOCCODE,SP20
+          CALL      RSOPDLV1                 * pos on first record
+.
+LTMP1000  CALL      RKOPDLV1                 * read next
+          BRANCH    OVRCD,LTMP9100           * eof?
+          MATCH     DOCCODE,OPDVDOCT         * same Doctor?
+          GOTO      LTMP9100 IF NOT EQUAL    * no
+.
+          ADD       ONE,TMRECNO
+          DISPLAY   *P10:24,*V2LON,TMRECNO;
+          CALL      WRTMDLV1                 * update to temp file
+          GOTO      LTMP1000
+.
+LTMP9100  MOVE      TMRECNO,CURRREC
+          DISPLAY   *P1:24,*EL
+          IF        TMRECNO=0
+            MOVE      ONE,EXIT
+          ENDIF
+.
+LTMP9999  RETURN
++
+.
+.****************************************************************************
+.* GDOC0000  : Get Doctor Name
+.* Called by : 
+.* Inputs    : KEY6    - Doctor Code
+.* Returns   : DOCNAME - Doctor Name
+.****************************************************************************
+GDOC0000
+          PACK      KEY6,KEY6,SP6
+          CALL      RDDOCT1
+          IF        OVRCD=1
+            MOVE      "Invalid Code",DOCNAME
+          ELSE
+            MOVE      DTITL,PACTITLE           * set up varaibles
+            MOVE      DSNAME,PACSNAME          * set up variables
+            MOVE      DGNAME,PACGNAME          * set up variables
+            MOVE      "2",PACFRMT              * set up varaibles
+            CALL      PACNAME
+            MOVE      PACFNAME,DOCNAME
+          ENDIF
+.
+GDOC9999  RETURN
++
+.***************************************************************************
+.***************************************************************************
+.
+.===============================
+.  TEMPORARY FILE IO ROUTINES 
+.===============================
+.
+RSTMDLV1   READ      TMPDLVA1,KEY3;;
+           RETURN
+.
+RATMDLV1   MOVE      ZERO,OVRCD
+           READ      TMPDLVA1,KEY3;ANS
+           GOTO      OVERCOND IF OVER 
+           RETURN
+.
+RDTMDLV1   MOVE      ZERO,OVRCD
+           READ      TMPDLVA1,KEY3;DTMRECNO,OPDVDOCT,OPDVFDTE,OPDVTDTE,OPDVREAS
+           GOTO      OVERCOND IF OVER 
+           MOVE      DTMRECNO,TMRECNO
+           RETURN
+.
+RKTMDLV1   MOVE      ZERO,OVRCD
+           READKS    TMPDLVA1;DTMRECNO,OPDVDOCT,OPDVFDTE,OPDVTDTE,OPDVREAS
+           GOTO      OVERCOND IF OVER 
+           MOVE      DTMRECNO,TMRECNO
+           RETURN
+.
+WRTMDLV1   MOVE      TMRECNO,DTMRECNO
+           WRITE     TMPDLVA1,KEY3;DTMRECNO,OPDVDOCT,OPDVFDTE,OPDVTDTE,OPDVREAS
+           RETURN
+.
+UPTMDLV1   MOVE      TMRECNO,DTMRECNO
+           UPDATE    TMPDLVA1;DTMRECNO,OPDVDOCT,OPDVFDTE,OPDVTDTE,OPDVREAS
+           RETURN
+.
+DETMDLV1   RESET     KEY3            
+           DELETE    TMPDLVA1,KEY3
+           RETURN
+.
+.===============================
+.    I/O   INCLUDES
+.===============================
+.
+          INC       STDGENCD
+          INC       PATCODKY
+          INC       PATDOCKY
+          INC       TFILENAM                * Generate Temp File Name
+          INC       IBASEQIO/INC            * Sequential Numbers File
+          INC       WEBERRIO/INC            * Web Server Error Logging
+.
+
+          INC       OPRDLVIO/INC
+          INC       PATDO1IO/INC
+          INC       PATCODIO/INC
+.

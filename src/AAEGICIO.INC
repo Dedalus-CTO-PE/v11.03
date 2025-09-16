@@ -1,0 +1,45 @@
+.
+. AAEGICIO.INC
+. ------------
+. Filenames       : aaegicio
+. Description     : A&E Investigation codes file
+.
+. ******* INDEX ONE *******
+.
+RSAEGIC1  RESET     KEY4
+          READ      AAEGICA1,KEY4;;
+          RETURN
+.
+RAAEGIC1  RESET     KEY4
+          MOVE      ZERO,OVRCD
+          READ      AAEGICA1,KEY4;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDAEGIC1  RESET     KEY4
+          MOVE      ZERO,OVRCD
+          READ      AAEGICA1,KEY4;AEICCODE,AEICDESC,AEICSUBA,AEICSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKAEGIC1  MOVE      ZERO,OVRCD
+          READKS    AAEGICA1;AEICCODE,AEICDESC,AEICSUBA,AEICSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPAEGIC1  MOVE      ZERO,OVRCD
+          READKP    AAEGICA1;AEICCODE,AEICDESC,AEICSUBA,AEICSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPAEGIC1  UPDATE    AAEGICA1;AEICCODE,AEICDESC,AEICSUBA,AEICSPAR
+          RETURN
+.
+WRAEGIC1  RESET     KEY4
+          WRITE     AAEGICA1,KEY4;AEICCODE,AEICDESC,AEICSUBA,AEICSPAR
+          RETURN
+.
+DEAEGIC1  RESET     KEY4
+          DELETE    AAEGICA1,KEY4
+          RETURN
+.

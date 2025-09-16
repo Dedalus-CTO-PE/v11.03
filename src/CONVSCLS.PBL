@@ -1,0 +1,1203 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   CONVSCLS                                                    *
+.* Desc      :   Program to upload AN-SNAP auto classification code data     *
+.*               from a text file into PMSSNCFD                              *
+.*****************************************************************************
+.* Date      :   08/04/2016                                                  *
+.* Author    :   Ebon Clements                                               *
+.* Function  :   This program will accept a tab delimited upload file.       *
+.*               The upload file will be converted to a pipe delimited file  *
+.*               via the convscls.us1 script.                                *
+.*               The program will loop through the upload file and           *
+.*               for each valid record found, it will write a new pmssncaf   *
+.*               record. If an earlier version of the new classification     *
+.*               code is found it will be inactivated.                       *
+.* Mods      :                                                               *
+.* V10.12.08 24/04/2018  Tracey Nguyen   TSK 0841644                         *
+.*           Recompiled for PMSIMPFD - added impairment group                *
+.*---------------------------------------------------------------------------*
+.*        V10.08.02  20/05/2016  Ebon Clements     TSK 0816095               *
+.*                   Removed range edits from VNUM0000                       *
+.*        V10.08.01  20/05/2016  Ebon Clements     TSK 0816095               *
+.*                   Fixed VNUM0000 file variable names for errors           *
+.*        V10.08.00  08/04/2016  Ebon Clements     TSK 0816095               *
+.*                   Created program                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       PMSSNCFD/INC
+          INC       PMSSNPFD/INC
+          INC       PMSIMPFD/INC
+.
+.         Upload file layout - xxxxxxxx.txt
+.
+UPLDFILE  FILE      HL7, FIXED=200          * Pipe delimited upload file
+.                                             4096 is maximum
+.
+.         Fields must be pipe delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+SNAPCLCD  DIM       3    1    * AN-SNAP Classification Code
+.PIPE     DIM       1    4    * Pipe Delimiter
+SNAPVERS  DIM       2    5    * AN-SNAP Version
+.PIPE     DIM       1    7    * Pipe Delimiter
+SNAPICDE  DIM       7    8    * Impairment Code
+.PIPE     DIM       1    15   * Pipe Delimiter
+SNAPDEFF  DIM       8    16   * Effective Date From
+.PIPE     DIM       1    24   * Pipe Delimiter
+SNAPDEFT  DIM       8    25   * Date Effective To
+.PIPE     DIM       1    33   * Pipe Delimiter
+SNAPFMSE  DIM       1    34   * FIM Motor Score Edit
+.PIPE     DIM       1    35   * Pipe Delimiter
+SNAPFMSL  DIM       2    36   * FIM Motor Score Range Low
+.PIPE     DIM       1    38   * Pipe Delimiter
+SNAPFMSH  DIM       2    39   * FIM Motor Score Range High
+.PIPE     DIM       1    41   * Pipe Delimiter
+SNAPFCSE  DIM       1    42   * FIM Cognitive Score Edit
+.PIPE     DIM       1    43   * Pipe Delimiter
+SNAPFCSL  DIM       2    44   * FIM Cognitive Score Range Low
+.PIPE     DIM       1    46   * Pipe Delimiter
+SNAPFCSH  DIM       2    47   * FIM Cognitive Score Range High
+.PIPE     DIM       1    49   * Pipe Delimiter
+SNAPAGEL  DIM       1    50   * Age Range Limit
+.PIPE     DIM       1    51   * Pipe Delimiter
+SNAPAGE   DIM       2    52   * Age
+.PIPE     DIM       1    54   * Pipe Delimiter
+SNAPASSO  DIM       1    55   * Assessment Only (1=Yes)
+.PIPE     DIM       1    56   * Pipe Delimiter
+SNAPFTSR  DIM       1    57   * FIM Total Score Range
+.PIPE     DIM       1    58   * Pipe Delimiter
+SNAPFTSL  DIM       3    59   * FIM Total Score Range Low
+.PIPE     DIM       1    62   * Pipe Delimiter
+SNAPFTSH  DIM       3    63   * FIM Total Score Range High
+.
+. End of Record          66  
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+ADDCOUNT  FORM      8             * added record count
+CODCOUNT  FORM      8             * code error record count
+.
+CMDLINE   DIM       127
+CURRCENT  FORM      2             * current century
+CURRDATE  DIM       8             * current date
+.
+DATEFLG1  FORM      1             * Date Type flag
+.                                     0 = full date (ccyymmdd)
+.                                     1 = partial date (ccyymm)
+DATEFLG2  FORM      1             * Dates Allowed flag
+.                                     0 = any date allowed
+.                                     1 = future dates not allowed
+.                                     2 = past dates not allowed
+.
+DIM1A     DIM       1
+DIM1B     DIM       1
+DIM2C     DIM       2
+DIM2D     DIM       2
+DIM2H     DIM       2
+DIM2M     DIM       2
+DIM2S     DIM       2
+DIM2Y     DIM       2
+DIM4      DIM       4
+DIM44     DIM       44
+DTECOUNT  FORM      8             * date error record count
+DUPCOUNT  FORM      8             * duplicate record count  >>>(may not be used)
+.
+ERORDESC  DIM       70
+ERORFLAG  FORM      1             * Field Validation Error Flag
+EPSCOUNT  FORM      8             * Episode type error count
+.                                     0 = No Errors on Field Validations
+.                                     1 = Errors on Field Validations
+.
+FORM10    FORM      10
+FORM2A    FORM      2
+FORM2B    FORM      2
+FORM3A    FORM      3
+FORM3B    FORM      3
+FILENAME  DIM       127
+FILENAM1  DIM       127
+.
+MANCOUNT  FORM      8             * mandatory field error record count
+.
+NUMCOUNT  FORM      8             * numeric error record count
+.
+RECCOUNT  FORM      8             * record read counter
+.
+SAVKEY12  DIM       12
+TEMPDATE  DIM       8
+.                                     ....add other files as required
+TMPFIELD  DIM       8             * Field name
+TMPSTRNG  DIM       40            * Temporary string (max field length)
+.
+VCHKFLAG  FORM      1             * Validation flag
+.                                     0 = writing data to database
+.                                     1 = only validating import data file
+WORKDATE  DATE      8             * Working date variable
+.
+. PROGRAM CONSTANTS
+. -----------------
+PIPE      INIT      "|"
+.
+PRGID     INIT      "CONVSCLS"
+PRGNAM    INIT      "Load AN-SNAP Auto Classification Codes"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with upload
+.
+MAIN1000  CALL      OPEN0000               * open upload file
+          BRANCH    EXIT,MAIN0100          * file not found
+.
+          CALL      ASKQ0000               * validation run only ?
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      UPLD0000               * process upload
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ";
+          DISPLAY   *P64:24,"pmssncaf";
+          OPEN      PMSSNCA1,"pmssncaf"
+.
+          DISPLAY   *P64:24,"pmssnpaf";
+          OPEN      PMSSNPA1,"pmssnpaf"
+.
+          DISPLAY   *P64:24,"pmsimpaf";
+          OPEN      PMSIMPA1,"pmsimpaf"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          MOVE      ONE,CNOUNDLN
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run data upload                         *
+.*                        TRUE  (1)  Exit selected                           *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Data Upload"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run data upload
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000              Called by: MAIN0000   *
+.*                  Open upload file (convalas.txt)                          *
+.*****************************************************************************
+.
+OPEN0000  KEYIN     *P1:8,*EF,"Keyin Path & File Name : ",*V2LON,FILENAME
+          KEYIN     *P1:9,*EF,"Keyin Heading File Name : ",*V2LON,FILENAM1
+.
+          PACK      FILENAM1,FILENAM1,SP70
+.
+          PACK      FILENAME,FILENAME,SP70
+          MATCH     SP70,FILENAME
+          GOTO      OPEN9200 IF EQUAL
+.
+          SCAN      ".txt",FILENAME
+          IF        !@EQUAL
+            SQUEEZE   FILENAME
+            ENDSET    FILENAME
+            APPEND    ".txt",FILENAME      * add ".txt" if there is a path
+            APPEND    SP70,FILENAME
+            RESET     FILENAME
+          ENDIF
+          RESET     FILENAME
+
+          STRIP     FILENAME
+          DISPLAY   *P26:8,*EL,*V2LON,FILENAME;
+.
+          CLEAR     CMDLINE
+          APPEND    "convscls.us1 ",CMDLINE
+          APPEND    FILENAME,CMDLINE
+          APPEND    SP70,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      UPLDFILE,FILENAME
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,*B,"Upload file ",FILENAME," not found.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+          GOTO      OPEN9999
+.
+OPEN9200  DISPLAY   *P1:24,*EL,*B,"Upload file name is a mandatory field.";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+          GOTO      OPEN9999
+.
+OPEN9999  RETURN
++
+.*****************************************************************************
+.*                               ASKQ0000              Called by: MAIN0000   *
+.*                  Ask if running validation only                           *
+.* Returns: VCHKFLAG  - validation flag                                      *
+.*                       0 = normal mode                                     *
+.*                       1 = validation only mode                            *
+.*****************************************************************************
+.
+ASKQ0000  MOVE      ANSY,ANS
+          KEYIN     *P1:10,*EL,"Validation only (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+                    *P25:10,*V2LON,*RV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS                     * Y input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DYES,*HOFF:
+                      *P35:10,"(No data will be uploaded)"
+            MOVE      ONE,VCHKFLAG               * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          MATCH     ANSN,ANS                     * N input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DNO,*HOFF:
+                      *P35:10,"(Data will be uploaded)"
+            MOVE      ZERO,VCHKFLAG              * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          GOTO      ASKQ0000                     * invalid input
+.
+ASKQ9999  RETURN
++
+.******************************************************************************
+.*                                  UPLD0000              Called by: MAIN0000 *
+.*                  Process the upload file records                       *
+.******************************************************************************
+.
+UPLD0000  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+          MOVE      CCC,CURRCENT
+.
+          DISPLAY   *P1:13,"Processing ",*V2LON,FILENAM1,*HOFF:
+                    *P1:15,"Started    : ",*V2LON,CTIMEIS,*HOFF:
+                    *P1:17,"Class Code : ":
+                    *P1:18,"Version    : ":
+                    *P1:19,"Records    : "
+.
+          MOVE      ZERO,RECCOUNT                * initialise records read
+          MOVE      ZERO,ADDCOUNT                * initialise added record count
+          MOVE      ZERO,DUPCOUNT                * initialise dup. record count
+          MOVE      ZERO,DTECOUNT                * init. date error record count
+          MOVE      ZERO,MANCOUNT                * init. mand error record count
+          MOVE      ZERO,NUMCOUNT                * init. num error record count
+          MOVE      ZERO,EPSCOUNT                * init. eps error record count
+          MOVE      ZERO,CODCOUNT                * init. code error record count
+.
+          CALL      HEAD0000                     * Print the report header
+.
+.         Loop through upload file records
+.
+UPLD1000  READ      UPLDFILE,SEQ;SNAPCLCD,SNAPVERS,SNAPICDE,SNAPDEFF:
+                                 SNAPDEFT,SNAPFMSE,SNAPFMSL,SNAPFMSH:
+                                 SNAPFCSE,SNAPFCSL,SNAPFCSH,SNAPAGEL:
+                                 SNAPAGE,SNAPASSO,SNAPFTSR,SNAPFTSL:
+                                 SNAPFTSH
+          GOTO      UPLD9000 IF OVER
+.
+          ADD       ONE,RECCOUNT                 * increment records read
+          IF        (RECCOUNT%1000) = 0 | RECCOUNT = 1
+            DISPLAY   *P14:17,*V2LON,SNAPCLCD:
+                      *P14:18,SNAPVERS:
+                      *P14:19,RECCOUNT;
+          ENDIF
+.
+          CALL      POUT0000                     * pad out fields with spaces
+.
+          CALL      CLER0000                     * clear database variables
+.
+          CALL      MAND0000                     * check for Mandatory fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      DVAL0000                     * date validation
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      VNUM0000                     * validate numeric fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      CVAL0000                     * validate coded fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      SETV0000                     * set up file variables
+.
+          BRANCH    VCHKFLAG,UPLD1000            * error checking only
+.
+          PACK      KEY20,PMSCCLCD,PMSCVERS,PMSCICDE,PMSCDEFF,SP70
+          CALL      RAPMSNC1
+          IF        OVRCD = 1
+            CALL      WRPMSNC1                   * write new record
+            ADD       ONE,ADDCOUNT               * increment added record count
+.
+            CALL      INAC0000                   * Inactivate previous version
+          ELSE
+            MOVE      "Classification record already exists ",ERORDESC
+            CALL      PERR0000                   * print error line
+            ADD       ONE,DUPCOUNT               * increment dupl. record count
+          ENDIF
+.
+          GOTO      UPLD1000                     * get next record
+.
+.         Upload completed
+.
+UPLD9000  ASSIGN    (CODCOUNT+DUPCOUNT+DTECOUNT+MANCOUNT+NUMCOUNT+EPSCOUNT),FORM10
+          IF        FORM10 > 0
+            CALL      LINE0000                   * print bottom line if errors
+          ENDIF
+.
+          COMPARE   CLNO,FIFTY3                  * room for stats ?
+          CALL      HEAD0000 IF LESS             * no - new page req'd.
+.
+          CLOCK     TIME,CTIMEIS
+          DISPLAY   *P14:19,*V2LON,RECCOUNT,*HOFF:
+                    *P1:21,"Finished   : ",*V2LON,CTIMEIS
+.
+.         Warn the user if there were any records with errors
+.
+          IF        FORM10 > 0
+            DISPLAY   *P1:22,*V2LON,*BLINKON,"Warning:  Records found with ":
+                      "errors.  Refer to error report."
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,*B,"Upload complete.  ";
+          CALL      HITENTER
+.
+          PRINT     *N:
+                    *1,"Total records read                    - ",RECCOUNT,*N:
+                    *1,"Records added                         - ",ADDCOUNT,*N:
+                    *1,"Duplicate Records detected            - ",DUPCOUNT,*N:
+                    *1,"Records with invalid dates detected   - ",DTECOUNT,*N:
+                    *1,"Records with blank mandatory fields   - ",MANCOUNT,*N:
+                    *1,"Records with invalid numbers detected - ",NUMCOUNT,*N:
+                    *1,"Records with invalid Episode Types    - ",EPSCOUNT:
+                    *1,"Records with invalid codes detected   - ",CODCOUNT,*N:
+                    *N,*N,*1,"*** End of Report ***"
+.
+UPLD9999  RETURN
++
+.****************************************************************************
+.*                             INAC0000                Called by: UPLD0000  *
+.*  Inactive the previous snap version of the currect code if one exists    *
+.****************************************************************************
+.
+INAC0000  MOVE      SNAPVERS,FORM2
+          SUB       ONE,FORM2               * Get previous version
+.
+          PACK      SAVKEY12,PMSCCLCD,FORM2,PMSCICDE,SP70
+.
+          PACK      KEY20,PMSCCLCD,FORM2,PMSCICDE,Z70
+          CALL      RSPMSNC1
+          CALL      RPPMSNC1
+          BRANCH    OVRCD,INAC9999
+.          
+          PACK      KEY12,PMSCCLCD,PMSCVERS,PMSCICDE,SP70
+.
+          MATCH     KEY12,SAVKEY12          * Previous version exists
+          GOTO      INAC9999 IF NOT EQUAL
+.
+          MATCH     SP70,PMSCDEFT           * Check effective to date populated
+          GOTO      INAC9999 IF NOT EQUAL
+.
+          MOVE      SNAPDEFF,WORKDATE       * Set inactive date to 1 day
+          SUB       ONE,WORKDATE            * before new version active date
+.
+          MOVE      WORKDATE,PMSCDEFT       * Set date inactive
+.
+          CALL      UPPMSNC1
+.
+INAC9999  RETURN
++
+.****************************************************************************
+.*                             MAND0000                Called by: UPLD0000  *
+.*                 Check for standard Mandatory fields                      *
+.* Returns: EXIT   0 = all mandatory fields are populated                   *
+.*                 1 = one or more mandatory fields are blank               *
+.*          MANCOUNT - updated count of records with mandatory fields       *
+.*                     missing                                              *
+.****************************************************************************
+.
+MAND0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MOVE      SNAPCLCD,TMPSTRNG
+          MOVE      "PMSCCLCD",TMPFIELD          * Classification Code
+          CALL      CHKM0000
+.
+          MOVE      SNAPVERS,TMPSTRNG
+          MOVE      "PMSCVERS",TMPFIELD          * Version 
+          CALL      CHKM0000
+.
+          MOVE      SNAPICDE,TMPSTRNG
+          MOVE      "PMSCICDE",TMPFIELD          * Impairment Code
+          CALL      CHKM0000
+.
+          MOVE      SNAPDEFF,TMPSTRNG
+          MOVE      "PMSCDEFF",TMPFIELD          * Effective Date
+          CALL      CHKM0000
+.
+          BRANCH    ERORFLAG,MAND9100            * errors on mand. fields
+.
+          MOVE      ZERO,EXIT                    * no errors on mand. fields
+          GOTO      MAND9999
+.
+MAND9100  ADD       ONE,MANCOUNT                 * incr. mand error record count
+          MOVE      ONE,EXIT
+.
+MAND9999  RETURN
++
+.*****************************************************************************
+.*                            CHKM0000             Called by: MAND0000       *
+.*                    Check if a mandatory field is blank                    *
+.* Requires: TMPSTRNG - field to be checked                                  *
+.*           TMPFIELD - 8 character field name                               *
+.* Returns:  ERORFLAG = 1   field is blank (error)                           *
+.*****************************************************************************
+.
+CHKM0000  MATCH     TMPSTRNG,SP70                * blank field ?
+          GOTO      CHKM9999 IF NOT EQUAL        * no - finished
+.
+          MOVE      "Mandatory Field blank ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set error flag
+.
+CHKM9999  RETURN
++
+.******************************************************************************
+.*                                  CLER0000              Called by: UPLD0000 *
+.*                    Clear all the database fields                           *
+.******************************************************************************
+.
+CLER0000  MOVE      SP70,PMSCCLCD
+          MOVE      SP70,PMSCVERS
+          MOVE      SP70,PMSCICDE
+          MOVE      SP70,PMSCDEFF
+          MOVE      SP70,PMSCDEFT
+          MOVE      SP70,PMSCFMSE
+          MOVE      SP70,PMSCFMSL
+          MOVE      SP70,PMSCFMSH
+          MOVE      SP70,PMSCFCSE
+          MOVE      SP70,PMSCFCSL
+          MOVE      SP70,PMSCFCSH
+          MOVE      SP70,PMSCAGEL
+          MOVE      SP70,PMSCAGE 
+          MOVE      SP70,PMSCASSO
+          MOVE      SP70,PMSCFTSR
+          MOVE      SP70,PMSCFTSL
+          MOVE      SP70,PMSCFTSH
+          MOVE      SP70,PMSCSPAR
+.
+CLER9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000              Called by: UPLD0000 *
+.*                           Print The Report Header                 PERR0000 *
+.******************************************************************************
+.
+HEAD0000  MOVE      "- Error Report",CPHDROPT
+          CALL      HEAD132                 * Print the report header
+.
+          PRINT     *1,FILENAM1
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"SNAP Code",*13,PIPE,*15,"Snap Version":
+                    *28,PIPE,*30,"Impairment":
+                    *42,PIPE,*44,"Effective Date":
+                    *59,PIPE,*61,"Error Description",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      SEVEN,CLNO                   * initialise line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: HEAD0000  *
+.*                      Draw line across page                               *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.******************************************************************************
+.*                                  SETV0000              Called by: UPLD0000 *
+.*                       Load the record variables                            *
+.******************************************************************************
+.
+SETV0000  MOVE      SNAPCLCD,PMSCCLCD  * AN-SNAP Classification Code
+          MOVE      SNAPVERS,PMSCVERS     * AN-SNAP Version
+.
+          MOVE      SNAPICDE,PMSCICDE  * Impairment Code
+          MOVE      SNAPDEFF,PMSCDEFF  * Effective Date From
+          MOVE      SNAPDEFT,PMSCDEFT  * Date Effective To
+.
+          MOVE      SNAPFMSE,PMSCFMSE  * FIM Motor Score Edit
+          MOVE      SNAPFMSL,PMSCFMSL  * FIM Motor Score Range Low
+          MOVE      SNAPFMSH,PMSCFMSH  * FIM Motor Score Range High
+.
+          MOVE      SNAPFCSE,PMSCFCSE  * FIM Cognitive Score Edit
+          MOVE      SNAPFCSL,PMSCFCSL  * FIM Cognitive Score Range Low
+          MOVE      SNAPFCSH,PMSCFCSH  * FIM Cognitive Score Range High
+.
+          MOVE      SNAPAGEL,PMSCAGEL  * Age Range Limit
+          MOVE      SNAPAGE,PMSCAGE    * Age
+.
+          MOVE      SNAPASSO,PMSCASSO  * Assessment Only (1=Yes)
+.
+          MOVE      SNAPFTSR,PMSCFTSR  * FIM Total Score Range
+          MOVE      PMSCFTSL,PMSCFTSL  * FIM Total Score Range Low
+          MOVE      SNAPFTSH,PMSCFTSH  * FIM Total Score Range High
+.
+SETV9999  RETURN
++
+.*****************************************************************************
+.*                            POUT0000             Called by: UPLD0000       *
+.*            Pad out all the record fields with spaces given that we        *
+.*            are dealing with pipe delimited records                        *
+.*****************************************************************************
+.
+POUT0000  PACK      SNAPCLCD,SNAPCLCD,SP70
+          PACK      SNAPVERS,SNAPVERS,SP70
+          PACK      SNAPICDE,SNAPICDE,SP70
+          PACK      SNAPDEFF,SNAPDEFF,SP70
+          PACK      SNAPDEFT,SNAPDEFT,SP70
+          PACK      SNAPFMSE,SNAPFMSE,SP70
+          PACK      SNAPFMSL,SNAPFMSL,SP70
+          PACK      SNAPFMSH,SNAPFMSH,SP70
+          PACK      SNAPFCSE,SNAPFCSE,SP70
+          PACK      SNAPFCSL,SNAPFCSL,SP70
+          PACK      SNAPFCSH,SNAPFCSH,SP70
+          PACK      SNAPAGEL,SNAPAGEL,SP70
+          PACK      SNAPAGE,SNAPAGE,SP70
+          PACK      SNAPASSO,SNAPASSO,SP70
+          PACK      SNAPFTSR,SNAPFTSR,SP70
+          PACK      SNAPFTSL,SNAPFTSL,SP70
+          PACK      SNAPFTSH,SNAPFTSH,SP70
+.
+POUT9999  RETURN
++
+.*****************************************************************************
+.*                           CVAL0000              Called by: UPLD0000       *
+.*                 Validate all the relevant coded fields.                   *
+.*        This validation is performed on the database fields just prior     *
+.*        to writing the data and after any mappings have been performed.    *
+.* Returns:  EXIT - 0 = No code validation errors                            *
+.*                  1 = Code validation errors                               *
+.*          CODCOUNT - updated count of records with coded field errors      *
+.*****************************************************************************
+.
+CVAL0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+.
+          MATCH     SP3,SNAPCLCD                 * blank code ?
+          GOTO      CVAL0100 IF EQUAL            * yes - no validation req'd
+.
+          PACK      KEY5,SNAPCLCD,SNAPVERS,SP70
+          CALL      RDPMSNP1
+          IF        OVRCD=1
+            MOVE      "Invalid classification code field ",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    LBRACK,ERORDESC
+            APPEND    SNAPCLCD,ERORDESC
+            APPEND    RBRACK,ERORDESC
+            APPEND    SP70,ERORDESC
+            RESET     ERORDESC
+            CALL      PERR0000                     * print error
+            MOVE      ONE,ERORFLAG                 * set code error flag
+          ENDIF
+.
+CVAL0100  MATCH     SP7,SNAPICDE                 * blank code ?
+          GOTO      CVAL9000 IF EQUAL            * yes - no validation req'd
+.
+          PACK      KEY7,SNAPICDE,SP70
+          CALL      RDPMIMP1
+          IF        OVRCD=1
+            MOVE      "Invalid impairment code field ",ERORDESC
+            ENDSET    ERORDESC
+            APPEND    LBRACK,ERORDESC
+            APPEND    SNAPICDE,ERORDESC
+            APPEND    RBRACK,ERORDESC
+            APPEND    SP70,ERORDESC
+            RESET     ERORDESC
+            CALL      PERR0000                     * print error
+            MOVE      ONE,ERORFLAG                 * set code error flag
+          ENDIF
+.
+CVAL9000  BRANCH    ERORFLAG,CVAL9100            * errors on code validation
+.
+          MOVE      ZERO,EXIT                    * no errors on code validation
+          GOTO      CVAL9999
+.
+CVAL9100  ADD       ONE,CODCOUNT                 * incr. code error record count
+          MOVE      ONE,EXIT
+.
+CVAL9999  RETURN
+
++
+.*****************************************************************************
+.*                              DVAL0000           Called by: UPLD0000       *
+.*                  Validate all date fields                                 *
+.* Returns:  EXIT - 0 = No date validation errors                            *
+.*                  1 = Date validation errors                               *
+.*          DTECOUNT - updated count of records with date field errors       *
+.*****************************************************************************
+.
+DVAL0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MOVE      SNAPDEFF,TEMPDATE
+          MOVE      ZERO,DATEFLG1                 * ccyymm
+          MOVE      ZERO,DATEFLG2                * any date allowed
+          MOVE      "PMSCDEFF",TMPFIELD
+          CALL      VDAT0000
+.
+          MOVE      SNAPDEFT,TEMPDATE
+          MOVE      ZERO,DATEFLG1                 * ccyymm
+          MOVE      ZERO,DATEFLG2                * any date allowed
+          MOVE      "PMSCDEFT",TMPFIELD
+          CALL      VDAT0000
+.
+.         Use the following code where there is a "from" and "to" date that
+.         need validating
+.         
+          MATCH     SP8,SNAPDEFT                 * end date blank ?
+          GOTO      DVAL1000 IF EQUAL            * yes
+.
+          MATCH     SNAPDEFF,SNAPDEFT            
+          IF        @LESS
+            MOVE      "End date less than Start date ",ERORDESC
+            CALL      PERR0000
+            MOVE      ONE,ERORFLAG
+          ENDIF
+.
+DVAL1000  BRANCH    ERORFLAG,DVAL9100            * errors on date validation
+.
+          MOVE      ZERO,EXIT                    * no errors on date validation
+          GOTO      DVAL9999
+.
+DVAL9100  ADD       ONE,DTECOUNT                 * incr. date error record count
+          MOVE      ONE,EXIT
+.
+DVAL9999  RETURN
++
+.*****************************************************************************
+.*                              VDAT0000           Called by: DVAL0000       *
+.*                  Validate a date field                                    *
+.* Requires:  TEMPDATE - Date in format ccyymmdd                             *
+.*            DATEFLG1 - Date Type flag                                      *
+.*                          0 = full date (ccyymmdd)                         *
+.*                          1 = partial date (ccyymm)                        *
+.*            DATEFLG2 - Dates Allowed flag                                  *
+.*                          0 = any date allowed                             *
+.*                          1 = future dates not allowed                     *
+.*                          2 = past dates not allowed                       *
+.*            TMPFIELD - Date field name                                     *
+.* Returns:   ERORFLAG = 1 if an error in date validation occurs.            *
+.*****************************************************************************
+.
+VDAT0000  MATCH     SP8,TEMPDATE                 * blank date ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+.         Validate that the date has been fully populated
+.
+          SQUEEZE   TEMPDATE
+          MOVELPTR  TEMPDATE,FORM1
+          IF        DATEFLG1 = 0 & FORM1 <> 8 | DATEFLG1 = 1 & FORM1 <> 6
+            MOVE      "Insufficient digits ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate that the date is numeric
+.
+VDAT0100  TYPE      TEMPDATE
+          IF        !@EQUAL
+            MOVE      "Not numeric ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          UNPACK    TEMPDATE,DIM2C,DIM2Y,DIM2M,DIM2D
+.
+.         Validate the century is >= 18 and <= current century
+.
+          MOVE      DIM2C,FORM2
+          IF        FORM2 < 18 | FORM2 > CURRCENT
+            MOVE      "Century not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+.         Validate the month
+.
+          MOVE      DIM2M,FORM2
+          IF        FORM2 < 1 | FORM2 > 12
+            MOVE      "Month not valid ",ERORDESC
+            CALL      DERR0000
+            GOTO      VDAT9999
+          ENDIF
+.
+          COMPARE   ONE,DATEFLG1                 * short date (ccyymm) ?
+          GOTO      VDAT9999 IF EQUAL            * yes - finished
+.
+.         Validate the day is:
+.              < 32 for January, March, May, July, August, October & December
+.              < 31 for April, June, September & November
+.              < 29 for February, except in a leap year where it is < 30
+.
+          BRANCH    FORM2,VDAT1000:              * Jan
+                          VDAT3000:              * Feb
+                          VDAT1000:              * Mar
+                          VDAT2000:              * Apr
+                          VDAT1000:              * May
+                          VDAT2000:              * Jun
+                          VDAT1000:              * Jul
+                          VDAT1000:              * Aug
+                          VDAT2000:              * Sep
+                          VDAT1000:              * Oct
+                          VDAT2000:              * Nov
+                          VDAT1000               * Dec
+.
+.         Validate days for month of 31 days
+.
+VDAT1000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 31
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for month of 30 days
+.
+VDAT2000  MOVE      DIM2D,FORM2
+          IF        FORM2 < 1 | FORM2 > 30
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Validate days for February
+.         A leap year is one where:
+.           1. Every year divisible by 4 is a leap year.
+.           2. But every year divisible by 100 is NOT a leap year
+.           3. Unless the year is also divisible by 400, then it is still a
+.              leap year.
+.
+VDAT3000  MOVE      DIM2D,FORM2
+          PACK      DIM4,DIM2C,DIM2Y
+          MOVE      DIM4,FORM4
+          IF        (FORM4%4) = 0
+            IF        (FORM4%100) = 0
+              IF        (FORM4%400) = 0
+                GOTO      VDAT3200
+              ENDIF
+            ELSE
+              GOTO      VDAT3200
+            ENDIF
+          ENDIF
+.
+.         Check for normal Feb days
+.
+VDAT3100  IF        FORM2 < 1 | FORM2 > 28
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+.         Check for leap year Feb days
+.
+VDAT3200  IF        FORM2 < 1 | FORM2 > 29
+            GOTO      VDAT3900
+          ENDIF
+          GOTO      VDAT4000
+.
+VDAT3900  MOVE      "Day not valid ",ERORDESC
+          CALL      DERR0000
+          GOTO      VDAT9999
+.
+VDAT4000  COMPARE   ZERO,DATEFLG2                * any date allowed ?
+          GOTO      VDAT9999 IF EQUAL            * yes
+.
+          BRANCH    DATEFLG2,VDAT5000:           * future dates not allowed
+                             VDAT6000            * past dates not allowed
+.
+.         Make sure the date is not in the future
+.
+VDAT5000  MATCH     TEMPDATE,CURRDATE
+          IF        @LESS
+            MOVE      "Date cannot be in the future ",ERORDESC
+            CALL      DERR0000
+          ENDIF
+          GOTO      VDAT9999
+.
+.         Make sure the date is not in the past
+.
+VDAT6000  MATCH     CURRDATE,TEMPDATE
+          IF        @LESS
+            MOVE      "Date cannot be in the past ",ERORDESC
+            CALL      DERR0000
+          ENDIF
+.
+VDAT9999  RETURN
++
+.*****************************************************************************
+.*                            DERR0000             Called by: VDAT0000       *
+.*                    Process date error                                     *
+.* Requires: TMPFIELD - field name                                           *
+.*           ERORDESC - error description                                    *
+.*****************************************************************************
+.
+DERR0000  ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set date error flag
+.
+DERR9999  RETURN
++
+.*****************************************************************************
+.*                            TERR0000             Called by: VTIM0000       *
+.*                    Process time error                                     *
+.* Requires: TMPFIELD - field name                                           *
+.*           ERORDESC - error description                                    *
+.*****************************************************************************
+.
+TERR0000  ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set time error flag
+.
+TERR9999  RETURN
++
+.*****************************************************************************
+.*                            VNUM0000             Called by: UPLD0000       *
+.*                    Validate numeric fields                                *
+.* Returns:  EXIT - 0 = No numeric validation errors                         *
+.*                  1 = Numeric validation errors                            *
+.*          NUMCOUNT - updated count of records with numeric field errors    *
+.*****************************************************************************
+.
+VNUM0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          SQUEEZE   SNAPVERS
+          TYPE      SNAPVERS                     * version numeric ?
+          GOTO      VNUM0050 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM2
+          MOVE      SNAPVERS,FORM2
+          MOVE      FORM2,SNAPVERS
+          GOTO      VNUM0100                     * yes - valid value
+.
+VNUM0050  MOVE      "PMSCVERS",TMPFIELD
+          CALL      NERR0000
+.
+.         SNAPFMSE numeric field (valid values 0 , 1 & 2)
+.
+VNUM0100  REP       " 0",SNAPFMSE
+.
+          TYPE      SNAPFMSE                     * SNAPFMSE numeric ?
+          GOTO      VNUM0150 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      SNAPFMSE,FORM1
+          IF        FORM1 > TWO
+            GOTO      VNUM0150                   * 0 , 1 or 2 valid
+          ENDIF
+          GOTO      VNUM0200                     * yes - valid value
+.
+VNUM0150  MOVE      "PMSCFMSE",TMPFIELD
+          CALL      NERR0000
+.
+VNUM0200  REP       " 0",SNAPFMSL
+.
+          TYPE      SNAPFMSL
+          IF        !@EQUAL
+            MOVE      "PMSCFMSL",TMPFIELD
+            CALL      NERR0000
+          ENDIF
+.
+          MOVE      ZERO,FORM2A
+          MOVE      SNAPFMSL,FORM2A
+          MOVE      FORM2A,SNAPFMSL
+.
+          REP       " 0",SNAPFMSH
+.
+          TYPE      SNAPFMSH
+          IF        !@EQUAL
+            MOVE      "PMSCFMSH",TMPFIELD
+            CALL      NERR0000
+          ENDIF
+.
+          MOVE      ZERO,FORM2B
+          MOVE      SNAPFMSH,FORM2B
+          MOVE      FORM2B,SNAPFMSH
+.
+.         SNAPFCSE numeric field (valid values 0 & 1)
+.
+VNUM0300  REP       " 0",SNAPFCSE
+.
+          TYPE      SNAPFCSE                     * SNAPFCSE numeric ?
+          GOTO      VNUM0350 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      SNAPFCSE,FORM1
+          IF        FORM1 > ONE
+            GOTO      VNUM0350                   * 0 & 1 valid
+          ENDIF
+          GOTO      VNUM0400                     * yes - valid value
+.
+VNUM0350  MOVE      "PMSCFCSE",TMPFIELD
+          CALL      NERR0000
+.
+VNUM0400  REP       " 0",SNAPFCSL
+.
+          TYPE      SNAPFCSL
+          IF        !@EQUAL
+            MOVE      "PMSCFCSL",TMPFIELD
+            CALL      NERR0000
+          ENDIF
+.
+          MOVE      ZERO,FORM2A
+          MOVE      SNAPFCSL,FORM2A
+          MOVE      FORM2A,SNAPFCSL
+.
+          REP      " 0", SNAPFCSH
+.
+          TYPE      SNAPFCSH
+          IF        !@EQUAL
+            MOVE      "PMSCFCSH",TMPFIELD
+            CALL      NERR0000
+          ENDIF
+
+          MOVE      ZERO,FORM2B
+          MOVE      SNAPFCSH,FORM2B
+          MOVE      FORM2B,SNAPFCSH
+.
+.         SNAPAGEL numeric field (valid values 0 ,1 & 2)
+.
+VNUM0500  REP       " 0",SNAPAGEL
+.
+          TYPE      SNAPAGEL                     * SNAPAGEL numeric ?
+          GOTO      VNUM0550 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      SNAPAGEL,FORM1
+          IF        FORM1 > TWO
+            GOTO      VNUM0550                   * 0 , 1 & 2 valid
+          ENDIF
+          GOTO      VNUM0700                     * yes - valid value
+.
+VNUM0550  MOVE      "PMSCAGEL",TMPFIELD
+          CALL      NERR0000
+.
+.         SNAPFTSR numeric field (valid values 0 & 1)
+.
+VNUM0700  REP       " 0",SNAPFTSR
+.
+          TYPE      SNAPFTSR                     * SNAPFTSR numeric ?
+          GOTO      VNUM0750 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      SNAPFTSR,FORM1
+          IF        FORM1 > ONE
+            GOTO      VNUM0750                   * 0 & 1 valid
+          ENDIF
+          GOTO      VNUM0800                     * yes - valid value
+.
+VNUM0750  MOVE      "PMSCFTSR",TMPFIELD
+          CALL      NERR0000
+.
+VNUM0800  REP       " 0",SNAPFTSL
+.
+          TYPE      SNAPFTSL
+          IF        !@EQUAL
+            MOVE      "PMSCFTSL",TMPFIELD
+            CALL      NERR0000
+          ENDIF
+.
+          MOVE      ZERO,FORM3A
+          MOVE      SNAPFTSL,FORM3A
+          MOVE      FORM3A,SNAPFTSL
+.
+          REP       " 0",SNAPFTSH
+.
+          TYPE      SNAPFTSH
+          IF        !@EQUAL
+            MOVE      "PMSCFTSH",TMPFIELD
+            CALL      NERR0000
+          ENDIF
+
+          MOVE      ZERO,FORM3B
+          MOVE      SNAPFTSH,FORM3B
+          MOVE      FORM3B,SNAPFTSH
+.
+.         SNAPAGE  numeric field 0 - 99
+.
+VNUM0900  SQUEEZE   SNAPAGE 
+.
+          TYPE      SNAPAGE                      * SNAPAGE  numeric ?
+          GOTO      VNUM0950 IF NOT EQUAL        * no - error
+.
+          MOVE      SNAPAGE,FORM2
+          MOVE      FORM2,SNAPAGE
+          GOTO      VNUM1000  
+.
+VNUM0950  MOVE      "PMSCAGE ",TMPFIELD
+          CALL      NERR0000
+.
+.         SNAPASSO numeric field (valid values 0 & 1)
+.
+VNUM1000  REP       " 0",SNAPASSO
+.
+          TYPE      SNAPASSO                     * SNAPASSO numeric ?
+          GOTO      VNUM1050 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      SNAPASSO,FORM1
+          IF        FORM1 > ONE
+            GOTO      VNUM1050                   * 0 & 1 valid
+          ENDIF
+          GOTO      VNUM9000                     * yes - valid value
+.
+VNUM1050  MOVE      "PMSCASSO",TMPFIELD
+          CALL      NERR0000
+.
+VNUM9000  BRANCH    ERORFLAG,VNUM9100            * errors on number validation
+.
+          MOVE      ZERO,EXIT                    * no errors on no. validation
+          GOTO      VNUM9999
+.
+VNUM9100  ADD       ONE,NUMCOUNT                 * incr. num. error record count
+          MOVE      ONE,EXIT
+.
+VNUM9999  RETURN
++
+.*****************************************************************************
+.*                            NERR0000             Called by: VNUM0000       *
+.*                    Process number error                                   *
+.* Requires: TMPFIELD - field name                                           *
+.*****************************************************************************
+.
+NERR0000  MOVE      "Invalid numeric field ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set number error flag
+.
+NERR9999  RETURN
++
+.*****************************************************************************
+.*                              PERR0000           Called by: UPLD0000       *
+.*                   Print an error detail line               CHKM0000       *
+.* Requires: Valid read on PMI records (for name fields)      DERR0000       *
+.*           ERORDESC - error description                     TERR0000       *
+.*           CLNO - current page line count                                  *
+.* Returns:  CLNO - updated page line count                   NERR0000       *
+.*                                                            VCOD0000       *
+.*****************************************************************************
+.
+PERR0000  COMPARE   CLNO,SIXTY3                  * page full ?
+          IF        @LESS
+            CALL      LINE0000                   * yes - print bottom line
+            CALL      HEAD0000                   * print header
+          ENDIF
+.
+          PRINT     *1,PIPE,*3,SNAPCLCD,*13,PIPE,*15,SNAPVERS:
+                    *28,PIPE,*30,SNAPICDE,*42,PIPE,*44,SNAPDEFF:
+                    *59,PIPE,*61,ERORDESC,*132,PIPE
+          ADD       ONE,CLNO                     * increment page line count
+.
+PERR9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       PMSSNCIO/INC
+          INC       PMSSNPIO/INC
+          INC       PMSIMPIO/INC

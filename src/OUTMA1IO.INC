@@ -1,0 +1,381 @@
+.  
+. INCLUDE NAME : OUTMA1IO.INC 
+.
+. FILE  I/O REQUESTS FOR OUTPATIENT CLINIC MASTER FILE
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.KEY18    DIM           18            KEY FOR OUTMA1A1
+.KEY24    DIM           24            KEY FOR OUTMA1A2
+.KEY22    DIM           22            KEY FOR OUTMA1A3
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE OUTAAAX
+.                  RDKAAAX IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+.
+. Straight read.
+.
+RDMASA1   MOVE      ZERO,OVRCD
+          RESET     KEY18
+          READ      OUTMA1A1,KEY18;OMASITE,OMACLIN,OMATYP,DOMADAY,OMASTART:
+                                 OMAFIN,OMAEND,OMACIND,OMAREG,OMAKDOC:
+                                 OMACOM1,OMACOM2,OMADURN,OMANEWSL,OMASPCSL:
+                                 OMASTAT,OMAFREQM,DOMASEQ,OMALOCK,OMAFREQF:
+                                 OMAFREQY,OMADATE,OTMAAVIS,OTMASTVT,OTMASUPX:
+                                 OTMARUSE,OTMADCMB,OTMAIXTA,OTMADEFD,OTMAUATR:
+                                 OTMADDNA,OTMANDRP,OTMALPTR,OTMALGPD,OTMALPTD:
+                                 OTMABKLT,OTMARALT,OTMARSLT,OTMACLSE,OTMAHOSP:
+                                 OTMACLOC,OTMAWDCL,OTMAWARD,OTMALTYP,OTMADFSL:
+                                 OTMADFGN,OTMAGRPS,DOTMASOV,DOTMANOO,DOTMASLF:
+                                 DOTMASLR,OTMASBKL,OTMASAPL,OTMASPMM,OTMASGPM:
+                                 DOTMALPP,DOTMASRL,DOTMANCO,OTMALOCN,OTMADTCO:
+                                 OTMADTCC,OTMAINS1,OTMAINS2,OTMAINS3,OTMALSER:
+                                 OTMAUMCI,OTMAPROV,OTMAMBST,OTMAROOM,OTMALEDG:
+                                 OTMACCTR,OTMAMPRC,OTMAMBSA,OTMALDNA,OTMAADEP:
+                                 OTMACENC,OTMACCAR,OTMACTRN,OTMADPSL,OTMACPMI:
+                                 OTMACPAG,OTMACTEL,OTMANMDS,OTMACART,OTMASRVD:
+                                 OTMACLHR,OTMAMLTD,OTMAXPUL,OTMAMREF,OTMATCOD:
+                                 OTMAHCLI,OTMAHCAI,OTMAAOPN,OTMAAOFR,OTMAAOWM:
+                                 OTMAAOWA,OTMAHCP1,OTMAHCP2,OTMAHCP3,OTMAHCP4:
+                                 OTMASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOMADAY,OMADAY
+          MOVE      DOMASEQ,OMASEQ
+          MOVE      DOTMASOV,OTMASOVB
+          MOVE      DOTMANOO,OTMANOOB
+          MOVE      DOTMASLF,OTMASLFB
+          MOVE      DOTMASLR,OTMASLRV
+          MOVE      DOTMALPP,OTMALPPC
+          MOVE      DOTMASRL,OTMASRLH
+          MOVE      DOTMANCO,OTMANCOC
+          RETURN  
+.
+.
+. Lock read.
+.
+RLOTMAS1  MOVE      ZERO,OVRCD
+          RESET     KEY18
+          READL     OUTMA1A1,KEY18;OMASITE,OMACLIN,OMATYP,DOMADAY,OMASTART:
+                                 OMAFIN,OMAEND,OMACIND,OMAREG,OMAKDOC:
+                                 OMACOM1,OMACOM2,OMADURN,OMANEWSL,OMASPCSL:
+                                 OMASTAT,OMAFREQM,DOMASEQ,OMALOCK,OMAFREQF:
+                                 OMAFREQY,OMADATE,OTMAAVIS,OTMASTVT,OTMASUPX:
+                                 OTMARUSE,OTMADCMB,OTMAIXTA,OTMADEFD,OTMAUATR:
+                                 OTMADDNA,OTMANDRP,OTMALPTR,OTMALGPD,OTMALPTD:
+                                 OTMABKLT,OTMARALT,OTMARSLT,OTMACLSE,OTMAHOSP:
+                                 OTMACLOC,OTMAWDCL,OTMAWARD,OTMALTYP,OTMADFSL:
+                                 OTMADFGN,OTMAGRPS,DOTMASOV,DOTMANOO,DOTMASLF:
+                                 DOTMASLR,OTMASBKL,OTMASAPL,OTMASPMM,OTMASGPM:
+                                 DOTMALPP,DOTMASRL,DOTMANCO,OTMALOCN,OTMADTCO:
+                                 OTMADTCC,OTMAINS1,OTMAINS2,OTMAINS3,OTMALSER:
+                                 OTMAUMCI,OTMAPROV,OTMAMBST,OTMAROOM,OTMALEDG:
+                                 OTMACCTR,OTMAMPRC,OTMAMBSA,OTMALDNA,OTMAADEP:
+                                 OTMACENC,OTMACCAR,OTMACTRN,OTMADPSL,OTMACPMI:
+                                 OTMACPAG,OTMACTEL,OTMANMDS,OTMACART,OTMASRVD:
+                                 OTMACLHR,OTMAMLTD,OTMAXPUL,OTMAMREF,OTMATCOD:
+                                 OTMAHCLI,OTMAHCAI,OTMAAOPN,OTMAAOFR,OTMAAOWM:
+                                 OTMAAOWA,OTMAHCP1,OTMAHCP2,OTMAHCP3,OTMAHCP4:
+                                 OTMASPAR
+          GOTO      OVERCOND IF OVER
+          GOTO      OVERLOCK IF LOCKED
+          MOVE      DOMADAY,OMADAY
+          MOVE      DOMASEQ,OMASEQ
+          MOVE      DOTMASOV,OTMASOVB
+          MOVE      DOTMANOO,OTMANOOB
+          MOVE      DOTMASLF,OTMASLFB
+          MOVE      DOTMASLR,OTMASLRV
+          MOVE      DOTMALPP,OTMALPPC
+          MOVE      DOTMASRL,OTMASRLH
+          MOVE      DOTMANCO,OTMANCOC
+          RETURN  
+.
+UUOTMAS1  UNLOCK    OUTMA1A1
+          RETURN  
+.
+RDKMASA1  MOVE      ZERO,OVRCD
+          READKS    OUTMA1A1;OMASITE,OMACLIN,OMATYP,DOMADAY,OMASTART:
+                             OMAFIN,OMAEND,OMACIND,OMAREG,OMAKDOC:
+                             OMACOM1,OMACOM2,OMADURN,OMANEWSL,OMASPCSL:
+                             OMASTAT,OMAFREQM,DOMASEQ,OMALOCK,OMAFREQF:
+                             OMAFREQY,OMADATE,OTMAAVIS,OTMASTVT,OTMASUPX:
+                             OTMARUSE,OTMADCMB,OTMAIXTA,OTMADEFD,OTMAUATR:
+                             OTMADDNA,OTMANDRP,OTMALPTR,OTMALGPD,OTMALPTD:
+                             OTMABKLT,OTMARALT,OTMARSLT,OTMACLSE,OTMAHOSP:
+                             OTMACLOC,OTMAWDCL,OTMAWARD,OTMALTYP,OTMADFSL:
+                             OTMADFGN,OTMAGRPS,DOTMASOV,DOTMANOO,DOTMASLF:
+                             DOTMASLR,OTMASBKL,OTMASAPL,OTMASPMM,OTMASGPM:
+                             DOTMALPP,DOTMASRL,DOTMANCO,OTMALOCN,OTMADTCO:
+                             OTMADTCC,OTMAINS1,OTMAINS2,OTMAINS3,OTMALSER:
+                             OTMAUMCI,OTMAPROV,OTMAMBST,OTMAROOM,OTMALEDG:
+                             OTMACCTR,OTMAMPRC,OTMAMBSA,OTMALDNA,OTMAADEP:
+                             OTMACENC,OTMACCAR,OTMACTRN,OTMADPSL,OTMACPMI:
+                             OTMACPAG,OTMACTEL,OTMANMDS,OTMACART,OTMASRVD:
+                             OTMACLHR,OTMAMLTD,OTMAXPUL,OTMAMREF,OTMATCOD:
+                             OTMAHCLI,OTMAHCAI,OTMAAOPN,OTMAAOFR,OTMAAOWM:
+                             OTMAAOWA,OTMAHCP1,OTMAHCP2,OTMAHCP3,OTMAHCP4:
+                             OTMASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOMADAY,OMADAY
+          MOVE      DOMASEQ,OMASEQ
+          MOVE      DOTMASOV,OTMASOVB
+          MOVE      DOTMANOO,OTMANOOB
+          MOVE      DOTMASLF,OTMASLFB
+          MOVE      DOTMASLR,OTMASLRV
+          MOVE      DOTMALPP,OTMALPPC
+          MOVE      DOTMASRL,OTMASRLH
+          MOVE      DOTMANCO,OTMANCOC
+          RETURN  
+.
+RDSMASA1  RESET     KEY18
+          READ      OUTMA1A1,KEY18;;
+          RETURN  
+.
+. Writes & unlocks.
+.
+WRMASA1   MOVE      SP2 TO OMALOCK
+          RESET     KEY18
+          MOVE      OMADAY,DOMADAY
+          MOVE      OMASEQ,DOMASEQ
+          MOVE      OTMASOVB,DOTMASOV
+          MOVE      OTMANOOB,DOTMANOO
+          MOVE      OTMASLFB,DOTMASLF
+          MOVE      OTMASLRV,DOTMASLR
+          MOVE      OTMALPPC,DOTMALPP
+          MOVE      OTMASRLH,DOTMASRL
+          MOVE      OTMANCOC,DOTMANCO
+          WRITE     OUTMA1A1,KEY18;OMASITE,OMACLIN,OMATYP,DOMADAY,OMASTART:
+                                 OMAFIN,OMAEND,OMACIND,OMAREG,OMAKDOC:
+                                 OMACOM1,OMACOM2,OMADURN,OMANEWSL,OMASPCSL:
+                                 OMASTAT,OMAFREQM,DOMASEQ,OMALOCK,OMAFREQF:
+                                 OMAFREQY,OMADATE,OTMAAVIS,OTMASTVT,OTMASUPX:
+                                 OTMARUSE,OTMADCMB,OTMAIXTA,OTMADEFD,OTMAUATR:
+                                 OTMADDNA,OTMANDRP,OTMALPTR,OTMALGPD,OTMALPTD:
+                                 OTMABKLT,OTMARALT,OTMARSLT,OTMACLSE,OTMAHOSP:
+                                 OTMACLOC,OTMAWDCL,OTMAWARD,OTMALTYP,OTMADFSL:
+                                 OTMADFGN,OTMAGRPS,DOTMASOV,DOTMANOO,DOTMASLF:
+                                 DOTMASLR,OTMASBKL,OTMASAPL,OTMASPMM,OTMASGPM:
+                                 DOTMALPP,DOTMASRL,DOTMANCO,OTMALOCN,OTMADTCO:
+                                 OTMADTCC,OTMAINS1,OTMAINS2,OTMAINS3,OTMALSER:
+                                 OTMAUMCI,OTMAPROV,OTMAMBST,OTMAROOM,OTMALEDG:
+                                 OTMACCTR,OTMAMPRC,OTMAMBSA,OTMALDNA,OTMAADEP:
+                                 OTMACENC,OTMACCAR,OTMACTRN,OTMADPSL,OTMACPMI:
+                                 OTMACPAG,OTMACTEL,OTMANMDS,OTMACART,OTMASRVD:
+                                 OTMACLHR,OTMAMLTD,OTMAXPUL,OTMAMREF,OTMATCOD:
+                                 OTMAHCLI,OTMAHCAI,OTMAAOPN,OTMAAOFR,OTMAAOWM:
+                                 OTMAAOWA,OTMAHCP1,OTMAHCP2,OTMAHCP3,OTMAHCP4:
+                                 OTMASPAR
+         RETURN 
+.  
+. Updates & unlocks.  
+.
+UPMASA1   MOVE      SP2 TO OMALOCK
+          MOVE      OMADAY,DOMADAY
+          MOVE      OMASEQ,DOMASEQ
+          MOVE      OTMASOVB,DOTMASOV
+          MOVE      OTMANOOB,DOTMANOO
+          MOVE      OTMASLFB,DOTMASLF
+          MOVE      OTMASLRV,DOTMASLR
+          MOVE      OTMALPPC,DOTMALPP
+          MOVE      OTMASRLH,DOTMASRL
+          MOVE      OTMANCOC,DOTMANCO
+          UPDATE    OUTMA1A1;OMASITE,OMACLIN,OMATYP,DOMADAY,OMASTART:
+                             OMAFIN,OMAEND,OMACIND,OMAREG,OMAKDOC:
+                             OMACOM1,OMACOM2,OMADURN,OMANEWSL,OMASPCSL:
+                             OMASTAT,OMAFREQM,DOMASEQ,OMALOCK,OMAFREQF:
+                             OMAFREQY,OMADATE,OTMAAVIS,OTMASTVT,OTMASUPX:
+                             OTMARUSE,OTMADCMB,OTMAIXTA,OTMADEFD,OTMAUATR:
+                             OTMADDNA,OTMANDRP,OTMALPTR,OTMALGPD,OTMALPTD:
+                             OTMABKLT,OTMARALT,OTMARSLT,OTMACLSE,OTMAHOSP:
+                             OTMACLOC,OTMAWDCL,OTMAWARD,OTMALTYP,OTMADFSL:
+                             OTMADFGN,OTMAGRPS,DOTMASOV,DOTMANOO,DOTMASLF:
+                             DOTMASLR,OTMASBKL,OTMASAPL,OTMASPMM,OTMASGPM:
+                             DOTMALPP,DOTMASRL,DOTMANCO,OTMALOCN,OTMADTCO:
+                             OTMADTCC,OTMAINS1,OTMAINS2,OTMAINS3,OTMALSER:
+                             OTMAUMCI,OTMAPROV,OTMAMBST,OTMAROOM,OTMALEDG:
+                             OTMACCTR,OTMAMPRC,OTMAMBSA,OTMALDNA,OTMAADEP:
+                             OTMACENC,OTMACCAR,OTMACTRN,OTMADPSL,OTMACPMI:
+                             OTMACPAG,OTMACTEL,OTMANMDS,OTMACART,OTMASRVD:
+                             OTMACLHR,OTMAMLTD,OTMAXPUL,OTMAMREF,OTMATCOD:
+                             OTMAHCLI,OTMAHCAI,OTMAAOPN,OTMAAOFR,OTMAAOWM:
+                             OTMAAOWA,OTMAHCP1,OTMAHCP2,OTMAHCP3,OTMAHCP4:
+                             OTMASPAR
+          RETURN
+.
+DEMASA1   RESET     KEY18
+          DELETE    OUTMA1A1,KEY18
+          RETURN  
+.
+.        SECOND KEY I/O  - only reads; no writes/updates/deletes allowed
+.
+RDMASA2   MOVE      ZERO,OVRCD
+          RESET     KEY24
+          READ      OUTMA1A2,KEY24;OMASITE,OMACLIN,OMATYP,DOMADAY,OMASTART:
+                                 OMAFIN,OMAEND,OMACIND,OMAREG,OMAKDOC:
+                                 OMACOM1,OMACOM2,OMADURN,OMANEWSL,OMASPCSL:
+                                 OMASTAT,OMAFREQM,DOMASEQ,OMALOCK,OMAFREQF:
+                                 OMAFREQY,OMADATE,OTMAAVIS,OTMASTVT,OTMASUPX:
+                                 OTMARUSE,OTMADCMB,OTMAIXTA,OTMADEFD,OTMAUATR:
+                                 OTMADDNA,OTMANDRP,OTMALPTR,OTMALGPD,OTMALPTD:
+                                 OTMABKLT,OTMARALT,OTMARSLT,OTMACLSE,OTMAHOSP:
+                                 OTMACLOC,OTMAWDCL,OTMAWARD,OTMALTYP,OTMADFSL:
+                                 OTMADFGN,OTMAGRPS,DOTMASOV,DOTMANOO,DOTMASLF:
+                                 DOTMASLR,OTMASBKL,OTMASAPL,OTMASPMM,OTMASGPM:
+                                 DOTMALPP,DOTMASRL,DOTMANCO,OTMALOCN,OTMADTCO:
+                                 OTMADTCC,OTMAINS1,OTMAINS2,OTMAINS3,OTMALSER:
+                                 OTMAUMCI,OTMAPROV,OTMAMBST,OTMAROOM,OTMALEDG:
+                                 OTMACCTR,OTMAMPRC,OTMAMBSA,OTMALDNA,OTMAADEP:
+                                 OTMACENC,OTMACCAR,OTMACTRN,OTMADPSL,OTMACPMI:
+                                 OTMACPAG,OTMACTEL,OTMANMDS,OTMACART,OTMASRVD:
+                                 OTMACLHR,OTMAMLTD,OTMAXPUL,OTMAMREF,OTMATCOD:
+                                 OTMAHCLI,OTMAHCAI,OTMAAOPN,OTMAAOFR,OTMAAOWM:
+                                 OTMAAOWA,OTMAHCP1,OTMAHCP2,OTMAHCP3,OTMAHCP4:
+                                 OTMASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOMADAY,OMADAY
+          MOVE      DOMASEQ,OMASEQ
+          MOVE      DOTMASOV,OTMASOVB
+          MOVE      DOTMANOO,OTMANOOB
+          MOVE      DOTMASLF,OTMASLFB
+          MOVE      DOTMASLR,OTMASLRV
+          MOVE      DOTMALPP,OTMALPPC
+          MOVE      DOTMASRL,OTMASRLH
+          MOVE      DOTMANCO,OTMANCOC
+          RETURN  
+.
+RDKMASA2  MOVE      ZERO,OVRCD
+          READKS    OUTMA1A2;OMASITE,OMACLIN,OMATYP,DOMADAY,OMASTART:
+                             OMAFIN,OMAEND,OMACIND,OMAREG,OMAKDOC:
+                             OMACOM1,OMACOM2,OMADURN,OMANEWSL,OMASPCSL:
+                             OMASTAT,OMAFREQM,DOMASEQ,OMALOCK,OMAFREQF:
+                             OMAFREQY,OMADATE,OTMAAVIS,OTMASTVT,OTMASUPX:
+                             OTMARUSE,OTMADCMB,OTMAIXTA,OTMADEFD,OTMAUATR:
+                             OTMADDNA,OTMANDRP,OTMALPTR,OTMALGPD,OTMALPTD:
+                             OTMABKLT,OTMARALT,OTMARSLT,OTMACLSE,OTMAHOSP:
+                             OTMACLOC,OTMAWDCL,OTMAWARD,OTMALTYP,OTMADFSL:
+                             OTMADFGN,OTMAGRPS,DOTMASOV,DOTMANOO,DOTMASLF:
+                             DOTMASLR,OTMASBKL,OTMASAPL,OTMASPMM,OTMASGPM:
+                             DOTMALPP,DOTMASRL,DOTMANCO,OTMALOCN,OTMADTCO:
+                             OTMADTCC,OTMAINS1,OTMAINS2,OTMAINS3,OTMALSER:
+                             OTMAUMCI,OTMAPROV,OTMAMBST,OTMAROOM,OTMALEDG:
+                             OTMACCTR,OTMAMPRC,OTMAMBSA,OTMALDNA,OTMAADEP:
+                             OTMACENC,OTMACCAR,OTMACTRN,OTMADPSL,OTMACPMI:
+                             OTMACPAG,OTMACTEL,OTMANMDS,OTMACART,OTMASRVD:
+                             OTMACLHR,OTMAMLTD,OTMAXPUL,OTMAMREF,OTMATCOD:
+                             OTMAHCLI,OTMAHCAI,OTMAAOPN,OTMAAOFR,OTMAAOWM:
+                             OTMAAOWA,OTMAHCP1,OTMAHCP2,OTMAHCP3,OTMAHCP4:
+                             OTMASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOMADAY,OMADAY
+          MOVE      DOMASEQ,OMASEQ
+          MOVE      DOTMASOV,OTMASOVB
+          MOVE      DOTMANOO,OTMANOOB
+          MOVE      DOTMASLF,OTMASLFB
+          MOVE      DOTMASLR,OTMASLRV
+          MOVE      DOTMALPP,OTMALPPC
+          MOVE      DOTMASRL,OTMASRLH
+          MOVE      DOTMANCO,OTMANCOC
+          RETURN  
+.
+RDSMASA2  RESET     KEY24
+          READ      OUTMA1A2,KEY24;;
+          RETURN
+.
+.        THIRD KEY I/O - only reads; no writes/updates/deletes allowed 
+.
+RDMASA3   MOVE      ZERO,OVRCD
+          RESET     KEY22
+          READ      OUTMA1A3,KEY22;OMASITE,OMACLIN,OMATYP,DOMADAY,OMASTART:
+                                 OMAFIN,OMAEND,OMACIND,OMAREG,OMAKDOC:
+                                 OMACOM1,OMACOM2,OMADURN,OMANEWSL,OMASPCSL:
+                                 OMASTAT,OMAFREQM,DOMASEQ,OMALOCK,OMAFREQF:
+                                 OMAFREQY,OMADATE,OTMAAVIS,OTMASTVT,OTMASUPX:
+                                 OTMARUSE,OTMADCMB,OTMAIXTA,OTMADEFD,OTMAUATR:
+                                 OTMADDNA,OTMANDRP,OTMALPTR,OTMALGPD,OTMALPTD:
+                                 OTMABKLT,OTMARALT,OTMARSLT,OTMACLSE,OTMAHOSP:
+                                 OTMACLOC,OTMAWDCL,OTMAWARD,OTMALTYP,OTMADFSL:
+                                 OTMADFGN,OTMAGRPS,DOTMASOV,DOTMANOO,DOTMASLF:
+                                 DOTMASLR,OTMASBKL,OTMASAPL,OTMASPMM,OTMASGPM:
+                                 DOTMALPP,DOTMASRL,DOTMANCO,OTMALOCN,OTMADTCO:
+                                 OTMADTCC,OTMAINS1,OTMAINS2,OTMAINS3,OTMALSER:
+                                 OTMAUMCI,OTMAPROV,OTMAMBST,OTMAROOM,OTMALEDG:
+                                 OTMACCTR,OTMAMPRC,OTMAMBSA,OTMALDNA,OTMAADEP:
+                                 OTMACENC,OTMACCAR,OTMACTRN,OTMADPSL,OTMACPMI:
+                                 OTMACPAG,OTMACTEL,OTMANMDS,OTMACART,OTMASRVD:
+                                 OTMACLHR,OTMAMLTD,OTMAXPUL,OTMAMREF,OTMATCOD:
+                                 OTMAHCLI,OTMAHCAI,OTMAAOPN,OTMAAOFR,OTMAAOWM:
+                                 OTMAAOWA,OTMAHCP1,OTMAHCP2,OTMAHCP3,OTMAHCP4:
+                                 OTMASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOMADAY,OMADAY
+          MOVE      DOMASEQ,OMASEQ
+          MOVE      DOTMASOV,OTMASOVB
+          MOVE      DOTMANOO,OTMANOOB
+          MOVE      DOTMASLF,OTMASLFB
+          MOVE      DOTMASLR,OTMASLRV
+          MOVE      DOTMALPP,OTMALPPC
+          MOVE      DOTMASRL,OTMASRLH
+          MOVE      DOTMANCO,OTMANCOC
+          RETURN  
+.
+RDKMASA3  MOVE      ZERO,OVRCD
+          READKS    OUTMA1A3;OMASITE,OMACLIN,OMATYP,DOMADAY,OMASTART:
+                             OMAFIN,OMAEND,OMACIND,OMAREG,OMAKDOC:
+                             OMACOM1,OMACOM2,OMADURN,OMANEWSL,OMASPCSL:
+                             OMASTAT,OMAFREQM,DOMASEQ,OMALOCK,OMAFREQF:
+                             OMAFREQY,OMADATE,OTMAAVIS,OTMASTVT,OTMASUPX:
+                             OTMARUSE,OTMADCMB,OTMAIXTA,OTMADEFD,OTMAUATR:
+                             OTMADDNA,OTMANDRP,OTMALPTR,OTMALGPD,OTMALPTD:
+                             OTMABKLT,OTMARALT,OTMARSLT,OTMACLSE,OTMAHOSP:
+                             OTMACLOC,OTMAWDCL,OTMAWARD,OTMALTYP,OTMADFSL:
+                             OTMADFGN,OTMAGRPS,DOTMASOV,DOTMANOO,DOTMASLF:
+                             DOTMASLR,OTMASBKL,OTMASAPL,OTMASPMM,OTMASGPM:
+                             DOTMALPP,DOTMASRL,DOTMANCO,OTMALOCN,OTMADTCO:
+                             OTMADTCC,OTMAINS1,OTMAINS2,OTMAINS3,OTMALSER:
+                             OTMAUMCI,OTMAPROV,OTMAMBST,OTMAROOM,OTMALEDG:
+                             OTMACCTR,OTMAMPRC,OTMAMBSA,OTMALDNA,OTMAADEP:
+                             OTMACENC,OTMACCAR,OTMACTRN,OTMADPSL,OTMACPMI:
+                             OTMACPAG,OTMACTEL,OTMANMDS,OTMACART,OTMASRVD:
+                             OTMACLHR,OTMAMLTD,OTMAXPUL,OTMAMREF,OTMATCOD:
+                             OTMAHCLI,OTMAHCAI,OTMAAOPN,OTMAAOFR,OTMAAOWM:
+                             OTMAAOWA,OTMAHCP1,OTMAHCP2,OTMAHCP3,OTMAHCP4:
+                             OTMASPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOMADAY,OMADAY
+          MOVE      DOMASEQ,OMASEQ
+          MOVE      DOTMASOV,OTMASOVB
+          MOVE      DOTMANOO,OTMANOOB
+          MOVE      DOTMASLF,OTMASLFB
+          MOVE      DOTMASLR,OTMASLRV
+          MOVE      DOTMALPP,OTMALPPC
+          MOVE      DOTMASRL,OTMASRLH
+          MOVE      DOTMANCO,OTMANCOC
+          RETURN  
+.
+RDSMASA3  RESET     KEY22
+          READ      OUTMA1A3,KEY22;;
+          RETURN
+.
+OPOTMA11  RESET     CFNAME,3
+          APPEND    FILMA1A1,CFNAME
+          RESET     CFNAME
+          OPEN      OUTMA1A1,CFNAME
+          RETURN
+.
+OPOTMA12  RESET     CFNAME,3
+          APPEND    FILMA1A2,CFNAME
+          RESET     CFNAME
+          OPEN      OUTMA1A2,CFNAME
+          RETURN
+.
+OPOTMA13  RESET     CFNAME,3
+          APPEND    FILMA1A3,CFNAME
+          RESET     CFNAME
+          OPEN      OUTMA1A3,CFNAME
+          RETURN
++
+.
+

@@ -1,0 +1,274 @@
+.******************************************************************************
+.* System    :   Patient Management System                                    *
+.* Program   :   FX298784                                                     *
+.* Desc      :   Fixit for Patient Health Fund Program Details                *
+.******************************************************************************
+.* Date      :   06/05/2014                                                   *
+.* Author    :   Patrick Adair                                                *
+.* Function  :   This program will loop through the Patient Health Fund       *
+.*               Program Details table (pmsapgaf) and set the Duration of     *
+.*               PTA field (pmagcamn) to cater for AROC V4 dataset            *
+.*               modifications relted to impairment code 02.22 only           *
+.* Mods      :                                                                *
+.* V10.04.00  06/05/2014 Patrick Adair                             CAR 298974 *
+.*            Program created                                                 *
+.******************************************************************************
+.
+          INC       STD001FD                * Standard common includes 
+.
+. File Description Includes
+. -------------------------
+          INC       PATCODFD/INC            * Category Codes
+          INC       PATFN1FD/INC            * Patient Health Fund File
+          INC       PATMA1FD/INC            * Patient Master File
+          INC       PMSAPGFD/INC            * Patient Health Fund Program Dtls
+.
+. Local Variable Definitions
+. --------------------------
+ADMTYPE   DIM       15
+CLMTYPE   DIM       15
+COUNTER   FORM      12
+EXPDATE   DIM       10
+HFUND     DIM       30
+PATNAME   DIM       25
+.
+. Local Constants Definitions
+. ---------------------------
+PRGID     INIT      "FX298784"
+PRGNAM    INIT      "AROC Fix for Duration of PTA"
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                  MAIN0000                                  *
+.* Controlling Logic                                                          *
+.******************************************************************************
+.
+MAIN0000  CALL      INIT0000                * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000                * select options
+          BRANCH    EXIT,MAIN9999           * EXIT = 1 if 0 chosen in menu
+.
+MAIN1000  CALL      CONTQST                 * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:         * yes
+                          MAIN0100:         * no
+                          MAIN0100          * cancel
+.
+MAIN2000  CALL      PROC0000                * process
+.
+MAIN9999  CHAIN     PGM                     * chain back to program
++
+.******************************************************************************
+.*                                  INIT0000              Called by: MAIN0000 *
+.* Display headings and open files.                                           *
+.******************************************************************************
+.
+INIT0000  CALL      DISPHEAD                * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"pmsapgaf";
+          OPEN      PMSAPGA1,"pmsapgaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"patfn1af";
+          OPEN      PATFN1A1,"patfn1af"
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          MOVE      SEVENTY,CLNO            * Init Line Count
+          MOVE      ZERO,CPAGENO            * Init Page Count
+          CLOCK     TIME,CTIMEIS            * Get the starting time
+.
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                  OPTN0000              Called by: MAIN0000 *
+.* Get user run options                                                       *
+.* Returns:  EXIT    = 0 - Run fixit                                          *
+.*                     1 - Exit program                                       *
+.******************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Fixit"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION            * exit selected ?
+          GOTO      OPTN9500 IF EQUAL       * yes
+.
+          BRANCH    COPTION,OPTN9000        * run fixit
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.******************************************************************************
+.*                                  PROC0000              Called by: MAIN0000 *
+.* Loop through all Patient Health Fund Program Details records               *
+.* 1) Update record to Aroc V4 dataset modification if required               *
+.*    or                                                                      *
+.* 2) Print report of records that require manual updating                    *
+.******************************************************************************
+.
+PROC0000  CALL      IBACLOCK                * get current date/time
+          MOVE      ZERO,COUNTER            * initialise counter
+.
+.         Loop through and check each Patient Health Fund Program Details
+.         record on file
+.
+          PACK      KEY31,SP70
+          CALL      RSPMAPG1                * position at start of file
+PROC1000  CALL      RKPMAPG1                * read next record
+.
+          DISPLAY   *P20:23,*EL,"UR Number: ",PMAGURNO;
+.
+          BRANCH    OVRCD,PROC9000          * eof - finish processing
+.
+.         Only process records with an Impairment code of 2.22
+.
+          MATCH     "02.22  ",PMAGICDE
+          GOTO      PROC1000 IF NOT EQUAL   * no - get next record
+.
+.         Default records with Duration of PTA set to "1" (yes) to
+.            "7" (183 days or more) and clear date emerged from PTA
+.
+          MATCH     "1",PMAGCAMN
+          IF        @EQUAL
+            PACK      PMAGDEFP,SP70
+            MOVE      "7",PMAGCAMN
+            GOTO      PROC8000
+          ENDIF
+.
+.         If date emerged from PTA is populated
+.            set PMAGCAMN to blank and update record
+.
+          MATCH     SP70,PMAGDEFP
+          IF        !@EQUAL
+            PACK      PMAGCAMN,SP10
+            GOTO      PROC8000
+          ENDIF
+.
+.         Print other records for manual updating by users
+.                                           * get formatted patient name
+          PACK      KEY8,PMAGURNO,SP70
+          CALL      RDMAST1
+          IF        OVRCD=1
+            PACK      PATNAME,SP70
+          ELSE
+            MOVE      ONE,PACFRMT
+            MOVE      PTITL,PACTITLE
+            MOVE      PGNAME,PACGNAME
+            MOVE      PSNAME,PACSNAME
+            CALL      PACNAME
+            MOVE      PACFNAME,PATNAME
+          ENDIF
+.                                           * get admission type description
+          PACK      KEY5,ANSA,SP1,PMAGATYP
+          CALL      RDCODE1
+          IF        OVRCD=1
+            PACK      ADMTYPE,SP70
+          ELSE
+            PACK      ADMTYPE,TDESC,SP70
+          ENDIF
+.                                           * get claim code description
+          PACK      KEY5,ANSC,ANSL,PMAGCLAM
+          CALL      RDCODE1
+          IF        OVRCD=1
+            PACK      CLMTYPE,SP70
+          ELSE
+            PACK      CLMTYPE,TDESC,SP70
+          ENDIF
+.                                           * get health fund name
+          PACK      KEY14,PMAGFUND,PMAGTABT,SP20
+          CALL      RDFUND1
+          IF        OVRCD=1
+            PACK      HFUND,SP70
+          ELSE
+            PACK      HFUND,HFNAME,SP70
+          ENDIF
+.                                           * format program expiry date
+          UNPACK    PMAGEDAT,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PACK      EXPDATE,CPCDATE,SP70
+.
+          CALL      PRIB0000
+.
+          GOTO      PROC1000                * get next record
+.
+PROC8000  CALL      UPPMAPG1                * update record
+.
+          ADD       ONE,COUNTER             * increment records updated counter
+.
+          GOTO      PROC1000                * get next record
+.
+PROC9000  DISPLAY   *P1:24,*EL,"Fixit completed.  ",*V2LON,COUNTER,*HOFF:
+                    " records updated.  ";
+          CALL      HITENTER
+.
+PROC9999  RETURN
++
+.******************************************************************************
+.*                                  PRIB0000             Called by : PROC0000 *
+.* Print Patient Health Fund Program Details Error Report                     *
+.******************************************************************************
+PRIB0000  COMPARE   "60",CLNO
+          CALL      PRHD0000 IF NOT LESS
+.
+          PRINT     *1,"| ",PMAGURNO:
+                    *13,"|",PATNAME:
+                    *41,"| ",ADMTYPE:
+                    *59,"| ",CLMTYPE:
+                    *77,"| ",HFUND:
+                    *110,"| ",EXPDATE:
+                    *132,"|"
+.
+          PRINT     *1,"|-----------|---------------------------":
+                    *41,"|-----------------|-----------------":
+                    *77,"|--------------------------------":
+                    *110,"|---------------------|"
+.
+          ADD       TWO,CLNO
+.
+PRIB9999  RETURN
++
+.******************************************************************************
+.*                                  PRHD0000             Called by : PRIB0000 *
+.* Print Patient Health Fund Program Details Error header details             *
+.******************************************************************************
+PRHD0000  COMPARE   "60",CLNO
+          GOTO      PRHD9999 IF LESS
+.
+          CALL      HEAD132                 * Print New Page Header
+.
+          CALL      UND132
+.
+          PRINT     *1,"| UR Number |Patient Name":
+                    *41,"| Admission Type  | Claim Code      | Health Fund":
+                    *110,"| Program Expiry Date |"
+.
+          CALL      UND132
+.
+          MOVE      "8",CLNO
+.
+PRHD9999  RETURN
++
+.******************************************************************************
+.* I/O Includes                                                               *
+.******************************************************************************
+.
+          INC       STD001IO                * Standard Common IO Includes
+.
+          INC       PATCODIO/INC            * Category Codes
+          INC       PATFN1IO/INC            * Patient Discharge File
+          INC       PATMA1IO/INC            * Patient Master File
+          INC       PMSAPGIO/INC            * Patient Health Fund Program Dtls

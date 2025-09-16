@@ -1,0 +1,141 @@
+RSFMJP1   RESET     KEY5
+          READ      FMSJPDA1,KEY5;;
+          RETURN
+.
+RAFMJP1   RESET     KEY5
+          MOVE      ZERO,OVRCD
+          READ      FMSJPDA1,KEY5;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMJP1   RESET     KEY5
+          MOVE      ZERO,OVRCD
+          READ      FMSJPDA1,KEY5;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMJP1   MOVE      ZERO,OVRCD
+          READKS    FMSJPDA1;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMJP1   MOVE      ZERO,OVRCD
+          READKP    FMSJPDA1;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMJP1   UPDATE    FMSJPDA1;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          RETURN
+.
+WRFMJP1   RESET     KEY5
+          WRITE     FMSJPDA1,KEY5;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          RETURN
+.
+DEFMJP1   RESET     KEY5
+          DELETE    FMSJPDA1,KEY5
+          RETURN
+.
+RSFMJP2   RESET     KEY12
+          READ      FMSJPDA2,KEY12;;
+          RETURN
+.
+RAFMJP2   RESET     KEY12
+          MOVE      ZERO,OVRCD
+          READ      FMSJPDA2,KEY12;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMJP2   RESET     KEY12
+          MOVE      ZERO,OVRCD
+          READ      FMSJPDA2,KEY12;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMJP2   MOVE      ZERO,OVRCD
+          READKS    FMSJPDA2;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMJP2   MOVE      ZERO,OVRCD
+          READKP    FMSJPDA2;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMJP2   UPDATE    FMSJPDA2;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          RETURN
+.
+WRFMJP2   RESET     KEY12
+          WRITE     FMSJPDA2,KEY12;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          RETURN
+.
+DEFMJP2   RESET     KEY12
+          DELETE    FMSJPDA2,KEY12
+          RETURN
+.
+RSFMJP3   RESET     KEY6
+          READ      FMSJPDA3,KEY6;;
+          RETURN
+.
+RAFMJP3   RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      FMSJPDA3,KEY6;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMJP3   RESET     KEY6
+          MOVE      ZERO,OVRCD
+          READ      FMSJPDA3,KEY6;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMJP3   MOVE      ZERO,OVRCD
+          READKS    FMSJPDA3;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMJP3   MOVE      ZERO,OVRCD
+          READKP    FMSJPDA3;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMJP3   UPDATE    FMSJPDA3;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          RETURN
+.
+WRFMJP3   RESET     KEY6
+          WRITE     FMSJPDA3,KEY6;FMJPBAT,FMJPJTY,FMJPJID,FMJPPDAT:
+                                  FMJPCDAT,FMJPUDAT,FMJPDAT,FMJPTYP,FMJPREV:
+                                  FMJPDTOT,FMJPAUTH,FMJPSPAR
+          RETURN
+.
+DEFMJP3   RESET     KEY6
+          DELETE    FMSJPDA3,KEY6
+          RETURN
+.

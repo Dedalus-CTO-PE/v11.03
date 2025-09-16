@@ -1,0 +1,460 @@
+.******************************************************************************
+.* Filename      : PATRECAL.PBL                                               *
+.* System        : Patient management system                                  *
+.******************************************************************************
+.* Subroutines   :                                                            *
+.* Procedures    : PATRECAL  - Recalculate rates for a change in board        *
+.******************************************************************************
+.* Modifications :                                                            *
+.                   08/10/1998  Glenn Berry      5.07 changes
+.******************************************************************************
+.*        V11.01.01 08/11/2021 J.Tan           TSK 0880410                    *
+.*                  Added PENDHOSP and PENDSYST for PATIPERH                  *
+.*        V10.07.01 16/02/2016  J.Tan            CAR 0310703                  *
+.*                  Mods Public Hosp checking for to be invoiced amount       *
+.*        V10.03.01 15/05/2012 J.Tan               CAR 255708                 *
+.*                  Mods checking for Hold Invoices From Date                 *
+.*        V10.01.01 06/12/2010  Ebon Clements     CAR 233927                  *
+.*                  Added reason for hold update to invoice pending           *
+.*                  30/11/2010  Peter Vela       CAR 233148                   *
+.*                  Initialised pattranf variables before write               *
+.*        V5.01.02  12/06/92  Graeme Williams               SRF 114865        *
+.*                  Changes for 9 character misc items                        *
+.*        V5.01.03  15/03/1993  Steve Armstrong                               *
+.*                  Mods for new episode field (PTTREPNO)                     *
+.*        V5.01.04  15/07/93  WHIRLPOOL        SRF 123030                     *
+.*                  Dudley postcode changes                                   *
+.*        V5.01.05  22/05/1995  Paul Howells     SRF 134644                   *
+.*                  Check whether using invoice pending file before writing.  *
+.******************************************************************************
+.
+.******************************************************************************
+.* PATRECAL      : Recalculate rates for a change in board for an inpatient   *
+.* Parameters    : PATMI1FD record                                            *
+.*                 PATMA1FD record                                            *
+.******************************************************************************
+          DEFPROC   PATRECAL
+.
+          INC       PATCFAFD/INC
+          INC       PATCT1FD/INC             * catchment file
+          INC       PATDTRFD/INC             * debtors transaction file
+          INC       PATFX1FD/INC
+          INC       PATFHIFD/INC
+          INC       PATIPEFD/INC             * invoice pending file
+          INC       PATMI1FD/INC
+          INC       PATTRNFD/INC             * bed transfer file
+          INC       PMSVX1FD/INC
+.
+.         Local and save variables required by this routine
+.
+CHRGFLAG  FORM      1
+.
+NOCHANGE  FORM      1
+.
+NEWBRD    DIM       6
+.
+PENDSDAT  DIM       8
+PENDADAT  DIM       8
+PENDDDAT  DIM       8
+PENDFUND  DIM       6
+PENDCLAM  DIM       3
+PENDHOSP  DIM       3
+PENDSYST  DIM       2
+.
+SAVKEY30  DIM       30
+.
+. *****************************************************************************
+. * RECAL000 : Mainline code for this procedure                               *
+. *****************************************************************************
+.
+RECAL000  CALL      NEWBD000                 * get th enew board code
+          BRANCH    EXIT,RECAL999            * no change in board
+.
+          CALL      UPDMI000                 * update admission file
+          CALL      UPTRN000                 * update transfer file
+          BRANCH    CHRGFLAG,RECAL500        * patient is chargable
+.
+          CALL      DELIP000                 * delete invoice pending record
+          GOTO      RECAL999
+.
+RECAL500  CALL      ADDIP000                 * make sure is on invoice pending
+.
+RECAL999  GOTO      ENDRECAL
+.
+. *****************************************************************************
+. * NEWBD000 : Find the new board code                                        *
+. *****************************************************************************
+.
+NEWBD000  OPEN      PATCT1C1,"patct1cf"
+          MOVE      PPOST,KEY8
+          CALL      RDCATC1
+          CLOSE     PATCT1C1
+          BRANCH    OVRCD,NEWBD900
+.
+          PACK      NEWBRD,CTCLGA,SP6
+          MATCH     NEWBRD,AFUNDH
+          GOTO      NEWBD900 IF EQUAL
+.
+          MOVE      ZERO,EXIT
+          GOTO      NEWBD999
+.
+NEWBD900  MOVE      ONE,EXIT
+.
+NEWBD999  RETURN
+.
+. *****************************************************************************
+. * UPDMI000 : Update the admission file with the new board code              *
+. *****************************************************************************
+.
+UPDMI000  MOVE      NEWBRD,AFUNDH            * health fund = board
+UPDMI999  RETURN                             * main program will do update
+.
+.**************************************************************************
+.* UPTRN000: Update the transfer file with a new set of rates.            *
+.*           Ignore all records before ALACDATE (the last accom. date) as *
+.*           they have already been invoiced, but allow for the inserting *
+.*           of a new record on that date to cater for a new rate.        *
+.*                                                                        *
+.* RETURNS   : CHRGFLAG = 0 if the all the new rates are zero             *
+.*                        1 if there is a non-zero rate posted            *
+.**************************************************************************
+.
+UPTRN000  MOVE      ZERO,CHRGFLAG          * Assume nothing is being charged
+          MOVE      ONE,NOCHANGE           * Assume we don't need a new record
+          OPEN      PATTRAN2,"pattranf"
+.
+          PACK      KEY30,AADMNO,SP30
+          CALL      RDSTRAN2
+UPTRN100  CALL      RDKTRAN2
+          BRANCH    OVRCD,UPTRN800         * Finished processing patient
+.
+          COMPARE   TADMN,AADMNO
+          GOTO      UPTRN800 IF NOT EQUAL  * Finished processing patient
+.
+.         Is this record outside any invoice period ?
+.
+          MATCH     ALACDTE,TDATE
+          GOTO      UPTRN200 IF LESS
+.
+.         We have an record outside the invoice period. Check if we have to
+.         post a record to allow for a change in rate at the end of the last
+.         invoice. We do this by check if a rate change is required, and if
+.         so and there is not a record with the same date as ALACDTE, we must
+.         write one with ALACDTE as the date.
+.
+          BRANCH    NOCHANGE,UPTRN300      * No new record needed
+.
+          MATCH     ALACDTE,TDATE
+          GOTO      UPTRN300 IF EQUAL      * This record will get the new rate
+.
+.         Write a new record to set up the change of rate on the first day
+.         of the next invoice
+.
+          PACK      SAVKEY30,TADMN,TDATE,TTIME,TWARD,TBED
+.
+          MOVE      ALACDTE,TDATE          * Write record on last accom. date
+          MOVE      "01:00:00",TTIME       * Dummy time value
+          MOVE      STWARD,TWARD           * Restore old ward
+          MOVE      STBED,TBED             * Restore old bed
+.
+          MOVE      ZERO,TDISC             * Set up discount amount
+          MOVE      ZERO,TALLW             * Set up allowance amount
+          MOVE      ANSC,TMOVE             * Write a change record
+          MOVE      STATYPE,TATYPE         * Restore old admission type
+          MOVE      STADOCT,TADOCT         * Restore old attending doctor
+          MOVE      STDEPT,TDEPT           * Restore old department
+          MOVE      STEPNO,PTTREPNO        * restore episode number
+          MOVE      STRBTYP,TRBTYP         * Restore old bed type
+          MOVE      STRBEND,TRBEND         * Restore old ending bed day range
+          MOVE      STCHSTAT,TCHSTAT       * Restore old chargable status
+          MOVE      PASSCODE,PTTROPER      * operator Id
+.
+.         We have a record to be updated. Find the new rate
+.
+          CALL      NEWR0000               * Get the new rates
+          MOVE      SP3,PTTRLTYP            * clear type of leave value
+.
+          MOVE      SP70,PTTRAUAT
+          MOVE      SP70,PTTRCUID
+          MOVE      SP70,PTTRLTSC
+          MOVE      ACLAIM,PTTRCLTY
+.
+          PACK      KEY30,TADMN,TDATE,TTIME,TWARD,TBED
+          PACK      PTTRCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTTRCDAT
+          CLOCK     TIME,PTTRCTIM
+          MOVE      WBSEUID,PTTRUCID
+          UNPACK    SP70,TRCDATE,TRCTIME,PTTRUUID
+.
+          CALL      WRTRAN2                * Write this new record
+.
+          MOVE      ONE,NOCHANGE           * Set flag to say no new rec needed
+.
+.         We have posted the new record. Now update the record we had just
+.         read in before posting the new record.
+.
+          MOVE      SAVKEY30,KEY30
+          CALL      RDTRAN2                * Re-read last record
+          GOTO      UPTRN300               * Continue processing
+.
+.         We have a record that has already been invoice. Don't update. Just
+.         save the details and check if anything needs to be changed.
+.
+UPTRN200  MOVE      TWARD,STWARD           * Save old ward
+          MOVE      TBED,STBED             * Save old bed
+          MOVE      TATYPE,STATYPE         * Save old admission type
+          MOVE      TADOCT,STADOCT         * Save old attending doctor
+          MOVE      TDEPT,STDEPT           * Save old department
+          MOVE      PTTREPNO,STEPNO        * save episode number
+          MOVE      TRBTYP,STRBTYP         * Save old bed type
+          MOVE      TRBEND,STRBEND         * Save old ending bed day range
+.
+          MOVE      TRATEF,STRATEF
+          MOVE      TEXTRA,STEXTRA
+          MOVE      TRATEG,STRATEG
+          MOVE      TRATEH,STRATEH
+.
+          CALL      NEWR0000               * Work out the new rate
+.
+          COMPARE   TRATEF,STRATEF         * Basic rate changed ?
+          GOTO      UPTRN210 IF NOT EQUAL  * Yes. Set flag accordingly
+.
+          COMPARE   TRATEH,STRATEH         * Rebate rate changed ?
+          GOTO      UPTRN210 IF NOT EQUAL  * Yes. Set flag accordingly
+.
+          COMPARE   TRATEG,STRATEG         * Government rate changed ?
+          GOTO      UPTRN210 IF NOT EQUAL  * Yes. Set flag accordingly
+.
+          COMPARE   TEXTRA,STEXTRA         * Extra rate changed ?
+          GOTO      UPTRN210 IF NOT EQUAL  * Yes. Set flag accordingly
+.
+          MOVE      ONE,NOCHANGE           * No new record needed
+          GOTO      UPTRN100               * Get the next record
+.
+.         The rate should have changed. Remember this so the rate can be
+.         changed at the end of the invoiced period
+.
+UPTRN210  MOVE      ZERO,NOCHANGE          * A new rate record is needed
+          GOTO      UPTRN100               * Get the next record
+.
+.         Update the current record with a new rate
+.
+UPTRN300  CALL      NEWR0000               * Calculate the new rate
+.
+          PACK      TRCDATE,CCC,CYY,CMM,CDD
+          REP       " 0",TRCDATE
+          CLOCK     TIME,TRCTIME
+          MOVE      WBSEUID,PTTRUUID
+.
+          CALL      UPTRAN2                * Update with the new rate
+          MOVE      ONE,NOCHANGE           * Don't need to post a new record
+          GOTO      UPTRN100               * Get the next record
+.
+.         Finished looping over transfer file. Check if we have to
+.         post a record to allow for a change in rate at the end of the last
+.         invoice. We do this by check if a rate change is required, and if
+.         so write one with ALACDTE as the date.
+.
+UPTRN800  BRANCH    NOCHANGE,UPTRN999      * No new record needed
+.
+          COMPARE   TWO,ASTAT              * Is the patient currently admitted?
+          GOTO      UPTRN999 IF NOT EQUAL  * No. Don't need to write a new rec
+.
+.         Write a new record to set up the change of rate on the first day
+.         of the next invoice
+.
+          MOVE      PVIBILL,TADMN          * Set up admission number
+          MOVE      ALACDTE,TDATE          * Write record on last accom. date
+          MOVE      "01:00:00",TTIME       * Dummy time value
+          MOVE      STWARD,TWARD           * Restore old ward
+          MOVE      STBED,TBED             * Restore old bed
+.
+          MOVE      PVIURNO,TURNO          * Set up U/R number
+          MOVE      ZERO,TDISC             * Set up discount amount
+          MOVE      ZERO,TALLW             * Set up allowance amount
+          MOVE      ANSC,TMOVE             * Write a change record
+          MOVE      STATYPE,TATYPE         * Restore old admission type
+          MOVE      STADOCT,TADOCT         * Restore old attending doctor
+          MOVE      STDEPT,TDEPT           * Restore old department
+          MOVE      STEPNO,PTTREPNO        * Restore episode number
+          MOVE      STRBTYP,TRBTYP         * Restore old bed type
+          MOVE      STRBEND,TRBEND         * Restore old ending bed day range
+          MOVE      STCHSTAT,TCHSTAT       * Restore old chargable status
+          MOVE      PASSCODE,PTTROPER      * operator Id
+.
+.         We have a record to be updated. Find the new rate
+.
+          CALL      NEWR0000               * Get the new rates
+          MOVE      SP3,PTTRLTYP            * clear type of leave value
+.
+          MOVE      SP70,PTTRAUAT
+          MOVE      SP70,PTTRCUID
+          MOVE      SP70,PTTRLTSC
+          MOVE      ACLAIM,PTTRCLTY
+.
+          PACK      KEY30,TADMN,TDATE,TTIME,TWARD,TBED
+          PACK      PTTRCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTTRCDAT
+          CLOCK     TIME,PTTRCTIM
+          MOVE      WBSEUID,PTTRUCID
+          UNPACK    SP70,TRCDATE,TRCTIME,PTTRUUID
+.
+          CALL      WRTRAN2                * Write this new record
+.
+UPTRN999  RETURN
+.
+.**************************************************************************
+.*                               NEWR0000                                 *
+.*                      Calculate the rate for a transfer record          *
+.**************************************************************************
+.
+NEWR0000  PACK      NEWTDATE,TDATE
+          MOVE      TWARD,NEWTWARD
+          MOVE      TATYPE,NEWTATYP
+          MOVE      TRBTYP,NEWTBTYP
+          MOVE      TCHSTAT,NEWTCHST
+          MOVE      TDEPT,NEWTDEPT
+          PROC      PATTRRAT                 * calculate new rate
+          BRANCH    EXIT,NEWR8000            * couldn't find rate
+.
+          MOVE      NEWTPPOR,TRATEF
+          MOVE      NEWTRPOR,TRATEH
+          MOVE      ZERO,TRATEG
+          MOVE      NEWTXTRA,TEXTRA
+          MOVE      NEWTBEND,TRBEND
+.
+.         Check if we have a zero rate
+.
+NEWR8000  COMPARE   ZERO,TRATEF
+          GOTO      NEWR8500 IF NOT EQUAL
+.
+          COMPARE   ZERO,TEXTRA
+          GOTO      NEWR8500 IF NOT EQUAL
+.
+          GOTO      NEWR9999
+.
+.         We have a non-zero rate
+.
+NEWR8500  MOVE      ONE,CHRGFLAG
+.
+NEWR9999  RETURN
+.
+. *****************************************************************************
+. * DELIP000 : Delete a record from the invoice pending file                  *
+. *****************************************************************************
+.
+DELIP000  IF        ASTAT = 3
+            MOVE      "00000000",TREF
+            PACK      KEY22,AADMNO,TREF,SP20
+            OPEN      PATDTRA1,"patdtraf"
+            CALL      RDSDTRN1
+            CALL      RDKDTRN1
+            CLOSE     PATDTRA1
+            BRANCH    OVRCD,DELIP100
+.
+            COMPARE   AADMNO,TADMNO
+            GOTO      DELIP100 IF NOT EQUAL
+.
+            MATCH     "00000000",TREF
+            GOTO      DELIP999 IF EQUAL      * items pending
+.
+DELIP100    IF        PTCNIPEN = 0 
+              MOVE      AADMNO,KEY8
+              OPEN      PATIPEN1,"patipenf"
+              CALL      DEIPEN1
+              CLOSE     PATIPEN1
+            ENDIF
+          ENDIF
+.
+DELIP999  RETURN
+.
+. *****************************************************************************
+. * ADDIP000 : Add a record to the invoice pending file if needed             *
+. *****************************************************************************
+.
+ADDIP000  COMPARE   ZERO,PTCNIPEN
+          GOTO      ADDIP999 IF NOT EQUAL
+. 
+          OPEN      PATCFAA1,"patcfaaf"
+          OPEN      PATFX1A1,"patfx1af"
+          OPEN      PATIPEN1,"patipenf"
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS
+.
+          IF        CHOSTYP=1 & CFEETYP=0
+            MOVE      FIVE,PTIPRSTA
+            MOVE      NEWTDATE,PENDSDAT             * as at date
+            CALL      CINVP000                      * Check for tobe invoiced
+            GOTO      ADDIP900
+          ENDIF
+.
+          MOVE      AADMNO,IPADMNO
+          MOVE      THREE,IPSYSTM
+          MOVE      SP6,IPSITE
+.
+          MOVE      SP70,PTIPRHLD
+          MOVE      SP70,PTIPRDES
+.
+          MOVE      SP70,PENDHOSP
+          IF        IBCNMHOS=1
+            PACK      KEY8,IPADMNO,SP70
+            CALL      RDPMVX11
+            IF        OVRCD=0
+              MOVE      PMVXMHOS,PENDHOSP          * Hospital id
+            ENDIF
+          ENDIF
+          MOVE      " 3",PENDSYST                  * Inpatient
+.
+          PACK      KEY8,IPADMNO,SP70
+          CALL      RDMISS1
+          IF        OVRCD<>1
+            MOVE      NEWTDATE,PENDSDAT             * as at date
+            MOVE      ADATE,PENDADAT                * admission date
+            MOVE      SP70,PENDDDAT
+            IF        ASTAT=3
+              OPEN      PATDSCH1,"patdschf"
+              CALL      RDDSCH1
+              IF        OVRCD=0
+                MOVE      DDATE,PENDDDAT            * discharged date
+              ENDIF
+            ENDIF
+            MOVE      AFUNDH,PENDFUND               * IP
+            MOVE      ACLAIM,PENDCLAM               
+            CALL      IPRH0000
+          ENDIF
+.
+          MOVE      FIVE,PTIPRSTA
+          MOVE      SP70,PTIPSVAR
+.
+          PACK      KEY8,IPADMNO,SP70
+          CALL      RAIPEN1
+          IF        OVRCD = 1
+            CALL      WRIPEN1
+          ELSE
+            CALL      UPIPEN1
+          ENDIF
+.
+ADDIP900  CLOSE     PATCFAA1
+          CLOSE     PATFX1A1
+          CLOSE     PATIPEN1
+          CLOSE     PATMI1A1
+          CLOSE     PMSVX1A1
+.
+ADDIP999  RETURN
+.
+          INC       PATIPERH
+.
+          INC       PATCFAIO/INC
+          INC       PATCT1IO/INC
+          INC       PATDTRIO/INC
+          INC       PATFX1IO/INC
+          INC       PATFHIIO/INC
+          INC       PATIPEIO/INC
+          INC       PATMI1IO/INC
+          INC       PATTRNIO/INC
+          INC       IBAOVRIO/INC
+.
+ENDRECAL  ENDPROC

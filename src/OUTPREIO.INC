@@ -1,0 +1,70 @@
+.
+.         INCLUDE NAME : OUTPREIO.INC
+.
+.         FILE  I/O REQUESTS FOR OUT-PATIENTS PRE-ATTENDANCE BOOKINGS
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE THEAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+.KEY8    DIM       8
+.
+.       FIRST SESSIONS   I/O
+.
+RDAPREA1  MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      OUTPREA1,KEY8;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDSPREA1  RESET     KEY8
+          READ      OUTPREA1,KEY8;;
+          RETURN  
+.
+RDPREA1   MOVE      ZERO,OVRCD
+          RESET     KEY8
+          READ      OUTPREA1,KEY8;DOPROUTN,OPRSITE,OPRCLIN,OPRDATE,OPRSTRT:
+                                  DOPRSLOT,OPRTIME,OPRCTYP,OPRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOPROUTN,OPROUTN
+          MOVE      DOPRSLOT,OPRSLOT
+          RETURN  
+.
+RDKPREA1  MOVE      ZERO,OVRCD
+          READKS    OUTPREA1;DOPROUTN,OPRSITE,OPRCLIN,OPRDATE,OPRSTRT:
+                                  DOPRSLOT,OPRTIME,OPRCTYP,OPRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOPROUTN,OPROUTN
+          MOVE      DOPRSLOT,OPRSLOT
+          RETURN  
+.
+RDPPREA1  MOVE      ZERO,OVRCD
+          READKP    OUTPREA1;DOPROUTN,OPRSITE,OPRCLIN,OPRDATE,OPRSTRT:
+                                  DOPRSLOT,OPRTIME,OPRCTYP,OPRSPAR
+          GOTO      OVERCOND IF OVER
+          MOVE      DOPROUTN,OPROUTN
+          MOVE      DOPRSLOT,OPRSLOT
+          RETURN  
+.
+WRPREA1   RESET     KEY8
+          MOVE      OPRSLOT,DOPRSLOT
+          WRITE     OUTPREA1,KEY8;KEY8:
+                                  OPRSITE,OPRCLIN,OPRDATE,OPRSTRT:
+                                  DOPRSLOT,OPRTIME,OPRCTYP,OPRSPAR
+          RETURN  
+.
+UPPREA1   MOVE      OPROUTN,DOPROUTN
+          MOVE      OPRSLOT,DOPRSLOT
+          UPDATE    OUTPREA1;DOPROUTN,OPRSITE,OPRCLIN,OPRDATE,OPRSTRT:
+                                  DOPRSLOT,OPRTIME,OPRCTYP,OPRSPAR
+          RETURN
+.
+DEPREA1   RESET     KEY8
+          DELETE    OUTPREA1,KEY8
+          RETURN

@@ -1,0 +1,105 @@
+.
+.         INC       OUTMABIO.INC
+.
+.         FILE  I/O REQUESTS FOR SECOND CLINIC MASTER FILE
+.
+.OVRCD    FORM          1             0 = NOT OVER
+.                                     1 = OVER
+.KEY31    DIM           31            KEY FOR OUTMASB1
+.
+.         NOTE:-
+.                  RDAAAX  IS THE READ CALL ON FILE PATAAAX
+.                  RDKAAAX  IS THE READKS CALL
+.                  WRAAAX  IS THE WRITE CALL
+.                  UPAAAX  IS THE UPDATE CALL
+.                  DEAAAX  IS THE DELETE CALL
+.
+.
+RDAMASB1 MOVE      ZERO,OVRCD
+         RESET     KEY31
+         READ      OUTMASB1,KEY31;ANS
+         GOTO      OVERCOND IF OVER
+         RETURN
+.
+RDMASB1  MOVE      ZERO,OVRCD
+         RESET     KEY31
+         READ      OUTMASB1,KEY31;OMBSITE,OMBCLIN,DOMBDAY,OMBSTRT:
+                                  DOMBSLOT,OMBVTYP,OMBTIME,OMBEXSL:
+                                  DOTMBRES,OTMBSHNO,OTMBSDAT,OMBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOMBDAY,OMBDAY
+         MOVE      DOMBSLOT,OMBSLOT
+         MOVE      ZERO,OTMBRESV
+         MOVE      DOTMBRES,OTMBRESV
+         MOVE      OMBSITE,SOMBSITE
+         MOVE      OMBCLIN,SOMBCLIN
+         MOVE      OMBDAY,SOMBDAY
+         MOVE      OMBSTRT,SOMBSTRT
+         MOVE      OMBSLOT,SOMBSLOT
+         MOVE      OTMBSHNO,SOMBSHNO
+         MOVE      OTMBSDAT,SOMBSDAT
+         RETURN  
+.
+RDKMASB1 MOVE      ZERO,OVRCD
+         READKS    OUTMASB1;OMBSITE,OMBCLIN,DOMBDAY,OMBSTRT:
+                            DOMBSLOT,OMBVTYP,OMBTIME,OMBEXSL:
+                            DOTMBRES,OTMBSHNO,OTMBSDAT,OMBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOMBDAY,OMBDAY
+         MOVE      DOMBSLOT,OMBSLOT
+         MOVE      ZERO,OTMBRESV
+         MOVE      DOTMBRES,OTMBRESV
+         MOVE      OMBSITE,SOMBSITE
+         MOVE      OMBCLIN,SOMBCLIN
+         MOVE      OMBDAY,SOMBDAY
+         MOVE      OMBSTRT,SOMBSTRT
+         MOVE      OMBSLOT,SOMBSLOT
+         MOVE      OTMBSHNO,SOMBSHNO
+         MOVE      OTMBSDAT,SOMBSDAT
+         RETURN  
+.
+RDPMASB1 MOVE      ZERO,OVRCD
+         READKP    OUTMASB1;OMBSITE,OMBCLIN,DOMBDAY,OMBSTRT:
+                            DOMBSLOT,OMBVTYP,OMBTIME,OMBEXSL:
+                            DOTMBRES,OTMBSHNO,OTMBSDAT,OMBSPARE
+         GOTO      OVERCOND IF OVER
+         MOVE      DOMBDAY,OMBDAY
+         MOVE      DOMBSLOT,OMBSLOT
+         MOVE      ZERO,OTMBRESV
+         MOVE      DOTMBRES,OTMBRESV
+         MOVE      OMBSITE,SOMBSITE
+         MOVE      OMBCLIN,SOMBCLIN
+         MOVE      OMBDAY,SOMBDAY
+         MOVE      OMBSTRT,SOMBSTRT
+         MOVE      OMBSLOT,SOMBSLOT
+         MOVE      OTMBSHNO,SOMBSHNO
+         MOVE      OTMBSDAT,SOMBSDAT
+         RETURN  
+.
+RDSMASB1 RESET     KEY31
+         READ      OUTMASB1,KEY31;;
+         RETURN  
+.
+WRMASB1  RESET     KEY31
+         MOVE      OMBDAY,DOMBDAY
+         MOVE      OMBSLOT,DOMBSLOT
+         MOVE      OTMBRESV,DOTMBRES
+         WRITE     OUTMASB1,KEY31;OMBSITE,OMBCLIN,DOMBDAY,OMBSTRT:
+                                  DOMBSLOT,OMBVTYP,OMBTIME,OMBEXSL:
+                                  DOTMBRES,OTMBSHNO,OTMBSDAT,OMBSPARE
+         RETURN  
+.
+UPMASB1
+         MOVE      OMBDAY,DOMBDAY
+         MOVE      OMBSLOT,DOMBSLOT
+         MOVE      OTMBRESV,DOTMBRES
+         UPDATE    OUTMASB1;OMBSITE,OMBCLIN,DOMBDAY,OMBSTRT:
+                            DOMBSLOT,OMBVTYP,OMBTIME,OMBEXSL:
+                            DOTMBRES,OTMBSHNO,OTMBSDAT,OMBSPARE
+         RETURN  
+.
+DEMASB1
+         RESET     KEY31
+         DELETE    OUTMASB1,KEY31
+         RETURN  
+.

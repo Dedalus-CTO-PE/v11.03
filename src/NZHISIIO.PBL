@@ -1,0 +1,1622 @@
+.*****************************************************************************
+.*  Include  :  NZHISIIO.PBL                                                 *
+.*                                                                           *
+.*  Function :  This include contains the routines required to access        *
+.*              and update the NZ National Database.                         *
+.*                                                                           *
+.*  Includes :  NZHISIFD.INC - data variables used by this include           *
+.*                                                                           *
+.*  Routines :  CONNECT  -  Start connection                                 *
+.*              DISCNNCT -  Terminate connection                             *
+.*              CHKHCU00 -  Get Nat. HCU Details Verify they Match Local Sys.*
+.*              KURNHI00 -  Lookup U/R Entered on National System            *
+.*              GETHCU   -  Get details for NHI No.                          *
+.*              SRHHCU   -  Start a surname search                           *
+.*              NXTHCU   -  Continue surname search                          *
+.*              ENDSRH   -  Terminate surname search                         *
+.*              GETAKA   -  Get Aliases for NHI No.                          *
+.*              GETHCE   -  Get Visits for NHI No.                           *
+.*              GETDNR   -  Get Donor and contact detail                     *
+.*              GETMWS   -  Get Medical Warnings                             *
+.*                                                                           *
+.*  Mod's    :                                                               *
+.*        V9.03.01  24/10/2003  Jill Habasque SRF 43783                      *
+.*                  Changed reads into two, errors then fields               *
+.*        V9.02.00  03/09/2003  Jill Habasque                                *
+.*                  Added length and timeout for fifo reads                  *
+.*        V5.07.00  19/10/1998  Davin                                        *
+.*                  507 changes                                              *
+.*        V5.05.01  08/01/1998  Steve Armstrong   SRF 643903                 *
+.*                  Mods to use NZFORM3B instead if NZFORM2A                 *
+.*****************************************************************************
+.*        V5.02.02  31/05/1995    Justin Coates  SRF 135427                  *
+.*                  if cant connect to nat, allow processing to continue     *
+.*                   (return exit = 0 from kurnha00)                         *
+.*        V5.02.01  21/03/1995  Graeme Williams   SRF 640150                 *
+.*                  Restore CNAME after fork to IBANHI01 if CNAME was changed*
+.*                                                                           *
+.*        V5.03.00  07/07/1995  B.G.Ackland       SRF 640445                 *
+.*                  Read nhimasaf after fork to IBANHI01                     *
+.*        V5.03.01  01/08/1995  ROD               SRF 610917                 *
+.*                  Fixed I*C on 2nd index nhimasaf                          *
+.*                                                                           *
+.*****************************************************************************
+.************************************************************************
+.*  CONNECT  : Start Connection between IBA & NZ National database      *
+.************************************************************************
+CONNECT   OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,TWENTY1;*139,PTCNNHID,*191,PTCNNHIF
+          READ      CONTROLF,HUND09;*177,PTCNNHTM
+.
+. open the file we want to read from
+.
+          PACK      KEY12,NZIBRFIL,PORT,DOTPIP     * build reply FIFO
+          REP       " 0",KEY12
+.
+          STRIP     PTCNNHID
+          PACK      FULLPATH,PTCNNHID,KEY12
+          PREP      NZRFIFA1,FULLPATH              * create reply FIFO
+.
+. now open file we want to write to
+.
+          STRIP     PTCNNHID
+          STRIP     PTCNNHIF
+          PACK      FULLPATH,PTCNNHID,PTCNNHIF,DOTPIP
+          CLOSE     NZWFIFA1
+          MOVE      ZERO,OVRCD                    * valid open
+          TRAP      OVERCOND IF IO
+          OPEN      NZWFIFA1,FULLPATH
+          TRAPCLR   IO
+.
+          IF        OVRCD=1
+            GETVAR    DLINE24A,DATTR24A,1,24
+            DISPLAY   *P1:24,*EL,*B,"Can't open link file to National system. ";
+            CALL      HITENTER
+            PUTVAR    DLINE24A,DATTR24A,1,24
+            MOVE      ONE,OVRCD
+          ENDIF
+.
+CONCT999  RETURN
+.*************************************************************************
+.*  DISCNNCT  :  Terminate Connection between IBA & NZ National database *
+.*************************************************************************
+DISCNNCT  CLOSE     NZWFIFA1                      * close write FIFO
+          CLOSE     NZRFIFA1,DELETE               * close & delete reply FIFO
+          RETURN
+.--------------------------------------------------------------------------
+. CHKHCU00 - Read Patient & Verify Patient Matches on Local System.
+.          - Requires Local Details to have been read from NHIMASFD.
+.          0 : NZIBNMPI - NMPI No. 
+.          EXIT = 0 Read OK Continue
+.          EXIT = 1 Can't Read 
+.          EXIT = 2 Abort
+.--------------------------------------------------------------------------
+CHKHCU00 MOVE      NHMANMPI,NZIBNMPI
+         CALL      GETHCU               * Read Patient Details 
+         BRANCH    OVRCD,CHKHCU80       * Ensure Correct Patient
+.
+         MOVE      ZERO,EXIT            * Patient Verified Ok
+.
+         MATCH     NZIBSURN,NHMASURN    * Verify Patient has Correct Surname
+         GOTO      CHKHCU85 IF NOT EQUAL
+         MATCH     NZIBGIV1,NHMAGIV1    * Verify Patient has Correct 1st Name
+         GOTO      CHKHCU99 IF EQUAL
+         MATCH     NZIBSEX,NHMASEX      * Verify Patient Sex
+         GOTO      CHKHCU90 IF NOT EQUAL
+         MATCH     NZIBDOB,NHMADOB      * Verify Patient Date of Birth
+         GOTO      CHKHCU95 IF NOT EQUAL
+         GOTO      CHKHCU99 
+.
+CHKHCU80 CALL      NZHISERR
+         MOVE      ONE,EXIT
+         GOTO      CHKHCU99
+.
+CHKHCU85 MOVE      "Surname Does Not Match ",KEY40
+         CALL      NHIERR00
+         GOTO      CHKHCU99
+.
+CHKHCU90 DISPLAY   *P1:24,*EL,*B,"WARNING: ":
+                   "1st Given Name & Gender Do Not Match",KEY40
+         CALL      NHIERR00
+         GOTO      CHKHCU99
+.
+CHKHCU95 MOVE      "1st Given Name & DOB Do Not Match.",KEY40
+         CALL      NHIERR00
+         GOTO      CHKHCU99
+.
+CHKHCU99 RETURN
+.------------------------------------------------------------
+. Display Critical Warning - Called by CHKHCU00
+.------------------------------------------------------------
+NHIERR00  MOVE      ZERO,HLEF
+          CALL      GETSCR00
+          MOVE      ZERO,EXIT
+          DISPLAY   *P1:10,*EF
+          BOX       16,1,16,80,24
+          DISPLAY   *P80:22,*G34,*P1:22,*G33;
+          HLINE     *G37,22,2,79
+          UNPACK    NZIBDOB,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,KEY10
+          UNPACK    NHMADOB,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          DISPLAY   *P3:23,*V2LON,"C",*HOFF,"ontinue, ":
+                           *V2LON,"A",*HOFF,"bort ? ":
+                    *P23:16,*HON," Critical Data Mismatch with NHI/MWS ":
+                    *HOFF,*P20:17,*V2LON,*ULON,"NZHIS NHI/MWS Details     ":
+                                       *P51:17,"Local Details             ":
+                    *HOFF,*P3:18,"Surname        : ":
+                          *P3:19,"1st Given Name :":
+                          *P3:20,"Gender         :":
+                          *P3:21,"Date of Birth  :":
+                    *P20:18,NZIBSURN,*P51:18,NHMASURN:
+                    *P20:19,NZIBGIV1,*P51:19,NHMAGIV1:
+                    *P20:20,NZIBSEX,*P51:20,NHMASEX:
+                    *P20:21,KEY10,*P51:21,CPCDATE:
+                    *P38:23,*HON,KEY40
+.
+NHIERR10  KEYIN     *P21:23,*V2LON,ANS
+          REP       UPPLOW,ANS
+          MOVE      TWO,EXIT
+          MATCH     ANSA,ANS
+          GOTO      NHIERR99 IF EQUAL
+          MOVE      ZERO,EXIT
+          MATCH     ANSC,ANS
+          GOTO      NHIERR10 IF NOT EQUAL
+.
+NHIERR99  CALL      PUTSCR00
+          RETURN
+.----------------------------------------------------------------------
+.KURNHI00  Lookup U/R on National Database   - Called by KURN
+. Returns  Exit = 0        Valid UR Number
+.          Exit = 1        Abort Use of UR - re-enter
+.          Exit = 2        U/R Does not exist (sets Ovrcd = 0)
+.----------------------------------------------------------------------
+KURNHI00  OPEN      NHIMASA1,"nhimasaf"
+          OPEN      NHIMASA2,"nhimasaf"
+          MOVE      ZERO,EXIT
+          MATCH     ZEROUR,PURNO
+          GOTO      KURNHI90 IF EQUAL
+.
+          MOVE      PURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,KURNHI40
+.
+.         Is this an associated U/R number ?
+.
+          IF        PSTAT=1  
+            CALL      ASSURN00
+            BRANCH    EXIT,KURNHI99  * abort use of this UR - re-enter
+          ENDIF
+.
+          CALL      KURNHA00         * Valid UR Lookup National Details
+          MOVE      ZERO,OVRCD       * UR exists
+          GOTO      KURNHI99
+.
+. Not a local UR Number
+.----------------------
+KURNHI40  IF        CREGOPT=1
+            CALL      KURNHB00      * Invalid UR Lookup National Details
+            MOVE      ZERO,OVRCD    * UR exists
+          ELSE
+            MOVE      ONE,OVRCD     * UR does not exist
+            MOVE      TWO,EXIT      * no UR
+          ENDIF
+          GOTO      KURNHI99
+.
+. Have a Zero UR
+.---------------
+KURNHI90  IF        CREGOPT=1
+            CALL      NHIREG00      * register
+          ELSE
+            MOVE      ONE,EXIT      * abort use of this UR - re-enter
+          ENDIF
+.
+KURNHI99  RETURN
+.------------------------------------------------------------
+. Register Patient on NHI ? - 0 U/R Entered
+.------------------------------------------------------------
+NHIREG00  MATCH     "IBANHI01",PRGID
+          IF        @EQUAL
+            MOVE      TWO,EXIT
+            MOVE      TWO,NZHISNEW
+            GOTO      NHIREG99
+          ENDIF
+          GETVAR    DLINE24A,DATTR24A,1,24
+          DISPLAY   *P1:24,*EL,*B,"Patients Must be Registered through ":
+                    "IBANHI01. Execute Now (",*V2LON,"Y",*HOFF,"/":
+                    *V2LON,"N",*HOFF,")? ";
+          MOVE      ANSN,ANS
+          KEYIN     *P66:24,*V2LON,*RV,ANS:
+                    *P66:24,*DV,ANS
+          PUTVAR    DLINE24A,DATTR24A,1,24
+          REP       UPPLOW,ANS
+          MOVE      ONE,EXIT
+          MATCH     ANSN,ANS
+          GOTO      NHIREG99 IF EQUAL
+          MATCH     ANSY,ANS
+          GOTO      NHIREG00 IF NOT EQUAL
+          MOVE      ONE,NZIBREGO
+          PACK      ERROR,ZERO,TWO,ZEROUR   * for NZHIS (IBANHI01.PBL)
+          CALL      CALNHI00                * Execute NHI Program
+          MOVE      ZERO,EXIT
+          IF        OVRCD=1
+            MOVE      TWO,EXIT
+          ENDIF
+.
+NHIREG99  RETURN
+.----------------------------------------------------------------------
+. Valid UR Entered Check NHI Files
+.  EXIT 0 = All OK
+.       1 = Can't Read National System - Link Down
+.       2 = Abort
+.----------------------------------------------------------------------
+KURNHA00  OPEN      NHIMASA2,"nhimasaf"
+          MOVE      PURNO,KEY8
+          CALL      RDNHMAS2
+          BRANCH    OVRCD,KURNHA80       * ON Masterfile But Not on local NHI
+.
+          MATCH     "T-",NHMANMPI      * Check for Temporary Number
+          GOTO      KURNHA90 IF EQUAL    * New Temp Number Prefix
+          MATCH     "$",NHMANMPI         * Check for Temporary Number
+          GOTO      KURNHA90 IF EQUAL    * Old Temp Number Prefix
+.
+          MATCH     "IBANHI01",PRGID     * If we are in IBANHI01 then
+          GOTO      KURNHA50 IF EQUAL  
+.
+          MOVE      NHMAURNO,CPPURNO
+          MOVE      NHMAURNO,PURNO
+          MOVE      NHMANMPI,KEY8
+          MOVE      NHMANMPI,NZIBNMPI
+          CALL      CONNECT
+          BRANCH    OVRCD,KURNHA90       * Can't Connect so Just Continue
+.
+          CALL      VALHCU00             * Check Patient Details
+          CALL      DISCNNCT 
+          GOTO      KURNHA99
+.
+KURNHA50  MOVE      NHMAURNO,CPPURNO
+          MOVE      NHMAURNO,PURNO
+          MOVE      NHMANMPI,KEY8
+          MOVE      NHMANMPI,NZIBNMPI
+          CALL      VALHCU00             * Check Patient Details
+          GOTO      KURNHA99
+.
+. UR Not of NHI File
+.--------------------
+KURNHA80  DISPLAY   *P1:24,*EL:
+                    "ERROR: NO NHI Master Record for U/R : ",KEY8," -";
+          CALL      HITENTER
+          MOVE      SP20,NZIBSURN
+          MOVE      SP20,NZIBGIV1
+          MOVE      SP20,NZIBGIV2
+          MOVE      SP20,NZIBGIV3
+          MOVE      SP20,NZIBPRNM
+          MOVE      SP20,NZIBADD1
+          MOVE      SP20,NZIBADD2
+          MOVE      SP20,NZIBSUBR
+          MOVE      SP20,NZIBCITY
+          MOVE      SP20,NZIBCTRY
+          MOVE      SP20,NZIBDOB
+          MOVE      SP20,NZIBDDTH
+          MOVE      SP20,NZIBDOMC
+          MOVE      SP20,NZIBRESI
+          MOVE      SP20,NZIBETHN
+          MOVE      SP20,NZIBETH2
+          MOVE      SP20,NZIBETH3
+          MOVE      SP20,NZIBSEX
+          MOVE      SP20,NZIBALNM
+          MOVE      SP20,NZIBMWDN
+          MOVE      SP20,NZIBMWST
+          MOVE      SP20,NZIBMERG
+          MOVE      SP20,NZIBALID
+          MOVE      TWO,EXIT
+          GOTO      KURNHA99
+.
+KURNHA90  MOVE      ZERO,EXIT
+          GOTO      KURNHA99
+.
+KURNHA95  MOVE      ONE,EXIT
+          GOTO      KURNHA99
+.
+KURNHA99  RETURN
+.-------------------------------------------------------
+. Not A local UR so Check for a National Number
+.-------------------------------------------------------
+KURNHB00  UNPACK    PURNO,KEY1,KEY7
+          CALL      RDNHMAS1
+          BRANCH    OVRCD,KURNHB80       * Not on local NHI Masterfile
+.
+          MOVE      NHMAURNO,CPPURNO
+          MOVE      NHMAURNO,KEY8
+          MOVE      ZERO,EXIT
+          CALL      RDMAST1
+          IF        OVRCD=1
+            DISPLAY   *P1:24,*EL,"ERROR Reading Masterfile for U/R : ",KEY8," -";
+            CALL      HITENTER
+            MOVE      TWO,EXIT
+            GOTO      KURNHB99
+          ENDIF
+.
+. Got Local Details Now Check National System
+.
+          MATCH     "IBANHI01",PRGID     * If we are in IBANHI01 then
+          GOTO      KURNHB50 IF EQUAL  
+.
+          MOVE      NHMAURNO,CPPURNO
+          MOVE      NHMAURNO,PURNO
+          MOVE      NHMANMPI,KEY8
+          MOVE      NHMANMPI,NZIBNMPI
+          CALL      CONNECT
+          BRANCH    OVRCD,KURNHB99
+.
+          CALL      VALHCU00             * Check Patient Details
+          CALL      DISCNNCT 
+          GOTO      KURNHB99
+.
+KURNHB50  MOVE      NHMAURNO,CPPURNO
+          MOVE      NHMAURNO,PURNO
+          MOVE      NHMANMPI,KEY8
+          MOVE      NHMANMPI,NZIBNMPI
+          CALL      VALHCU00             * Check Patient Details
+          GOTO      KURNHB99
+.
+. Not on Local NHI File So Check National
+.------------------------------------------
+KURNHB80  CALL      CHKNHI00
+.
+KURNHB99  RETURN
+.----------------------------------------------------------------------
+. Prompt to Check for HCU ID on National System
+.----------------------------------------------------------------------
+CHKNHI00  GETVAR    DLINE24A,DATTR24A,1,24
+          MOVE      ANSY,ANS
+          KEYIN     *P1:24,*EL,"Check National System for HCU ID (":
+                    *V2LON,"Y",*HOFF,"/":
+                    *V2LON,"N",*HOFF,") ? ",*V2LON,*RV,ANS
+          REP       UPPLOW,ANS
+          MOVE      TWO,EXIT
+          PUTVAR    DLINE24A,DATTR24A,1,24
+          MATCH     ANSN,ANS
+          GOTO      CHKNHI99 IF EQUAL
+          MATCH     ANSY,ANS
+          GOTO      CHKNHI00 IF NOT EQUAL
+.
+          UNPACK    PURNO,KEY1,KEY7
+          MOVE      KEY7,NZIBNMPI
+          CALL      KURHCU00           * Connect Perform GETHCU
+          BRANCH    EXIT,CHKNHI90,CHKNHI95
+.
+          PACK      ERROR,ZERO,THREE,NZIBNMPI
+          CALL      CALNHI00
+          MOVE      OVRCD,EXIT
+          GOTO      CHKNHI99
+.
+CHKNHI90  MOVE      ZERO,EXIT
+          GOTO      CHKNHI99
+.
+CHKNHI95  MOVE      ONE,EXIT
+.
+CHKNHI99  RETURN
+.-----------------------------------------------------------------
+. KURHCU - Perform Get HCU for KURN
+. ----------------------------------
+. Returns : Exit = 0 Found National Record and PRGID not IBANHI01
+.           Exit = 1 Found National Record and PRGID is IBANHI01
+.                    (NZHISNEW will be Set to 1)
+.           Exit = 2 Error Trying to Read National Record
+.           Valid HCU Read for NZIBNPMI 
+.-----------------------------------------------------------------
+KURHCU00  MATCH     "IBANHI01",PRGID
+          GOTO      KURHCU10 IF EQUAL
+.
+          CALL      CONNECT
+          BRANCH    OVRCD,KURHCU90
+          CALL      GETHCU
+          CALL      DISCNNCT 
+          BRANCH    OVRCD,KURHCU95      * OVRCD from GETHCU
+.
+          MOVE      ZERO,EXIT
+          GOTO      KURHCU99
+.
+. IBANHI01 No Connect, Disconnect or Fork. Just Set Indicator for New
+.-----------------------------------------------------------------------
+KURHCU10  CALL      GETHCU              * Read National Database
+          BRANCH    OVRCD,KURHCU95      * OVRCD from GETHCU
+          MOVE      ONE,EXIT            * In IBANHI01 & Got Record
+          MOVE      ONE,NZHISNEW        * New Patient from National System
+          GOTO      KURHCU99
+.
+KURHCU90  MOVE      TWO,EXIT
+          GOTO      KURHCU99
+.
+KURHCU95  CALL      NZHISERR
+          MOVE      TWO,EXIT
+          GOTO      KURHCU99
+.
+KURHCU99  RETURN 
+.---------------------------------------------
+. Display Standard Error Message
+.---------------------------------------------
+NZHISERR  GETVAR    DLINE23A,DATTR23A,1,23
+          GETVAR    DLINE24A,DATTR24A,1,24
+          MOVE      NZIBERRD,KEY40
+          STRIP     KEY40
+          DISPLAY   *P1:23,*B,*EL,NZIBERRD:
+                    *P1:24,*EL,"NHI/MWS Error No.: ",*HOFF,NZIBERRN:
+                    "  - ";
+          CALL      HITENTER
+          PUTVAR    DLINE23A,DATTR23A,1,23
+          PUTVAR    DLINE24A,DATTR24A,1,24
+          RETURN
+.
+.************************************************************************
+.*  GETHCU  :  Get the PMI details for a NHI Number                     *
+.*             Parameters : NZIBNMPI - NMPI No.                         *
+.************************************************************************
+GETHCU    MOVE      ZERO,NZHISWRN                 * Medical Warning Flag
+          MOVE      "3 ",NZIBACTN                 * action identifier
+          CALL      FIFHD000                      * set up header details
+.
+          MOVE     "38",WRLNGTH                  * FIFO record length (write)
+          WRITE    NZWFIFA1;NZIBSTX,NZIBACTN,NZIBUSER,NZIBVDU,NZIBRFIF,NZIBNMPI;
+.
+. now get the reply 
+.
+          MOVE      "86",RDLNGTH                * FIFO record length (reply)
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBAPPC,NZIBERRN,NZIBERRD;
+.
+          MATCH     "AA",NZIBAPPC               * valid read?
+          IF        !@EQUAL
+            MOVE      ZERO,NZHISWRN             * Read Failed
+            MOVE      ONE,OVRCD                 * error
+            GOTO      GTHCU999
+          ENDIF
+.
+          MOVE      "288",RDLNGTH                * FIFO record length (reply)
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBSURN,NZIBGIV1,NZIBGIV2:
+                           NZIBGIV3,NZIBPRNM:
+                           NZIBADD1,NZIBADD2,NZIBSUBR,NZIBCITY,NZIBCTRY:
+                           NZIBDOB,NZIBDDTH,NZIBDOMC,NZIBRESI,NZIBETHN:
+                           NZIBETH2,NZIBETH3,NZIBSEX,NZIBALNM,NZIBMWDN:
+                           NZIBMWST,NZIBMERG,NZIBALID,NZIBLAST;
+.
+          MOVE      ZERO,OVRCD                  * assume valid read
+          MOVE      ONE,NZHISWRN                * Read Ok & Warning Set
+          MATCH     "AA",NZIBAPPC               * valid read?
+          IF        !@EQUAL
+            MOVE      ZERO,NZHISWRN             * Read Failed
+            MOVE      ONE,OVRCD                 * error
+          ELSE
+            MATCH     SP1,NZIBMWST
+            IF        @EQUAL
+              MOVE      TWO,NZHISWRN            * Read Ok & No Warning
+            ENDIF
+          ENDIF
+.
+GTHCU999  RETURN
+.************************************************************************
+.*  GETHCE  :  Get list of visits on National database for an NHI Number*
+.************************************************************************
+GETHCE    MOVE      ZERO,OVRCD
+          MOVE      "11",NZIBACTN                 * action identifier
+          CALL      FIFHD000                      * set up header details
+.
+          MOVE      "62",WRLNGTH                  * FIFO record length (write)
+          WRITE     NZWFIFA1;NZIBSTX,NZIBACTN,NZIBUSER,NZIBVDU,NZIBRFIF:
+                             NZIBNMPI,NZIBCPTR,NZIBMXRP;
+.
+. now get the reply (firstly checking for an error)
+.
+          MOVE      "86",RDLNGTH
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBAPPC,NZIBERRN,NZIBERRD;
+.
+          MATCH     "AA",NZIBAPPC                 * valid read?
+          GOTO      GTHCE900 IF NOT EQUAL         * error
+.
+          MOVE      "28",RDLNGTH
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBMRGS,NZIBNMWF,NZIBNMWR:
+                                              NZIBCPTR;
+.
+          MATCH     "AA",NZIBAPPC                 * valid read?
+          GOTO      GTHCE900 IF NOT EQUAL         * error
+.
+          MOVE      ONE,NZIBCNT
+          MOVE      "106",RDLNGTH
+          SQUEEZE   NZIBNMWR
+          MOVE      NZIBNMWR,FORM2
+          WHILE     NZIBCNT <= FORM2
+            READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZARSTDT[NZIBCNT]:
+                               NZARENDT[NZIBCNT]:
+                               NZAREVND[NZIBCNT],NZARRPTF[NZIBCNT];
+            ADD       ONE,NZIBCNT
+          DO
+.
+          MOVE      ZERO,OVRCD                    * valid read
+          GOTO      GTHCE999
+.
+GTHCE900  MOVE      ONE,OVRCD                     * an error was encountered
+.
+GTHCE999  RETURN
+.*****************************************************************************
+.*  GETDNR  :  Get the Donor and Contact details for a patient from Nat. Sys *
+.*****************************************************************************
+GETDNR    MOVE      "12",NZIBACTN                 * action identifier
+          CALL      FIFHD000                      * set up header details
+.
+          MOVE      "38",WRLNGTH                  * FIFO record length (write)
+          WRITE     NZWFIFA1;NZIBSTX,NZIBACTN,NZIBUSER,NZIBVDU,NZIBRFIF:
+                             NZIBNMPI;
+.
+. now get the reply
+.
+          MOVE      "86",RDLNGTH                  * FIFO record length (reply)
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBAPPC,NZIBERRN,NZIBERRD;
+.
+          MOVE      ZERO,OVRCD                  * assume valid read
+          MATCH     "AA",NZIBAPPC               * valid read?
+          IF        !@EQUAL
+            MOVE      ONE,OVRCD                 * error
+            GOTO      DNHCU999
+          ENDIF
+.
+          MOVE      "311",RDLNGTH                  * FIFO record length (reply)
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBSTSU,NZIBPCSN:
+                          NZIBPCG1,NZIBPCG2,NZIBPCG3:
+                          NZIBPRNM,NZIBPCA1,NZIBPCA2,NZIBPCSB,NZIBPCTW,NZIBPCCT:
+                          NZIBWKPH,NZIBAHPH,NZIBRELC,NZIBDTLU;
+.
+          MOVE      ZERO,OVRCD                  * assume valid read
+          MATCH     "AA",NZIBAPPC               * valid read?
+          IF        !@EQUAL
+            MOVE      ONE,OVRCD                 * error
+          ENDIF
+.
+DNHCU999  RETURN
++
+.************************************************************************
+.*  FIFHD000  :  Set up Header details for Write FIFO                   *
+.************************************************************************
+FIFHD000  CLOCK     PID,NZIBUSER                  * process Id/User
+          PACK      NZIBVDU,PASSCODE,SLASH,PORT   * VDU Id
+          REP       " 0",NZIBVDU
+          PACK      NZIBRFIF,NZIBRFIL,PORT        * reply fifo name
+          REP       " 0",NZIBRFIF
+.
+FIFHD999  RETURN
+.------------------------------------------------------------------------------
+. Routine to Fork to IBANHI01 to Register or Change a Patients Details
+.
+. ERROR will contain :  "01xxxxxxxx", where xxxxxxxx = U/R Number
+.                   or  "02xxxxxxxx", where xxxxxxxx = Zero U/R Number
+.                   or  "03xxxxxxxx", where xxxxxxxx = NMPI Number
+.                   or  Spaces (Run from menu)
+.
+.            01 means that an NHI field has been selected in another program
+.            02 means that the Register option on National Search was selected
+.            03 means that a National Number was selected not on Local system
+.
+. Read in Returned Details from the Fork to NHI Screens
+. EXIT=0 Record Posted  EXIT=1 Cancelled
+.
+.------------------------------------------------------------------------------
+CALNHI00  MOVE      ZERO,HLEF
+          CALL      GETSCR00                * Save Screen
+          MOVE      ONE,NZHISMOD
+          FORK      "IBANHI01",ANS
+          PACK      ERROR,SP20              * Clear Error Field
+          CALL      PUTSCR00                * Put Screen
+.
+          MOVE      "PATNZI",KEY6
+          PACK      KEY8,KEY6,PORT
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FILNHIAF,KEY8
+          TRAPCLR   IO
+          BRANCH    OVRCD,CALNHI99
+          READ      FILNHIAF,SEQ;NZHISMOD,PURNO,PSNAME,PGNAME,PSEX:
+                                   PBDATE,PADD1,PADD2,PSUBRB,PADD4,PCEASE:
+                                   PDECDTE,PPOST
+.
+          OPEN      NHIMASA2,"nhimasaf"
+          MOVE      PURNO,CPPURNO
+          MOVE      PURNO,KEY8
+          CALL      RDNHMAS2          * Refresh NHI Variables for Display
+          CLOSE     FILNHIAF,DELETE
+CALNHI99  RETURN
+.*************************************************************************
+.*  LDHCU000  :  NO LONGER REQUIRED AUTOMATIC ON ACCESS TO SYSTEM
+.*************************************************************************
+.LDHCU000  
+.          MOVE      "L",FNTN
+.          PROC      NZGET000                * call subr in proc to do the job
+.
+.LDHCU999  RETURN
+.*****************************************************************************
+.*  NZDSP000  :  Display records/matches found                               *
+.*****************************************************************************
+NZDSP000  MOVE      "D",FNTN
+          PROC      NZGET000                * call subr in proc to do the job
+          RETURN
+.*****************************************************************************
+.*  NZDUP000  :  Display records/matches found After New Dup Error           *
+.*****************************************************************************
+NZDUP000  MOVE      "N",FNTN
+          PROC      NZGET000                * call subr in proc to do the job
+          RETURN
+.******************************************************************************
+.* DISNE000 - Display the list of National Episodes                           *
+.******************************************************************************
+DISNE000  DISPLAY   *P1:8,*EF:
+                    *P1:8,*V2LON,*ULON,"Start     ":
+                    *P12:8,"End       ":
+                    *P23:8,"Reporting Facility  "
+.
+          MOVE      ZERO,COUNT
+          MOVE      NINE,CVERT
+.
+DISNE100  ADD       ONE,COUNT
+.
+          MOVE      NZIBNMWR,FORM2
+          COMPARE   COUNT,FORM2                  * Check for number returned
+          GOTO      DISNE800 IF LESS
+.
+. ------- check if we need a new screen -------------------------
+.
+          COMPARE   CVERT,TWENTY2                * Check for number returned
+          IF        @LESS
+            CALL      EXITM000                   * Exit and Search More
+            COMPARE   ZERO,EXIT                  * exit
+            GOTO      DISNE999 IF EQUAL
+.
+            MOVE      NINE,CVERT
+            DISPLAY   *P1:CVERT,*EF
+          ENDIF
+.
+          UNPACK    NZARSTDT[COUNT],CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          DISPLAY   *P1:CVERT,CPCDATE
+.
+          UNPACK    NZARENDT[COUNT],CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          DISPLAY   *P12:CVERT,CPCDATE:
+                    *P23:CVERT,NZARRPTF[COUNT]
+          DISPLAY   *H02,NZAREVND[COUNT]
+.
+          ADD       "2",CVERT
+.
+          GOTO      DISNE100
+.
+DISNE800  COMPARE   FORM3,FORM3Z
+          IF        @EQUAL
+            CALL      EXITT000                   * Exit Only Display
+          ELSE
+            CALL      EXITM000                   * Exit and Search More
+          ENDIF
+.
+DISNE999  RETURN
+.
+.******************************************************************************
+.* EXITT000 - Display (E)xit only prompt                                      *
+.******************************************************************************
+EXITT000  MOVE      FALSE,EXIT
+          DISPLAY   *P1:24,*EL,"(":
+                    *V2LON,ANSE,*HOFF:
+                    ")xit ? ";
+.
+EXITT100  KEYIN     *P10:24,*V2LON,ANS;
+.
+          REP       UPPLOW,ANS
+          MATCH     ANS,ANSE
+          IF        !@EQUAL
+            BEEP
+            GOTO      EXITT100
+          ENDIF
+.
+EXITT999  RETURN
+.
+.******************************************************************************
+.* EXITM000 - Display (E)xit and (M)ore Options                               *
+.******************************************************************************
+EXITM000  MOVE      FALSE,EXIT
+.
+          DISPLAY   *P1:24,*EL,"(":
+                    *V2LON,ANSE,*HOFF:
+                    ")xit, (":
+                    *V2LON,ANSM,*HOFF:
+                    ")ore ? ";
+.
+EXITM100  KEYIN     *P18:24,*V2LON,ANS;
+.
+          MOVE      FALSE,EXIT
+          REP       UPPLOW,ANS
+          MATCH     ANS,ANSE
+          IF        @EQUAL
+            GOTO      EXITM999
+          ENDIF
+.
+          MATCH     ANS,ANSM
+          IF        @EQUAL
+            MOVE      TRUE,EXIT
+            GOTO      EXITM999
+          ENDIF
+.
+          BEEP
+          GOTO      EXITM100
+.
+EXITM999  RETURN
+.
++
+.************************************************************************
+.*  PROC  NZGET  :  Contains subroutines to search, load & retrieve from*
+.*                  New Zealand National system.......to save data space* 
+.************************************************************************
+          DEFPROC   NZGET000
+.
+NZDOB     DIM       10
+NZGIVEN   DIM       25[15]
+NZADDR    DIM       67[15]
+.
+LISTNMPI  DIM       7[8]     * NMPI No on Screen
+NZARNMPI  DIM       7[15]    * NMPI No.
+NZARSURN  DIM       25[15]   * Surname/Family name
+NZARGIV1  DIM       20[15]   * Given Name 1
+NZARGIV2  DIM       20[15]   * Given Name 2
+NZARGIV3  DIM       20[15]   * Given Name 3
+NZARPRNM  DIM       1[15]    * preferred name indicator
+NZARDOB   DIM       8[15]    * Date of Birth
+NZARSEX   DIM       1[15]    * Sex/Gender
+.
+NUMTOT    FORM      3
+NUMCUR    FORM      3
+.
+.
+DETFN000
+.          MATCH     "L",FNTN
+.          IF        @EQUAL
+.            CALL      LDHCU000
+.            GOTO      DETFN999
+.          ENDIF 
+.
+          MATCH     "D",FNTN
+          IF        @EQUAL
+            CALL      NZDSP000
+            GOTO      DETFN999
+          ENDIF
+.
+          MATCH     "N",FNTN
+          IF        @EQUAL
+            CALL      NZDUP000
+            GOTO      DETFN999
+          ENDIF
+.
+DETFN999  GOTO      NZGET999
+.************************************************************************
+.*  SRHHCU  :  Initiate a Surname search on the National database       *
+.************************************************************************
+SRHHCU    MOVE      "5 ",NZIBACTN                 * action identifier
+          CALL      FIFHD000                      * set up header details
+.
+          MOVE      "294",WRLNGTH                 * FIFO record length (write)
+          WRITE     NZWFIFA1;NZIBSTX,NZIBACTN,NZIBUSER,NZIBVDU,NZIBRFIF:
+                          NZIBSTYP,NZIBSTIM,NZIBRLIM:
+                          NZIBSURN,NZIBGIV1,NZIBGIV2,NZIBGIV3,NZIBPRNM,NZIBNSTY:
+                          NZIBADD1,NZIBADD2,NZIBSUBR,NZIBCITY,NZIBCTRY:
+                          NZIBASTY,NZIBMGEN,NZIBMDOB,NZIBMAGE,NZIBMPAG;
+.
+. now get the reply (firstly checking for an error)
+.
+          MOVE      "86",RDLNGTH                * FIFO record length (reply)
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBAPPC,NZIBERRN,NZIBERRD;
+.
+          MATCH     "AA",NZIBAPPC                 * valid read?
+          GOTO      SRHCU900 IF NOT EQUAL         * error
+.
+          MOVE      "30",RDLNGTH                * FIFO record length (reply)
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBNMFN,NZIBNMRE,NZIBNMRP:
+                             NZIBCPTR;
+.
+          MOVE      "280",RDLNGTH                * FIFO record length (reply)
+          MOVE      ONE,NZIBCNT
+.         
+          SQUEEZE   NZIBNMRP
+          MOVE      NZIBNMRP,FORM2
+          WHILE     NZIBCNT <= FORM2
+.
+            READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZARNMPI[NZIBCNT]:
+                               NZARSURN[NZIBCNT]:
+                               NZIBGIV1,NZIBGIV2:
+                               NZIBGIV3,NZIBPRNM:
+                               NZIBADD1,NZIBADD2:
+                               NZIBSUBR,NZIBCITY:
+                               NZIBCTRY,NZARDOB[NZIBCNT]:
+                               NZIBDDTH,NZIBDOMC:
+                               NZIBRESI,NZIBETHN,NZIBETH2,NZIBETH3:
+                               NZARSEX[NZIBCNT],NZIBALNM:
+                               NZIBMWDN,NZIBMWST:
+                               NZIBMERG;
+            CALL      NZFGS000                    * format given name
+            CALL      NZFAS000                    * format address
+            ADD       ONE,NZIBCNT
+          DO
+.
+          MOVE      ZERO,OVRCD                    * valid read
+          GOTO      SRHCU999
+.
+SRHCU900  MOVE      ONE,OVRCD                     * an error was encountered
+.
+SRHCU999  RETURN
++
+.************************************************************************
+.*  NXTHCU  :  Continue a surname search on the National database       *
+.************************************************************************
+NXTHCU    MOVE      "6 ",NZIBACTN                 * action identifier
+          CALL      FIFHD000                      * set up header details
+.
+          MOVE      "59",WRLNGTH                  * FIFO record length (write)
+          WRITE     NZWFIFA1;NZIBSTX,NZIBACTN,NZIBUSER,NZIBVDU,NZIBRFIF:
+                             NZIBCPTR,NZIBSTIM,NZIBRLIM,NZIBTSRC;
+.
+. now get the reply (firstly checking for an error)
+.
+          MOVE      "86",RDLNGTH                * FIFO record length (reply)
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBAPPC,NZIBERRN,NZIBERRD;
+.
+          MATCH     "AA",NZIBAPPC                * valid read?
+          GOTO      NXHCU900 IF NOT EQUAL        * error
+.
+          MOVE      "30",RDLNGTH                * FIFO record length (reply)
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBNMFN,NZIBNMRE,NZIBNMRP:
+                             NZIBCPTR;
+.
+          MOVE      "280",RDLNGTH                * FIFO record length (reply)
+          MOVE      ONE,NZIBCNT
+          SQUEEZE   NZIBNMRP
+          MOVE      NZIBNMRP,FORM2
+          WHILE     NZIBCNT <= FORM2
+            READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZARNMPI[NZIBCNT]:
+                               NZARSURN[NZIBCNT]:
+                               NZIBGIV1,NZIBGIV2:
+                               NZIBGIV3,NZIBPRNM:
+                               NZIBADD1,NZIBADD2:
+                               NZIBSUBR,NZIBCITY:
+                               NZIBCTRY,NZARDOB[NZIBCNT]:
+                               NZIBDDTH,NZIBDOMC:
+                               NZIBRESI,NZIBETHN,NZIBETH2,NZIBETH3:
+                               NZARSEX[NZIBCNT],NZIBALNM:
+                               NZIBMWDN,NZIBMWST:
+                               NZIBMERG;
+            CALL      NZFGS000                    * format given name
+            CALL      NZFAS000                    * format address
+            ADD       ONE,NZIBCNT
+          DO
+.
+          MOVE      ZERO,OVRCD                    * valid read
+          GOTO      NXHCU999
+.
+NXHCU900  MOVE      ONE,OVRCD                     * an error was encountered
+.
+NXHCU999  RETURN
+.
+.*************************************************************************
+.*  LDHCU000  NO LONGER REQUIRED AUTOMATIC ON ACCESS TO NHI/MWS System
+.*************************************************************************
+.LDHCU000  DISPLAY    *P1:24,*EL,*B,"Option NOT Available - ";
+.          CALL       HITENTER
+.LDHCU999  RETURN
+.
+.*****************************************************************************
+.*  NZDSP000  :  Display records/matches found                               *
+.*****************************************************************************
+NZDSP000  MOVE      ZERO,NZIBREGO               * assume register option not sel
+          MOVE      ZERO,NZRECDSP                 * count records displayed
+          MOVE      ONE,SCRNCNT                   * initialise screen counter
+          MOVE      ONE,TOTALCNT                  * initialise total counter
+          MOVE      SIX,CVERT
+.
+          CALL      SRHHCU                        * initiate surname search
+          BRANCH    OVRCD,NZDSP800                * error
+.
+          SQUEEZE   NZIBNMFN
+          MOVE      NZIBNMFN,FORM3                * move to a form field
+          COMPARE   ZERO,FORM3                    * a match found? 
+          GOTO      NZDSP950 IF EQUAL
+.
+          DISPLAY   *P4:5,*V2LON,*ULON,"NMPI No",*P13:5,"Surname",SP10,SP8:
+                    *P40:5,"Given Name",SP10,SP5,*P66:5,"Sex",*P70:5," D.O.B. "
+.
+. check if we have a valid U/R (on patma1af)
+.
+          MOVE      ZERO,NZIBNMAS                 * assume not valid U/R No.
+          MATCH     ZEROUR,PURNO
+          GOTO      NZDSP100 IF EQUAL
+          MOVE      PURNO,KEY8
+          CALL      RDAMAST1
+          BRANCH    OVRCD,NZDSP100
+          MOVE      ONE,NZIBNMAS                  * we have a valid U/R No.
+.
+. loop until records are finished displaying
+.
+NZDSP100  SQUEEZE   NZIBNMFN
+          MOVE      NZIBNMFN,NZFORM3B             * srf 643903
+          WHILE     TOTALCNT<=NZFORM3B
+.
+            SQUEEZE   NZIBNMRP
+            MOVE      NZIBNMRP,NZFORM2B           * move to a form field
+            WHILE     SCRNCNT<=NZFORM2B
+.
+.             check if screen is full
+.
+              IF        (SCRNCNT>8) | (TOTALCNT>NZFORM2B)
+                CALL      SNEXT000                    * Screen is Full
+                BRANCH    EXIT,NZDSP200:              * Search more
+                               NZDSP960:              * Next
+                               NZDSP500:              * Register
+                               NZDSP600               * Item selected
+                GOTO      NZDSP900                    * Exit
+              ELSE
+                CALL      NZFRM000                    * format data for display
+                DISPLAY   *P1:CVERT,*V2LON,SCRNCNT,*HOFF,". ":
+                          *V2LON,NZARNMPI[TOTALCNT],SP2:
+                          NZARSURN[TOTALCNT],SP2,NZGIVEN[TOTALCNT]:
+                          SP2,NZARSEX[TOTALCNT]:
+                          SP2,NZDOB
+                ADD       ONE,CVERT
+                DISPLAY   *P13:CVERT,NZADDR[TOTALCNT]
+                ADD       ONE,CVERT
+                ADD       ONE,SCRNCNT
+                ADD       ONE,TOTALCNT
+                ADD       ONE,NZRECDSP            * count total recs displayed
+              ENDIF
+              DO
+.
+            CALL      SNEXT000                    * Screen is Full
+            BRANCH    EXIT,NZDSP200:              * Search more
+                           NZDSP960:              * Next
+                           NZDSP500:              * Register
+                           NZDSP600               * Item selected
+            GOTO      NZDSP900                    * Exit
+
+. get next pack of data using NXTHCU
+
+NZDSP200   IF        SCRNCNT>8
+             GOTO      NZDSP300                   * already have records left
+           ENDIF 
+            MOVE      "N",NZIBTSRC                * Terminate search flag = No
+            CALL      NXTHCU                      * get next 15 records
+            BRANCH    OVRCD,NZDSP800              * error
+            MOVE      SIX,CVERT
+            MOVE      ONE,SCRNCNT
+            MOVE      ONE,TOTALCNT
+            DISPLAY   *P1:CVERT,*EF
+          DO
+.
+. no more records to display
+.
+NZDSP250  CALL      SNEXT000                    * Screen is Full
+          BRANCH    EXIT,NZDSP300:              * Search more
+                         NZDSP960:              * Next
+                         NZDSP500:              * Register
+                         NZDSP600               * Item selected
+          GOTO      NZDSP900                    * Exit
+.
+. new screen required
+.
+NZDSP300  MOVE      SIX,CVERT
+          MOVE      ONE,SCRNCNT
+          DISPLAY   *P1:CVERT,*EF
+          GOTO      NZDSP100
+.
+. Register was selected
+.
+NZDSP500  MATCH     "IBANHI01",PRGID
+          IF        @EQUAL
+            MOVE      ZERO,EXIT
+            MOVE      TWO,NZHISNEW
+            GOTO      NZDSP900
+          ENDIF
+          MATCH     "IBANHI02",PRGID              * allocation Nat # to temp #
+          IF        @EQUAL
+            MOVE      ONE,NZIBREGO
+            MOVE      ZERO,EXIT
+            GOTO      NZDSP999
+          ENDIF
+          MOVE      ONE,NZIBREGO
+          PACK      ERROR,ZERO,TWO,ZEROUR,SRCHDOB * for NZHIS (IBANHI01)
+          PACK      KEY18,SRCHSUR,SP20
+          PACK      KEY16,SRCHGIV,SP20
+          MOVE      CNAME,KEY35                  * save original hosp. name
+          PACK      CNAME,KEY18,KEY16,SRCHSEX,SP20
+          CALL      CALNHI00
+          MOVE      KEY35,CNAME                  * restore original hosp. name
+          BRANCH    OVRCD,NZDSP900
+          MOVE      ZERO,EXIT
+          GOTO      NZDSP999
+.
+. An Item was selected
+.
+NZDSP600  MOVE      NZARNMPI[NZFORM2A],NZIBNMPI  * NMPI No. selected
+          PACK      NMPNUMB,SP10,SP3,NZIBNMPI
+          CALL      GETHCU                       * get details for patient sel
+          BRANCH    OVRCD,NZDSP800               * error
+.
+NZDSP610  OPEN      NHIMASA1,"nhimasaf"
+          MOVE      NZIBNMPI,KEY7
+          CALL      RDNHMAS1
+          BRANCH    OVRCD,NZDSP650
+.
+          MOVE      ONE,SRCHFLAG                  * set as item selected
+          MOVE      NHMAURNO,CPPURNO              * set up UR for KURN 
+          MOVE      NHMAURNO,PURNO                * set up UR for KURN 
+.
+          MOVE      ZERO,EXIT
+          GOTO      NZDSP999
+.
+NZDSP650  MATCH     "IBANHI01",PRGID
+          IF        @EQUAL
+            MOVE      ZERO,EXIT
+            MOVE      ONE,NZHISNEW
+            GOTO      NZDSP900
+          ENDIF
+          MATCH     "IBANHI02",PRGID              * allocation Nat # to temp #
+          IF        @EQUAL
+            MOVE      ZERO,EXIT
+            GOTO      NZDSP999
+          ENDIF
+.          
+          MOVE      ONE,NZIBREGO
+          PACK      ERROR,ZERO,THREE,KEY7
+          CALL      CALNHI00
+          BRANCH    OVRCD,NZDSP900
+          MOVE      ZERO,EXIT
+          GOTO      NZDSP999
+.
+NZDSP800  CALL      NZERR000                     * display error message
+          GOTO      NZDSP900
+.
+NZDSP890  DISPLAY   *P1:24,*EL,*B,"Cannot open link to National system.  ";
+          CALL      HITENTER
+          MOVE      TWO,EXIT                      * Exit selected,registr or err
+          GOTO      NZDSP999
+.
+NZDSP900  MOVE      TWO,EXIT                      * Exit selected,registr or err
+          GOTO      NZDSP990
+.
+NZDSP950  DISPLAY   *P1:24,*EL,*B,"No records found.  ";
+          CALL      HITENTER
+          GOTO      NZDSP250
+.
+NZDSP960  MOVE      ONE,EXIT                      * Next selected
+          GOTO      NZDSP990
+.
+. do and ENDSRH if we still get records in another NXTSRH
+.
+NZDSP990  
+.          SQUEEZE   NZIBNMRE                      * still records remaining
+.          MOVE      NZIBNMRE,FORM3
+.          COMPARE   FORM3,ZERO
+.          GOTO      NZDSP999 IF EQUAL
+.
+.          CALL      ENDSRH
+.
+NZDSP999  RETURN
+.
+.*****************************************************************************
+.*  NZDUP000  :  Duplicate Search Display for New Patient Record             *
+.*****************************************************************************
+NZDUP000  CALL      SRHHCU                  * initiate surname search
+          BRANCH    OVRCD,NZDUP800          * error
+.
+          SQUEEZE   NZIBNMFN                * Number of Records Total
+          MOVE      NZIBNMFN,NUMTOT  
+          COMPARE   ZERO,NUMTOT             * ZERO Matches ?
+          GOTO      NZDUP910 IF EQUAL       * YES
+.
+          SQUEEZE   NZIBNMRP                * Number of Records This Reply
+          MOVE      NZIBNMRP,NUMCUR              
+          MOVE      ZERO,NZRECDSP           * count records displayed
+          MOVE      ZERO,TOTALCNT            * initialise total counter
+.
+NZDUP090  MOVE      FIVE,CVERT
+          MOVE      ZERO,SCRNCNT             * initialise screen counter
+          DISPLAY   *P1:3,*EF
+          DISPLAY   *P4:5,*V2LON,*ULON,"NMPI No",*P13:5,"Surname",SP10,SP8:
+                    *P40:5,"Given Name",SP10,SP5,*P66:5,"Sex",*P70:5," D.O.B. "
+.
+NZDUP100  ADD       ONE,SCRNCNT
+          ADD       ONE,TOTALCNT
+          ADD       ONE,NZRECDSP            * count total recs displayed
+          ADD       ONE,CVERT
+          CALL      NZFRM000                    * format data for display
+          MOVE      NZARNMPI[TOTALCNT],LISTNMPI[SCRNCNT]
+          DISPLAY   *P1:CVERT,*V2LON,SCRNCNT,*HOFF,". ":
+                    *V2LON,NZARNMPI[TOTALCNT],SP2:
+                    NZARSURN[TOTALCNT],SP2,NZGIVEN[TOTALCNT]:
+                    SP2,NZARSEX[TOTALCNT]:
+                    SP2,NZDOB
+          ADD       ONE,CVERT
+          DISPLAY   *P13:CVERT,NZADDR[TOTALCNT]
+.
+          COMPARE   TOTALCNT,NUMCUR
+          GOTO      NZDUP110 IF NOT EQUAL   * Finished This Batch
+          COMPARE   NZRECDSP,NUMTOT
+          GOTO      NZDUP190 IF EQUAL       * No More
+          MOVE      "N",NZIBTSRC            * Terminate search flag = No
+          CALL      NXTHCU                  * get next 15 records
+          BRANCH    OVRCD,NZDUP800          * error
+          SQUEEZE   NZIBNMRP                * Number of Records This Reply
+          MOVE      NZIBNMRP,NUMCUR            
+          MOVE      ONE,TOTALCNT
+.
+NZDUP110  COMPARE   "8",SCRNCNT
+          GOTO      NZDUP100 IF NOT EQUAL   
+.
+NZDUP190  STRIP     NZIBNMFN
+          MOVE      NZIBNMFN,FORM3
+          ASSIGN    (FORM3-NZRECDSP),FORM3
+          DISPLAY   *P58:23,"Records Remaining: ",*V2LON,FORM3
+          KEYIN     *P1:24,*EL:
+                    "Select Item, (":
+                    *V2LON,"S",*HOFF,")earch more or (":
+                    *V2LON,"E",*HOFF,")xit  ? ",*V2LON,ANS
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSS,ANS                * Search for More
+          IF        @EQUAL
+            COMPARE   NZRECDSP,NUMTOT
+            GOTO      NZDUP090 IF NOT EQUAL
+            BEEP
+            GOTO      NZDUP190
+          ENDIF
+.
+          MATCH     ANSE,ANS                * Exit
+          GOTO      NZDUP910 IF EQUAL
+.
+          MOVE      ZERO,NZTMPF1                 * Check for Number Selected
+          MOVE      ANS,NZTMPF1
+          IF        (NZTMPF1<1 | NZTMPF1>SCRNCNT)
+            BEEP
+            GOTO      NZDUP190
+          ENDIF
+          MOVE      LISTNMPI[NZTMPF1],NZIBNMPI
+          MATCH     SP30,NZIBNMPI
+          IF        @EQUAL
+            BEEP
+            GOTO      NZDUP190
+          ENDIF
+          PACK      NMPNUMB,SP10,SP3,NZIBNMPI
+          CALL      GETHCU                  * get details for patient sel
+          BRANCH    OVRCD,NZDUP800          * error
+.
+          GOTO      NZDSP900
+.
+NZDUP800  CALL      NZERR000                * display error message
+          GOTO      NZDUP910
+.
+NZDUP900  MOVE      ZERO,EXIT               * Patient Selected
+          GOTO      NZDUP999
+.
+NZDUP910  MOVE      ONE,EXIT                * Exit Selected
+.
+NZDUP999  RETURN
+.*****************************************************************************
+.*  NZFRM000  :  format data for display                                     *
+.*****************************************************************************
+NZFRM000  UNPACK    NZARDOB[TOTALCNT],CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,NZDOB                 * formatted date of birth
+.
+NZFRM999  RETURN
++
+.************************************************************************
+.* NZFGS000 :  Format the given name returned from a search             *
+.************************************************************************
+.
+. put as many given names as will fit into NZGIVEN[NZIBCNT]
+.
+NZFGS000  STRIP     NZIBGIV1
+          MOVELPTR  NZIBGIV1,NZIBFRA2
+          STRIP     NZIBGIV2
+          MOVELPTR  NZIBGIV2,NZIBFRB2
+          STRIP     NZIBGIV3
+          MOVELPTR  NZIBGIV3,NZIBFRC2
+.
+          IF        (NZIBFRA2+NZIBFRB2) > 24
+            PACK      NZGIVEN[NZIBCNT],NZIBGIV1,SP30
+          ELSE
+            IF        (NZIBFRA2+NZIBFRB2+NZIBFRC2) > 23
+              PACK      NZGIVEN[NZIBCNT],NZIBGIV1,SP1,NZIBGIV2,SP30
+            ELSE
+              PACK      NZGIVEN[NZIBCNT],NZIBGIV1,SP1,NZIBGIV2,SP1,NZIBGIV3:
+                        SP30
+            ENDIF
+          ENDIF
+          RETURN
++
+.************************************************************************
+.* NZFAS000 :  Format the address returned from a search                *
+.************************************************************************
+.
+. format the address
+.
+NZFAS000  PACK       NZADDR[NZIBCNT],NZIBADD1
+          STRIP      NZADDR[NZIBCNT]
+.
+          MATCH      SP20,NZIBADD2
+          IF         !@EQUAL
+            ENDSET     NZADDR[NZIBCNT]
+            APPEND     NZCOMMA,NZADDR[NZIBCNT]
+            APPEND     NZIBADD2,NZADDR[NZIBCNT]
+            RESET      NZADDR[NZIBCNT]
+            STRIP      NZADDR[NZIBCNT]
+          ENDIF
+.
+          MATCH      SP20,NZIBSUBR
+          IF         !@EQUAL
+            ENDSET     NZADDR[NZIBCNT]
+            APPEND     NZCOMMA,NZADDR[NZIBCNT]
+            APPEND     NZIBSUBR,NZADDR[NZIBCNT]
+            RESET      NZADDR[NZIBCNT]
+            STRIP      NZADDR[NZIBCNT]
+          ENDIF
+.
+          MATCH      SP20,NZIBCITY
+          IF         !@EQUAL
+            ENDSET     NZADDR[NZIBCNT]
+            APPEND     NZCOMMA,NZADDR[NZIBCNT]
+            APPEND     NZIBCITY,NZADDR[NZIBCNT]
+            RESET      NZADDR[NZIBCNT]
+            STRIP      NZADDR[NZIBCNT]
+          ENDIF
+.
+          MATCH      SP20,NZIBCTRY
+          IF         !@EQUAL
+            ENDSET     NZADDR[NZIBCNT]
+            APPEND     NZCOMMA,NZADDR[NZIBCNT]
+            APPEND     NZIBCTRY,NZADDR[NZIBCNT]
+            RESET      NZADDR[NZIBCNT]
+          ENDIF
+.
+          MATCH      SP20,NZIBDOMC
+          IF         !@EQUAL
+            ENDSET     NZADDR[NZIBCNT]
+            APPEND     NZCOMMA,NZADDR[NZIBCNT]
+            APPEND     NZIBDOMC,NZADDR[NZIBCNT]
+            RESET      NZADDR[NZIBCNT]
+          ENDIF
+.
+          RETURN
++
+.************************************************************************
+.*  ENDSRH  :  Terminate a search on the National database              *
+.************************************************************************
+ENDSRH    MOVE      "Y",NZIBTSRC                  * Terminate Search = Yes
+          CALL      NXTHCU
+          RETURN
++
+.*****************************************************************************
+.
+NZGET999  ENDPROC
+.-----------------------------------------------------------------------------
+. Procedure to Setup Medical Warning Temp File from National NHI/MWS System.
+.
+. Note Before Calling this Routine
+. A Record from the File NHIMASFD Must have been read.
+. A Connect to the national system must have been peformed.
+.
+.-----------------------------------------------------------------------------
+.
+           DEFPROC   SETMED00
+.
+. the following fields repeat upto 15 times
+.
+NZARSEVR   DIM       1[15]    * Severity code
+NZARDTON   DIM       8[15]    * Date of Onset
+NZARWTXT   DIM       70[15]   * MW Text description
+NZARMARC   DIM       8[15]    * MARC approval date
+NZARWDTU   DIM       8[15]    * MW Date of Last Update
+NZARFACC   DIM       4[15]    * Facility code
+NZARDOCC   DIM       5[15]    * MW Doctor code
+NZARSYSI   DIM       2[15]    * MW Coding System identifier
+NZARMWCD   DIM       6[15]    * MW Code
+NZARENTM   DIM       14[15]   * MW Entry Time
+.
+.------------------------------------------------------------
+. Setup File for Medical Warnings
+.------------------------------------------------------------
+SETMED00  DISPLAY  *P1:24,*EL,*BLINKON,*HON,"  Accessing NZHIS NHI/MWS   "
+          OPEN     PATMWSA1,"patmwsaf"
+          MOVE     NHMANMPI,KEY7
+          CALL     CHKHCU00
+          BRANCH   EXIT,SETMED98,SETMED99
+.
+.
+SETMED10  MATCH    SP1,NZIBMWST
+          GOTO     SETMED90 IF EQUAL
+.                                  * Access to NHI/MWS Should be OK so delete
+          CALL     DELMED00        * current medical warnings and reload from
+          MOVE     ZERO,TOTALMWS   * MHI/MWS System.
+.
+SETMED20  CALL     GETMWS          * Read in group of Medical Warnings from
+          BRANCH   OVRCD,SETMED95  * NHI/MWS. OVRCD=ERROR so Exit
+.
+          SQUEEZE  NZIBNMWR        * Number of Warnings Returned in this Group
+          MOVE     NZIBNMWR,FORM2  * as a 2 character field. 
+          COMPARE  ZERO,FORM2
+          GOTO     SETMED90 IF EQUAL
+.
+          CALL     ADDMED00
+.
+          SQUEEZE  NZIBNMWR        * Number of Warnings Returned in this Group
+          MOVE     NZIBNMWR,FORM2 
+          ADD      FORM2,TOTALMWS  * Accumulated Total Returned
+          SQUEEZE  NZIBNMWF        * Total on NHI/MWS 
+          MOVE     NZIBNMWF,FORM3  
+          IF       TOTALMWS<FORM3
+            GOTO     SETMED20      * Keep going until all returned
+          ENDIF
+          MOVE     ZERO,EXIT       * So Just Delete All and Exit
+          GOTO     SETMED99
+.
+SETMED90  CALL     DELMED00        * Indicator for NO Medical Warnings Set
+          MOVE     ZERO,EXIT       * So Just Delete All and Exit
+          GOTO     SETMED99
+.
+SETMED95  CALL     NZHISERR        * Display Error from Medical Warning Read
+SETMED98  MOVE     ONE,EXIT        * Error Display in CHKHCU00 Set Exit
+          GOTO     SETMED99
+.
+SETMED99  GOTO     ENDSETMW
+.------------------------------------
+. Add Medical Warning Read to File
+.------------------------------------
+ADDMED00  MOVE      ZERO,COUNT
+          MOVE      ZERO,PTMWCNT
+          SQUEEZE   NZIBNMWR
+          MOVE      NZIBNMWR,FORM2
+ADDMED10  ADD       ONE,COUNT
+          IF        COUNT>FORM2
+            GOTO      ADDMED99
+          ENDIF
+          PACK      PTMWCLSS,NZARSEVR[COUNT],SP6
+          MOVE      NHMAURNO,PTMWURNO           * U/R Number
+ADDMED20  ADD       ONE,PTMWCNT
+          PACK      KEY14,PTMWURNO,PTMWCLSS,PTMWCNT
+          CALL      RDPTMWS1
+          COMPARE   ZERO,OVRCD
+          GOTO      ADDMED20 IF EQUAL
+          MOVE      ZERO,PTMWSYS                  * initialise system of coding
+          MOVE      NZARDTON[COUNT],PTMWDATE      * date of onset
+          MOVE      NZARWTXT[COUNT],PTMWTEXT      * text
+          MOVE      NZARMARC[COUNT],PTMWMARC      * MARC Approval date
+          PACK      PTMWHOSP,NZARFACC[COUNT],SP30 * Facility who reported warnng
+          MOVE      NZARDOCC[COUNT],PTMWDOCT      * Doctor code
+          MOVE      NZARSYSI[COUNT],PTMWSYS       * Coding system being used
+          MOVE      NZARMWCD[COUNT],PTMWCODE      * Code for Warning (Danger)
+          MOVE      NZARENTM[COUNT],PTMWLUPD      * Date/Time entered on NZHIS
+          CALL      WRPTMWS1
+          GOTO      ADDMED10
+ADDMED99  RETURN
+.------------------------------------------------------------
+. Delete Medical Warnings From System
+.------------------------------------------------------------
+DELMED00  PACK      KEY14,NHMAURNO,SP20
+DELMED10  CALL      RSPTMWS1
+          CALL      RKPTMWS1
+          BRANCH    OVRCD,DELMED99
+          MATCH     NHMAURNO,PTMWURNO
+          GOTO      DELMED99 IF NOT EQUAL
+          PACK      KEY14,PTMWURNO,PTMWCLSS,PTMWCNT
+          CALL      DEPTMWS1
+          GOTO      DELMED10
+.
+DELMED99  RETURN
++
+.************************************************************************
+.*  GETMWS  :  Get list of Medical Warnings for a patient from Nat. Sys *
+.************************************************************************
+GETMWS    MOVE      "10",NZIBACTN                 * action identifier
+          CALL      FIFHD000                      * set up header details
+.
+          MOVE      "62",WRLNGTH                  * FIFO record length (write)
+          WRITE     NZWFIFA1;NZIBSTX,NZIBACTN,NZIBUSER,NZIBVDU,NZIBRFIF:
+                             NZIBNMPI,NZIBCPTR,NZIBMWRP;
+.
+. now get the reply (firstly checking for an error)
+.
+          MOVE      "86",RDLNGTH
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBAPPC,NZIBERRN,NZIBERRD;
+.
+          MATCH     "AA",NZIBAPPC                 * valid read?
+          GOTO      GTMWS900 IF NOT EQUAL         * error
+.
+          MOVE      "29",RDLNGTH
+          READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZIBMWDN,NZIBMRGS,NZIBNMWF:
+                             NZIBNMWR,NZIBCPTR;
+.
+          MOVE      ONE,NZIBCNT
+          SQUEEZE   NZIBNMWR
+          MOVE      NZIBNMWR,FORM2
+          MOVE      "126",RDLNGTH
+          WHILE     NZIBCNT <= FORM2
+            READ      NZRFIFA1,RDLNGTH,PTCNNHTM;NZARSEVR[NZIBCNT]:
+                               NZARDTON[NZIBCNT]:
+                               NZARWTXT[NZIBCNT],NZARMARC[NZIBCNT]:
+                               NZARWDTU[NZIBCNT],NZARFACC[NZIBCNT]:
+                               NZARDOCC[NZIBCNT],NZARSYSI[NZIBCNT]:
+                               NZARMWCD[NZIBCNT],NZARENTM[NZIBCNT];
+            ADD       ONE,NZIBCNT
+          DO
+.
+GTMWS800  MOVE      ZERO,OVRCD                    * valid read
+          GOTO      GTMWS999
+.
+GTMWS900  MOVE      ONE,OVRCD                     * an error was encountered
+.
+GTMWS999  RETURN
+.
+ENDSETMW  ENDPROC
+.--------------------------------------------------------------------------
+. VALHCU00 - Read Patient & Verify Patient Matches on Local System.
+.          - Requires Local Details to have been read from NHIMASFD.
+.          0 : NZIBNMPI - NMPI No. 
+.          EXIT = 0 Read OK Continue
+.          EXIT = 1 Can't Read 
+.          EXIT = 2 Abort
+.--------------------------------------------------------------------------
+VALHCU00 MOVE     NHMANMPI,NZIBNMPI
+         CALL     GETHCU               * Read Patient Details 
+         BRANCH   OVRCD,VALHCU80       * Ensure Correct Patient
+.
+         MOVE     ZERO,EXIT            * Patient Verified Ok
+.
+         MATCH    NHMASURN,NZIBSURN
+         GOTO     VALHCU10 IF NOT EQUAL
+         MATCH    NHMAGIV1,NZIBGIV1
+         GOTO     VALHCU05 IF EQUAL
+         MATCH    NHMADOB,NZIBDOB
+         GOTO     VALHCU20 IF NOT EQUAL
+         MATCH    NHMASEX,NZIBSEX
+         GOTO     VALHCU30 IF NOT EQUAL
+.
+VALHCU05 MATCH    NHMADOB,NZIBDOB
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMASEX,NZIBSEX
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAGIV2,NZIBGIV2
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAGIV3,NZIBGIV3
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAPREI,NZIBPRNM
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAADD1,NZIBADD1
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAADD2,NZIBADD2
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAADD3,NZIBSUBR
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAADD4,NZIBCITY
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAADD5,NZIBCTRY
+         GOTO     VALHCU50 IF NOT EQUAL
+.         MATCH    NHMADDTH,NZIBDDTH
+.         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMADOMC,NZIBDOMC
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMARES,NZIBRESI
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAETH,NZIBETHN
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAETH2,NZIBETH2
+         GOTO     VALHCU50 IF NOT EQUAL
+         MATCH    NHMAETH3,NZIBETH3
+         GOTO     VALHCU50 IF NOT EQUAL
+         GOTO     VALHCU99 
+.
+VALHCU10 MOVE     "Surname Does Not Match ",KEY40
+         CALL     NHIERR00
+         BRANCH   EXIT,VALHCU99,VALHCU99
+         GOTO     VALHCU60
+.
+VALHCU20 DISPLAY  *P1:24,*EL,*B,"WARNING: ":
+                  "1st Given Name & DOB Do Not Match",KEY40
+         CALL     NHIERR00
+         BRANCH   EXIT,VALHCU99,VALHCU99
+         GOTO     VALHCU60
+.
+VALHCU30 MOVE     "1st Given Name & Gender Do Not Match.",KEY40
+         CALL     NHIERR00
+         BRANCH   EXIT,VALHCU99,VALHCU99
+         GOTO     VALHCU60
+.
+VALHCU50 CALL     SDIFF000             * Show Differences and Allow Selection
+         BRANCH   EXIT,VALHCU60
+         MOVE     ZERO,EXIT
+         GOTO     VALHCU99
+.
+.        GETVAR   DLINE24A,DATTR24A,1,24
+.        KEYIN    *P1:24,*EL,*B:
+.                 "Patients National Details are different to Local.":
+.                 " Update (":
+.                 *V2LON,"Y",*HOFF,"/":
+.                 *V2LON,"N",*HOFF,") ? ",*V2LON,ANS
+.        PUTVAR   DLINE24A,DATTR24A,1,24
+.        REP      UPPLOW,ANS
+.        MATCH    ANSY,ANS
+.        GOTO     VALHCU60 IF EQUAL
+.        MATCH    ANSN,ANS
+.        GOTO     VALHCU50 IF NOT EQUAL
+.        MOVE     ZERO,EXIT
+.        GOTO     VALHCU99
+.
+VALHCU60 MATCH    "IBANHI01",PRGID
+         GOTO     VALHCU90 IF EQUAL
+         PACK     ERROR,ZERO,ONE,PURNO
+         CALL     CALNHI00
+         MOVE     OVRCD,EXIT
+         GOTO     VALHCU99
+.
+VALHCU80 CALL     NZHISERR
+         MOVE     ZERO,EXIT
+         GOTO     VALHCU99
+.
+VALHCU90 MOVE     ZERO,EXIT
+.
+VALHCU99 RETURN
+.------------------------------------------------------------
+. Show Differences and Enable Selection
+.------------------------------------------------------------
+SDIFF000   MOVE     ZERO,HLEF
+           CALL     GETSCR00
+           UNPACK   NHMADAT,CCENT,CYEAR,CMON,CDAY
+           CALL     PACDATE
+           MOVE     CPCDATE,KEY10
+           UNPACK   NZIBLAST,CCENT,CYEAR,CMON,CDAY
+           CALL     PACDATE
+           DISPLAY  *P1:5,*EF
+           HLINE    *G37,5,1,80
+
+           DISPLAY  *P2:6,*V2LON,*ULON,"National":
+                          *HOFF," - Last Update ",CPCDATE:
+                   *P42:6,*V2LON,*ULON,"Local":
+                          *HOFF," - Last Update ",KEY10,*HOFF
+           UNPACK   NHMADOB,CCENT,CYEAR,CMON,CDAY
+           CALL     PACDATE
+           MOVE     CPCDATE,KEY10
+           UNPACK   NZIBDOB,CCENT,CYEAR,CMON,CDAY
+           CALL     PACDATE
+           DISPLAY  *P2:7,"Surname     : ",NZIBSURN,*P42:7,NHMASURN:
+                    *P2:8,"Given Names : ",NZIBGIV1,*P42:8,NHMAGIV1:
+                    *P2:9,"            : ",NZIBGIV2,*P42:9,NHMAGIV2:
+                   *P2:10,"            : ",NZIBGIV3,*P42:10,NHMAGIV3:
+                   *P2:11,"Pref. Name  : ",NZIBPRNM,*P42:11,NHMAPREI:
+                   *P2:12,"Address     : ",NZIBADD1,*P42:12,NHMAADD1:
+                   *P2:13,"            : ",NZIBADD2,*P42:13,NHMAADD2:
+                   *P2:14,"            : ",NZIBSUBR,*P42:14,NHMAADD3:
+                   *P2:15,"            : ",NZIBCITY,*P42:15,NHMAADD4:
+                   *P2:16,"            : ",NZIBCTRY,*P42:16,NHMAADD5:
+                   *P2:17,"Domicile    : ",NZIBDOMC,*P42:17,NHMADOMC:
+                   *P2:18,"Gender      : ",NZIBSEX,*P42:18,NHMASEX:
+                   *P2:19,"D.O.B.      : ",CPCDATE,*P42:19,KEY10:
+                   *P2:20,"Deceased    : ",NZIBDDTH,*P42:20,NHMADDTH:
+                   *P2:21,"Resident    : ",NZIBRESI,*P42:21,NHMARES:
+                   *P2:22,"Ethnicity Cd: ",NZIBETHN,"/",NZIBETH2,"/",NZIBETH3:
+                                    *P42:22,NHMAETH,"/",NHMAETH2,"/",NHMAETH3
+          HLINE    *G37,23,1,80
+SDIFF100  KEYIN    *P1:24,*EL,"(",*V2LON,"U",*HOFF,")pdate Now or (":
+                                  *V2LON,"C",*HOFF,")ontinue without Update ? ":
+                                  *V2LON,ANS
+          REP      UPPLOW,ANS
+          MOVE     ONE,EXIT
+          MATCH    ANSU,ANS
+          GOTO     SDIFF999 IF EQUAL
+          MATCH    ANSC,ANS
+          GOTO     SDIFF100 IF NOT EQUAL
+          MOVE     ZERO,EXIT
+.
+SDIFF999  CALL     PUTSCR00
+          RETURN
+.

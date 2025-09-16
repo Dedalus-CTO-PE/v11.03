@@ -1,0 +1,801 @@
+.******************************************************************************
+.*                                                                            *
+.* Prcodeure Name   : ICDSCLAS.PBL                                            * .*                                                                            *
+.* Description      : Change the admission type based on ICD10 Code           *
+.*                                                                            *
+.* Author           : J.Tan  18/11/2009  CAR 188110                           *
+.*                                                                            *
+.* Return           : INVBFLAG - 0 Ok to change Adm.Type                      *
+.*                             1 Not Valid                                    *
+.*                             2 Coding is not complete                       *
+.*                             3 No ICD10 Code Suggested Classification       *
+.* Modifications    :                                                         *
+.*        V10.05.01 04/08/2014  J.Tan          CAR 304397                     *
+.*                  Changed labels for SPBD9999 to CPBD9999                   *
+.*        V10.03.01 05/09/2012  J.Tan          CAR 267784                     *
+.*                  Mods Checking for TCINDC19 Claim Code                     *
+.*        V10.02.01 24/03/2011  Mike Laming   CAR 240107                      *
+.*                  Change Indexes and Keys for PATECDaf and PATECOaf         *
+.*        V10.01.02 30/11/2010 Peter Vela CAR 233148                          *
+.*                  Initialised pattranf variables before write to pattranf   *
+.*        V10.01.01 18/01/2011 J.Tan      CAR 233034                          *
+.*                  Mods Bed fees to use HF Table type                        *
+.******************************************************************************
+ICDSG000  MOVE      ONE,MSGFLAG
+          MOVE      SP70,PMSGCLSS
+          CALL      ISUG0000                * Check if ICD10 Sugg.Class.required
+          BRANCH    INVBFLAG,ICDSG999,ICDSG999,ICDSG999
+.
+          MATCH     "1",UPADMTYP            * Update Admission type?
+          GOTO      ICDSG999 IF NOT EQUAL
+.
+          CALL      WTRC0000                * Write new transfer file
+          BRANCH    EXIT,ICDSG999
+.
+          CALL      FTRC0000                * Update the transfer file
+          CALL      FASTF000                * Update the admission stats file
+          CALL      FADMF000                * Update the admission file
+          CALL      FVSTS000                * Update the visit status
+ICDSG999  RETURN
++
+.******************************************************************************
+.         Check if ICD10 Suggested Classification is required
+.******************************************************************************
+ISUG0000  MOVE      ZERO,INVBFLAG
+          COMPARE   ZERO,CFEETYP
+          GOTO      ISUG9000 IF NOT EQUAL   * Not using patbfeef
+.
+          MOVE      AADMNO,KEY8
+          CALL      RDMISS1
+          BRANCH    OVRCD,ISUG9000          * Missing admission record
+.
+          MATCH     SP3,ATYPE
+          GOTO      ISUG9000 IF EQUAL       * Blank admission type
+.
+          PACK      KEY5,ANSA,SP1,ATYPE
+          CALL      RDCODE1                 * Read the codes file
+          BRANCH    OVRCD,ISUG9000
+.
+          MATCH     ANSX,TCINDC7
+          GOTO      ISUG9000 IF EQUAL       * Exclude this admission type
+.
+          COMPARE   SIX,TCFORM6
+          GOTO      ISUG9000 IF NOT EQUAL
+.
+.         No ICD10 Suggested Classification, if there is a MBS Items charge
+.
+          CALL      CHKI0000                * Check MBS items
+          BRANCH    EXIT,ISUG9000           * found Theatre item record
+.
+          MATCH     SP70,ACODDTE            * Coding is incomplete?
+          GOTO      ISUG8000 IF EQUAL
+.
+          CALL      GDIA0000                * Get the primary diagnosis
+          BRANCH    EXIT,ISUG8000           * no primary diagnosis
+.
+          CALL      CHSG0000                * Check Suggested Class.file
+          GOTO      ISUG9999
+.
+ISUG8000  MOVE      TWO,INVBFLAG            * Coding is not complete
+          GOTO      ISUG9999
+.
+ISUG9000  MOVE      ONE,INVBFLAG            * not valid
+ISUG9999  RETURN
++
+.******************************************************************************
+.         Check if there is any MBS Items charge 
+.******************************************************************************
+CHKI0000  OPEN      PATDTRA3,"patdtraf"
+          OPEN      PMSMTIA2,"pmsmtiaf"
+.
+.         Check Invoiced items
+.
+          MOVE      "2",KEY1
+          PACK      KEY18,AADMNO,KEY1,SP70
+          CALL      RDSDTRN3
+CHKI1000  CALL      RDKDTRN3
+          BRANCH    OVRCD,CHKI6000
+.
+          COMPARE   AADMNO,TADMNO            * Same admission?
+          GOTO      CHKI6000 IF NOT EQUAL
+.
+          MATCH     KEY1,DTRECTYP
+          GOTO      CHKI9000 IF EQUAL        * Found a theatre item record
+          GOTO      CHKI1000
+.
+.         Check any to be invoice items
+.
+CHKI6000  PACK      KEY15,AADMNO,KEY1,SP70
+          CALL      RSPMMTI2
+CHKI7000  CALL      RKPMMTI2
+          BRANCH    OVRCD,CHKI8000
+.
+          MATCH     PMMIVISN,DAADMNO         * Same admission?
+          GOTO      CHKI8000 IF NOT EQUAL
+.
+          MATCH     KEY1,PMMIRTYP
+          GOTO      CHKI9000 IF EQUAL        * Found a theatre item record
+          GOTO      CHKI7000
+.
+CHKI8000  MOVE      ZERO,EXIT                * no theatre item
+          GOTO      CHKI9999
+.
+CHKI9000  MOVE      ONE,EXIT
+CHKI9999  RETURN
++
+.******************************************************************************
+.         Get primary diagnosis
+.******************************************************************************
+GDIA0000  MOVE      ZERO,EXIT
+          OPEN      PATECDA1,"patecdaf"
+          PACK      KEY13,AADMNO,SP70
+          CALL      RSPTECD1
+          CALL      RKPTECD1
+          BRANCH    OVRCD,GDIA9999
+.
+          COMPARE   PTEDADMN,AADMNO          * Same admission?
+          GOTO      GDIA9999 IF EQUAL
+          MOVE      ONE,EXIT
+.
+GDIA9999  RETURN
++
+.******************************************************************************
+.         Check if ICD10 Suggested Classification record exist
+.******************************************************************************
+CHSG0000  OPEN      PMSSGAA1,"pmssgaaf"
+          PACK      KEY9,KEY9,SP70
+          MOVE      ZERO,F1
+          PACK      KEY14,AFUNDH,AFNDTB,SP70
+CHSG1000  PACK      KEY26,ACLAIM,KEY14,PTEDCODE,SP70
+          CALL      RDPMSGA1
+          IF        OVRCD=1
+            CALL      SETD0000                 * Set diagnosis code 
+            PACK      KEY26,ACLAIM,KEY14,KEY9,SP70
+            CALL      RDPMSGA1
+            BRANCH    OVRCD,CHSG4000
+          ENDIF
+          MOVE      ZERO,INVBFLAG            * found ICD10 Sugg.Class.
+          MATCH     ATYPE,PMSGCLSS
+          IF        @EQUAL
+            MOVE      ONE,INVBFLAG           * No change of adm.type
+          ENDIF        
+          GOTO      CHSG9999
+.
+CHSG4000  ADD       ONE,F1
+          BRANCH    F1,CHSG5000,CHSG6000
+          MOVE      SP70,PMSGCLSS
+          MOVE      THREE,INVBFLAG           * ICD10 Sugg.Class not found
+          GOTO      CHSG9999
+.
+CHSG5000  MOVE      SP70,KEY14               * try with blank health fund
+          GOTO      CHSG1000
+.
+CHSG6000  PACK      KEY14,PTCNDCLM,SP70      * try with default claim code
+          GOTO      CHSG1000
+.
+CHSG9999  RETURN
++
+.******************************************************************************
+.         Set Diagnosis code characters prior to the decimal point
+.******************************************************************************
+SETD0000  PACK      KEY9,PTEDCODE,SP70
+          RESET     KEY9,9
+SETD1000  CMATCH    SP1,KEY9
+          GOTO      SETD2000 IF EQUAL
+.
+          CMATCH    ".",KEY9
+          GOTO      SETD3000 IF EQUAL
+.
+SETD2000  BUMP      KEY9,-1
+          GOTO      SETD1000 IF NOT EOS
+          GOTO      SETD9000
+.
+SETD3000  BUMP      KEY9,-1
+SETD9000  APPEND    SP70,KEY9
+          RESET     KEY9
+SETD9999  RETURN
++
+.******************************************************************************
+.*                                  WTRC0000                                  *
+.*                           Write a Transfer record                          *
+.******************************************************************************
+WTRC0000  PACK      KEY30,AADMNO,ADATE,Z70
+          CALL      RDSTRAN2                * Position on & read the transfer
+WTRC1000  CALL      RDPTRAN2                  file
+          BRANCH    OVRCD,WTRC9000
+.
+          COMPARE   AADMNO,TADMN
+          GOTO      WTRC9000 IF NOT EQUAL   * Different admission number
+.
+          CMATCH    "D",TMOVE
+          GOTO      WTRC1000 IF EQUAL       * get previous record
+          CMATCH    "L",TMOVE
+          GOTO      WTRC1000 IF EQUAL       * get previous record
+.
+          CALL      ADDT0000                * Add 5 seconds
+          PACK      TTIME,XHOUR,ANS,XMIN,ANS,KEY2
+          REP       " 0",TTIME
+.
+          MOVE      ADATE,TDATE             * Change date
+          MOVE      "C",TMOVE               * Change record
+          MOVE      PMSGCLSS,TATYPE         * Change admission type
+          MOVE      "A",PTTRAUAT            * Auto update of admission type
+          PACK      KEY30,TADMN,TDATE,TTIME,TWARD,TBED
+          CALL      RDATRAN2                * Position read on the transfer file
+          COMPARE   ONE,OVRCD
+          GOTO      WTRC9000 IF NOT EQUAL   * Record exists, error
+.
+          MOVE      SP70,PTTRCUID
+          MOVE      SP70,PTTRLTSC
+          MOVE      ACLAIM,PTTRCLTY
+          PACK      PTTRCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTTRCDAT
+          CLOCK     TIME,PTTRCTIM
+          MOVE      WBSEUID,PTTRUCID
+          UNPACK    SP70,TRCDATE,TRCTIME,PTTRUUID
+.
+          CALL      WRTRAN2                 * Write to the transfer file
+          MOVE      ZERO,EXIT
+          GOTO      WTRC9999
+.
+WTRC9000  MOVE      ONE,EXIT
+WTRC9999  RETURN
++
+.******************************************************************************
+.         Add time by 5 secs
+.******************************************************************************
+ADDT0000  UNPACK    TTIME,XHOUR,ANS,XMIN,ANS,KEY2
+          REP       " 0",KEY2
+          MOVE      ZERO,FORM2
+          MOVE      KEY2,FORM2
+          ADD       FIVE,FORM2              * 5 secs
+          MOVE      FORM2,KEY2
+          COMPARE   "60",FORM2
+          IF        !@LESS
+            MOVE      "00",KEY2
+            MOVE      XMIN,FORM2
+            ADD       ONE,FORM2
+            MOVE      FORM2,XMIN
+            COMPARE   "60",FORM2
+            IF        !@LESS
+              MOVE      "00",XMIN                        * was KEY2    *C
+              MOVE      XHOUR,FORM2
+              ADD       ONE,FORM2
+              MOVE      FORM2,XHOUR
+            ENDIF
+          ENDIF
+ADDT9999  RETURN
++
+.******************************************************************************
+.*                                  FTRC0000              Called by: CADTP000 *
+.*                          Update The Transfer File                          *
+.******************************************************************************
+FTRC0000  MOVE      ZERO,SBFPAT
+          MOVE      ZERO,SBFHF
+          MOVE      SP3,SBFENDDY
+          PACK      KEY30,AADMNO,ADATE,TTIME,SP70
+          CALL      RDSTRAN2                * Position on & read the transfer
+FTRC1000  CALL      RDKTRAN2                  file
+          BRANCH    OVRCD,FTRC9000
+.
+          COMPARE   AADMNO,TADMN
+          GOTO      FTRC9000 IF NOT EQUAL   * Different admission number
+.
+.         If this is a caspayment patient, update Transfer file with new 
+.         admission type only (no bed fee update)
+.
+          BRANCH    CMXFLAG,FTRC4000
+.
+          MATCH     ANSD,TMOVE
+          GOTO      FTRC3000 IF EQUAL       * Disch record, use last B/F vars
+.
+          PACK      SAVKEY30,TADMN,TDATE,TTIME,TWARD,TBED
+          MOVE      ZERO,TOTDAY
+          MATCH     ADATE,DDATE
+          GOTO      FTRC2000 IF EQUAL       * Daycase
+.
+          MOVE      ADATE,FROMDATE
+          MOVE      TDATE,TODATE
+          CALL      CPBD0000                * Check for speciality bed type
+          BRANCH    EXIT,FTRC1200
+.
+          CALL      NHOSPDAY                * Calculate no of days in hospital
+          GOTO      FTRC1400
+.
+FTRC1200  MOVE      SP10,SAVIND6
+          MOVE      TCINDC6,SAVIND6       * get no of days in the specialty bed
+          MOVE      ZERO,FORM1            * calculate beddays for a specialtybed
+          CALL      FBTP0000
+.
+FTRC1400  MOVE      NBRDAYS,TOTDAY
+          ADD       ONE,TOTDAY            * Want inclusive days
+.
+FTRC2000  ADD       ADYHOSP,TOTDAY          * no of days from admin to transfer
+          MOVE      SAVKEY30,KEY30
+          CALL      RDTRAN2                 * Read the transfer file
+.
+          CALL      GETBF000                * Get the bed fee
+          IF        EXIT=1
+            MOVE      ZERO,SBFPAT           * no bed fees setup
+            MOVE      ZERO,SBFHF
+          ENDIF
+.
+.         Discharge record must have same amount as previous trns record
+.
+FTRC3000  MOVE      SBFPAT,TRATEF           * Patient amount
+          MOVE      SBFHF,TRATEH            * H/F amount
+          MOVE      SBFENDDY,TRBEND         * End of day range for this rate
+.
+FTRC4000  MOVE      PMSGCLSS,TATYPE         * Change admission type
+          MOVE      "A",PTTRAUAT            * Auto update of admission type
+          PACK      TRCDATE,CCC,CYY,CMM,CDD
+          REP       " 0",TRCDATE
+          CLOCK     TIME,TRCTIME
+          MOVE      WBSEUID,PTTRUUID
+.
+          CALL      UPTRAN2                 * Update the transfer file
+          GOTO      FTRC1000
+.
+FTRC9000  MOVE      ZERO,EXIT
+          GOTO      FTRC9999
+.
+FTRC9800  MOVE      ONE,EXIT
+FTRC9999  RETURN
++
+.******************************************************************************
+.*                                  FASTF000              Called by: CADTP000 *
+.*                         Update Admission Stats File                        *
+.******************************************************************************
+FASTF000  OPEN      PATSTAD1,"patstads"
+.
+. ----- Update admission stats for old admission type if any -----
+.
+          CALL      FWMVU000                * Calc which month var to update
+          PACK      KEY8,SADYEAR,ANSA,ATYPE
+          CALL      RDSTAD1                 * Read the admission stats file
+          BRANCH    OVRCD,FASTF100
+.
+          MOVE      "-1",FORM2
+          LOAD      FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          ADD       FORM2,FORM5
+          STORE     FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          CALL      UPSTAD1                 * Update the admission stats file
+.
+. ----- Add admission stats for new admission type -----
+.
+FASTF100  CALL      FWMVU000                * Calc which month var to update
+          PACK      KEY8,SADYEAR,ANSA,PMSGCLSS
+          CALL      RDSTAD1                 * Read the admission stats file
+          BRANCH    OVRCD,FASTF200
+.
+          MOVE      ONE,FORM2
+          LOAD      FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          ADD       FORM2,FORM5
+          STORE     FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          CALL      UPSTAD1                 * Update the admission stats file
+          GOTO      FASTF900
+.
+. ----- Write new admission status record -----
+.
+FASTF200  MOVE      ANSA,SADTYPE
+          MOVE      ATYPE,SADCODE
+          MOVE      ZERO,SADMTH1
+          MOVE      ZERO,SADMTH2
+          MOVE      ZERO,SADMTH3
+          MOVE      ZERO,SADMTH4
+          MOVE      ZERO,SADMTH5
+          MOVE      ZERO,SADMTH6
+          MOVE      ZERO,SADMTH7
+          MOVE      ZERO,SADMTH8
+          MOVE      ZERO,SADMTH9
+          MOVE      ZERO,SADMTH10
+          MOVE      ZERO,SADMTH11
+          MOVE      ZERO,SADMTH12
+          MOVE      ONE,FORM5
+          STORE     FORM5,IMON,SADMTH1,SADMTH2,SADMTH3,SADMTH4,SADMTH5:
+                               SADMTH6,SADMTH7,SADMTH8,SADMTH9,SADMTH10:
+                               SADMTH11,SADMTH12
+          CALL      WRSTAD1                 * Write to the admission stats file
+.
+FASTF900  MOVE      ZERO,EXIT
+FASTF999  RETURN
++
+.******************************************************************************
+.*                                  FADMF000              Called by: CADTP000 *
+.*                          Update The Admission File                         *
+.******************************************************************************
+FADMF000  PACK      KEY8,AADMNO
+          CALL      RDPTMIS1                * Read lock the admission file
+.
+          MOVE      PMSGCLSS,ATYPE
+          CALL      UPLMISS1                * Update the admission file
+.
+. ----- Update the admission audit file -----
+.
+          READ      CONTROLF,TEN;*201,CAUDA
+          IF        CAUDA<>1
+            OPEN      PATAUAA1,"pataa1af"
+            MOVE      ANSB,ACTION           * Before changes
+            CALL      WRAAUD                * Write to the admission audit file
+            MOVE      ANSC,ACTION           * After changes
+            CALL      SADAV000              * Save admission audit variables
+            CALL      WRAAUD                * Write to the admission audit file
+          ENDIF
+.
+FADMF900  MOVE      ZERO,EXIT
+FADMF999  RETURN
++
+.******************************************************************************
+.*                                  FVSTS000              Called by: CADTP000 *
+.*                           Update The Visit Status                          *
+.******************************************************************************
+FVSTS000  MOVE      ONE,KEY1             * Default to public patient
+          PACK      KEY5,ANSA,SP1,PMSGCLSS
+          CALL      RDCODE1                 * Read the codes file
+          IF        OVRCD<>1
+            MATCH     SP1,TCINDC1
+            IF        !@EQUAL
+              MOVE      TCINDC1,KEY1
+            ENDIF
+          ENDIF
+.
+          MOVE      AADMNO,PVIBILL
+          PACK      KEY8,PVIBILL
+          CALL      RDVISA1                 * Read the visit file
+          IF        OVRCD<>1
+            MOVE      TWO,FORM1             * Default public patient
+            MATCH     "1",KEY1
+            IF        !@EQUAL
+              MOVE      ONE,FORM1           * Private patient
+            ENDIF
+            IF        FORM1<>PVISTAT
+              MOVE      FORM1,PVISTAT       * Change visit status
+            ENDIF
+            CALL      UPVISA1               * Update the visit file
+          ENDIF
+.
+FVSTS900  MOVE      ZERO,EXIT
+FVSTS999  RETURN
++
+.******************************************************************************
+.*                                  SADAV000              Called by: VALID000 *
+.*                      Save Admission Audit Variables             & FADMF000 *
+.******************************************************************************
+SADAV000  MOVE      AADMNO,SAADMNO
+          MOVE      AURNO,SAURNO
+          MOVE      ADATE,SADATE
+          MOVE      ATIME,SATIME
+          MOVE      AWARD,SAWARD
+          MOVE      ABED,SABED
+.
+          MOVE      ARDRNAM,SARDRNAM
+          MOVE      ADOCTR,SADOCTR
+          MOVE      ADOCTA,SADOCTA
+          MOVE      ACLAIM,SACLAIM
+.
+          MOVE      ASRCE,SASRCE
+          MOVE      ATYPE,SATYPE
+          MOVE      ACLSS,SACLSS
+          MOVE      ACARE,SACARE
+.
+          MOVE      AFUNDH,SAFUNDH
+          MOVE      AFNDTB,SAFNDTB
+          MOVE      AFNDMM,SAFNDMM
+.
+          MOVE      AVISIT,SAVISIT
+          MOVE      AALERG,SAALERG
+          MOVE      ADISC,SADISC
+          MOVE      AALLOW,SAALLOW
+.
+          MOVE      AILLN,SAILLN
+          MOVE      ASTAY,SASTAY
+.
+          MOVE      ADIET,SADIET
+          MOVE      ADOCTT,SADOCTT
+          MOVE      AUSR1,SAUSR1
+          MOVE      AUSR2,SAUSR2
+          MOVE      AUSR3,SAUSR3
+          MOVE      AUSR4,SAUSR4
+          MOVE      AUSR5,SAUSR5
+          MOVE      ACLSSFT,SACLSSFT
+          MOVE      AMEMB,SAMEMB
+          MOVE      AMEMBNO,SAMEMBNO
+          MOVE      ADYHOSP,SADYHOSP
+          MOVE      AMBS,SAMBS
+.
+SADAV900  MOVE      ZERO,EXIT
+SADAV999  RETURN
++
+.******************************************************************************
+.*                                  GETBF000                                  *
+.*                               Get The Bed Fee                              *
+.******************************************************************************
+GETBF000  MOVE      ZERO,FORM1              * Valid bed fee flag
+          MOVE      ZERO,FORM2              * Bed fee pass counter
+.
+          COMPARE   NINE,CFEETYP
+          GOTO      GETBF100 IF EQUAL       * Johns Hopkins
+.
+          PACK      KEY9,ACLAIM,AFUNDH,SP70
+          CALL      GETCNEFF               * Get Contract Effective From
+          BRANCH    EXIT,GETBF800
+          MOVE      TDATE,CEFFDATE
+          LOAD      CEFFDATE,CNTRCEFR,ADATE,DDATE
+.
+.         If Contract Effective From is 'For Discharges From', Discharged date
+.         is blank and TCINDC19=D, default Effective date to Current date
+.
+          IF        CNTRCEFR=2
+            PACK      DDATE,DDATE,SP70
+            MATCH     SP70,DDATE
+            IF        @EQUAL
+              PACK      KEY5,CODECL,ACLAIM
+              CALL      RDCODE1
+              IF        OVRCD=0
+                MATCH     "D",TCINDC19
+                IF        @EQUAL
+                  PACK      CEFFDATE,CCC,CYY,CMM,CDD,SP70
+                  REP       " 0",CEFFDATE
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+.
+GETBF100  PACK      KEY27,ACLAIM,AFUNDH,AFNDTB,PMSGCLSS,TRBTYP,SP70
+          CALL      GETBFEES
+          COMPARE   ZERO,EXIT
+          GOTO      GETBF999 IF EQUAL
+.
+          MATCH     "PATWEB",PRGID
+          GOTO      GETBF950 IF NOT EQUAL
+.
+          UNPACK    KEY27,DIM3,DIM6,KEY3,DIM3A,DIM3B
+          CLEAR     WARNINGL
+          APPEND    "Warning:Default BedFee Not SetUp. CL[",WARNINGL
+          APPEND    DIM3,WARNINGL
+          APPEND    "] H/F[",WARNINGL
+          APPEND    DIM6,WARNINGL
+          APPEND    "/",WARNINGL
+          APPEND    KEY3,WARNINGL
+          APPEND    "] A[",WARNINGL
+          APPEND    DIM3A,WARNINGL
+          APPEND    "] BT[",WARNINGL
+          APPEND    DIM3B,WARNINGL
+          APPEND    "]",WARNINGL
+          RESET     WARNINGL
+          CALL      ADDWRN00    * Add Warning
+          GOTO      GETBF950
+.
+GETBF800  CLEAR     WARNINGL
+          APPEND    "Warning:BedFee Not SetUp. ",WARNINGL
+          APPEND    "Contract Effective Detail not found.",WARNINGL
+          RESET     WARNINGL
+          CALL      ADDWRN00    * Add Warning
+.
+GETBF950  MOVE      ONE,EXIT
+GETBF999  RETURN
++
+.******************************************************************************
+.*                                  FWMVU000              Called by: FASTF000 *
+.*                  Calculate Which Month Variable To Update                  *
+.******************************************************************************
+FWMVU000  UNPACK    ADATE,XCENT,XYEAR,XMON,XDAY
+          OPEN      PATDRGA2,"patdrgaf"
+          CALL      PATSTRYR                     * get start of year date
+          BRANCH    EXIT,FWMVU000                * not set up in patdrgaf
+.                                                  loop until user fixes
+          UNPACK    CSTRTYR,CCENT,CYEAR,CMON,CDAY
+          MOVE      XYEAR,SADYEAR
+.
+. ----- Get the correct year -----
+.
+          MATCH     CMON,XMON
+          IF        @LESS
+            MOVE      SADYEAR,IYEAR
+            COMPARE   ZERO,IYEAR
+            IF        @EQUAL
+              MOVE      "99",SADYEAR
+            ELSE
+              SUB       ONE,IYEAR
+              MOVE      IYEAR,SADYEAR
+            ENDIF
+          ENDIF
+.
+. ----- Get the correct month -----
+.
+          MOVE      XMON,IMON
+          MOVE      CMON,FORM2
+          SUB       FORM2,IMON
+          ADD       ONE,IMON
+          COMPARE   ONE,IMON
+          IF        @LESS
+            ADD       TEN2,IMON
+          ENDIF
+.
+FWMVU900  MOVE      ZERO,EXIT
+FWMVU999  RETURN
++
+.==============================================================================
+.         CPBD0000 - Check for speciality bed type
+.==============================================================================
+CPBD0000  MOVE      ZERO,EXIT
+.
+          MATCH     ANSY,PTMICMXP                * casemix patient ?
+          GOTO      CPBD9999 IF EQUAL            * yes - finish
+          MATCH     SP9,CMDRG                    * drg entered ?
+          GOTO      CPBD9999 IF NOT EQUAL        * yes - casemix
+.
+          PACK      KEY6,TWARD,TBED
+          CALL      RDWARD1
+          BRANCH    OVRCD,CPBD9999
+.
+          MATCH     SP3,WEFRBT
+          GOTO      CPBD9999 IF EQUAL            * blank bed type
+          PACK      KEY5,ANSB,ANST,WEFRBT
+          CALL      RDCODE1
+          BRANCH    OVRCD,CPBD9999               * invalid bed type
+.
+          REP       " 0",TCINDC6
+          MOVE      ZERO,FORM1
+          MOVE      TCINDC6,FORM1                * check for specialty bedtype
+          COMPARE   ZERO,FORM1
+          GOTO      CPBD9999 IF EQUAL            * normal bed type
+          MOVE      ONE,EXIT
+.
+CPBD9999  RETURN
++
+.==============================================================================
+.         FBTP0000 - Calculate no of bed days for the specialty bed type
+.==============================================================================
+FBTP0000 MOVE       SP10,WDATE1             * initialise the start date
+         MOVE       SP10,WDATE2             * initialise the end date
+         MOVE       ZERO,NBRDAYS
+.
+         COMPARE    THREE,ASTAT             * discharged ?
+         GOTO       FBTP1000 IF NOT EQUAL   * no.
+.
+         MATCH      ADATE,DDATE             * day case patient ?
+         GOTO       FBTP1000 IF NOT EQUAL   * no.
+.
+         PACK       KEY30,AADMNO,Z70
+         CALL       RDSTRAN2
+         CALL       RDPTRAN2
+         BRANCH     OVRCD,FBTP9999
+         COMPARE    TADMN,AADMNO            * same admission ?
+         GOTO       FBTP9999 IF NOT EQUAL   * No.
+.
+         IF         FORM1=1
+           MATCH      SAVBTYP,TRBTYP
+           GOTO       FBTP9999 IF NOT EQUAL
+         ELSE
+           PACK       KEY5,ANSB,ANST,TRBTYP
+           CALL       RDCODE1
+           BRANCH     OVRCD,FBTP9999
+           MATCH      SAVIND6,TCINDC6         * same bed type indicator ?
+           GOTO       FBTP9999 IF NOT EQUAL
+         ENDIF
+.
+         MATCH      ADATE,TODATE
+         GOTO       FBTP9999 IF LESS
+.
+         MOVE       ONE,NBRDAYS             * no of bed days is one for daycase
+         GOTO       FBTP9999
+.
+FBTP1000 PACK       KEY30,AADMNO,SP20,SP10
+         CALL       RDSTRAN2
+FBTP1200 CALL       RDKTRAN2
+         BRANCH     OVRCD,FBTP4000
+.
+         COMPARE    TADMN,AADMNO            * same admission ?
+         GOTO       FBTP4000 IF NOT EQUAL
+.
+         REP        " 0",TDATE
+         MOVE       TDATE,STDATE
+         MATCH      ANSA,TMOVE              * Admission record ?
+         GOTO       FBTP2000 IF EQUAL
+.
+         MATCH      ANSR,TMOVE              * Return record ?
+         GOTO       FBTP2000 IF EQUAL
+.
+         CMATCH     ANSC,TMOVE              * Change record ?
+         GOTO       FBTP2200 IF EQUAL
+         GOTO       FBTP3000
+.
+.        Admission/Return record
+.
+FBTP2000 
+         MATCH      TDATE,TODATE
+         GOTO       FBTP9999 IF LESS
+         PACK       KEY5,ANSB,ANST,TRBTYP
+         CALL       RDCODE1
+         BRANCH     OVRCD,FBTP1200
+         IF         FORM1=1
+           MATCH      SAVBTYP,TRBTYP          * same bed type ?
+           GOTO       FBTP1200 IF NOT EQUAL
+         ELSE
+           MATCH      SAVIND6,TCINDC6         * same bed type indicator ?
+           GOTO       FBTP1200 IF NOT EQUAL
+         ENDIF
+         MOVE       TDATE,WDATE1            * set from date
+         GOTO       FBTP1200                * get next trans record
+.
+.        Change
+.
+FBTP2200 
+         MATCH      TDATE,TODATE
+         IF         @LESS
+           MATCH      SP6,WDATE1              * Check with the fromdate
+           GOTO       FBTP9999 IF EQUAL
+           MOVE       TODATE,WDATE2           * set to date
+           CALL       SBDY0000                * Calculate bed days
+           GOTO       FBTP9999
+         ENDIF
+.
+         PACK       KEY5,ANSB,ANST,TRBTYP
+         CALL       RDCODE1
+         BRANCH     OVRCD,FBTP2400
+         IF         FORM1=1
+           MATCH      SAVBTYP,TRBTYP
+           GOTO       FBTP2400 IF NOT EQUAL
+         ELSE
+           MATCH      SAVIND6,TCINDC6      * check if it's the selected bedtype
+           GOTO       FBTP2400 IF NOT EQUAL
+         ENDIF
+.
+.        Change to the selected bed type
+.
+         MATCH      SP8,WDATE1            * check if it was a real change of
+         GOTO       FBTP1200 IF NOT EQUAL   * bed type
+.
+         MOVE       TDATE,WDATE1          * set fromdate of the change bedtype
+         GOTO       FBTP1200
+.
+.        Change to a different bed type, check if it was from selected bedtype
+.
+FBTP2400 MATCH      SP8,WDATE1           
+         GOTO       FBTP1200 IF EQUAL
+.
+         MOVE       TDATE,WDATE2
+         CALL       SBDY0000                * Calculate bed days
+         GOTO       FBTP1200                * get next trans record
+.
+.        Discharge/Leave record always on the same bed type as previous record
+.
+FBTP3000 MATCH      SP8,WDATE1
+         GOTO       FBTP3200 IF EQUAL       * Was not on selected bed type
+.
+         MATCH      TDATE,TODATE
+         IF         @LESS
+           MOVE       TODATE,WDATE2         * set to end date
+         ELSE
+           MOVE       TDATE,WDATE2          * Set to date
+         ENDIF
+         REP        " 0",WDATE2
+         CALL       SBDY0000                * Calculate bed days
+.
+FBTP3200 CMATCH     "D",TMOVE
+         GOTO       FBTP1200 IF NOT EQUAL   * get next record
+         GOTO       FBTP9999
+.
+.        check the last record
+.
+FBTP4000 MATCH      SP8,WDATE1
+         GOTO       FBTP9999 IF EQUAL       * Was not on selected bed type
+.
+         MOVE       TODATE,WDATE2
+         REP        " 0",WDATE2
+         CALL       SBDY0000                * Calculate bed days
+         GOTO       FBTP9999
+.
+FBTP9999 RETURN
++
+.
+

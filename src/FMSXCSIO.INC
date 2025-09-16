@@ -1,0 +1,126 @@
+RSFMXC1   RESET     KEY26
+          READ      FMSXCSA1,KEY26;;
+          RETURN
+.
+RAFMXC1   RESET     KEY26
+          MOVE      ZERO,OVRCD
+          READ      FMSXCSA1,KEY26;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMXC1   RESET     KEY26
+          MOVE      ZERO,OVRCD
+          READ      FMSXCSA1,KEY26;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMXC1   MOVE      ZERO,OVRCD
+          READKS    FMSXCSA1;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMXC1   MOVE      ZERO,OVRCD
+          READKP    FMSXCSA1;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMXC1   UPDATE    FMSXCSA1;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          RETURN
+.
+WRFMXC1   RESET     KEY26
+          WRITE     FMSXCSA1,KEY26;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          RETURN
+.
+DEFMXC1   RESET     KEY26
+          DELETE    FMSXCSA1,KEY26
+          RETURN
+.
+RSFMXC2   RESET     KEY31
+          READ      FMSXCSA2,KEY31;;
+          RETURN
+.
+RAFMXC2   RESET     KEY31
+          MOVE      ZERO,OVRCD
+          READ      FMSXCSA2,KEY31;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMXC2   RESET     KEY31
+          MOVE      ZERO,OVRCD
+          READ      FMSXCSA2,KEY31;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMXC2   MOVE      ZERO,OVRCD
+          READKS    FMSXCSA2;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMXC2   MOVE      ZERO,OVRCD
+          READKP    FMSXCSA2;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMXC2   UPDATE    FMSXCSA2;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          RETURN
+.
+WRFMXC2   RESET     KEY31
+          WRITE     FMSXCSA2,KEY31;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          RETURN
+.
+DEFMXC2   RESET     KEY31
+          DELETE    FMSXCSA2,KEY31
+          RETURN
+.
+RSFMXC3   RESET     KEY31
+          READ      FMSXCSA3,KEY31;;
+          RETURN
+.
+RAFMXC3   RESET     KEY31
+          MOVE      ZERO,OVRCD
+          READ      FMSXCSA3,KEY31;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDFMXC3   RESET     KEY31
+          MOVE      ZERO,OVRCD
+          READ      FMSXCSA3,KEY31;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKFMXC3   MOVE      ZERO,OVRCD
+          READKS    FMSXCSA3;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPFMXC3   MOVE      ZERO,OVRCD
+          READKP    FMSXCSA3;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPFMXC3   UPDATE    FMSXCSA3;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          RETURN
+.
+WRFMXC3   RESET     KEY31
+          WRITE     FMSXCSA3,KEY31;FMXCLED,FMXCSUB,FMXCCOS,FMXCCPR:
+                                  FMXCSPR,FMXCSPAR
+          RETURN
+.
+DEFMXC3   RESET     KEY31
+          DELETE    FMSXCSA3,KEY31
+          RETURN
+.

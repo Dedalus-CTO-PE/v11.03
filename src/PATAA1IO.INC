@@ -1,0 +1,77 @@
+.
+.         FILE  I/O REQUESTS FOR ALL PATIENT ADMISSIONS AUDIT FILES
+.
+.OVRCD  FORM            1             0=NOT OVER
+.                                     1= OVER
+.
+.         NOTE:-
+.                  UPAAAX  IS THE WRITE CALL
+.                  RDAAAX  IS THE READ CALL
+.                  RDSAAAX  IS THE READ SECTOR 0 CALL
+.                  WRSAAAX  IS THE WRITE ONE TO SECTOR 0 CALL
+.
+RDSAAUD   READ      PATAUAA1,ZERO;SECTOR
+          RETURN
+.
+CRAAUD    CLOSE     PATAUAA1
+          OPEN      PATAUAA1,"pataa1af"
+          CLOSE     PATAUAA1
+          OPEN      PATAUAA1,"pataa1af"
+          WRITE     PATAUAA1,ZERO;SEC1,SP30,SP30,SP30,SP30,SP30,SP30,SP30:
+                                  SP30,SP10
+.
+          RETURN
+.
+RDAAUD    READ      PATAUAA1,SECTOR;ADD,AMM,ACC,AYY,TIMEIS,ACTION,OPERCODE:
+                             SAADMNO,SAURNO,SADATE,SATIME,SASTAT:
+                             SAPORT,SATRANNO,SAINVPRT,SALACDTE:
+                             SACANCEL,SAWARD,SABED,SADOCTR,SADOCTA,SADOCTL:
+                             SASRCE,SATYPE,SACLSS,SACARE,SAFUNDH,SAFNDTB:
+                             SAFNDMM,SAELIG,SAVISIT,SAALERG,SAILLN,SADIAG1
+          ADD       ONE,SECTOR
+          READ      PATAUAA1,SECTOR;SADIAG2,SADISC,SADOCTT,SACLSSFT,SAALLOW:
+                             SAMBS,SACLAIM,SADIET,SAPLOCCR,SASTAY,SADYHOSP:
+                             SAMEMB,SAMEMBNO,SACOMM1,SACOMM2,SAPLUR,SAPURGE:
+                             SAUSR1,SAUSR2,SAUSR3,SAUSR4,SAUSR5,SAUSR6,SAUSR7:
+                             SADSCHI,SARDRNAM,SAFNDYY,SAFNDCG,SAOCCDTE,SACODDTE:
+                             SARETDTE,SAMUMADM
+          ADD       ONE,SECTOR
+          READ      PATAUAA1,SECTOR;SDPTMIPV,SABWGHT,SPTMSRFG,SPTMSGPP:
+                             SPTMSFHA,SPTMSECR,SPTMSMGI,SPTMIDIG,SPTMIGPT:
+                             SPTMIDOF,SPTMIREF,SPTMIDFC,SPTMIPHP,SPTMIAGN:
+                             SPTMIESS,SPTMIUS8,SPTMIUS9,SPTMIUS0,SPTMSDRG:
+                             SPTMIOPE,SPTMIXWD,SPTMIADC,SPTMIREG,SPTMIUY1:
+                             SPTMIUY2
+          RETURN
+.
+WRAAUD    CLOCK     TIME,TIMEIS
+          READ      PATAUAA1,ZERO;SECTOR
+          WRITE     PATAUAA1,SECTOR;CDD,CMM,CCC,CYY,TIMEIS,ACTION,PASSCODE:
+                             SAADMNO,SAURNO,SADATE,SATIME,SASTAT:
+                             SAPORT,SATRANNO,SAINVPRT,SALACDTE:
+                             SACANCEL,SAWARD,SABED,SADOCTR,SADOCTA,SADOCTL:
+                             SASRCE,SATYPE,SACLSS,SACARE,SAFUNDH,SAFNDTB:
+                             SAFNDMM,SAELIG,SAVISIT,SAALERG,SAILLN,SADIAG1:
+                             SP30,SP10,SP7
+          ADD       ONE,SECTOR
+          WRITE     PATAUAA1,SECTOR;SADIAG2,SADISC,SADOCTT,SACLSSFT,SAALLOW:
+                             SAMBS,SACLAIM,SADIET,SAPLOCCR,SASTAY,SADYHOSP:
+                             SAMEMB,SAMEMBNO,SACOMM1,SACOMM2,SAPLUR,SAPURGE:
+                             SAUSR1,SAUSR2,SAUSR3,SAUSR4,SAUSR5,SAUSR6,SAUSR7:
+                             SADSCHI,SARDRNAM,SAFNDYY,SAFNDCG,SAOCCDTE,SACODDTE:
+                             SARETDTE,SAMUMADM,SP5
+.
+          ADD       ONE,SECTOR
+          WRITE     PATAUAA1,SECTOR;SDPTMIPV,SABWGHT,SPTMSRFG:
+                             SPTMSGPP,SPTMSFHA,SPTMSECR,SPTMSMGI,SPTMIDIG:
+                             SPTMIGPT,SPTMIDOF,SPTMIREF,SPTMIDFC,SPTMIPHP:
+                             SPTMIAGN,SPTMIESS,SPTMIUS8,SPTMIUS9,SPTMIUS0:
+                             SPTMSDRG,SPTMIOPE,SPTMIXWD,SPTMIADC,SPTMIREG:
+                             SPTMIUY1,SPTMIUY2,SP30,SP30,SP30,SP30,SP9
+          ADD       ONE,SECTOR
+          WRITE     PATAUAA1,ZERO;SECTOR,SP30,SP30,SP30,SP30,SP30,SP30,SP30:
+                             SP30,SP10
+          RETURN
++
+.
+

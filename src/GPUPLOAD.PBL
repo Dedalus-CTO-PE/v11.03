@@ -1,0 +1,1256 @@
+.******************************************************************************
+.* System    :   Patient Management System                                    *
+.* Program   :   GPUPLOAD                                                     *
+.* Desc      :   Load GP & Practice data into IBA                             *
+.******************************************************************************
+.* Date      :   31/01/2002                                                   *
+.* Author    :   Davin                                                        *
+.* Mods      :                                                                *
+.*  V10.11.01    09/08/2017 Tracey Nguyen      TSK 0299206                    *
+.*               Recompiled for PMSHKIPR/PMSPKIPR                             *
+.*  V10.07.01    10/03/2016 Peter McMullem CAR 0815423                        *
+.*               Use mandatory env var QISNAME to detect Oracle               *
+.*  V10.03.01    19/09/2012  Davin             CAR 269841                     *
+.*               Added isclear of keyword tables                              *
+.*   V9.09.01    29/01/2008  Jill Habasque     CAR 119873                     *
+.*               Added error for 'Practice Principal blank.'                  *
+.*   V9.08.01    09/05/2007  Davin             CAR 137085                     *
+.*             - Mods to inactivate existing GP/Prac links for hcps in the    *
+.*               new data file before uploading                               *
+.*   V9.05.01    10/04/2006  Davin             CAR 94865                      *
+.*             - Mods to use tempfile 2 (Practice-record type 2) to write     *
+.*               GP/Practice link if no provider number exists.               *
+.*             - Write "GPUPLOAD" as user id for hcp/hcg/hcl records written. *
+.*             - Added pmshcg keyword index routine (geng0000).               *
+.*   V9.04.03    27/07/2005  Steve Armstrong   CAR 66545                      *
+.*               Mods to handle upload of preferred method of contact for GP  *
+.*               where non-standard descriptions are present (Cat CZ).        *
+.*   V9.04.02    14/07/2005  Steve Armstrong   CAR 59305                      *
+.*             - Mods to not clear the HCP table fields if the record already *
+.*               exists (so that any fields not overwitten by the upload will *
+.*               retain their existing values).                               *
+.*             - Fixed WLND0000 to CALL RDPMHCL1 instead of RAPMHCL1 prior to *
+.*               updating the pmshclaf record.                                *
+.*   V9.04.01    13/12/2004  Davin  HealthSMart                               *
+.*               Added pracfree & removed pracdivi from temp4 definition      *
+.*               (Practice-record type 5)                                     *
+.******************************************************************************
+.*   V9.03.02    04/08/2004  Davin  CAR 47322                                 *
+.*               Changed to write state to address line 4 in hcp & hcg tables *
+.*   V9.03.01    28/08/2002  Davin                                            *
+.*               Changed to work with or without "^M" at end of each line     *
+.******************************************************************************
+.*   V9.02.02    25/03/2002  Davin                                            *
+.*               Added keyword index generation for HCPs (pmshkiaf)           *
+.*   V9.02.01    12/03/2002  Davin                                            *
+.*               Fixed a couple of bugs                                       *
+.******************************************************************************
++
+          INC       STD001FD
+.
+          INC       PATCODFD/INC            * codes file
+          INC       PMSHCGFD/INC            * Practice file
+          INC       PMSHCLFD/INC            * GP/Practice link file
+          INC       PMSHCPFD/INC            * HCP file
+          INC       PMSHKIFD/INC            * HCP Keyword index
+          INC       PMSPKIFD/INC            * HCG Keyword index
+.
+. ----- Input Text File Definition -----
+.
+INPTEXT1  FILE      ASCII, FIXED=256        * GPDV input file
+.
+. ----- GP tempfile layout -----
+.
+TEMP1     IFILE     SQL, FIXED=441, KEY="U1-10"
+FILELIN1  INIT      " 441 U1-10"
+.
+.Name     Type    Length  Physical  Start   Description
+.----     ----    ------  --------  -----   -----------
+GPCODE    DIM     10         10         1   GP Code
+GPRTYPE   DIM     1          1         11   Record type (1)   (not used)
+GPSURN    DIM     35         35        12   Surname
+GPGIVN    DIM     35         35        47   Given name
+GPTIT     DIM     10         10        82   Title
+GPSEX     DIM     1          1         92   Sex
+GPADD1    DIM     60         60        93   Address 1
+GPADD2    DIM     60         60       153   Address 2
+GPSUBRB   DIM     30         30       213   Suburb
+GPSTATE   DIM     4          4        243   State
+GPPOST    DIM     4          4        247   Postcode
+GPTELEP   DIM     20         20       251   Telephone
+GPFAXNO   DIM     20         20       271   Fax number
+GPMOBNO   DIM     20         20       291   Mobile
+GPEMAIL   DIM     60         60       311   Email
+GPSTAT    DIM     30         30       371   Status            (not used)
+GPPREF    DIM     30         30       401   Preferred contact
+GPLUPD    DIM     10         10       431   Date last updated (not used)
+.
+.End of Record                        441
+.
+. ----- Practices for GP tempfile layout -----
+.
+TEMP2     IFILE     SQL, FIXED=24, KEY="U1-10,11-12"
+FILELIN2  INIT      " 24 U1-10,11-12"
+.
+.Name     Type    Length  Physical  Start   Description
+.----     ----    ------  --------  -----   -----------
+PRGPCODE  DIM     10         10         1   GP Code for Practices
+DPRGPCOU  DIM     2          2         11   Count
+PRGPTYPE  DIM     1          1         13   Record type (2)   (not used)
+PRGPPRAC  DIM     10         10        14   Practice
+.
+.End of Record                         24
+.
+PRGPCOUN  FORM    2
+.
+. ----- Provider no. & Practice for GP tempfile layout -----
+.
+TEMP3     IFILE     SQL, FIXED=32, KEY="U1-10,11-12"
+FILELIN3  INIT      " 32 U1-10,11-12"
+.
+.Name     Type    Length  Physical  Start   Description
+.----     ----    ------  --------  -----   -----------
+PROVCODE  DIM     10         10         1   GP Code
+DPROVCOU  DIM     2          2         11   Count
+PROVTYPE  DIM     1          1         13   Record type (4)   (not used)
+PROVNUMB  DIM     8          8         14   Provider number
+PROVPRAC  DIM     10         10        22   Practice
+.
+.End of Record                         32
+.
+PROVCOUN  FORM    2
+.
+. ----- Practice tempfile layout -----
+.
+TEMP4     IFILE     SQL, FIXED=490, KEY="U1-10"
+FILELIN4  INIT      " 490 U1-10"
+.
+.Name     Type    Length  Physical  Start   Description
+.----     ----    ------  --------  -----   -----------
+PRACCODE  DIM     10         10         1   Practice Code
+PRACTYPE  DIM     1          1         11   Record type (5)   (not used)
+PRACNAME  DIM     80         80        12   Practice name
+PRACADD1  DIM     60         60        92   Address 1
+PRACADD2  DIM     60         60       152   Address 2
+PRACSUBR  DIM     30         30       212   Suburb
+PRACSTTE  DIM     4          4        242   State
+PRACPOST  DIM     4          4        246   Postcode
+PRACFREE  DIM     30         30       250   Free format name field
+PRACTELP  DIM     20         20       280   Telephone
+PRACFAXN  DIM     30         30       300   Fax number
+PRACMOBN  DIM     20         20       330   Mobile            (not used)
+PRACEMAI  DIM     60         60       350   Email
+PRACSTAT  DIM     30         30       410   Status            (not used)
+PRACPREF  DIM     30         30       440   Preferred contact
+PRACPRIN  DIM     10         10       470   GP code for practice principal
+PRACLUPD  DIM     10         10       480   Date last updated (not used)
+.
+.End of Record                        490
+.
+. ----- Program Variables -----
+.
+CDATEIS   DIM       8
+CMDLINE   DIM       50
+COUNT     FORM      8
+DIM4      DIM       4
+DIM8      DIM       8
+DIM10     DIM       10
+DIM20     DIM       20
+ERRCODE   DIM       10
+ERRTYPE   DIM       1
+ERRMESSG  DIM       50
+FNAMEA    DIM       8                            * tempfile for gp
+FNAMEB    DIM       8                            * tempfile for gp/prac link
+FNAMEC    DIM       8                            * tempfile for prov. number
+FNAMED    DIM       8                            * tempfile for practices
+FNAMEI    DIM       8                            * input filename entered
+HCGCOUNT  FORM      8
+HCLCOUNT  FORM      8
+HCPCOUNT  FORM      8
+LINKFLAG  FORM      1                            * overwrite flag for HCL (0=no)
+PTCNHDPS  FORM      1
+.
+. ----- Program Constants -----
+.
+CATCZ     INIT      "CZ"
+RET       INIT      015                          * carriage return
+.
+PRGNAM    INIT      "Upload GPDV Data"
+PRGID     INIT      "GPUPLOAD"
+VERSION   INIT      "V11.03.00"
++
+.******************************************************************************
+.*                                   ML0000                                   *
+.*                                 Main Module                                *
+.******************************************************************************
+ML0000    CALL      INIT0000                * Initialise variables & open files
+          BRANCH    EXIT,ML9000
+.
+          CALL      OPTN0000                * Ask proceed question
+          BRANCH    EXIT,ML9000
+.
+ML1000    CALL      KASC0000                * Keyin ASCII input file
+          BRANCH    EXIT,ML0000
+.
+          CALL      OLNK0000                * Ask overwrite link file
+.
+          CALL      CONTQST                 * Ok to Continue (Y/N/C) ?
+          BRANCH    CEXIT,ML5000,ML1000,ML0000
+.
+ML5000    CALL      OPTM0000                * Open tempfiles
+          CALL      PINP0000                * Process the input file
+          CALL      KILT0000                * Delete tempfiles
+.
+          CALL      GENK0000                * generate HCP keyword records
+          CALL      GENG0000                * generate HCG keyword records
+.
+ML9000    MATCH     SP8,PGM
+          GOTO      ML9999 IF EQUAL
+.
+          CHAIN     PGM                     * Chain back to appropriate menu
+ML9999    SHUTDOWN  ""
++
+.******************************************************************************
+.*                                  INIT0000                                  *
+.*                      Initialise Variables & Open Files                     *
+.******************************************************************************
+INIT0000  CALL      DISPHEAD                * Display screen header
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P64:24,"pmshcpaf";
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          DISPLAY   *P64:24,"pmshcgaf";
+          OPEN      PMSHCGA1,"pmshcgaf"
+.
+          DISPLAY   *P64:24,"pmshclaf";
+          OPEN      PMSHCLA1,"pmshclaf"
+.
+          DISPLAY   *P64:24,"pmshkiaf";
+          OPEN      PMSHKIA1,"pmshkiaf"
+          OPEN      PMSHKIA2,"pmshkiaf"
+.
+          DISPLAY   *P64:24,"pmspkiaf";
+          OPEN      PMSPKIA1,"pmspkiaf"
+          OPEN      PMSPKIA2,"pmspkiaf"
+.
+          CLEAR     FNAMEA                       * set up 1st tempfile
+          APPEND    "gtemp1",FNAMEA
+          APPEND    PORT,FNAMEA
+          RESET     FNAMEA
+          REP       " 0",FNAMEA
+          RESET     FNAMEA
+.
+          CLEAR     FNAMEB                       * set up 2nd tempfile
+          APPEND    "gtemp2",FNAMEB
+          APPEND    PORT,FNAMEB
+          RESET     FNAMEB
+          REP       " 0",FNAMEB
+          RESET     FNAMEB
+.
+          CLEAR     FNAMEC                       * set up 3rd tempfile
+          APPEND    "gtemp3",FNAMEC
+          APPEND    PORT,FNAMEC
+          RESET     FNAMEC
+          REP       " 0",FNAMEC
+          RESET     FNAMEC
+.
+          CLEAR     FNAMED                       * set up 4th tempfile
+          APPEND    "gtemp4",FNAMED
+          APPEND    PORT,FNAMED
+          RESET     FNAMED
+          REP       " 0",FNAMED
+          RESET     FNAMED
+.
+          MOVE      SP70,DIM19
+          GETENV    "QISNAME",DIM19
+          PACK      DIM19,DIM19,SP70
+.
+INIT9000  MOVE      ZERO,EXIT
+          GOTO      INIT9999
+.
+INIT9500  MOVE      ONE,EXIT
+INIT9999  RETURN
++
+.******************************************************************************
+.*                                  OPTN0000                                  *
+.*                         Select option to run upload                        *
+.******************************************************************************
+OPTN0000  DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON," 0",*HOFF," = Exit":
+                    *P1:5,*V2LON," 1",*HOFF," = Upload GP/Practice details":
+                    *P1:7,"Select Option : ";
+.
+OPTN1000  KEYIN     *P17:7,*V2LON,*DV,UNDLN2,*P17:7,OPTION;
+          COMPARE   ZERO,OPTION
+          GOTO      OPTN9500 IF EQUAL
+.
+          COMPARE   ONE,OPTION
+          GOTO      OPTN1000 IF NOT EQUAL
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+OPTN9999  RETURN
++
+.******************************************************************************
+.*                                  OLNK0000                                  *
+.*                     Ask question to overwrite link file                    *
+.******************************************************************************
+OLNK0000  DISPLAY   *P1:13,*EF,"Overwrite any existing records on GP/Practice":
+                               " link file? (Y/N): ";
+.
+OLNK1000  KEYIN     *P65:13,*V2LON,*DV,UNDLN1,*P65:13,ANS;
+          REP       "yYnN",ANS
+          CMATCH    "Y",ANS
+          GOTO      OLNK9500 IF EQUAL
+.
+          CMATCH    "N",ANS
+          GOTO      OLNK1000 IF NOT EQUAL
+.
+          MOVE      ZERO,LINKFLAG
+          GOTO      OLNK9999
+.
+OLNK9500  MOVE      ONE,LINKFLAG
+OLNK9999  RETURN
++
+.******************************************************************************
+.*                                 KASC0000                                   *
+.*                            Keyin ASCI file                                 *
+.******************************************************************************
+KASC0000  KEYIN     *P1:10,*EF,"Keyin Load File Name : ",*V2LON,FNAMEI
+.
+          PACK      FNAMEI,FNAMEI,SP70
+.
+          MATCH     SP70,FNAMEI                  * anything entered ?
+          GOTO      KASC9500 IF EQUAL            * no
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      INPTEXT1,FNAMEI              * open file
+          TRAPCLR   IO
+.
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Input GPDV data file not found.  ";
+            CALL      HITENTER
+            GOTO      KASC0000
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      KASC9999
+.
+KASC9500  MOVE      ONE,EXIT                     * no filename
+KASC9999  RETURN
++
+.******************************************************************************
+.*                                  PINP0000                                  *
+.*                         Process The Input Text File                        *
+.******************************************************************************
+PINP0000  CALL      IBACLOCK
+          PACK      CDATEIS,CCC,CYY,CMM,CDD
+          REP       " 0",CDATEIS
+          DISPLAY   *P1:16,*EF,"GP/Prc Code: ":
+                    *P1:17,"Record Type: ":
+                    *P1:18,"Records    : ":
+                    *P1:20,"Started  : ",*V2LON,CTIMEIS,*HOFF:
+                    *P1:24,"Processing ",*V2LON,FNAMEI,*HOFF;
+          MOVE      ZERO,COUNT
+          CALL      HEAD0000                     * Print the report header
+.
+. ----- Read the input data file into temporary files -----
+.
+PINP1000  READ      INPTEXT1,SEQ;KEY10,KEY1;     * GP code & record type
+          GOTO      PINP8000 IF OVER             * end of file
+.
+          MOVE      ZERO,FORM1
+          MOVE      KEY1,FORM1
+          COMPARE   ONE,FORM1
+          IF        @EQUAL
+            CALL      WRGP0000                   * write to GP tempfile
+            GOTO      PINP5000
+          ENDIF
+.
+          COMPARE   TWO,FORM1
+          IF        @EQUAL
+            CALL      WRPG0000                   * write to Practices for GP
+            GOTO      PINP5000
+          ENDIF
+.
+          COMPARE   FOUR,FORM1
+          IF        @EQUAL
+            CALL      WRPN0000                   * write to Prov. Number for GP
+            GOTO      PINP5000
+          ENDIF
+.
+          COMPARE   FIVE,FORM1
+          IF        @EQUAL
+            CALL      WRPR0000                   * write to Practice tempfile
+            GOTO      PINP5000
+          ENDIF
+.
+          READ      INPTEXT1,SEQ;ANS             * get next record
+.
+PINP5000  ADD       ONE,COUNT
+          IF        (COUNT%500)=0
+            DISPLAY   *P14:16,*V2LON,KEY10:
+                      *P14:17,KEY1:
+                      *P14:18,COUNT;
+          ENDIF
+          GOTO      PINP1000
+.
+. ----- Write data to IBA files -----
+.
+PINP8000  CALL      WGPD0000                     * write GP details
+          CALL      WPRD0000                     * write Practice details
+.
+          CALL      CLND0000                     * inactivate all GP/Prac links
+.
+          CALL      WLND0000                     * write GP/Prac link details
+          CALL      WL2D0000                     * write link from record type 2
+.
+. ----- Finished -----
+.
+PINP9000  CALL      IBACLOCK
+          DISPLAY   *P1:21,"Finished : ",*V2LON,CTIMEIS,*HOFF:
+                    *P1:24,*EL,*B,"No more records.  ";
+          CALL      HITENTER
+          PRINT     *N,*1,COUNT," total input records processed.",*N:
+                    *N,*1,HCPCOUNT," GP records updated/written to pmshcpaf.":
+              *N,*1,HCGCOUNT," Practice records updated/written to pmshcgaf.":
+              *N,*1,HCLCOUNT," GP/Prac records updated/written to pmshclaf.",*N:
+                    *N,*1,"*** End of Report ***"
+PINP9999  RETURN
++
+.******************************************************************************
+.*                                  WRGP0000                                  *
+.*                         Write GP record to tempfile                        *
+.******************************************************************************
+WRGP0000  MOVE      KEY10,GPCODE                 * GP code
+          MOVE      KEY1,GPRTYPE                 * record type
+          READ      INPTEXT1,SEQ;GPSURN,GPGIVN,GPTIT,GPSEX,GPADD1,GPADD2:
+                                 GPSUBRB,GPSTATE,GPPOST,GPTELEP,GPFAXNO:
+                                 GPMOBNO,GPEMAIL,GPSTAT,GPPREF,GPLUPD;
+.
+          PACK      KEY10,GPCODE
+          CALL      RATEMP1
+          IF        OVRCD=1
+            CALL      WRTEMP1                    * write if doesn't exist
+          ENDIF
+          READ      INPTEXT1,SEQ;ANS             * get next record
+WRGP9999  RETURN
++
+.******************************************************************************
+.*                                  WRPG0000                                  *
+.*                   Write Practices for GP record to tempfile                *
+.******************************************************************************
+WRPG0000  MOVE      ZERO,PRGPCOUN                * practice count
+          MOVE      KEY10,PRGPCODE               * GP code for Practice
+          MOVE      KEY1,PRGPTYPE                * record type
+WRPG1000  READ      INPTEXT1,SEQ;PRGPPRAC;
+          PACK      PRGPPRAC,PRGPPRAC,SP70
+          CMATCH    RET,PRGPPRAC
+          GOTO      WRPG9000 IF EQUAL            * end of record
+.
+          MATCH     SP70,PRGPPRAC
+          GOTO      WRPG9000 IF EQUAL            * end of record
+.
+          ADD       ONE,PRGPCOUN
+          PACK      KEY12,PRGPCODE,PRGPCOUN
+          CALL      RATEMP2
+          IF        OVRCD=1
+            CALL      WRTEMP2                    * write if doesn't exist
+          ENDIF
+          GOTO      WRPG1000
+.
+WRPG9000  READ      INPTEXT1,SEQ;ANS             * get next record
+WRPG9999  RETURN
++
+.******************************************************************************
+.*                                  WRPN0000                                  *
+.*                    Write Provider Number record to tempfile                *
+.******************************************************************************
+WRPN0000  MOVE      ZERO,PROVCOUN                * provider number count
+          MOVE      KEY10,PROVCODE               * GP code for prov. number
+          MOVE      KEY1,PROVTYPE                * record type
+WRPN1000  READ      INPTEXT1,SEQ;PROVNUMB,PROVPRAC;
+          PACK      PROVNUMB,PROVNUMB,SP70
+          CMATCH    RET,PROVNUMB
+          GOTO      WRPN9999 IF EQUAL            * end of record
+.
+          MATCH     SP70,PROVNUMB
+          GOTO      WRPN9999 IF EQUAL            * end of record
+.
+          ADD       ONE,PROVCOUN
+          PACK      KEY12,PROVCODE,PROVCOUN
+          CALL      RATEMP3
+          IF        OVRCD=1
+            CALL      WRTEMP3                    * write if doesn't exist
+          ENDIF
+          GOTO      WRPN1000
+.
+WRPN9999  RETURN
++
+.******************************************************************************
+.*                                  WRPR0000                                  *
+.*                      Write Practice record to tempfile                     *
+.******************************************************************************
+WRPR0000  MOVE      KEY10,PRACCODE               * Practice code
+          MOVE      KEY1,PRACTYPE                * record type
+          READ      INPTEXT1,SEQ;PRACNAME,PRACADD1,PRACADD2,PRACSUBR,PRACSTTE:
+                                 PRACPOST,PRACFREE,PRACTELP,PRACFAXN,PRACMOBN:
+                                 PRACEMAI:
+                                 PRACSTAT,PRACPREF,PRACPRIN,PRACLUPD;
+.
+          PACK      KEY10,PRACCODE
+          CALL      RATEMP4
+          IF        OVRCD=1
+            CALL      WRTEMP4                    * write if doesn't exist
+          ENDIF
+          READ      INPTEXT1,SEQ;ANS             * get next record
+WRPR9999  RETURN
++
+.******************************************************************************
+.*                                  WGPD0000                                  *
+.*                         Write GP details to pmshcpaf                       *
+.******************************************************************************
+WGPD0000  MOVE      ZERO,HCPCOUNT
+          PACK      KEY10,SP70
+          CALL      RSTEMP1
+WGPD1000  CALL      RKTEMP1                      * loop through tempfile
+          BRANCH    OVRCD,WGPD9999
+.
+          IF        (HCPCOUNT%100)=0
+            DISPLAY   *P14:16,*V2LON,GPCODE:
+                      *P14:17,GPRTYPE:
+                      *P14:18,HCPCOUNT;
+          ENDIF
+.
+          PACK      KEY10,GPCODE,SP70
+          CALL      RDPMHCP1
+          COMPARE   ONE,OVRCD
+          GOTO      WGPD9000 IF NOT EQUAL        * GP code already on file
+.
+          CALL      CLPMSHCP                     * clear HCP file vars
+          CALL      STGP0000                     * set up vars
+          MOVE      CDATEIS,PMHCCDTE
+          MOVE      CTIMEIS,PMHCCTIM
+          MOVE      "GPUPLOAD  ",PMHCWEBC
+          PACK      KEY10,GPCODE,SP70
+          CALL      WRPMHCP1                     * write record
+          ADD       ONE,HCPCOUNT
+          GOTO      WGPD9500
+.
+WGPD9000  MATCH     "A",PMHCUPDF
+          IF        @EQUAL
+            CALL      STGP0000                   * set up vars
+            MOVE      CDATEIS,PMHCLUPD
+            MOVE      CTIMEIS,PMHCLUPT             
+            MOVE      "GPUPLOAD  ",PMHCWEBU
+            CALL      UPPMHCP1                   * update record automatically
+            ADD       ONE,HCPCOUNT
+          ELSE
+            MOVE      GPCODE,ERRCODE
+            MOVE      GPRTYPE,ERRTYPE
+            MOVE      "Record on GP file set to manual update.",ERRMESSG
+            CALL      PRNT0000                   * write to error report
+          ENDIF
+.
+WGPD9500  GOTO      WGPD1000                     * get next GP from tempfile
+.
+WGPD9999  RETURN
++
+.******************************************************************************
+.*                                  STGP0000                                  *
+.*                         Set up GP fields for HCP file                      *
+.******************************************************************************
+STGP0000  MOVE      GPCODE,PMHCHCPC
+          MOVE      "G ",PMHCHCPT
+          MOVE      GPTIT,PMHCTITL
+          MOVE      GPGIVN,PMHCGNAM
+          MOVE      GPSURN,PMHCSNAM
+          MOVE      GPSEX,PMHCGNDR
+          MOVE      GPADD1,PMHCADR1
+          MOVE      GPADD2,PMHCADR2
+          MOVE      GPSUBRB,PMHCADR3
+          MOVE      GPSTATE,PMHCADR4
+          MOVE      GPPOST,PMHCPOST
+          MOVE      GPEMAIL,PMHCSEML
+          MOVE      GPTELEP,PMHCSTEL
+          MOVE      FIVE,PMHCHCST
+          MOVE      GPSTAT,DIM10
+          CALL      CHDT0000                     * check if date present
+          IF        EXIT<>1
+            MOVE      DIM8,PMHCHCSD
+          ENDIF
+          MOVE      GPFAXNO,PMHCFAXN
+          MOVE      GPMOBNO,PMHCMOBN
+.
+          PACK      PMHCPRFC,SP70
+          MATCH     SP70,GPPREF
+          IF        !@EQUAL
+            CALL      GCOD0000                   * get code from description
+          ENDIF
+.
+          MOVE      "A",PMHCUPDF
+          MOVE      ZERO,PMHCSTTS
+          MOVE      GPSTAT,DIM10
+          CALL      CHAC0000                     * check if GP active
+          IF        EXIT=1
+            MOVE      ONE,PMHCSTTS
+          ENDIF
+STGP9999  RETURN
++
+.******************************************************************************
+.*                                  GCOD0000                                  *
+.*                     Get code from description for cat CZ                   *
+.* Requires: PMHCSEML - surgery email address                                 *
+.*           PMHCFAXN - surgery fax number                                    *
+.* Returns:  PMHCPRFC - code for preferred method of contact (Cat CZ)         *
+.******************************************************************************
+.
+GCOD0000  PACK      KEY5,ANSC,ANSZ,SP70
+          CALL      RDSCODE1                     * position on Category CZ
+GCOD1000  CALL      RDKCODE1                     * read next record
+          BRANCH    OVRCD,GCOD5000               * eof - try defaults
+.
+          MATCH     CATCZ,TCODE                  * same category still ?
+          GOTO      GCOD5000 IF NOT EQUAL        * no - try defaults
+.
+          MATCH     GPPREF,TDESC                 * same description ?
+          GOTO      GCOD9000 IF EQUAL            * yes - load code
+.
+          GOTO      GCOD1000                     * no - get next record
+.
+.         A non-standard description for preferred contact has been found.
+.         If the fax number is not blank, then find the code for "Fax"
+.         and use this to populate the preferred contact method.
+.
+GCOD5000  MATCH     SP20,PMHCFAXN                 * fax no. blank ?
+          IF        !@EQUAL
+            MOVE      "Fax                 ",DIM20
+            GOTO      GCOD6000
+          ENDIF
+.
+.         The fax number is blank, so if the email address is not blank,
+.         then find the code for "E-mail" and use this to populate the preferred
+.         contact method.
+.
+GCOD5100  MATCH     SP20,PMHCSEML                 * email address blank ?
+          IF        !@EQUAL
+            MOVE      "E-mail              ",DIM20
+            GOTO      GCOD6000
+          ENDIF
+.
+.         The email address is blank, so find the code for "Mail" and use
+.         this as the default value to populate the preferred contact method.
+.
+GCOD5200  MOVE      "Mail                ",DIM20
+.
+GCOD6000  PACK      KEY5,ANSC,ANSZ,SP5
+          CALL      RDSCODE1                     * position on category CZ
+GCOD6500  CALL      RDKCODE1                     * read next record
+          BRANCH    OVRCD,GCOD9100               * eof - no match found
+.
+          MATCH     CATCZ,TCODE                  * same category still ?
+          GOTO      GCOD9100 IF NOT EQUAL        * no - no match found
+.
+          MATCH     DIM20,TDESC                  * same description ?
+          GOTO      GCOD6500 IF NOT EQUAL        * no - get next code
+.
+GCOD9000  MOVE      ACODE,PMHCPRFC               * save code to GP file
+          GOTO      GCOD9999
+.
+GCOD9100  MOVE      SP3,PMHCPRFC                 * leave field blank
+.
+GCOD9999  RETURN
++
+.******************************************************************************
+.*                                  CHDT0000                                  *
+.*                     Check for date (dd/mm/yyyy) in field                   *
+.******************************************************************************
+CHDT0000  UNPACK    DIM10,DIM2,DIM1,KEY2,KEY1,DIM4
+          PACK      DIM8,DIM4,KEY2,DIM2
+          TYPE      DIM8
+          GOTO      CHDT9000 IF NOT EQUAL
+.
+          MATCH     SLASH,DIM1
+          GOTO      CHDT9000 IF NOT EQUAL
+.
+          MATCH     SLASH,KEY1
+          GOTO      CHDT9000 IF NOT EQUAL
+.
+          MOVE      ZERO,EXIT                    * date
+          GOTO      CHDT9999
+.
+CHDT9000  MOVE      ONE,EXIT                     * not date
+CHDT9999  RETURN
++
+.******************************************************************************
+.*                                  CHAC0000                                  *
+.*                       Check if GP to be set to ACTIVE                      *
+.******************************************************************************
+CHAC0000  REP       UPPLOW,DIM10
+.
+          MATCH     "INACTIVE",DIM10
+          GOTO      CHAC9000 IF EQUAL
+.
+          MATCH     "DECEASED",DIM10
+          GOTO      CHAC9000 IF EQUAL
+.
+          MATCH     "RETIRED",DIM10
+          GOTO      CHAC9000 IF EQUAL
+.
+          MOVE      ZERO,EXIT                    * active
+          GOTO      CHAC9999
+.
+CHAC9000  MOVE      ONE,EXIT                     * inactive
+CHAC9999  RETURN
++
+.******************************************************************************
+.*                                  WPRD0000                                  *
+.*                      Write Practice details to pmshcgaf                    *
+.******************************************************************************
+WPRD0000  MOVE      ZERO,HCGCOUNT
+          PACK      KEY10,SP70
+          CALL      RSTEMP4
+WPRD1000  CALL      RKTEMP4                      * loop through tempfile
+          BRANCH    OVRCD,WPRD9999
+.
+          IF        (HCGCOUNT%100)=0
+            DISPLAY   *P14:16,*V2LON,PRACCODE:
+                      *P14:17,PRACTYPE:
+                      *P14:18,HCGCOUNT;
+          ENDIF
+.
+          PACK      KEY12,PRACCODE,SP1,ONE,SP70
+          CALL      RDPMHCG1
+          COMPARE   ONE,OVRCD
+          GOTO      WPRD9000 IF NOT EQUAL        * Practice already on file
+.
+          CALL      CLPMSHCG                     * clear HCG file vars
+          CALL      STPR0000                     * set up vars
+          MOVE      CDATEIS,PMHGCDTE
+          MOVE      CTIMEIS,PMHGCTIM
+          MOVE      "GPUPLOAD  ",PMHGWEBC
+          PACK      KEY10,PRACCODE,SP1,ONE,SP70
+          CALL      WRPMHCG1                     * write record
+          ADD       ONE,HCGCOUNT
+          GOTO      WPRD9500
+.
+WPRD9000  MATCH     "A",PMHGUPFL
+          IF        @EQUAL
+            CALL      STPR0000                   * set up vars
+            MOVE      CDATEIS,PMHGLUPD
+            MOVE      CTIMEIS,PMHGLUPT
+            MOVE      "GPUPLOAD  ",PMHGWEBU
+            CALL      UPPMHCG1                   * update record automatically
+            ADD       ONE,HCGCOUNT
+          ELSE
+            MOVE      PRACCODE,ERRCODE
+            MOVE      PRACTYPE,ERRTYPE
+            MOVE      "Record on Practice file set to manual update.",ERRMESSG
+            CALL      PRNT0000                   * write to error report
+          ENDIF
+.
+WPRD9500  GOTO      WPRD1000                     * get next prac from tempfile
+.
+WPRD9999  RETURN
++
+.******************************************************************************
+.*                                  STPR0000                                  *
+.*                     Set up Practice fields for HCG file                    *
+.******************************************************************************
+STPR0000  MOVE      PRACCODE,PMHGPRAC
+          PACK      PMHGCNTR,SP1,ONE
+          MATCH     SP70,PRACPRIN
+          IF        @EQUAL
+            MOVE      PRACCODE,ERRCODE
+            MOVE      PRACTYPE,ERRTYPE
+            MOVE      "Practice principal not allocated.",ERRMESSG
+            CALL      PRNT0000                   * write to error report
+          ENDIF
+
+          PACK      KEY10,PRACPRIN,SP70
+          CALL      RDPMHCP1
+          IF        OVRCD<>1
+            MOVE      PRACPRIN,PMHGSPCD          * must be on HCP file
+          ELSE
+            MOVE      PRACCODE,ERRCODE
+            MOVE      PRACTYPE,ERRTYPE
+            MOVE      "Practice principal does not exist on HCP file.",ERRMESSG
+            CALL      PRNT0000                   * write to error report
+          ENDIF
+          MOVE      PRACNAME,PMHGPNAM
+          MOVE      PRACADD1,PMHGADD1
+          MOVE      PRACADD2,PMHGADD2
+          MOVE      PRACSUBR,PMHGADD3
+          MOVE      PRACSTTE,PMHGADD4
+          MOVE      PRACPOST,PMHGPOST
+          MOVE      PRACEMAI,PMHGPEML
+          MOVE      PRACTELP,PMHGPTEL
+          MOVE      PRACFAXN,PMHGPFAX
+          MOVE      PRACSTAT,DIM10
+          CALL      CHDT0000                     * check if date present
+          IF        EXIT<>1
+            MOVE      DIM8,PMHGPSTT
+          ENDIF
+          MOVE      PRACPREF,PMHGPPCN
+          MOVE      "0",PMHGGPPI
+          MOVE      "A",PMHGUPFL
+          MOVE      ZERO,PMHGSTTS
+          MOVE      PRACSTAT,DIM10
+          CALL      CHAC0000                     * check if Practice active
+          IF        EXIT=1
+            MOVE      ONE,PMHGSTTS
+          ENDIF
+STPR9999  RETURN
++
+.******************************************************************************
+.*                                  WLND0000                                  *
+.*                     Write GP/Prac link details to pmshclaf                 *
+.******************************************************************************
+WLND0000  MOVE      ZERO,HCLCOUNT
+          PACK      KEY12,SP70
+          CALL      RSTEMP3
+WLND1000  CALL      RKTEMP3                      * loop through tempfile
+          BRANCH    OVRCD,WLND9999
+.
+          IF        (HCLCOUNT%100)=0
+            DISPLAY   *P14:16,*V2LON,PROVCODE:
+                      *P14:17,PROVTYPE:
+                      *P14:18,HCLCOUNT;
+          ENDIF
+.
+          PACK      KEY10,PROVCODE,SP70          * valid GP code?
+          CALL      RDPMHCP1
+          BRANCH    OVRCD,WLND9000
+.
+          PACK      KEY12,PROVPRAC,SP1,ONE,SP70  * valid Practice code?
+          CALL      RDPMHCG1
+          BRANCH    OVRCD,WLND9000
+.
+          PACK      KEY20,PROVCODE,PROVPRAC,SP70
+          CALL      RDPMHCL1                     * check for GP/Prac combo
+          BRANCH    OVRCD,WLND5000
+.
+          COMPARE   ONE,LINKFLAG                 * 1 = overwrite existing rec
+          IF        @EQUAL
+            CALL      STLN0000                   * set up vars
+            MOVE      CDATEIS,PMHLLUPD
+            MOVE      CTIMEIS,PMHLLUPT
+            MOVE      "GPUPLOAD  ",PMHLWEBU
+            CALL      UPPMHCL1                   * update record automatically
+            ADD       ONE,HCLCOUNT
+            GOTO      WLND9500
+          ENDIF
+          GOTO      WLND9000
+
+WLND5000  CALL      CLPMSHCL                     * clear HCL file vars
+          CALL      STLN0000                     * set up vars
+          MOVE      CDATEIS,PMHLCDTE
+          MOVE      CTIMEIS,PMHLCTIM
+          MOVE      "GPUPLOAD  ",PMHLWEBC
+          PACK      KEY20,PROVCODE,PROVPRAC,SP70
+          CALL      WRPMHCL1                     * write record
+          ADD       ONE,HCLCOUNT
+          GOTO      WLND9500
+.
+WLND9000  MOVE      PROVCODE,ERRCODE
+          MOVE      PROVTYPE,ERRTYPE
+          MOVE      "Problem writing to GP/Practice link file.",ERRMESSG
+          CALL      PRNT0000                     * write to error report
+.
+WLND9500  GOTO      WLND1000                     * get next GP/Prac
+.
+WLND9999  RETURN
++
+.******************************************************************************
+.*                                  STLN0000                                  *
+.*                     Set up GP/Practice fields for HCL file                 *
+.******************************************************************************
+STLN0000  MOVE      PROVCODE,PMHLHCPC
+          MOVE      PROVPRAC,PMHLHCPR
+          MOVE      PROVNUMB,PMHLPRV1
+          PACK      KEY10,PROVCODE
+          CALL      RDPMHCP1
+          IF        OVRCD<>1
+            MOVE      "0",PMHLSTAT          * status = active
+          ENDIF
+STLN9999  RETURN
++
+.******************************************************************************
+.*                                  WL2D0000                                  *
+.*                     Write GP/Prac link details to pmshclaf                 *
+.******************************************************************************
+WL2D0000  PACK      KEY12,SP70
+          CALL      RSTEMP2
+WL2D1000  CALL      RKTEMP2                      * loop through tempfile
+          BRANCH    OVRCD,WL2D9999
+.
+          IF        (HCLCOUNT%100)=0
+            DISPLAY   *P14:16,*V2LON,PRGPCODE:
+                      *P14:17,PRGPTYPE:
+                      *P14:18,HCLCOUNT;
+          ENDIF
+.
+          PACK      KEY10,PRGPCODE,SP70          * valid GP code?
+          CALL      RDPMHCP1
+          BRANCH    OVRCD,WL2D9000
+.
+          PACK      KEY12,PRGPPRAC,SP1,ONE,SP70  * valid Practice code?
+          CALL      RDPMHCG1
+          BRANCH    OVRCD,WL2D9000
+.
+          PACK      KEY20,PRGPCODE,PRGPPRAC,SP70
+          CALL      RDPMHCL1                     * check for GP/Prac combo
+          BRANCH    OVRCD,WL2D5000
+.
+          COMPARE   ONE,LINKFLAG                 * 1 = overwrite existing rec
+          IF        @EQUAL
+            CALL      STL20000                   * set up vars
+            MOVE      CDATEIS,PMHLLUPD
+            MOVE      CTIMEIS,PMHLLUPT
+            MOVE      "GPUPLOAD  ",PMHLWEBU
+            CALL      UPPMHCL1                   * update record automatically
+            ADD       ONE,HCLCOUNT
+            GOTO      WL2D9500
+          ENDIF
+          GOTO      WL2D9000
+
+WL2D5000  CALL      CLPMSHCL                     * clear HCL file vars
+          CALL      STL20000                     * set up vars
+          MOVE      CDATEIS,PMHLCDTE
+          MOVE      CTIMEIS,PMHLCTIM
+          MOVE      "GPUPLOAD  ",PMHLWEBC
+          PACK      KEY20,PRGPCODE,PRGPPRAC,SP70
+          CALL      WRPMHCL1                     * write record
+          ADD       ONE,HCLCOUNT
+          GOTO      WL2D9500
+.
+WL2D9000  MOVE      PRGPCODE,ERRCODE
+          MOVE      PRGPTYPE,ERRTYPE
+          MOVE      "Problem writing to GP/Practice link file.",ERRMESSG
+          CALL      PRNT0000                     * write to error report
+.
+WL2D9500  GOTO      WL2D1000                     * get next GP/Prac
+.
+WL2D9999  RETURN
++
+.******************************************************************************
+.*                                  STL20000                                  *
+.*                     Set up GP/Practice fields for HCL file                 *
+.******************************************************************************
+STL20000  MOVE      PRGPCODE,PMHLHCPC
+          MOVE      PRGPPRAC,PMHLHCPR
+          PACK      KEY10,PRGPCODE
+          CALL      RDPMHCP1
+          IF        OVRCD<>1
+            MOVE      "0",PMHLSTAT          * status = active
+          ENDIF
+STL29999  RETURN
++
+.******************************************************************************
+.*                                  CLND0000                                  *
+.*                     Clear existing GP/Prac link details                    *
+.******************************************************************************
+CLND0000  PACK      KEY10,SP70
+          CALL      RSTEMP1
+CLND1000  CALL      RKTEMP1                      * loop through tempfile 1
+          BRANCH    OVRCD,CLND9999
+.
+          PACK      KEY20,GPCODE,SP70
+          CALL      RSPMHCL1
+CLND2000  CALL      RKPMHCL1                     * loop through pmshcl for hcp
+          BRANCH    OVRCD,CLND9999
+.
+          MATCH     GPCODE,PMHLHCPC
+          GOTO      CLND1000 IF NOT EQUAL        * same hcp?
+.
+          MOVE      "1",PMHLSTAT                 * status = inactive
+          MOVE      CDATEIS,PMHLLUPD
+          MOVE      CTIMEIS,PMHLLUPT
+          MOVE      "GPUPLOAD  ",PMHLWEBU
+          CALL      UPPMHCL1
+          GOTO      CLND2000
+.
+CLND9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000                                  *
+.*                           Print The Report Header                          *
+.******************************************************************************
+HEAD0000  MOVE      ONE,CNOUNDLN
+          MOVE      "- Error report",CPHDROPT
+          CALL      HEAD80                  * Print the report header
+          PRINT     *N;
+HEAD9999  RETURN
++
+.******************************************************************************
+.*                                  PRNT0000                                  *
+.*                            Print An Error Report                           *
+.******************************************************************************
+PRNT0000  COMPARE   "56",CLNO
+          CALL      HEAD0000 IF NOT LESS    * Print the report header
+.
+          PRINT     *1,ERRCODE,SP2,ERRTYPE,SP2,ERRMESSG
+          ADD       ONE,CLNO
+PRNT9999  RETURN
++
+.******************************************************************************
+.*                                 OPTM0000                                   *
+.*                            Open The Tempfiles                              *
+.******************************************************************************
+OPTM0000  CALL      KILT0000                     * Delete the tempfiles
+.
+          CLEAR     KEY99                        * create gp tempfile
+          APPEND    "isbuild ",KEY99
+          APPEND    FNAMEA,KEY99
+          APPEND    FILELIN1,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+          OPEN      TEMP1,FNAMEA
+.
+          CLEAR     KEY99                        * create gp/prac tempfile
+          APPEND    "isbuild ",KEY99
+          APPEND    FNAMEB,KEY99
+          APPEND    FILELIN2,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+          OPEN      TEMP2,FNAMEB
+.
+          CLEAR     KEY99                        * create prov. number tempfile
+          APPEND    "isbuild ",KEY99
+          APPEND    FNAMEC,KEY99
+          APPEND    FILELIN3,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+          OPEN      TEMP3,FNAMEC
+.
+          CLEAR     KEY99                        * create practice tempfile
+          APPEND    "isbuild ",KEY99
+          APPEND    FNAMED,KEY99
+          APPEND    FILELIN4,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+          OPEN      TEMP4,FNAMED
+.
+OPTM9999  RETURN
++
+.******************************************************************************
+.*                                 KILT0000                                   *
+.*                           Delete The Tempfiles                             *
+.******************************************************************************
+KILT0000  CLOSE     TEMP1,DELETE
+          CLOSE     TEMP2,DELETE
+          CLOSE     TEMP3,DELETE
+          CLOSE     TEMP4,DELETE
+.
+          CLEAR     KEY99                        * tempfile 1
+          APPEND    "iserase ",KEY99
+          APPEND    FNAMEA,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+.
+          CLEAR     KEY99                        * tempfile 2
+          APPEND    "iserase ",KEY99
+          APPEND    FNAMEB,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+.
+          CLEAR     KEY99                        * tempfile 3
+          APPEND    "iserase ",KEY99
+          APPEND    FNAMEC,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+.
+          CLEAR     KEY99                        * tempfile 4
+          APPEND    "iserase ",KEY99
+          APPEND    FNAMED,KEY99
+          RESET     KEY99
+          EXECUTE   KEY99,TASKID
+.
+KILT9999  RETURN
++
+.******************************************************************************
+.*                                 GENK0000                                   *
+.*                           Generate HCP Keywords                            *
+.******************************************************************************
+GENK0000  MATCH     SP70,DIM19
+          IF        !@EQUAL
+            CLEAR     CMDLINE
+            APPEND    "isclear pmshkiaf",CMDLINE
+            APPEND    SP70,CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+          MOVE      ZERO,SECTOR
+          PACK      KEY10,SP70
+          CALL      RSPMHCP1
+GENK1000  CALL      RKPMHCP1
+          BRANCH    OVRCD,GENK9999
+.
+          ADD       ONE,SECTOR
+          IF        SECTOR%100=1
+            DISPLAY   *P1:24,*EL,*V2LON,"Generating HCP Keyword Index: ",SECTOR:
+                                        " - ",PMHCHCPC;
+          ENDIF
+.
+          PROC      PMSHKIUP                     * update pmshkiaf
+          GOTO      GENK1000
+.
+GENK9999  RETURN
++
+.******************************************************************************
+.*                                 GENG0000                                   *
+.*                           Generate HCG Keywords                            *
+.******************************************************************************
+GENG0000  MATCH     SP70,DIM19
+          IF        !@EQUAL
+            CLEAR     CMDLINE
+            APPEND    "isclear pmspkiaf",CMDLINE
+            APPEND    SP70,CMDLINE
+            RESET     CMDLINE
+            EXECUTE   CMDLINE,TASKID
+          ENDIF
+.
+          MOVE      ZERO,SECTOR
+          PACK      KEY12,SP70
+          CALL      RSPMHCG1
+GENG1000  CALL      RKPMHCG1
+          BRANCH    OVRCD,GENG9999
+.
+          ADD       ONE,SECTOR
+          IF        SECTOR%100=1
+            DISPLAY   *P1:24,*EL,*V2LON,"Generating HCG Keyword Index: ",SECTOR:
+                                        " - ",PMHGPRAC,SP1,PMHGCNTR;
+          ENDIF
+.
+          PROC      PMSPKIUP                     * update pmspkiaf
+          GOTO      GENG1000
+.
+GENG9999  RETURN
++
+.******************************************************************************
+.*                       I/O Routines For The Tempfile                        *
+.******************************************************************************
+RATEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY10
+          READ      TEMP1,KEY10;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP1   RESET     KEY10
+          READ      TEMP1,KEY10;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY10
+          READKS    TEMP1;GPCODE,GPRTYPE:
+                          GPSURN,GPGIVN,GPTIT,GPSEX,GPADD1,GPADD2:
+                          GPSUBRB,GPSTATE,GPPOST,GPTELEP,GPFAXNO:
+                          GPMOBNO,GPEMAIL,GPSTAT,GPPREF,GPLUPD
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   RESET     KEY10
+          WRITE     TEMP1,KEY10;GPCODE,GPRTYPE:
+                                GPSURN,GPGIVN,GPTIT,GPSEX,GPADD1,GPADD2:
+                                GPSUBRB,GPSTATE,GPPOST,GPTELEP,GPFAXNO:
+                                GPMOBNO,GPEMAIL,GPSTAT,GPPREF,GPLUPD
+          RETURN
+.
+RATEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      TEMP2,KEY12;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP2   RESET     KEY12
+          READ      TEMP2,KEY12;;
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READKS    TEMP2;PRGPCODE,DPRGPCOU,PRGPTYPE,PRGPPRAC
+          GOTO      OVERCOND IF OVER
+          MOVE      DPRGPCOU,PRGPCOUN
+          RETURN
+.
+WRTEMP2   RESET     KEY12
+          MOVE      PRGPCOUN,DPRGPCOU
+          WRITE     TEMP2,KEY12;PRGPCODE,DPRGPCOU,PRGPTYPE,PRGPPRAC
+          RETURN
+.
+RATEMP3   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READ      TEMP3,KEY12;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP3   RESET     KEY12
+          READ      TEMP3,KEY12;;
+          RETURN
+.
+RKTEMP3   MOVE      ZERO,OVRCD
+          RESET     KEY12
+          READKS    TEMP3;PROVCODE,DPROVCOU,PROVTYPE,PROVNUMB,PROVPRAC
+          GOTO      OVERCOND IF OVER
+          MOVE      DPROVCOU,PROVCOUN
+          RETURN
+.
+WRTEMP3   RESET     KEY12
+          MOVE      PROVCOUN,DPROVCOU
+          WRITE     TEMP3,KEY12;PROVCODE,DPROVCOU,PROVTYPE,PROVNUMB,PROVPRAC
+          RETURN
+.
+RATEMP4   MOVE      ZERO,OVRCD
+          RESET     KEY10
+          READ      TEMP4,KEY10;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP4   RESET     KEY10
+          READ      TEMP4,KEY10;;
+          RETURN
+.
+RKTEMP4   MOVE      ZERO,OVRCD
+          RESET     KEY10
+          READKS    TEMP4;PRACCODE,PRACTYPE:
+                          PRACNAME,PRACADD1,PRACADD2,PRACSUBR,PRACSTTE:
+                          PRACPOST,PRACFREE,PRACTELP,PRACFAXN,PRACMOBN,PRACEMAI:
+                          PRACSTAT,PRACPREF,PRACPRIN,PRACLUPD
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP4   RESET     KEY10
+          WRITE     TEMP4,KEY10;PRACCODE,PRACTYPE:
+                                PRACNAME,PRACADD1,PRACADD2,PRACSUBR,PRACSTTE:
+                                PRACPOST,PRACFREE,PRACTELP,PRACFAXN,PRACMOBN:
+                                PRACEMAI:
+                                PRACSTAT,PRACPREF,PRACPRIN,PRACLUPD
+          RETURN
++
+.==============================================================================
+.
+          INC       STD001IO
+.
+          INC       CLPMSHCG                * clear HCG file
+          INC       CLPMSHCL                * clear HCL file
+          INC       CLPMSHCP                * clear HCP file
+          INC       PMSHKIPR                * update HCP keyword
+          INC       PMSPKIPR                * update HCG keyword
+.
+          INC       PATCODIO/INC            * Codes file
+          INC       PMSHCGIO/INC            * Practice file
+          INC       PMSHCLIO/INC            * GP/Practice link file
+          INC       PMSHCPIO/INC            * HCP file
+          INC       PMSHKIIO/INC            * HCP Keyword index
+          INC       PMSPKIIO/INC            * HCG Keyword index
++

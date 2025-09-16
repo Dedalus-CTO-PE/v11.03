@@ -1,0 +1,749 @@
+.*******************************************************************************
+.* System      :   OUTPATIENTS              
+.* Program     :   IBAOUT19
+.* Desc        :   Statistics Report 2     
+.* Written for :   Taranaki (NZ)            
+.*******************************************************************************
+.* Date        :   09/03/1994
+.* Author      :   Glenn Berry
+.* Mods        :                                                               *
+.*******************************************************************************
+.*        V11.02.01 09/02/2022  Thanh T       TSK 0905641                      *
+.*                  Recompiled as OUTMA1FD changes                             *
+.*        V10.07.01  29/10/2015  Ebon Clements  CAR 268970                     *
+.*                   Change to use OUTCLIFD index 1 instead of index 2         *
+.*        V10.04.01  23/06/2014   J.Tan        CAR 261630                      *
+.*                   Removed port number from temp file name                   *
+.*        V10.03.01  26/10/2012  Patrick Adair       CAR 247588                *
+.*                   Cleared CLINDESC field before each read                   *
+.*        V5.08.B01  13/03/2000  Steve Armstrong   5.08 mods                   *
+.*                   Mods for changes to OUTCLIFD (effective date)             *
+.*******************************************************************************
+.*                 V5.01.02  10/06/94  Rob Leonard  SRF 601088 
+.*                           Fixed continue Y/N/C bug. Fixed calc of wait times 
+.*                           16/06/94  Rob Leonard
+.*                           Added Date range header. Fix totals being truncated
+.*******************************************************************************
+.
+.============================== 
+. FD LIST
+.============================== 
+.
+          INC       STD001FD
+          INC       IBASEQFD/INC            * Sequential Numbers File
+          INC       TFILEVAR/INC            * Generate Temp File Name
+          INC       WEBERRFD/INC            * Web Server Error Logging
+.
+          INC       OUTBOAFD/INC
+          INC       OUTBB1FD/INC
+          INC       OUTCLIFD/INC
+          INC       OUTSITFD/INC
+          INC       OUTCTYFD/INC
+          INC       OUTMA1FD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       OUTCONFD/INC
+          INC       PATDO1FD/INC
+          INC       PATCOMM/INC
+          INC       PATDRGFD/INC
+          INC       PATVISFD/INC
+.
+.============================== 
+. TEMP FILE DEFINITIONS
+.============================== 
+.
+TMPAFNAM  DIM       8
+TMPFILA1  IFILE     SQL, FIXED=27, KEY="U1-6"
+.
+. NAME    TYPE    LENGTH   PHYSICAL  START LOC.  DESCRIPTION
+. ----    ----    ------   --------  ----------  -----------
+TMPACLIN  DIM       6         6         1       Clinic ID
+TMPANVIS  FORM      5         4         7       No. of New Visits
+TMPARVIS  FORM      5         4        11       No. of Re-Visits Visits
+TMPATWNE  FORM      5         4        15       Total Waiting Time for Visits
+TMPATWRE  FORM      5         4        19       Total Waiting Time for Revisits
+TMPATVAR  FORM      5         4        23       Total Variance between
+.                                               appointment time & time seen.
+.End of record                         27
+.
+.============================== 
+. VARIABLE LIST
+.============================== 
+.
+AVENEW    FORM      5                        * Average Wait time for New Visits
+AVEREV    FORM      5                        * Average Wait time for Re-Visits
+AVEVAR    FORM      5                        * Average Variance of times
+CDYSDAYS  FORM      6
+CDYSFDTE  DIM       8
+CDYSTDTE  DIM       8
+CDYSYEAR  FORM      2
+CLINDESC  DIM       30
+CMDLINE   DIM       80
+COUNT     FORM      3                        * count variable
+DURATION  FORM      4                        * calculated duration of operation
+ENDDATE   DIM       10                       * enddate
+FORM4B    FORM      4                        * time work variable
+NEWREC    FORM      1                        * new record?
+SAVE21    DIM       21
+SAVE36    DIM       36
+SAVOUTNO  FORM      8                        * save outpatient number
+STRDATE   DIM       10                       * start date
+TIMESTOP  DIM       5                        * ending time
+TIMESTRT  DIM       5                        * starting time
+TVIS      FORM      5                        * Total Visits
+TTVIS     FORM      5                        * TOTAL of Total Visits
+TOTLNVIS  FORM      5                        * TOTAL No. of New Visits
+TOTLRVIS  FORM      5                        * TOTAL No. of Re-Visits Visits
+TAVENEW   FORM      5                        * TOTAL Ave Wait time for NewVisits
+TAVEREV   FORM      5                        * TOTAL Ave Wait time for Re-Visits
+TAVEVAR   FORM      5                        * TOTAL Ave Variance of times
+TNOCLIN   FORM      5                        * Total number of clinic records
+VSITE     DIM       6
+.
+++
+PRGID     INIT      "IBAOUT19"
+PRGNAM    INIT      "Statistics Report 2"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.* ML0000 : MAINLINE
+.**************************************************************************
+ML0000    CALL      INIT0000                 * initialization
+          BRANCH    EXIT,ML9999
+.
+ML0100    CALL      OPTN0000                 * select option
+          BRANCH    OPTION,ML1000            * run report
+          GOTO      ML9999                   * exit
+.
+ML1000    CALL      KPER0000                 * get period
+          BRANCH    EXIT,ML0100              * no input
+.
+          CALL      CONTQST                  * continue?
+          BRANCH    CEXIT,ML2000:            * yes
+                          ML1000:            * no
+                          ML0100             * cancel
+.
+ML2000    CALL      CRTP0000                 * Create Temp files
+          CALL      PROC0000                 * process data
+          CALL      GENR0000                 * generate report
+          CALL      KILL0000                 * delete temp file
+          GOTO      ML0100
+.
+ML9999    CHAIN     PGM                      * chain back
++
+.
+.****************************************************************************
+.* INIT0000 : initialization  
+.****************************************************************************
+INIT0000  MOVE      ZERO,EXIT
+          CALL      DISPHEAD
+.
+          MOVE      IDDD,VSITE          * Initialize the current site
+          MATCH     SP6,VSITE           * Valid site ?
+          GOTO      INIT9000 IF EQUAL   * No. Initialization failure
+.
+.         Open the site file so as an extra test on the site, and to get
+.         the parameters for the site (ie. OSTSYST, OSTIRNG, OSTCHRG).
+.
+          DISPLAY   *P56:24,"Opening outsitaf";
+          OPEN      OUTSITA1,"outsitaf"
+.
+          MOVE      VSITE,KEY6          * Key for the site file
+          CALL      RDSITA1             * Read the site record
+          BRANCH    OVRCD,INIT9000      * Invalid site.
+.
+.         Open the control file to get the parameters needed by this program
+.
+          DISPLAY   *P56:24,"Opening "
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,THIRTY1;*183,OTCNNSID
+          READ      CONTROLF,FIFTY9;*27,CPERMTH
+.
+          IF        OTCNNSID = 1
+            MOVE      "out",UID
+            MOVE      "out",OSTFILE
+          ENDIF
+.
+          MATCH     UID,OSTFILE         * Final check. Is UID correct for site?
+          GOTO      INIT9000 IF NOT EQUAL
+.
+          DISPLAY    *P64:24,"patcodes"
+          OPEN       PATCODE1,"patcodes"
+.
+          DISPLAY    *P64:24,"patdo1af"
+          OPEN      PATDO1A1,"patdo1af"
+.
+          DISPLAY    *P64:24,"patdrgaf"
+          OPEN       PATDRGA1,"patdrgaf"
+          OPEN       PATDRGA3,"patdrgaf"
+.
+          PACK       CFNAME,UID,FILBOKA3
+          DISPLAY    *P64:24,CFNAME
+          OPEN       OUTBOKA3,CFNAME
+.
+          DISPLAY    *P64:24,"outbb1af"
+          CALL       OPOTBB12
+.
+          PACK       CFNAME,UID,FILCLIA1
+          DISPLAY    *P64:24,CFNAME
+          OPEN       OUTCLIA1,CFNAME
+.
+          PACK       CFNAME,UID,FILCTYA1
+          DISPLAY    *P64:24,CFNAME
+          OPEN       OUTCTYA1,CFNAME
+.
+          PACK       CFNAME,UID,FILMA1A2
+          DISPLAY    *P64:24,CFNAME
+          CALL       OPOTMA12
+.
+          DISPLAY    *P64:24,"patvisaf"
+          OPEN       PATVISA1,"patvisaf"
+.
+          CALL      TFILENAM                * Get temp file name
+          MOVE      TFILNAME,TMPAFNAM
+.
+          DISPLAY   *P1:24,*EL
+          GOTO      INIT9999
+.
+INIT9000  DISPLAY   *P1:24,*EL,*B:
+                    "Incorrect call to program - Site info wrong. ";
+          CALL      HITENTER
+.
+INIT9100  MOVE      ONE,EXIT                * Initialization failure
+.
+INIT9999 RETURN
+.
++
+.****************************************************************************
+.* OPTN0000 : get option
+.****************************************************************************
+OPTN0000  MOVE       ONE,EXIT
+.
+          DISPLAY    *P1:3,*EF:
+                     *P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                     *P1:5,*V2LON,ONE,*HOFF,". Run Report"
+.
+OPTN0500  KEYIN      *P1:7,"Please Select : ",*V2LON,OPTION;
+          COMPARE    ZERO,OPTION
+          GOTO       OPTN9999 IF EQUAL
+.
+          MOVE       ZERO,EXIT
+          BRANCH     OPTION,OPTN1000
+.
+          BEEP
+          GOTO       OPTN0500
+.
+.-------- display header according to option chosen ----
+.
+OPTN1000  
+.
+OPTN9999  RETURN
++
+.
+.***************************************************************************
+. KPER0000  : Keyin Period
+.***************************************************************************
+KPER0000  MOVE      ZERO,EXIT
+.
+          DISPLAY   *P1:3,*EF:
+                    *P1:4,"Enter the ",CPERMTH,*P21:4," : ";
+.
+          MOVE      ZERO,CHIGHLT              * 0 = highlight 1 = no highlight
+          MOVE      "25",CCOL                 * column for keyin
+          MOVE      "4",CVERT                 * row for keyin
+          UNPACK    SP20,CYEAR,CMON           * no defaults
+          MOVE      CCC,CCENT
+          CALL      KEYPER
+          BRANCH    OVRCD,KPER9100            * no date keyed in
+.
+          PACK      KEY6,CCENT,CYEAR,CMON
+          CALL      RDDRGA3                   * period on file?
+          BRANCH    OVRCD,KPER9200 
+.
+.-------- Pack start date
+.
+          UNPACK    DRGFDTE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,STRDATE
+.
+.-------- Pack end date
+.
+          UNPACK    DRGTDTE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,ENDDATE
+.
+          DISPLAY   *P35:4,*EL,DRGLDSC:
+                    *P35:5,*EL,STRDATE," to ",ENDDATE
+          GOTO      KPER9999
+.
+KPER9100  MOVE      ONE,EXIT
+          GOTO      KPER9999
+.
+KPER9200  DISPLAY   *P1:24,*EL,*B,"Date not found on date range file.  ";
+          CALL      HITENTER
+          GOTO      KPER0000
+.
+KPER9999  RETURN
++
+.
+.***************************************************************************
+. PROC0000 : Process data and Write to temp file
+.***************************************************************************
+PROC0000  DISPLAY   *P1:7,*EL,*V2LON,"Scanning : ",*HOFF:
+                    *P1:8,*EL,"U/R        : ":
+                    *P1:9,*EL,"Date       : ":
+                    *P1:10,*EL,"Outpatient : ":
+                    *P1:11,*EL,"Slot Number: "
+    
+.-------- Read OUTBB1FD in Date order for outpatient number
+.
+          PACK      KEY16,DRGFDTE,SP20       * start at from date
+          CALL      RDSBOKB2                 * positional read
+PROC1000  CALL      RDKBOKB2                 * read next
+          BRANCH    OVRCD,PROC9999           * no more records
+          MATCH     OBADATE,DRGTDTE          * past end date?
+          GOTO      PROC9999 IF LESS         * yes
+.
+.-------- Read PATVISFD for clinic details
+.
+          PACK      KEY8,OBAOUTNO,SP10
+          CALL      RDVISA1
+          BRANCH    OVRCD,PROC1000           * missing visit file record
+.
+          COMPARE   TWO,PVITYPE              * outpatient?
+          GOTO      PROC1000 IF NOT EQUAL    * no
+.
+.-------- Read OUTBOAFD for details we require
+.
+          PACK      KEY21,PVISITE,PVIDOCT,PVIDATE,SP30
+.
+          MOVE      OBAOUTNO,SAVOUTNO        * save outpatient number
+          PACK      KEY36,PVIURNO,PVIDATE,SP20,SP20
+          CALL      RDSBOKA3
+PROC2000  CALL      RDKBOKA3
+          BRANCH    OVRCD,PROC1000           * the database is stuffed
+.
+          UNPACK    PVIDATE,CCENT,CYEAR,CMON,CDAY
+.
+          DISPLAY   *P20:8,*EL,*V2LON,PVIURNO:
+                    *P20:9,*EL,*V2LON,CDAY,"/",CMON,"/",CCENT,CYEAR:
+                    *P20:10,*EL,*V2LON,OBAOUTNO:
+                    *P20:11,*EL,*V2LON,OBASLOT
+.
+          PACK      SAVE36,PVIURNO,PVIDATE,SP20,SP20
+          MATCH     KEY36,SAVE36             * correct record?
+          GOTO      PROC1000 IF NOT EQUAL    
+.
+          PACK      SAVE21,PVISITE,PVIDOCT,PVIDATE,SP30
+          MATCH     KEY21,SAVE21             * correct record?
+          GOTO      PROC2000 IF NOT EQUAL    * no
+.
+          COMPARE   OBAOUTNO,SAVOUTNO        * correct outpatient number?
+          GOTO      PROC2000 IF NOT EQUAL    * no, get next
+.
+.-------- Now setup the data we want
+.
+          CALL      CVAR0000                 * Clear the temp file data
+          PACK      KEY6,OBACLIN,SP6
+          CALL      RDTMFLA1                 * read data if it exists
+          MOVE      OVRCD,NEWREC
+.
+          MOVE      OBACLIN,TMPACLIN         * Clinic ID
+.
+          PACK      KEY5,ANSC,ANSV,OBAVISIT,SP5 * get visit type
+          CALL      RDCODE1
+          BRANCH    OVRCD,PROC8000
+.
+          MATCH     TCINDC1,ANSN             * New visit?
+          IF        @EQUAL
+            ADD       ONE,TMPANVIS           * Number of new visists
+            CALL      WAIT0000               * calculate waiting time
+            ADD       CDYSDAYS,TMPATWNE      * Waiting Time for New Visits
+            GOTO      PROC6000
+          ENDIF
+.
+          MATCH     TCINDC1,ANSR             * re-visit?
+          IF        @EQUAL
+            ADD       ONE,TMPARVIS           * Number of re-visits
+            CALL      WAIT0000               * calculate waiting time
+            ADD       CDYSDAYS,TMPATWRE      * Waiting Time for Revisits
+            GOTO      PROC6000
+          ENDIF
+.
+PROC6000  MOVE      OBATIME,TIMESTRT
+          MOVE      OTBBASTM,TIMESTOP
+          MATCH     SP5,OTBBASTM             * nothing for time actually seen?
+          GOTO      PROC7000 IF EQUAL        * ignore variance
+          CALL      DURN0000                 * calculate duration
+          ADD       DURATION,TMPATVAR        * diff b/w appt. time & time seen
+.
+PROC7000  PACK      KEY6,TMPACLIN,SP6
+          IF        NEWREC=1
+            CALL      WRTMFLA1               * Write new record
+          ELSE
+            CALL      UPTMFLA1               * Update existing record
+          ENDIF
+.
+PROC8000  GOTO      PROC1000                 * get next
+.
+PROC9999  RETURN
++
+.
+.*********************************************************************
+.* DURN0000                   
+.*        Calculate a duration given two times                 
+.*        Para's  : TIMESTOP      the end time   (HH:MM)      
+.*                  TIMESTRT      the start time (HH:MM)     
+.*        Returns : DURATION      the duration (minutes)    
+.*********************************************************************
+DURN0000  MOVE      ZERO,DURATION
+          MATCH     TIMESTOP,TIMESTRT
+          GOTO      DURN9999 IF EQUAL       * no duration
+          GOTO      DURN1000 IF LESS        * times not over midnight
+.
+.         duration went over midnight so make end time larger
+.         eg 22:00 to 01:00 becomes 22:00 to 25:00 which gives 3 hours duration
+.
+          UNPACK    TIMESTOP,CHOUR,ANS,CMIN
+          MOVE      CHOUR,FORM2
+          ADD       "24",FORM2
+          MOVE      FORM2,CHOUR
+          PACK      TIMESTOP,CHOUR,ANS,CMIN
+.
+.         get end time as minutes
+.
+DURN1000  UNPACK    TIMESTOP,CHOUR,ANS,CMIN
+          MOVE      CHOUR,FORM2             * hour as a form 2
+          MOVE      FORM2,FORM4A            * set up work variable
+          MULT      "60",FORM4A             * hours turned into minutes
+          MOVE      CMIN,FORM2              * minutes as as form 2
+          ADD       FORM2,FORM4A            * the total minutes of end time
+.
+.         get start time as minutes
+.
+          UNPACK    TIMESTRT,CHOUR,ANS,CMIN
+          MOVE      CHOUR,FORM2             * hour as a form 2
+          MOVE      FORM2,FORM4B            * set up work variable
+          MULT      "60",FORM4B             * hours turned into minutes
+          MOVE      CMIN,FORM2              * minutes as as form 2
+          ADD       FORM2,FORM4B            * the total minutes of start time
+.
+.         duration = end minutes - start minutes
+.
+          SUB       FORM4B,FORM4A           * the duration
+          MOVE      FORM4A,DURATION         * the duration
+.
+DURN9999  RETURN
++
+.
+.***************************************************************************
+. WAIT0000 : Calculate Waiting time in days
+. parameters : OBADATE  - date seen
+.              OBABKDTE - booking date/time
+. returns    : CDYSDAYS
+.***************************************************************************
+WAIT0000  MOVE      OBABKDTE,CDYSFDTE        * from date (truncate time)
+          MOVE      OBADATE,CDYSTDTE         * to date
+          CALL      CALCDAYS
+          SUB       ONE,CDYSDAYS             * not inclusive
+.
+WAIT9999  RETURN
+.
++
+.***************************************************************************
+. GENR0000  : Generate Report
+.***************************************************************************
+GENR0000  CLOCK     TIME,CTIMEIS
+          CALL      CTOT0000                 * Clear the Totals
+.
+          DISPLAY   *P1:24,*EL,"Printing : "
+          CALL      PAGE0000                 * new page
+          PACK      KEY6,SP6
+          CALL      RSTMFLA1                 * pos read at start
+          
+GENR1000  CALL      RKTMFLA1                 * next read
+          BRANCH    OVRCD,GENR9000           
+.
+          IF        CLNO > 55
+            CALL      PAGE0000               * new page
+          ENDIF
+.
+          DISPLAY   *P14:24,COUNT,*EL        * Display Screen activity
+          CALL      PREC0000                 * Print record  
+          ADD       ONE,COUNT
+          CALL      TOTL0000                 * Add to totals
+          GOTO      GENR1000                 * print next
+.
+GENR9000  CALL      PTOT0000                 * Print the totals
+          CALL      ENDR0000                 * End report
+.
+GENR9999  RETURN
++
+.
+.***************************************************************************
+. CTOT0000  : Clear the Totals
+.***************************************************************************
+CTOT0000  MOVE      ZERO,TOTLNVIS
+          MOVE      ZERO,TOTLNVIS
+          MOVE      ZERO,TAVENEW
+          MOVE      ZERO,TAVEREV
+          MOVE      ZERO,TNOCLIN
+          MOVE      ZERO,TAVEVAR
+          MOVE      ZERO,TTVIS
+.
+CTOT9999  RETURN
++
+.
+.***************************************************************************
+. TOTL0000  : Add to Totals
+.***************************************************************************
+TOTL0000  ADD       TMPANVIS,TOTLNVIS
+          ADD       TMPARVIS,TOTLRVIS
+          ADD       AVENEW,TAVENEW
+          ADD       AVEREV,TAVEREV
+          ADD       ONE,TNOCLIN
+          ADD       AVEVAR,TAVEVAR
+          ADD       TVIS,TTVIS
+.
+TOTL9999  RETURN
++
+.
+.***************************************************************************
+. PAGE0000  : Print New Page
+.***************************************************************************
+PAGE0000  CALL      HEAD132
+          PRINT     *N,*40,"Date : ",STRDATE," To ",ENDDATE,*N
+          ADD       "3",CLNO
+          CALL      UND132
+          PRINT     *1,"| Clinic ID",*41,"| No. of",*54,"| No. of",*66:
+                    "| Total",*75,"| Ave. Waiting",*93,"| Ave. Waiting":
+                    *111,"| Ave. Variance b/w",*132,"|"
+          PRINT     *1,"|",*41,"| New Visits",*54,"| Revisits",*66:
+                    "| Visits",*75,"| Time for",*93:
+                    "| Time for",*111,"| appointment time",*132,"|"
+          PRINT     *1,"|",*41,"|",*54,"|",*66,"|",*75,"| Visits (days)",*93:
+                    "| Revisits (days)",*111,"| & time seen (mins)",*132,"|"
+.
+          ADD       "3",CLNO
+          CALL      UND132
+.
+PAGE9999  RETURN
++
+.
+.***************************************************************************
+. SETP0000 : Set up vars for print
+.***************************************************************************
+.
+SETP0000  MOVE      SP70,CLINDESC                                   * CAR 247588
+          PACK      KEY8,CCC,CYY,CMM,CDD
+          REP       " 0",KEY8
+          PACK      KEY20,VSITE,TMPACLIN,KEY8
+          CALL      RDCLIA1 
+          IF        OVRCD = 1
+            CALL      RDPCLIA1
+            IF        OVRCD = 0
+              MATCH     VSITE,OCASITE
+              IF        !@EQUAL
+                MOVE      ONE,OVRCD
+              ELSE
+                MATCH     TMPACLIN,OCACLIN
+                IF        !@EQUAL
+                  MOVE      ONE,OVRCD
+                ENDIF
+              ENDIF
+            ENDIF
+          ENDIF
+          IF        OVRCD = 1
+            MOVE      "Unknown Clinic",OCADESC
+            PACK      OCADESC,OCADESC,SP30
+            MOVE      OCADESC,CLINDESC       * use clinic desc
+            GOTO      SETP1000
+          ENDIF
+.
+          MATCH     SP6,OCADOCT
+          IF        @EQUAL
+            MOVE      OCADESC,CLINDESC       * use clinic desc
+          ELSE
+            PACK      KEY6,OCADOCT,SP6
+            CALL      RDDOCT1                
+            BRANCH    OVRCD,SETP1000
+            MOVE      DTITL,PACTITLE        
+            MOVE      DSNAME,PACSNAME      
+            MOVE      "2",PACFRMT       
+            CALL      PACNAME
+            MOVE      PACFNAME,CLINDESC      * use doctor name
+          ENDIF
+.
+SETP1000  ASSIGN    (TMPANVIS+TMPARVIS),TVIS     * total visits 
+          ASSIGN    (TMPATWNE/TVIS),AVENEW       * Ave Wait time for New Visits
+          ASSIGN    (TMPATWRE/TVIS),AVEREV       * Ave Wait time for Re-Visits
+          ASSIGN    (TMPATVAR/TVIS),AVEVAR       * Ave Variance for app.
+.
+SETP9999  RETURN
++
+.
+.***************************************************************************
+. PREC0000  : Print a single record
+.***************************************************************************
+PREC0000  CALL      SETP0000                 * set up vars for print
+          PRINT     *1,"| ",TMPACLIN,SP1,CLINDESC,*41,"| ",TMPANVIS,*54,"| ":
+                    TMPARVIS,*66,"| ",TVIS,*75,"| ",AVENEW,*93:
+                    "| ",AVEREV,*111,"| ",AVEVAR,*132,"|"
+          CALL      UND132
+.
+          ADD       "1",CLNO
+.
+PREC9999  RETURN
++
+.
+.***************************************************************************
+. PTOT0000  : Print Totals
+.***************************************************************************
+PTOT0000  CALL      SETP0000                 * set up vars for print
+.  
+          COMPARE   TNOCLIN,ZERO
+          GOTO      PTOT1000 IF EQUAL
+.
+          ASSIGN    (TAVENEW/TNOCLIN),TAVENEW
+          ASSIGN    (TAVEREV/TNOCLIN),TAVEREV
+          ASSIGN    (TAVEVAR/TNOCLIN),TAVEVAR
+.
+PTOT1000  PRINT     *1,"| TOTALS",*41,"| ",TOTLNVIS,*54,"| ":
+                    TOTLRVIS,*66,"| ",TTVIS,*75,"| ",TAVENEW,*93:
+                    "| ",TAVEREV,*111,"| ",TAVEVAR,*132,"|"
+          CALL      UND132
+.
+          ADD       "1",CLNO
+.
+PTOT9999  RETURN
++
+.
+.***************************************************************************
+. ENDR0000  : End Report
+.***************************************************************************
+ENDR0000  PRINT     *N,"***  End of Report ***"
+          ADD       "2",CLNO 
+.
+          DISPLAY   *P1:24,*B,*EL,"Report Complete.  ";
+          CALL      HITENTER
+.
+ENDR9999  RETURN
++
+.
+.******************************************************************************
+.* CRTP0000   : Create temporary file
+.******************************************************************************
+CRTP0000  CALL      KILL0000                * make sure old file is not there
+.
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    TMPAFNAM,CMDLINE
+          APPEND    " 27 U1-6",CMDLINE
+                              
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+          OPEN      TMPFILA1,TMPAFNAM 
+.
+CRTP9999  RETURN
++
+.
+.******************************************************************************
+.* KILL0000   : Remove temporary file
+.******************************************************************************
+KILL0000  CLOSE     TMPFILA1
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    TMPAFNAM,CMDLINE
+          RESET     CMDLINE
+.
+          EXECUTE   CMDLINE,TASKID
+.
+KILL9999  RETURN
++
+.
+.***************************************************************************
+. CVAR0000 : Clear Temp file Variables
+.***************************************************************************
+CVAR0000  MOVE      SP6,TMPACLIN
+          MOVE      ZERO,TMPANVIS 
+          MOVE      ZERO,TMPARVIS  
+          MOVE      ZERO,TMPATWNE 
+          MOVE      ZERO,TMPATWRE   
+          MOVE      ZERO,TMPATVAR   
+          MOVE      ZERO,AVENEW
+          MOVE      ZERO,AVEREV
+          MOVE      ZERO,AVEVAR
+          MOVE      ZERO,TVIS
+.
+CVAR9999  RETURN
++
+.
+.***************************************************************************
+.***************************************************************************
+.
+.===============================
+.  TEMPORARY FILE IO ROUTINES 
+.===============================
+.
+RSTMFLA1  READ      TMPFILA1,KEY6;;
+          RETURN
+.
+RATMFLA1  MOVE      ZERO,OVRCD
+          READ      TMPFILA1,KEY6;ANS
+          GOTO      OVERCOND IF OVER 
+          RETURN
+.
+RDTMFLA1  MOVE      ZERO,OVRCD
+          READ      TMPFILA1,KEY6;TMPACLIN,TMPANVIS,TMPARVIS:
+                                  TMPATWNE,TMPATWRE,TMPATVAR
+          GOTO      OVERCOND IF OVER 
+          RETURN
+.
+RPTMFLA1  MOVE      ZERO,OVRCD
+          READKP    TMPFILA1;TMPACLIN,TMPANVIS,TMPARVIS:
+                                  TMPATWNE,TMPATWRE,TMPATVAR
+          GOTO      OVERCOND IF OVER 
+          RETURN
+.
+RKTMFLA1  MOVE      ZERO,OVRCD
+          READKS    TMPFILA1;TMPACLIN,TMPANVIS,TMPARVIS:
+                                  TMPATWNE,TMPATWRE,TMPATVAR
+          GOTO      OVERCOND IF OVER 
+          RETURN
+.
+WRTMFLA1  WRITE     TMPFILA1,KEY6;TMPACLIN,TMPANVIS,TMPARVIS:
+                                  TMPATWNE,TMPATWRE,TMPATVAR
+          RETURN
+.
+UPTMFLA1  UPDATE    TMPFILA1;TMPACLIN,TMPANVIS,TMPARVIS:
+                                  TMPATWNE,TMPATWRE,TMPATVAR
+          RETURN
+.
+DETMFLA1  RESET     KEY6            
+          DELETE    TMPFILA1,KEY6
+          RETURN
+.
+.====================================================================== 
+. I/O INCLUDES
+.====================================================================== 
+.
+          INC       STD001IO
+          INC       TFILENAM                * Generate Temp File Name
+          INC       IBASEQIO/INC            * Sequential Numbers File
+          INC       WEBERRIO/INC            * Web Server Error Logging
+          INC       OUTBOAIO/INC
+          INC       OUTBB1IO/INC
+          INC       OUTCLIIO/INC
+          INC       OUTCTYIO/INC
+          INC       OUTMA1IO/INC
+          INC       PATCODIO/INC
+          INC       PATDRGIO/INC
+          INC       PATCOMN3
+          INC       PATDO1IO/INC
+          INC       OUTSITIO/INC
+          INC       PATVISIO/INC
+          INC       CALCDAYS
+.

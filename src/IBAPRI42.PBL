@@ -1,0 +1,1134 @@
+.***************************************************************************
+.* System    :   Private Practice                                          *
+.* Program   :   IBAPRI42                                                  *
+.* Desc      :   Item Number Summary                                       *
+.***************************************************************************
+.* Date      :   29/10/91                                                  *
+.* Author    :   Stephen Armstrong                                         *
+.* Function  :   Prints a summary of item numbers billed by doctors for a  *
+.*               given range of medical practices and dates.  The first    *
+.*               part of the report gives details for indivdual doctors    *
+.*               billing for individual items, while the second part of the*
+.*               report is a summary of all items billed over the given    *
+.*               ranges                                                    *
+.* Mods      :                                                             *
+.* V11.00.01 29/07/2020  J.Tan          TSK 0892130                        *
+.*           Fixed UKEY2                                                   *
+.* V10.13.01 10/08/2018  Richa Phogat   TSK 0848506                        *
+.*           Extended XSDOCT, SAVDOC from 6 to 10                          *
+.*           Replaced RDDOCT1 (patdo1af) with RDPMHCP1 (pmshcpaf) and      *
+.*           associated table fields                                       *
+.*              V10.04.01 15/04/2014  J.Tan          CAR 261630            *
+.*                        Removed port number from temp file name          *
+.*              V10.03.01 26/09/2013 Peter Vela     CAR 287939             *
+.*                  If credit all do not display the item line             *
+.*               V9.11.01 20/10/2008  J.Tan         CAR 178415             *
+.*                        Mods checking for Medical practice user access   *
+.*               V9.03.00 24/02/2004 Lina Vo   CAR 44147                   * 
+.*                        Ported to V9.03                                  *
+.*               V5.08.01 10/05/2000 J.Tan                                 * 
+.*                        Mods for GST                                     *
+.*               V5.07.01  15/10/1999  D.Di Paola                          *
+.*                        Recompiled for PRIITMFD                          *
+.*               V6.00.01 31/08/92 Steve Armstrong                         *
+.*                        Updated to use patdrgaf file for start of fin.   *
+.*                        year                                             *
+.*               V6.00.02 07/10/92  Steve Armstrong                        *
+.*                        Modified for alphanumeric debtor number          *
+.*               V6.00.03 17/11/93  Greg Horvat            SRF 120787      * 
+.*                        Fixed no. of services count on print on          *
+.*        V5.03.01  14/08/1995  Steve Armstrong                            *
+.*                  Recompiled for PRIITMFD                                *
+.*                                                                         *
+.***************************************************************************
+.
+.$$$$$
+.         Item Number Summary Report (IBAPRI42)
+.         -------------------------------------
+.
+.         ML0000
+.         Open files and initialisation
+.         pripracf
+.         pridtraf
+.         priitemf
+.         pmshcpaf
+.         patdrgaf
+.         controlf
+.
+.         ML0100
+.         Get user option
+.            If zero selected, end program
+.            If valid option selected, proceed to get starting practice
+.
+.         ML1000
+.         Get starting medical practice
+.            If exitchar input, return to get next option
+.            If "?" input, display practices on file
+.            If valid option input, proceed to get ending practice
+.
+.         Get ending practice
+.            If exitchar input, return to get next option
+.            If "?" input, display practices on file
+.            If valid option input, proceed to get starting date
+.
+.         Get starting date
+.            If nothing input, defaults to start of financial year 
+.
+.         Get ending date
+.            If nothing input, defaults to current date
+.
+.         Confirm printout
+.            If (Y)es input, proceed to create temporary files
+.            If (N)o input, return to get next option
+.            If (C)ancel input, return to get next option
+.
+.         ML3000
+.         Create temporary working files
+.
+.         Process DTRAN records for printing. Write details to 1st temp. file
+.         and item summary information to 2nd temp. file
+.
+.         Print detailed practice listing using records in 1st temp. file
+.         Print summary using records in 2nd temp. file
+.
+.         Return to get next option
+.
+.         ML9999
+.         Chain back to calling program
+.
+.$$$$$
+.
+.
+          INC       STD001FD
+          INC       IBASEQFD/INC                 * Sequential Numbers File
+          INC       TFILEVAR/INC                 * Generate Temp File Name
+          INC       WEBERRFD/INC                 * Web Server Error Logging
+.
+. ******* 1st Temp. file - contains details of items billed by doctor and 
+.                          practice
+.
+.         Temporary File Definitions
+.         --------------------------
+.
+.         Filename : PRI42Axx.dat          (xx = port id)
+.
+ITMTEMP1  IFILE SQL, FIXED=73, KEY="U1-6,7-16,17-18,19-27,28-30"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+XPRAC     DIM       6           6           1       Medical Practice
+XSDOCT    DIM       10          10          7       Service doctor
+XFLAG     DIM       2           2          17       Item Flag
+XITEM     DIM       9           9          19       Item number
+XSUBN     DIM       3           3          28       Sub item number
+XDESC     DIM      30          30          31       Item description
+XSERVS    FORM      5           4          61       Total number of servs.
+XAMNT     FORM   12.2           8          65       Total amount
+.
+.End of Record                             73
+.
+.
+.
+. ******* 2nd Temp. file - contains item summary details ************
+.
+.         Filename : PRI42Bxx.dat          (xx = port id)
+.
+SUMTEMP1  IFILE SQL, FIXED=27, KEY="U1-2,3-11,12-14"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+XSFLAG    DIM       2           2           1       Item flag
+XSITEM    DIM       9           9           3       Item number
+XSSUBN    DIM       3           3          12       Sub item number
+XSSERVS   FORM      5           4          15       Number of services
+XSAMNT    FORM   12.2           8          19       Total amount
+.
+.End of Record                             27
+.
+.
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+.
+          INC       PRIPRAFD/INC                 * medical practice
+          INC       PRIDTRFD/INC                 * debtor transaction file
+          INC       PRIITMFD/INC                 * item file
+          INC       PRIFCIFD/INC
+          INC       PRICONFD/INC                 * control file
+          INC       PRIALSFD/INC                 * Medical Prac.all user access
+          INC       PRISECFD/INC                 * Medical Prac.security access
+.
+          INC       PATDRGFD/INC                 * date range file
+          INC       PMSHCPFD/INC                 * doctor file
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+.
+AMA       INIT      "A-"
+ERASE     INIT      "iserase "
+FINISH    INIT      "Finish"
+ISBUILD   INIT      "isbuild "
+IBCNUGST  FORM      1
+MBS       INIT      "M-"
+NINE8     FORM      "99999999"
+PIPE      INIT      "|"
+START     INIT      "Start"
+UKEY1     INIT      " 73 U1-6,7-16,17-18,19-27,28-30"
+UKEY2     INIT      " 27 U1-2,3-11,12-14"
+ZED8      INIT      "zzzzzzzz"
+ZED20     INIT      "zzzzzzzzzzzzzzzzzzzz"
+.
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+CMDLIN1   DIM       47
+CMDLIN2   DIM       16
+CMDLIN3   DIM       35
+CURRDAT   DIM       8                            * current date
+.
+DOCNAME   DIM       30                           * formatted doctor name
+DOCSERVS  FORM      5                            * total doctor services
+DOCAMNT   FORM      12.2                         * total doctor amount
+.
+ENDDATE   DIM       8                            * enddate
+EPRAC     DIM       6                            * end practice code
+.
+FULLINE   FORM      1                            * full line print flag
+.                                                   0 = partial line
+.                                                   1 = full line
+.
+MPRAC     DIM       6                            * medical practice code
+MPSERVS   FORM      5                            * total practice services
+MPAMNT    FORM      12.2                         * total practice amount
+.
+PREFIX    DIM       2                            * MBS/AMA prefix
+.
+SAVDOC    DIM       10                           * save doctor variable
+SAVPRAC   DIM       6                            * save practice variable
+SPRAC     DIM       6                            * start practice code
+STRTDATE  DIM       8                            * start date
+SUMMAMT   FORM      12.2                         * summary total amount
+SUMMSERV  FORM      5                            * summary total servs
+.
+TEMPFIL1  DIM       8
+TEMPFIL2  DIM       8
+TMPAMT    FORM      8.2
+USERID    DIM       10
+.
+ZEROAMNT  DIM       1
+.
+.
+PRGID     INIT      "IBAPRI42"
+PRGNAM    INIT      "Item Number Summary"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialisation and open files
+.
+ML0100    CALL      OPTN0000               * select options
+          BRANCH    EXIT,ML9999            * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,ML1000         *
+.
+ML1000    CALL      SPRA0000               * get start medical practice
+          BRANCH    EXIT,ML0100            * exitchar entered
+.
+          CALL      EPRA0000               * get end medical practice
+          BRANCH    EXIT,ML0100            * exitchar entered
+.
+          CALL      SDAT0000               * get starting date
+.
+          CALL      EDAT0000               * get ending date
+.
+          CALL      USID0000               * Keyin user id
+.
+          CALL      CONTQST                * ok to continue ?
+          BRANCH    CEXIT,ML3000:          * Yes
+                          ML0100:          * No
+                          ML0100           * Cancel
+.
+ML3000    CALL      CREA0000               * create temporary file
+          CALL      PROC0000               * process records for printing
+.
+          CALL      PRIN0000               * print records in temp file
+.
+          CALL      SUMM0000               * print item summary
+          CALL      KILL0000               * remove existing file
+          GOTO      ML0100
+.
+ML9999    CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                     * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"pripracf";
+          OPEN      PRIPRAC1,"pripracf"          * medical practice file
+.
+          DISPLAY   *P64:24,"pridtraf";
+          OPEN      PRIDTRA2,"pridtraf"          * debtor transaction file
+.
+          DISPLAY   *P64:24,"prifciaf";
+          OPEN      PRIFCIA1,"prifciaf"
+.
+          DISPLAY   *P64:24,"priitemf";
+          OPEN      PRIITEM1,"priitemf"          * item file
+.
+          OPEN      PRIALSA1,"prialsaf"
+          OPEN      PRISECA1,"prisecaf"
+.
+          DISPLAY   *P64:24,"pmshcpaf";
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          DISPLAY   *P64:24,"patdrgaf";
+          OPEN      PATDRGA2,"patdrgaf"          * date range file
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"          * control file
+          READ      CONTROLF,ZERO;*85,IBCNUGST
+.
+          MOVE      ZERO,CHIGHLT
+          MOVE      ZERO,CDEFDTE
+          MOVE      ONE,PACFRMT
+.
+          CALL      TFILENAM                * Get temp file name
+          MOVE      TFILNAME,TEMPFIL1
+.
+          CALL      TFILENAM                * Get temp file name
+          MOVE      TFILNAME,TEMPFIL2
+.
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Valid option selected                  *
+.*                        TRUE  (1)  Exit option selected                   *
+.*              COPTION = 1                                                 *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = By Medical Practice"
+.
+OPTN1000  KEYIN     *P1:7,*EL,"Select option : ",*DV,UNDLN1:
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION
+          GOTO      OPTN9500 IF EQUAL            * exit
+.
+          BRANCH    COPTION,OPTN9000
+.
+          BEEP
+          GOTO      OPTN1000
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.**************************************************************************
+.*                               SPRA0000              Called by: ML0000  *
+.*                       input start medical practice code                *
+.* Returns:          EXIT  0 = valid code input                           *
+.*                         1 = exitchar input                             *
+.**************************************************************************
+.
+SPRA0000  KEYIN     *P1:9,*EF,"From Medical Practice : ",*DV,UNDLN6:
+                    *P25:9,*V2LON,MPRAC:
+                    *P25:9,*DV,MPRAC
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,SPRA5000:               * nothing entered
+                         SPRA4000:               * ? entered
+                         SPRA9500:               * exitchar input
+                         SPRA8000                * valid input
+.
+          GOTO      SPRA0000                     * invalid input
+.
+SPRA4000  MOVE      ZERO,HLEF
+          CALL      GETSCR00                     * save screen
+SPRA4200  CALL      PRIPRADS                     * list codes on file
+.
+SPRA4500  KEYIN     *P1:24,*EL,"From Medical Practice : ",*DV,UNDLN6:
+                    *P25:24,*V2LON,MPRAC:
+                    *P25:24,*DV,MPRAC
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,SPRA4900:               * nothing entered
+                         SPRA4200:               * ? entered
+                         SPRA9400:               * exitchar input
+                         SPRA7900                * valid input
+.
+          GOTO      SPRA4500                     * invalid input
+.
+SPRA4900  CALL      PUTSCR00                     * restore screen
+SPRA5000  MOVE      SP6,SPRAC
+          DISPLAY   *P25:9,*V2LON,START
+          GOTO      SPRA8500
+.
+SPRA7900  CALL      PUTSCR00                     * restore screen
+          DISPLAY   *P25:9,*V2LON,MPRAC
+SPRA8000  MOVE      MPRAC,SPRAC
+          DISPLAY   *P35:9,PRPRDESC
+.
+SPRA8500  MOVE      ZERO,EXIT
+          GOTO      SPRA9999
+.
+SPRA9400  CALL      FRESCR00
+SPRA9500  MOVE      ONE,EXIT
+.
+SPRA9999  RETURN
++
+.**************************************************************************
+.*                               EPRA0000              Called by: ML0000  *
+.*                       input end medical practice code                  *
+.* Returns:          EXIT  0 = valid code input                           *
+.*                         1 = exitchar input                             *
+.**************************************************************************
+.
+EPRA0000  KEYIN     *P1:11,*EF,"To   Medical Practice : ",*DV,UNDLN6:
+                    *P25:11,*V2LON,MPRAC:
+                    *P25:11,*DV,MPRAC
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,EPRA5000:               * nothing entered
+                         EPRA4000:               * ? entered
+                         EPRA9500:               * exitchar input
+                         EPRA3000                * valid input
+.
+          GOTO      EPRA0000                     * invalid input
+.
+EPRA3000  MATCH     SPRAC,MPRAC                  * end prac < start prac ?
+          GOTO      EPRA8000 IF NOT LESS         * no
+.
+          DISPLAY   *P1:24,*EL,"End practice less than start practice.  ";
+          CALL      HITENTER
+          GOTO      EPRA0000
+.
+EPRA4000  MOVE      ZERO,HLEF
+          CALL      GETSCR00                     * save screen
+EPRA4200  CALL      PRIPRADS                     * list codes on file
+.
+EPRA4500  KEYIN     *P1:24,*EL,"To   Medical Practice : ",*DV,UNDLN6:
+                    *P25:24,*V2LON,MPRAC:
+                    *P25:24,*DV,MPRAC
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,EPRA4900:               * nothing entered
+                         EPRA4200:               * ? entered
+                         EPRA9400:               * exitchar input
+                         EPRA6000                * valid input
+.
+          GOTO      EPRA4500                     * invalid input
+.
+EPRA4900  CALL      PUTSCR00                     * restore screen
+EPRA5000  MOVE      ZED8,EPRAC
+          DISPLAY   *P25:11,*V2LON,FINISH
+          GOTO      EPRA8500
+.
+EPRA6000  MATCH     SPRAC,MPRAC                  * end prac < start prac ?
+          GOTO      EPRA7900 IF NOT LESS         * no
+.
+          DISPLAY   *P1:24,*EL,"End practice less than start practice.  ";
+          CALL      HITENTER
+          GOTO      EPRA4500
+.
+EPRA7900  CALL      PUTSCR00                     * restore screen
+          DISPLAY   *P25:11,*V2LON,MPRAC
+EPRA8000  MOVE      MPRAC,EPRAC
+          DISPLAY   *P35:11,PRPRDESC
+.
+EPRA8500  MOVE      ZERO,EXIT
+          GOTO      EPRA9999
+.
+EPRA9400  CALL      FRESCR00
+EPRA9500  MOVE      ONE,EXIT
+.
+EPRA9999  RETURN
++
+.**************************************************************************
+.*                              CHK0000                Called by: SPRA0000*
+.*                       see what was entered                     EPRA0000*
+.* Returns:           EXIT   0 = invalid input                            *
+.*                           1 = nothing input                            *
+.*                           2 = ? input                                  *
+.*                           3 = exitchar input                           *
+.*                           4 = valid input                              *
+.**************************************************************************
+.
+CHK0000  ENDSET     MPRAC
+         APPEND     SP6,MPRAC
+         RESET      MPRAC
+.
+         MATCH      SP6,MPRAC                    * anything entered ?
+         GOTO       CHK8000 IF EQUAL             * yes
+.
+         MATCH      EXITCHAR,MPRAC               * exitchar input ?
+         GOTO       CHK9000 IF EQUAL             * yes
+.
+         MATCH      QUEST,MPRAC                  * "?" input ?
+         GOTO       CHK8500 IF EQUAL             * yes
+.
+         MOVE       MPRAC,KEY6
+         CALL       RDPRPR1                      * record on file ?
+         COMPARE    ZERO,OVRCD
+         GOTO       CHK9500 IF EQUAL             * yes
+.
+         DISPLAY    *P1:24,*EL,*B,"Medical Practice not on file.  ";
+         CALL       HITENTER
+.
+         MOVE       ZERO,EXIT
+         GOTO       CHK9999
+.
+CHK8000  MOVE       ONE,EXIT
+         GOTO       CHK9999
+.
+CHK8500  MOVE       TWO,EXIT
+         GOTO       CHK9999
+.
+CHK9000  MOVE       THREE,EXIT
+         GOTO       CHK9999
+.
+CHK9500  MOVE       FOUR,EXIT
+.
+CHK9999  RETURN
++
+.****************************************************************************
+.*                               SDAT0000              Called by: ML0000    *
+.*                    get starting date                                     *
+.****************************************************************************
+.
+SDAT0000  DISPLAY   *P1:13,*EF,"From Date :"
+.
+          CALL      IBACLOCK                     * get current date
+.
+          PACK      CURRDAT,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDAT
+          UNPACK    SP10,CCENT,CYEAR,CMON,CDAY
+.
+          PACK      KEY14,CURRDAT,ZED20          * get start of financial year
+          CALL      RDSDRGA2
+SDAT0500  CALL      RDPDRGA2
+          BRANCH    OVRCD,SDAT0700
+.
+          MOVE      DRGNUM,FORM2
+          IF        FORM2 = 1
+             UNPACK    DRGFDTE,CCENT,CYEAR,CMON,CDAY
+          ELSE
+             GOTO   SDAT0500
+          ENDIF
+.
+SDAT0700  MOVE      TEN3,CVERT
+          MOVE      TEN3,CCOL
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,SDAT0000
+          PACK      STRTDATE,CCENT,CYEAR,CMON,CDAY
+.
+SDAT9999  RETURN
++
+.****************************************************************************
+.*                               EDAT0000              Called by: ML0000    *
+.*                    get ending date                                       *
+.****************************************************************************
+.
+EDAT0000  DISPLAY   *P1:15,*EL,"To   Date :"
+.
+          CALL      IBACLOCK                     * get current date
+          PACK      CURRDAT,CCC,CYY,CMM,CDD
+.
+          UNPACK    CURRDAT,CCENT,CYEAR,CMON,CDAY
+          MOVE      TEN5,CVERT                   * default to current date
+          MOVE      TEN3,CCOL
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,EDAT0000
+          PACK      ENDDATE,CCENT,CYEAR,CMON,CDAY
+.
+          MATCH     STRTDATE,ENDDATE
+          IF        @LESS
+             DISPLAY   *P1:24,*EL,*B,"End date before start date.  ";
+             CALL      HITENTER
+             GOTO      EDAT0000
+          ENDIF
+.
+EDAT9999  RETURN
++
+.****************************************************************************
+.         Keyin user id
+.****************************************************************************
+USID0000  KEYIN     *P1:16,*EL,"User Id : ",USERID;
+          PACK      USERID,USERID,SP70
+          MATCH     SP70,USERID
+          GOTO      USID0000 IF EQUAL
+USID9999  RETURN
++
+.****************************************************************************
+.*                               PROC0000              Called by: ML0000    *
+.*                  process the records for printing                        *
+.****************************************************************************
+.
+PROC0000  DISPLAY   *P1:24,*EL,"Processing: ";
+.
+          PACK      KEY30,STRTDATE,SP30
+          CALL      RSPRDT2                      * position in file
+PROC0500  CALL      RKPRDT2                      * read next record
+          BRANCH    OVRCD,PROC9999               * end of file
+.
+          MATCH     PRDTSDAT,ENDDATE             * past end date ?
+          GOTO      PROC9999 IF LESS             * yes
+.
+          COMPARE   ONE,PRDTRTYP                 * item record ?
+          GOTO      PROC0500 IF NOT EQUAL        * no
+.
+.         check the medical practice user access
+.
+          PACK      KEY10,USERID,SP70
+          CALL      RDPRALS1
+          COMPARE   ZERO,OVRCD
+          GOTO      PROC1000 IF EQUAL       * User has access to all Med.Prac.
+.
+          PACK      KEY16,PRDTPRAC,USERID,SP70
+          CALL      RDPRSEC1
+          BRANCH    OVRCD,PROC0500          * no access
+.
+PROC1000  MATCH     SPRAC,PRDTPRAC               * M.P. < start practice ?
+          GOTO      PROC0500 IF LESS             * yes
+.
+          MATCH     PRDTPRAC,EPRAC               * M.P. > end practice ?
+          GOTO      PROC0500 IF LESS             * yes
+.
+.         Valid record found, so write to temp. file
+.
+          DISPLAY   *P13:24,*EL,*V2LON,PRDTDEBT,SP1,PRDTINVN,SP1,PRDTITMN;
+.
+          MOVE      PRDTAMNT,TMPAMT
+          IF        IBCNUGST=2
+            ADD       PRDTGSTM,TMPAMT
+          ENDIF
+          MULT      PRDTSERV,TMPAMT
+.
+          CALL      CNOT0000
+.
+          MATCH     "1",ZEROAMNT
+          GOTO      PROC0500 IF EQUAL
+.
+          PACK      KEY30,PRDTPRAC,PRDTDOCT,PRDTIFLG,PRDTITMN,PRDTSUBN
+          CALL      RDTEMP1                      * record on file already ?
+          BRANCH    OVRCD,PROC2000               * no
+.
+          ADD       PRDTSERV,XSERVS
+          ADD       TMPAMT,XAMNT
+          CALL      UPTEMP1
+          CALL      UPDT0000                     * update item totals
+          GOTO      PROC0500
+.
+PROC2000  MOVE      PRDTSERV,XSERVS
+          MOVE      TMPAMT,XAMNT
+.
+.         See if the item is a pathology test.  If so, then get the item
+.         description from the item file, rather than displaying the test
+.         description (which may vary for the same item number)
+.
+          PACK      KEY22,PRDTIFLG,PRDTITMN,PRDTSUBN,ZED8
+          CALL      RSPRIT1                      * position in item file
+          CALL      RPPRIT1                      * read previous record
+          BRANCH    OVRCD,PROC5000               * end of file
+.
+          COMPARE   PRITPATH,ZERO                * pathology test ?
+          GOTO      PROC5000 IF NOT EQUAL        * no
+.
+          COMPARE   PRDTIFLG,PRITFLAG            * same scan flag ?
+          GOTO      PROC5000 IF NOT EQUAL        * no
+.
+          MATCH     PRDTITMN,PRITITMN            * same item number ?
+          GOTO      PROC5000 IF NOT EQUAL        * no
+.
+          MATCH     PRDTSUBN,PRITSUBN            * same sub item number ?
+          GOTO      PROC5000 IF NOT EQUAL        * no
+.
+          MOVE      PRITDESC,XDESC               * save item description
+          GOTO      PROC6000
+.
+PROC5000  MOVE      PRDTDESC,XDESC               * save DTRAN description
+.
+PROC6000  CALL      WRTEMP1
+          CALL      UPDT0000                     * update item totals
+          GOTO      PROC0500                     * get next record
+.
+PROC9999  RETURN
++
+.****************************************************************************
+.*                              UPDT0000               Called by: PROC0000  *
+.*                         update item totals                               *
+.****************************************************************************
+.
+UPDT0000   PACK       KEY14,PRDTIFLG,PRDTITMN,PRDTSUBN
+           CALL       RDTEMP2                    * record on file ?
+           BRANCH     OVRCD,UPDT1000             * no
+.
+           ADD        PRDTSERV,XSSERVS           * yes
+           ADD        TMPAMT,XSAMNT
+           CALL       UPTEMP2                    * update record totals
+           GOTO       UPDT9999
+.
+UPDT1000   MOVE       PRDTSERV,XSSERVS
+           MOVE       TMPAMT,XSAMNT
+           CALL       WRTEMP2                    * write new item record
+.
+UPDT9999  RETURN
++
+.****************************************************************************
+.*                              PRIN0000               Called by: ML0000    *
+.*                     print the records from the temp file                 *
+.****************************************************************************
+.
+PRIN0000  DISPLAY   *P1:24,*EL,"Printing: ";
+.
+          MOVE      ZERO,CPAGENO
+          MOVE      ZERO,CNOUNDLN
+          MOVE      ZERO,CLNO
+          CALL      IBACLOCK
+.
+          MOVE      ZERO,DOCSERVS
+          MOVE      ZERO,DOCAMNT
+          MOVE      ZERO,MPSERVS
+          MOVE      ZERO,MPAMNT
+.
+          MOVE      SP6,SAVPRAC
+          MOVE      SP10,SAVDOC
+.
+          MOVE      SP30,KEY30
+          CALL      RSTEMP1                      * position at start of file
+PRIN0500  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,PRIN9500               * end of file
+.
+          MATCH     SP6,SAVPRAC                  * first record ?
+          IF        @EQUAL
+             CALL      HEAD0000                  * yes - print header
+             GOTO      PRIN2000
+          ENDIF
+.
+.         See if practice has changed
+.
+          MATCH     SAVPRAC,XPRAC                * same practice still ?
+          IF        @EQUAL
+             GOTO      PRIN1000                  * yes
+          ELSE
+             CALL      DTOT0000                  * print doctor totals
+             CALL      PTOT0000                  * print practice totals
+             MOVE      ZERO,MPSERVS
+             MOVE      ZERO,MPAMNT
+             CALL      HEAD0000                  * print new header
+          ENDIF
+.
+.         See if service doctor has changed
+.
+PRIN1000  MATCH     SAVDOC,XSDOCT                * same doctor ?
+          IF        @EQUAL
+             GOTO      PRIN2000                  * yes
+          ELSE
+             CALL      DTOT0000                  * print doctor totals
+          ENDIF
+.
+PRIN2000  DISPLAY   *P11:24,*EL,*V2LON,XPRAC,SP1,XSDOCT,SP1,XITEM;
+          CALL      DISP0000                     * print item line
+.
+          GOTO      PRIN0500                     * get next record
+.
+PRIN9500  IF        CPAGENO=0
+            CALL      HEAD0000                   * print header
+          ENDIF
+.
+          CALL      DTOT0000                     * print doctor totals
+          CALL      PTOT0000                     * print practice totals
+          CALL      LINE0000                     * draw line across page
+.
+PRIN9999  RETURN
++
+.****************************************************************************
+.*                            DISP0000                 Called by: PRIN0000  *
+.*                  valid record so print it                                *
+.****************************************************************************
+.
+DISP0000  COMPARE   FIFTY3,CLNO                  * page full ?
+          CALL      HEAD0000 IF NOT LESS         * yes
+.
+          COMPARE   ONE,FULLINE                  * print full line ?
+          IF        @EQUAL
+             PRINT     *1,PIPE,*5,XSDOCT;
+             MOVE      "Unknown doctor",DOCNAME
+             MOVE      XSDOCT,KEY10
+             CALL      RDPMHCP1                  * doctor on file (pmshcpaf)
+             BRANCH    OVRCD,DISP1000            * no
+.
+             MOVE      PMHCSNAM,PACSNAME
+             MOVE      PMHCGNAM,PACGNAME
+             MOVE      PMHCTITL,PACTITLE
+             CALL      PACNAME
+             MOVE      PACFNAME,DOCNAME
+.
+DISP1000     UNPACK    DOCNAME,KEY26
+             PRINT     *17,KEY26;
+          ELSE
+             PRINT     *1,PIPE;
+          ENDIF
+.
+          MOVE      MBS,PREFIX
+          MOVE      XFLAG,FORM2
+          LOAD      PREFIX,FORM2,AMA
+          PRINT     *44,PIPE,*46,PREFIX,XITEM;
+.
+          MATCH     SP3,XSUBN                    * blank sub item ?
+          GOTO      DISP2000 IF EQUAL            * yes
+.
+          PRINT     *57,"(",XSUBN,")";
+.
+DISP2000  PRINT     *63,XDESC,*94,PIPE,*100,XSERVS,*111,PIPE,*114,XAMNT:
+                    *132,PIPE
+.
+          ADD       XAMNT,DOCAMNT
+          ADD       XSERVS,DOCSERVS
+          ADD       ONE,CLNO                     * increment line count
+          MOVE      ZERO,FULLINE                 * reset full line flag
+.
+DISP9999  RETURN
++
+.****************************************************************************
+.*                            HEAD0000                 Called by: PRIN0000  *
+.*                       print page heading                       DISP0000  *
+.****************************************************************************
+.
+HEAD0000  CALL      HEAD132                      * display page header
+.
+          UNPACK    STRTDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *40,"From ",CPCDATE,*56,"to";
+.
+          UNPACK    ENDDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *59,CPCDATE
+.
+          CALL      PRAC0000                     * get practice details
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*5,"SERVICE     DOCTOR",*44,PIPE,*48,"ITEM NUMBER":
+                    *94,PIPE,*96,"NO.OF SERVICES",*111,PIPE,*123,"AMOUNT":
+                    *132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      TEN,CLNO                     * increment line count
+          MOVE      ONE,FULLINE                  * set full line flag
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                                 PRAC0000            Called by: HEAD0000  *
+.*                   get the medical practice details                       *
+.****************************************************************************
+.
+PRAC0000  MOVE      "Unknown practice",PRPRDESC
+          MOVE      XPRAC,KEY6
+          CALL      RDPRPR1                      * read practice record
+.
+          PRINT     *N,*1,"MEDICAL PRACTICE :",*20,XPRAC,*30,PRPRDESC,*N
+.
+          MOVE      XSDOCT,SAVDOC
+          MOVE      XPRAC,SAVPRAC
+.
+PRAC9999  RETURN
++
+.****************************************************************************
+.*                             DTOT0000                Called by: PRIN0000  *
+.*                    display doctor totals                                 *
+.****************************************************************************
+.
+DTOT0000  PRINT     *1,PIPE,*44,PIPE:
+                    *45,"-------------------------------------------------":
+                    *94,PIPE,*95,"----------------",*111,PIPE,*112,"----------":
+                    "----------",*132,PIPE,*N:
+                    *1,PIPE,*44,PIPE,*46,"DOCTOR TOTALS",*94,PIPE:
+                    *100,DOCSERVS,*111,PIPE,*114,DOCAMNT:
+                    *132,PIPE
+.
+          ADD       TWO,CLNO                     * increment line count
+.
+          CALL      LINE0000
+          MOVE      ONE,FULLINE                  * set full line flag
+.
+          MOVE      XSDOCT,SAVDOC
+.
+          ADD       DOCSERVS,MPSERVS
+          ADD       DOCAMNT,MPAMNT
+          MOVE      ZERO,DOCSERVS
+          MOVE      ZERO,DOCAMNT
+.
+DTOT9999  RETURN
++
+.****************************************************************************
+.*                             PTOT0000                Called by: PRIN0000  *
+.*                    display practice totals                               *
+.****************************************************************************
+.
+PTOT0000  PRINT     *1,PIPE,*44,PIPE,*46,"PRACTICE TOTALS",*94,PIPE:
+                    *100,MPSERVS,*111,PIPE,*114,MPAMNT,*132,PIPE
+.
+          ADD       ONE,CLNO
+.
+PTOT9999  RETURN
++
+.****************************************************************************
+.*                            SUMM0000                 Called by: ML0000    *
+.*                   print item summary's                                   *
+.****************************************************************************
+.
+SUMM0000  MOVE      ZERO,SUMMSERV                * initialise totals
+          MOVE      ZERO,SUMMAMT
+          MOVE      ONE,CNOUNDLN
+.
+          CALL      SHED0000                     * print new page header
+.
+          MOVE      SP20,KEY14
+          CALL      RSTEMP2                      * position at start of file
+SUMM1000  CALL      RKTEMP2                      * read next record
+          BRANCH    OVRCD,SUMM9500               * end of file
+.
+          COMPARE   FIFTY5,CLNO                  * page full ?
+          IF        @LESS
+             GOTO      SUMM1500                  * no
+          ELSE
+             CALL      SLIN0000                  * yes
+             CALL      SHED0000
+          ENDIF
+.
+.         Print item record
+.
+SUMM1500  DISPLAY   *P11:24,*EL,*V2LON,XSITEM,XSSUBN;
+          MOVE      MBS,PREFIX
+          MOVE      XSFLAG,FORM2
+          LOAD      PREFIX,FORM2,AMA
+          PRINT     *33,PIPE,*35,PREFIX,XSITEM;
+.
+          MATCH     SP3,XSSUBN                   * subitem blank ?
+          GOTO      SUMM2000 IF EQUAL            * yes
+.
+          PRINT     *45,"(",XSSUBN,")";
+.
+SUMM2000  PRINT     *52,PIPE,*59,XSSERVS,*69,PIPE,*71,XSAMNT,*88,PIPE
+.
+          ADD       XSSERVS,SUMMSERV
+          ADD       XSAMNT,SUMMAMT
+          ADD       ONE,CLNO
+          GOTO      SUMM1000                     * get next record
+.
+SUMM9500  DISPLAY   *P1:24,*EL,*V2LON,"** Report Generated **";
+          CALL      SLIN0000                     * print short line
+.
+          PRINT     *33,PIPE,*37,"TOTAL",*52,PIPE,*59,SUMMSERV,*69,PIPE:
+                    *71,SUMMAMT,*88,PIPE
+.
+          CALL      SLIN0000
+.
+          PRINT     *N,*1,"*** End of Report ***"
+.
+SUMM9999  RETURN
++
+.****************************************************************************
+.*                            SHED0000                 Called by: SUMM0000  *
+.*                    print item summary page header                        *
+.****************************************************************************
+.
+SHED0000  CALL      HEAD132
+.
+          UNPACK    STRTDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *40,"From ",CPCDATE,*56,"to";
+.
+          UNPACK    ENDDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          PRINT     *59,CPCDATE,*N
+.
+          CALL      SLIN0000                     * print short line
+.
+          PRINT     *33,PIPE,*37,"ITEM NUMBER",*52,PIPE,*54,"NO.OF SERVICES":
+                    *69,PIPE,*80,"AMOUNT",*88,PIPE
+.
+          CALL      SLIN0000
+.
+          MOVE      EIGHT,CLNO
+.
+SHED9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: PRIN0000  *
+.*                      draw line across page                     HEAD0000  *
+.*                                                                DTOT0000  *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+          ADD       ONE,CLNO
+.
+LINE9999  RETURN
++
+.**************************************************************************
+.*                              SLIN0000               Called by: SUMM0000*
+.*                     print summary page line                    SHED0000*
+.**************************************************************************
+.
+SLIN0000  PRINT    *33,"*--------------------------------------------------":
+                   "----*"
+.
+SLIN9999  RETURN
++
+.**************************************************************************
+.*                              CREA0000               Called by: ML0000  *
+.*             create new temporary files                                 *
+.**************************************************************************
+.
+CREA0000  CALL      KILL0000                     * remove existing file
+.
+          PACK      CMDLIN1,ISBUILD,TEMPFIL1,UKEY1
+          EXECUTE   CMDLIN1,TASKID               * create 1st temp. index file
+.
+          OPEN      ITMTEMP1,TEMPFIL1            * open temp index file
+.
+          PACK      CMDLIN3,ISBUILD,TEMPFIL2,UKEY2
+          EXECUTE   CMDLIN3,TASKID               * create 2nd temp. index file
+.
+          OPEN      SUMTEMP1,TEMPFIL2            * open temp index file
+.
+CREA9999  RETURN
++
+.****************************************************************************
+.*                              KILL0000               Called by: ML0000    *
+.*               close and erase the temporary files              CREA0000  *
+.****************************************************************************
+.
+KILL0000  CLOSE     ITMTEMP1                     * close file
+          CLOSE     SUMTEMP1
+.
+          PACK      CMDLIN2,ERASE,TEMPFIL1       * set file erase command
+          EXECUTE   CMDLIN2,TASKID               * erase temp file
+          PACK      CMDLIN2,ERASE,TEMPFIL2
+          EXECUTE   CMDLIN2,TASKID
+.
+KILL9999 RETURN
++
+.****************************************************************************
+.*                              CNOT0000                                    *
+.*                     get credit note amounts                              *
+.*                       (subtract from TMPAMT)                             *
+.****************************************************************************
+CNOT0000  MOVE      SP70,ZEROAMNT
+.
+          PACK      KEY32,PRDTDEBT,SP1,ONE,PRDTINVN,DPRDTTRN,SP70
+          CALL      RSPRFCI1
+CNOT1000  CALL      RKPRFCI1
+          BRANCH    OVRCD,CNOT9000
+.
+          MATCH     PRDTDEBT,PRFCDEBT
+          GOTO      CNOT9000 IF NOT EQUAL
+.
+          MATCH     " 1",PRFCSCAN
+          GOTO      CNOT9000 IF NOT EQUAL
+.
+          MATCH     PRDTINVN,PRFCINVN
+          GOTO      CNOT9000 IF NOT EQUAL
+.
+          MATCH     DPRDTTRN,PRFCTRAN
+          GOTO      CNOT9000 IF NOT EQUAL
+.
+          ADD       PRFCCAMT,TMPAMT
+.
+          GOTO      CNOT1000
+.
+CNOT9000  IF        TMPAMT=ZERO
+            MOVE      "1",ZEROAMNT
+          ENDIF
+.
+CNOT9999  RETURN
+.****************************************************************************
+.*        IO ROUTINES FOR TEMPORARY FILE                                    *
+.****************************************************************************
+.
+.         1st temporary file
+.
+RSTEMP1   READ      ITMTEMP1,KEY30;;
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          READ      ITMTEMP1,KEY30;XPRAC,XSDOCT,XFLAG,XITEM,XSUBN,XDESC:
+                                   XSERVS,XAMNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    ITMTEMP1;XPRAC,XSDOCT,XFLAG,XITEM,XSUBN,XDESC,XSERVS,XAMNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     ITMTEMP1,KEY30;KEY30,XDESC,XSERVS,XAMNT
+          RETURN
+.
+UPTEMP1   UPDATE    ITMTEMP1;XPRAC,XSDOCT,XFLAG,XITEM,XSUBN,XDESC,XSERVS,XAMNT
+          RETURN
+.
+.         2nd temorary file
+.
+RSTEMP2   READ      SUMTEMP1,KEY14;;
+          RETURN
+.
+RDTEMP2   MOVE      ZERO,OVRCD
+          READ      SUMTEMP1,KEY14;XSFLAG,XSITEM,XSSUBN,XSSERVS,XSAMNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP2   MOVE      ZERO,OVRCD
+          READKS    SUMTEMP1;XSFLAG,XSITEM,XSSUBN,XSSERVS,XSAMNT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP2   WRITE     SUMTEMP1,KEY14;KEY14,XSSERVS,XSAMNT
+          RETURN
+.
+UPTEMP2   UPDATE    SUMTEMP1;XSFLAG,XSITEM,XSSUBN,XSSERVS,XSAMNT
+          RETURN
++
+. =========================================================================
+.  I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+          INC       TFILENAM                * Generate Temp File Name
+          INC       IBASEQIO/INC            * Sequential Numbers File
+          INC       WEBERRIO/INC            * Web Server Error Logging
+.
+          INC       PRIPRADS
+          INC       PRIPRAIO/INC                 * medical practice file
+          INC       PRIDTRIO/INC                 * debtor transaction file
+          INC       PRIFCIIO/INC
+          INC       PRIITMIO/INC                 * item file
+          INC       PRIALSIO/INC                 * Medical Prac.all user access
+          INC       PRISECIO/INC                 * Medical Prac.security access
+.
+          INC       PMSHCPIO/INC                 * doctor file
+          INC       PATDRGIO/INC                 * date range file

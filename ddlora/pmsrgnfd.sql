@@ -1,0 +1,73 @@
+create table pmsrgnaf
+(
+  pmrgurno    varchar2(8) default ' ' not null,
+  pmrguniq    varchar2(10) default ' ' not null,
+  pmrgcntr    varchar2(3) default ' ' not null,
+  pmrggrav    varchar2(1) default ' ' not null,
+  pmrgtotl    varchar2(2) default ' ' not null,
+  pmrgtopl    varchar2(2) default ' ' not null,
+  pmrgtopb    varchar2(2) default ' ' not null,
+  pmrgcurl    varchar2(2) default ' ' not null,
+  pmrgtops    varchar2(2) default ' ' not null,
+  pmrgtpnd    varchar2(2) default ' ' not null,
+  pmrgtpas    varchar2(2) default ' ' not null,
+  pmrgtpai    varchar2(2) default ' ' not null,
+  pmrgtpeo    varchar2(2) default ' ' not null,
+  pmrgtpuo    varchar2(2) default ' ' not null,
+  pmrgdate    varchar2(8) default ' ' not null,
+  pmrgoutl    varchar2(3) default ' ' not null,
+  pmrglasm    varchar2(3) default ' ' not null,
+  pmrglasc    varchar2(1) default ' ' not null,
+  pmrgtots    varchar2(2) default ' ' not null,
+  pmrgplvb    varchar2(3) default ' ' not null,
+  pmrgisbr    varchar2(3) default ' ' not null,
+  pmrgdatm    varchar2(8) default ' ' not null,
+  pmrgestd    varchar2(8) default ' ' not null,
+  pmrgeddb    varchar2(3) default ' ' not null,
+  pmrghght    varchar2(6) default ' ' not null,
+  pmrgwght    varchar2(6) default ' ' not null,
+  pmrgesga    varchar2(2) default ' ' not null,
+  pmrgegas    varchar2(8) default ' ' not null,
+  pmrgnu14    varchar2(2) default ' ' not null,
+  pmrgnu26    varchar2(2) default ' ' not null,
+  pmrgnu27    varchar2(2) default ' ' not null,
+  pmrgml20    varchar2(3) default ' ' not null,
+  pmrgmg20    varchar2(3) default ' ' not null,
+  pmrgacrc    varchar2(3) default ' ' not null,
+  pmrgdacp    varchar2(3) default ' ' not null,
+  pmrgancp    varchar2(10) default ' ' not null,
+  pmrgasbr    varchar2(3) default ' ' not null,
+  pmrgasbf    varchar2(50) default ' ' not null,
+  pmrgcibs    varchar2(3) default ' ' not null,
+  pmrgcibr    varchar2(3) default ' ' not null,
+  pmrgudf1    varchar2(3) default ' ' not null,
+  pmrgudf2    varchar2(3) default ' ' not null,
+  pmrgudf3    varchar2(3) default ' ' not null,
+  pmrgudf4    varchar2(3) default ' ' not null,
+  pmrgudf5    varchar2(3) default ' ' not null,
+  pmrgudf6    varchar2(3) default ' ' not null,
+  pmrgudf7    varchar2(3) default ' ' not null,
+  pmrgudf8    varchar2(3) default ' ' not null,
+  pmrgudf9    varchar2(3) default ' ' not null,
+  pmrgudf0    varchar2(3) default ' ' not null,
+  pmrgwebc    varchar2(10) default ' ' not null,
+  pmrgdatc    varchar2(8) default ' ' not null,
+  pmrgtimc    varchar2(8) default ' ' not null,
+  pmrgreas    varchar2(3) default ' ' not null,
+  pmrgcomp    varchar2(3) default ' ' not null,
+  pmrgspar    varchar2(94) default ' ' not null,
+  lf          varchar2(1) default ' ' not null,
+constraint pmsrgna1 primary key( 
+pmrgurno,
+pmrguniq,
+pmrgcntr)
+)
+tablespace pas_data 
+enable primary key using index 
+  tablespace pas_indx; 
+create unique index pmsrgna2 on pmsrgnaf
+(
+pmrguniq,
+pmrgcntr
+)
+  tablespace pas_indx; 

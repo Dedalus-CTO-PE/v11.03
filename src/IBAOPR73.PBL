@@ -1,0 +1,725 @@
+.******************************************************************************
+.* System         : Operating Rooms              Release 5.01                 *
+.* Program        : IBAOPR73.PBL                 (Wellington only)            *
+.* Name           : Operating Theatre Usage by Speciality                     *
+.******************************************************************************
+.* Date           : 05/11/1991    Melbourne Cup Day and this king has to work *
+.* Author         : Justin Pooches Goats                                      *
+.* Function       : To report on Usage by Speciality - this report is for     *
+.*                  Wellington only so certain things are hardcoded.  Thus    *
+.*                  this program will do bugger all at any other site.        *
+.* Modifications  :                                                           *
+.******************************************************************************
+.*       V11.03.03 21/04/2023  Thanh T        TSK 0909393                     *
+.*                 Changed LOAD1000 to use RSOPDEA6 instead of RSOPDEA1       *
+.*       V11.03.02 19/04/2023  Thanh T        TSK 0909393                     *
+.*                 Changed LOAD1000 to use RSOPDEA6 instead of RSOPDEA1       * 
+.*       V11.03.01 20/03/2023  PJ Le Febour   TSK 0909393a                    *
+.*                 Amended KEY19 to KEY22 for theatre index changes           *
+.*       V10.07.01 14/10/2015  Ebon Clements  CAR 316629                      *
+.*                 Added hospital to holiday file key  - OUTPHOFD             *
+.*       V10.04.01 23/06/2014   J.Tan         CAR 261630                      *
+.*                 Removed port number from temp file name                    *
+.*        V9.03.01  07/08/2003  Jill Habasque CAR 41815                       *
+.*                  Changed matches of opdastat                               *
+.*        V5.01.02  21/11/1991    Justin Pooches Goats                        *
+.*                  Changed so duration uses post-op time 2 (not post op 1)   *
+.*        V5.01.03  10/01/1992    Darren Jones                                *
+.*                  Fix determination of Urology Clinic                       *
+.*        V5.01.04  08/04/1993  Steve Armstrong   Q7568  SRF 119998           *
+.*                  Change in specs for identification of a specialty         *
+.******************************************************************************
+.
+.$$$$$
+.         IBAOPR73.PBL        Operating Theatre Usage by Speciality
+.         ------------        -------------------------------------
+.         DATE0000 - Enter date range
+.         CTPA0000 - Create temp file
+.         ITMP0000 - Initialize temp file, write all Speciality descs to file
+.         LOAD0000 - Loop over Session, Details & Usage files to obtain the
+.                    required data and then set up the temp file using this data
+.         REPT0000 - Loop over temp file and produce the report
+.$$$$$
+.
+.         FD's required
+.
+          INC       STD001FD/PBL            * standard variables
+          INC       IBACONFD/INC
+          INC       IBASEQFD/INC            * Sequential Numbers File
+          INC       TFILEVAR/INC            * Generate Temp File Name
+          INC       WEBERRFD/INC            * Web Server Error Logging
+.
+          INC       OPRDEAFD/INC            * op. details file
+          INC       OPRDECFD/INC            * op. usage file
+          INC       OPRSESFD/INC            * session file
+          INC       OUTPHOFD/INC            * public holiday file
+          INC       PATCODFD/INC            * codes file
+.
+.         program variables
+.
+CFNAMEA   DIM       8         * tempfile A name
+CMDLINE   DIM       50        * command line for execute
+CURRDATE  DIM       8         * current date
+CURSESS   DIM       22        * current session
+DATESTRT  DIM       8         * starting date ccyymmdd
+DATESTOP  DIM       8         * ending   date ccyymmdd
+DATE10A   DIM       10        * starting date dd/mm/ccyy
+DATE10B   DIM       10        * ending   date dd/mm/ccyy
+DURATION  FORM      4         * calculated duration of operation
+FORM4B    FORM      4         * time work variable
+SAVOVER   FORM      1         * copy of ovrcd
+SPECTOTL  FORM      7         * speciality total
+.
+.         temp file
+.
+TEMPA1    IFILE     SQL, FIXED=45, KEY="U1-20"
+.
+.Name     Type      Length  Phys.  Start  Description
+.-------  ----      ------  -----  -----  ------------------------------------
+XDESC     DIM       20        20       1  Speciality Description
+XSHORT    FORM      6          4      21  No. of short duration cases
+XMEDIUM   FORM      6          4      25  No. of medium duration cases
+XLONG     FORM      6          4      29  No. of long duration cases
+XELECT    FORM      6          4      33  No. of elective operations
+XEMDAY    FORM      6          4      37  No. of emergency day operations
+XEMNIGHT  FORM      6          4      41  No. of emergency night operations
+. End of Record                       45
+.
+.         program constants
+.
+CATZ1     INIT      "Z1"      * cat for ud field 1 oprdecfd
+ISBUILD   INIT      "isbuild "
+ISERASE   INIT      "iserase "
+KEYA      INIT      " 45 U1-20 "
+Z20       INIT      "zzzzzzzzzzzzzzzzzzzz"
+.
+PRGID     INIT      "IBAOPR73"
+PRGNAM    INIT      "Operating Theatre Usage By Speciality"
+VERSION   INIT      "V11.03.03"
+.
+.*********************************************************************
+.*                  ML0000                                           *
+.*        Mainline Code / Controlling Logic                          *
+.*********************************************************************
+ML0000    CALL      INIT0000                * initilization
+.
+ML1000    CALL      DATE0000                * enter date range
+          BRANCH    EXIT,ML9995             * exit selected
+.
+          CALL      CTPA0000                * create temp files
+          CALL      ITMP0000                * initialize temp file
+          CALL      LOAD0000                * load data into temp file
+          CALL      REPT0000                * produce report
+          GOTO      ML1000
+.
+ML9995    CALL      DTPA0000                * delete temp file
+.
+ML9999    CHAIN     PGM
++
+.*********************************************************************
+.*                  INIT0000                    Called by : ML0000   *
+.*        Initilization and open files                               *
+.*********************************************************************
+INIT0000  CALL      DISPHEAD                * display header
+          DISPLAY   *P50:23,"Opening "
+          DISPLAY   *P58:23,"oprdetaf"
+          OPEN      OPRDETA1,"oprdetaf"
+          OPEN      OPRDETA6,"oprdetaf"
+          DISPLAY   *P58:23,"oprdetcf"
+          OPEN      OPRDETC1,"oprdetcf"
+          DISPLAY   *P58:23,"oprsesaf"
+          OPEN      OPRSESA1,"oprsesaf"
+          DISPLAY   *P58:23,"oprsesaf"
+          OPEN      OPRSESA7,"oprsesaf"
+          DISPLAY   *P58:23,"outphoaf"
+          OPEN      OUTPHOA1,"outphoaf"
+          DISPLAY   *P58:23,"patcodes"
+          OPEN      PATCODE1,"patcodes"
+          DISPLAY   *P50:23,*EL;
+.
+          OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*43,IBCNMHOS     * Multi hospital parameter
+.
+          CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE           * current date
+          MOVE      ONE,CDEFDTE             * hit enter once for default
+.
+          CALL      TFILENAM                * Get temp file name
+          MOVE      TFILNAME,CFNAMEA
+.
+INIT9999  RETURN
++
+.*********************************************************************
+.*                  DATE0000                    Called by : ML2000   *
+.*        Enter the date ranges                                      *
+.*        Returns : EXIT = 1      exit chosen                        * 
+.*                  DATESTRT      starting date  ccyymmdd            *
+.*                  DATESTOP      ending date    ccyymmdd            *
+.*                  DATE10A       starting date  dd/mm/ccyy          *
+.*                  DATE10B       ending date    dd/mm/ccyy          *
+.*********************************************************************
+DATE0000  DISPLAY   *P1:4,*EF,"Starting date : ",*EL:
+                    *P1:5,"Ending date   : ",*EL;
+.
+.         enter starting date
+.
+DATE1000  MOVE      "4",CVERT              * row
+          MOVE      "17",CCOL               * column
+          UNPACK    SP6,CYEAR,CMON,CDAY     * no defaults
+          MOVE      CCC,CCENT
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,DATE9000          * nothing entered
+          BRANCH    CQUEST,DATE1000
+.
+          PACK      DATESTRT,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",DATESTRT           * set up start date
+          CALL      PACDATE
+          MOVE      CPCDATE,DATE10A         * formatted start date
+.
+          MATCH     DATESTRT,CURRDATE
+          GOTO      DATE2000 IF NOT LESS    * date is <= current date
+.
+          DISPLAY   *P1:24,*B,"Date must not be after current date.  ",*EL;
+          CALL      HITENTER 
+          GOTO      DATE1000
+.
+.         enter ending date (default to starting date)
+.
+DATE2000  MOVE      "5",CVERT              * row
+          MOVE      "17",CCOL               * column
+          UNPACK    DATESTRT,CCENT,CYEAR,CMON,CDAY
+.
+          CALL      KEYDATE
+          BRANCH    OVRCD,DATE9000          * nothing entered
+          BRANCH    CQUEST,DATE2000
+.
+          PACK      DATESTOP,CCENT,CYEAR,CMON,CDAY
+          REP       " 0",DATESTOP           * set up end date
+          CALL      PACDATE
+          MOVE      CPCDATE,DATE10B         * formatted end date
+.
+          MATCH     DATESTRT,DATESTOP
+          GOTO      DATE3000 IF NOT LESS    * date is <= start date
+.
+          DISPLAY   *P1:24,*B,"Ending date must be after Starting date.  ",*EL;
+          CALL      HITENTER 
+          GOTO      DATE2000
+.
+.         check end date is before current date
+.
+DATE3000  MATCH     DATESTOP,CURRDATE
+          GOTO      DATE5000 IF NOT LESS    * date is <= current date
+.
+          DISPLAY   *P1:24,*B,"Date must not be after current date.  ",*EL;
+          CALL      HITENTER 
+          GOTO      DATE2000
+.
+DATE5000  CALL      CONTQST
+          BRANCH    CEXIT,DATE8000,DATE0000,DATE9000
+.                         Yes      No       Cancel
+.
+DATE8000  MOVE      ZERO,EXIT               * valid dates
+          GOTO      DATE9999
+.
+DATE9000  MOVE      ONE,EXIT                * exit selected
+.
+DATE9999  RETURN
++
+.*********************************************************************
+.*                  CTPA0000                    Called by : ML1000   *
+.*        Create a temp file                                         *
+.*********************************************************************
+CTPA0000  CALL      DTPA0000                * delete temp file
+.
+          CLEAR     CMDLINE                 * clear command line
+          PACK      CMDLINE,ISBUILD,CFNAMEA,KEYA,SP30      * set command
+          RESET     CMDLINE                 * reset FP
+          EXECUTE   CMDLINE,TASKID          * build the temp file
+          OPEN      TEMPA1,CFNAMEA          * open the temp file
+.
+CTPA9999  RETURN
++
+.*********************************************************************
+.*                  ITMP0000                    Called by : xxxx0000 *
+.*        Initialize temp file by looping over codes file for all    *
+.*        possible descriptions and writing a record with a zeros    *
+.*********************************************************************
+ITMP0000  PACK      KEY5,CATZ1,SP3
+          CALL      RDCODE1
+.
+ITMP1000  CALL      RDKCODE1
+          BRANCH    OVRCD,ITMP5000          * finished all actual codes
+.
+          MATCH     CATZ1,TCODE
+          GOTO      ITMP5000 IF NOT EQUAL   * different category
+.
+.         check for a few special cases
+.
+          MATCH     "UR ",ACODE
+          GOTO      ITMP1000 IF EQUAL       * ignore code UR, done later
+.
+          MATCH     "RU ",ACODE
+          GOTO      ITMP2000 IF EQUAL       * set as Renal
+.
+          MATCH     "RG ",ACODE
+          GOTO      ITMP3000 IF NOT EQUAL   * dont set as Renal
+.
+ITMP2000  MOVE      "Renal",TDESC           * set description
+.
+ITMP3000  MOVE      TDESC,KEY20             * set key
+          CALL      RDTEMPA1
+          COMPARE   ZERO,OVRCD
+          GOTO      ITMP1000 IF EQUAL       * dont write as already there
+.
+          CALL      ZVAL0000                * zero values
+          MOVE      TDESC,XDESC             * temp file description
+          CALL      WRTEMPA1                * write a record
+          GOTO      ITMP1000
+.
+.         now write the special values
+.
+ITMP5000  MOVE      "Urology Clinic",KEY20  * set key
+          CALL      RDTEMPA1
+          COMPARE   ZERO,OVRCD
+          GOTO      ITMP6000 IF EQUAL       * dont write as already there
+.
+          CALL      ZVAL0000                * zero values
+          MOVE      KEY20,XDESC             * temp file description
+          CALL      WRTEMPA1                * write a record
+.
+ITMP6000  MOVE      "Urology",KEY20         * set key
+          CALL      RDTEMPA1
+          COMPARE   ZERO,OVRCD
+          GOTO      ITMP7000 IF EQUAL       * dont write as already there
+.
+          CALL      ZVAL0000                * zero values
+          MOVE      KEY20,XDESC             * temp file description
+          CALL      WRTEMPA1                * write a record
+.
+.         write the total record
+.
+ITMP7000  MOVE      Z20,KEY20               * zeds for total record
+          CALL      ZVAL0000                * zero values
+          MOVE      KEY20,XDESC             * temp file description
+          CALL      WRTEMPA1                * write a record
+.
+ITMP9999  RETURN
++
+.*********************************************************************
+.*                  LOAD0000                    Called by : ML1000   *
+.*        Loop over oprdeafd and oprdecfd and record the details to  *
+.*        the temp file                                              *
+.*        Please Note : there is a severe case of 'Harry Hardcoding' *
+.*        in this routine.  This has been done as this report is for *
+.*        Wellington only so we know what values they want.          *
+.*********************************************************************
+LOAD0000  PACK      KEY22,DATESTRT,SP20
+          CALL      RSOPSES7                * position on session file
+          DISPLAY   *P1:24,"Processing : ",*EL;
+.
+.         loop over session file
+.
+LOAD1000  CALL      RKOPSES7
+          BRANCH    OVRCD,LOAD9999          * finished date range
+.
+          MATCH     OPSEDATE,DATESTOP
+          GOTO      LOAD9999 IF LESS        * end of date range
+.
+          PACK      CURSESS,OPSEDATE,OPSETIME,OPSECLIN,OPSEHOSP,SP70
+          DISPLAY   *P14:24,*V2LON,CURSESS
+.         PACK      KEY26,CURSESS,ZERO,SP3
+          PACK      KEY26,OPSEDATE,OPSETIME,OPSECLIN,SP3,ZERO,SP3,SP70 
+          CALL      RSOPDEA6
+.
+.         loop over details file
+.
+LOAD1500  CALL      RKOPDEA6
+          BRANCH    OVRCD,LOAD1000          * end of file
+.
+.         PACK      KEY22,OPDADATE,OPDATIME,OPDACLIN,OPDAHOSP,SP70
+.         MATCH     CURSESS,KEY22
+.         GOTO      LOAD1000 IF NOT EQUAL   * different session
+.
+          MATCH     OPSEDATE,OPDADATE
+          GOTO      LOAD1000 IF NOT EQUAL
+.
+          MATCH     OPSETIME,OPDATIME
+          GOTO      LOAD1000 IF NOT EQUAL
+.
+          MATCH     OPSECLIN,OPDACLIN
+          GOTO      LOAD1000 IF NOT EQUAL
+.
+          COMPARE   ZERO,OPDASTAT
+          GOTO      LOAD1500 IF NOT EQUAL
+.
+          COMPARE   THREE,OPDASTAT
+          GOTO      LOAD1500 IF EQUAL       * not a booking
+.
+          MATCH     SP5,OPDAPRE3
+          GOTO      LOAD1500 IF EQUAL       * no time set up
+.
+          MATCH     SP5,OPDAPOS2
+          GOTO      LOAD1500 IF EQUAL       * no time set up
+.
+.         see if usage details
+.
+          PACK      KEY11,OPDAUNIQ,ONE      * get team one usage details
+          CALL      RDOPDEC1
+          BRANCH    OVRCD,LOAD1500          * no usage details
+.
+          MATCH     SP3,OPDCUSR1
+          GOTO      LOAD1500 IF EQUAL       * no speciality field
+.
+. ******* get the correct description for Speciality *******
+.         check for speciality "Renal"
+.
+          MATCH     "RU ",OPDCUSR1
+          GOTO      LOAD2000 IF EQUAL       * set as Renal
+.
+          MATCH     "RG ",OPDCUSR1
+          GOTO      LOAD3000 IF NOT EQUAL   * dont set as Renal
+.
+LOAD2000  MOVE      "Renal",KEY20           * set key
+          GOTO      LOAD6000
+.
+.         check for speciality "Urology"
+.
+LOAD3000  MATCH     "UR ",OPDCUSR1
+          GOTO      LOAD4000 IF NOT EQUAL   * not a Urology
+.
+          MOVE      "Urology",KEY20         * set as Urology
+.
+          MATCH     "      ",OPDATHET
+          IF        !@EQUAL
+            MATCH     "80    ",OPDATHET
+            GOTO      LOAD6000 IF NOT EQUAL   * not the clinic
+            MOVE      "Urology Clinic",KEY20  * set as Urology Clinic
+            GOTO      LOAD6000
+          ELSE
+            PACK      KEY22,OPDADATE,OPDATIME,OPDACLIN,OPDAHOSP,SP70
+            CALL      RDOPSES7
+            BRANCH    OVRCD,LOAD6000
+            MATCH     "80    ",OPSETHET
+            GOTO      LOAD6000 IF NOT EQUAL
+            MOVE      "Urology Clinic",KEY20  * set as Urology Clinic
+            GOTO      LOAD6000
+          ENDIF
+.
+.         Speciality is just TDESC
+.
+LOAD4000  PACK      KEY5,CATZ1,OPDCUSR1
+          CALL      RDCODE1
+          BRANCH    OVRCD,LOAD1500          * invalid speciality
+          MOVE      TDESC,KEY20             * set key
+.
+.         now get the stats values (must have KEY20 set up at this point)
+.
+LOAD6000  CALL      UPDT0000                * update stats for speciality
+          MOVE      Z20,KEY20               * do for total
+          CALL      UPDT0000                * update
+          GOTO      LOAD1500                * get next dea record
+.
+LOAD9999  RETURN
++
+.*********************************************************************
+.*                  REPT0000                    Called by : ML1000   *
+.*        Produce the report from temp file A                        *
+.*********************************************************************
+REPT0000  MOVE      ZERO,CPAGENO            * clear page counter
+          CLOCK     TIME,CTIMEIS            * get time
+          MOVE      "70",CLNO               * set to print new header
+          MOVE      SP20,KEY20
+          CALL      RSTEMPA1                * positional read
+          DISPLAY   *P1:24,"Producing the report now - ":
+                    *V2LON,*BLINKON,"Please wait",*EL;
+.
+REPT1000  CALL      RKTEMPA1                * next read
+          BRANCH    OVRCD,REPT5000          * end of report
+.
+          MATCH     Z20,XDESC
+          GOTO      REPT5000 IF EQUAL       * end of report
+.
+          CALL      PLIN0000                * print a line of the report
+          GOTO      REPT1000
+.
+.         end of report, print totals and descriptions
+.
+REPT5000  CALL      ENDA0000
+.
+REPT9999  RETURN
++
+.*********************************************************************
+.*                  DTPA0000                    Called by : CTPA0000 *
+.*        Delete temp file A                                ML9995   *
+.*********************************************************************
+DTPA0000  CLOSE     TEMPA1                  * close temp file
+          CLEAR     CMDLINE                 * clear command line
+          PACK      CMDLINE,ISERASE,CFNAMEA * set command line for erase
+          RESET     CMDLINE                 * reset FP
+          EXECUTE   CMDLINE,TASKID          * delete the temp file
+.
+DTPA9999  RETURN
++
+.*********************************************************************
+.*                  ZVAL0000                    Called by : ITMP0000 *
+.*        Clear all temp file A variables                   LOAD0000 *
+.*********************************************************************
+ZVAL0000  MOVE      ZERO,XSHORT
+          MOVE      ZERO,XMEDIUM
+          MOVE      ZERO,XLONG
+          MOVE      ZERO,XELECT
+          MOVE      ZERO,XEMDAY
+          MOVE      ZERO,XEMNIGHT
+ZVAL9999  RETURN
++
+.*********************************************************************
+.*                  UPDT0000                    Called by : LOAD6000 *
+.*        update values for the given speciality                     *
+.*        Para's  : KEY20         the speciality                     *
+.*********************************************************************
+UPDT0000  CALL      ZVAL0000                * clear all the values
+          CALL      RDTEMPA1                * read temp file
+          MOVE      OVRCD,SAVOVER           * save the ovrcd value for later
+.
+. ******* work out the duration range *******
+.
+          CALL      DURN0000                * get the duration
+          COMPARE   "31",DURATION
+          GOTO      UPDT6100 IF NOT LESS    * not in range 0-30
+.
+          ADD       ONE,XSHORT              * add one to short dur. range
+          GOTO      UPDT7000
+.
+UPDT6100  COMPARE   "91",DURATION
+          GOTO      UPDT6200 IF NOT LESS    * not in range 31-90
+.
+          ADD       ONE,XMEDIUM             * add one to medium dur. range
+          GOTO      UPDT7000
+.
+UPDT6200  ADD       ONE,XLONG               * add one to long dur. range
+.
+. ******* now see if elective or emergency *******
+.
+UPDT7000  MATCH     "EL ",OPDATYPE
+          GOTO      UPDT8000 IF NOT EQUAL   * not an elective operation
+.
+          ADD       ONE,XELECT              * add to elective 
+          GOTO      UPDT9000
+.
+.         have an emergency operation, see if day or night
+.
+UPDT8000  COMPARE   "6",OPSEDAY
+          GOTO      UPDT8500 IF NOT LESS    * on weekend so class as night
+.
+          PACK      KEY11,OPDADATE,SP70
+          CALL      RDPHOA1                 * public holiday file
+          COMPARE   ZERO,OVRCD
+          GOTO      UPDT8500 IF EQUAL       * a PH so class as night
+. 
+          IF        IBCNMHOS=1
+            PACK      KEY11,OPDADATE,OPSEHOSP,SP70
+            CALL      RDPHOA1                 * public holiday file
+            COMPARE   ZERO,OVRCD
+            GOTO      UPDT8500 IF EQUAL       * a PH so class as night
+          ENDIF
+.
+          MATCH     "08:15",OPDAPRE3
+          GOTO      UPDT8500 IF LESS        * class as night
+.
+          MATCH     "16:31",OPDAPRE3
+          GOTO      UPDT8500 IF NOT LESS    * class as night
+.
+          ADD       ONE,XEMDAY              * emergency day
+          GOTO      UPDT9000
+.
+UPDT8500  ADD       ONE,XEMNIGHT            * emergency night
+.
+.         update or write to temp file
+.
+UPDT9000  BRANCH    SAVOVER,UPDT9500        * write a record
+.
+          CALL      UPTEMPA1
+          GOTO      UPDT9999
+.
+UPDT9500  MOVE      KEY20,XDESC             * set desc
+          CALL      WRTEMPA1
+.
+UPDT9999  RETURN
++
+.*********************************************************************
+.*                  PLIN0000                    Called by : REPT0000 *
+.*        Print the line for the report                              *
+.*********************************************************************
+PLIN0000  COMPARE   "55",CLNO
+          CALL      NEWA0000 IF NOT LESS    * print new header
+.
+          MOVE      XSHORT,SPECTOTL         * set speciality total
+          ADD       XMEDIUM,SPECTOTL
+          ADD       XLONG,SPECTOTL
+.
+          PRINT     *1,"| ",XDESC,*28,"|",*32,XSHORT,*41,"|",*45,XMEDIUM:
+                    *54,"|",SP2,XLONG,*66,"||",*71,XELECT,*82,"|",*85,XEMDAY:
+                    *96,"|  ",XEMNIGHT,*110,"||   ",SPECTOTL,*126,"|"
+          ADD       ONE,CLNO
+.
+PLIN9999  RETURN
++
+.*********************************************************************
+.*                  ENDA0000                    Called by : REPT5000 *
+.*        Print the ending for the report                            *
+.*********************************************************************
+ENDA0000  MOVE      XSHORT,SPECTOTL         * set speciality total
+          ADD       XMEDIUM,SPECTOTL
+          ADD       XLONG,SPECTOTL
+.
+          PRINT     *1,"*-----------------------------------------":
+                       "------------------------------------------":
+                       "-----------------------------------------*":
+                    *N,"|     Grand Totals ",*28,"|",*32,XSHORT,*41,"|":
+                    *45,XMEDIUM,*54,"|",SP2,XLONG,*66,"||",*71,XELECT,*82,"|":
+                    *85,XEMDAY,*96,"|  ",XEMNIGHT,*110,"||   ",SPECTOTL,*126,"|"
+          PRINT     *1,"*-----------------------------------------":
+                       "------------------------------------------":
+                       "-----------------------------------------*",*N
+          ADD       "3",CLNO
+.
+          COMPARE   "44",CLNO
+          CALL      NEWA0000 IF NOT LESS    * print new header
+.
+          PRINT     "Urology Clinic",*23,"= Urology speciality performed in ":
+                    "Theatre '80'"
+          PRINT     "Short",*23,"= Number of cases whose duration in theatre ":
+                    "was 0-30 minutes"
+          PRINT     "Medium",*23,"= Number of cases whose duration in theatre ":
+                    "was 31-90 minutes"
+          PRINT     "Long",*23,"= Number of cases whose duration in theatre ":
+                    "was 91+ minutes"
+          PRINT     "Elective",*23,"= Cases with Operation Type 'EL'"
+          PRINT     "Emergency Day",*23,"= Cases with Operation Type <> 'EL' ":
+                    "and operation started between 08:15 and 16:30"
+          PRINT     *25,"and operation was done on a weekday (excluding ":
+                    "Public Holidays)"
+          PRINT     "Emergency Night-W/End = All cases not covered by Elective":
+                    " or Emergency Day"
+          PRINT     *N,"*** End of Report ***",*N
+.
+ENDA9999  RETURN
++
+.*********************************************************************
+.*                  DURN0000                    Called by : UPDT0000 *
+.*        Calculate a duration given two times                       *
+.*        Para's  : OPDAPOS2      the end time   (HH:MM)             *
+.*                  OPDAPRE3      the start time (HH:MM)             *
+.*        Returns : DURATION      the duration (minutes)             *
+.*********************************************************************
+DURN0000  MOVE      ZERO,DURATION           * clear duration
+          MATCH     OPDAPOS2,OPDAPRE3
+          GOTO      DURN9999 IF EQUAL       * no duration
+          GOTO      DURN1000 IF LESS        * times not over midnight
+.
+.         operation went over midnight so make end time larger
+.         eg 22:00 to 01:00 becomes 22:00 to 25:00 which gives 3 hours duration
+.
+          UNPACK    OPDAPOS2,CHOUR,ANS,CMIN
+          MOVE      CHOUR,FORM2
+          ADD       "24",FORM2
+          MOVE      FORM2,CHOUR
+          PACK      OPDAPOS2,CHOUR,ANS,CMIN
+.
+.         get end time as minutes
+.
+DURN1000  UNPACK    OPDAPOS2,CHOUR,ANS,CMIN
+          MOVE      CHOUR,FORM2             * hour as a form 2
+          MOVE      FORM2,FORM4A            * set up work variable
+          MULT      "60",FORM4A             * hours turned into minutes
+          MOVE      CMIN,FORM2              * minutes as as form 2
+          ADD       FORM2,FORM4A            * the total minutes of end time
+.
+.         get start time as minutes
+.
+          UNPACK    OPDAPRE3,CHOUR,ANS,CMIN
+          MOVE      CHOUR,FORM2             * hour as a form 2
+          MOVE      FORM2,FORM4B            * set up work variable
+          MULT      "60",FORM4B             * hours turned into minutes
+          MOVE      CMIN,FORM2              * minutes as as form 2
+          ADD       FORM2,FORM4B            * the total minutes of start time
+.
+.         duration = end minutes - start minutes
+.
+          SUB       FORM4B,FORM4A           * the duration
+          MOVE      FORM4A,DURATION         * the duration
+.
+DURN9999  RETURN
++
+.*********************************************************************
+.*                  NEWA0000                    Called by : PLIN0000 *
+.*        Print new page header                             ENDA0000 *
+.*********************************************************************
+NEWA0000  CALL      HEAD132
+          PRINT     *40,"Date Range : ",DATE10A," to ",DATE10B
+          PRINT     *N,"*-----------------------------------------":
+                       "------------------------------------------":
+                       "-----------------------------------------*":
+                    *N,"|",*28,"|",*33,"Short   |    Medium  |   Long    ||":
+                    *82,"|-------- Emergency --------||",*126,"|":
+                    *N,"| Speciality",*28,"|",*32,"0-30 min |  31-90 min |  ":
+                    "91+ min  ||   Elective   |     Day     | Night-W/End ||":
+                    *117,"Total",*126,"|":
+                    *N,"*-----------------------------------------":
+                       "------------------------------------------":
+                       "-----------------------------------------*"
+          MOVE      "10",CLNO               * set line number
+.
+NEWA9999  RETURN
++
+.*********************************************************************
+.         temp file I/O
+.*********************************************************************
+RATEMPA1  MOVE      ZERO,OVRCD
+          RESET     KEY20
+          READ      TEMPA1,KEY20;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMPA1  RESET     KEY20
+          READ      TEMPA1,KEY20;;
+          RETURN
+.
+RDTEMPA1  MOVE      ZERO,OVRCD
+          RESET     KEY20
+          READ      TEMPA1,KEY20;XDESC,XSHORT,XMEDIUM,XLONG,XELECT:
+                                 XEMDAY,XEMNIGHT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMPA1  MOVE      ZERO,OVRCD
+          READKS    TEMPA1;XDESC,XSHORT,XMEDIUM,XLONG,XELECT:
+                           XEMDAY,XEMNIGHT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMPA1  RESET     KEY20
+          WRITE     TEMPA1,KEY20;XDESC,XSHORT,XMEDIUM,XLONG,XELECT:
+                                 XEMDAY,XEMNIGHT
+          RETURN
+.
+UPTEMPA1  RESET     KEY20
+          UPDATE    TEMPA1;XDESC,XSHORT,XMEDIUM,XLONG,XELECT:
+                           XEMDAY,XEMNIGHT
+          RETURN
+.
+.         I/O's required
+.
+          INC       STD001IO/PBL            * standard variables
+          INC       TFILENAM                * Generate Temp File Name
+          INC       IBASEQIO/INC            * Sequential Numbers File
+          INC       WEBERRIO/INC            * Web Server Error Logging
+.
+          INC       OPRDEAIO/INC            * op. details file
+          INC       OPRDECIO/INC            * op. usage file
+          INC       OPRSESIO/INC            * session file
+          INC       OUTPHOIO/INC            * public holiday file
+          INC       PATCODIO/INC            * codes file
+...............................................................................

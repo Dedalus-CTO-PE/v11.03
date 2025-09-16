@@ -1,0 +1,880 @@
+. PBFEEUPD.PBL
+.
+.         Routine to update new bed fees to all patients in Invoice Pending file
+.
+.         Modification   : 
+.                           V10.01.04        22/02/2011  Peter Vela CAR 233034
+.                           Mods for Johns Hopkins Bed Fee functionality
+.                           V10.01.03        09/12/2010  J.Tan   CAR 233034
+.                           Mods bed fees to use HF Table type
+.                           V10.01.02        09/12/2010
+.                           Fixed to initialise discharged date
+.                           V10.01.01        30/11/2010  Peter Vela CAR 233148
+.                           Initialised pattranf variables before write to
+.                           pattranf
+.                           V10.00.00        07/10/2010  CAR 231376
+.                           New routine for bed fees update.
+.
+.******************************************************************************
+.*                                  UPBF0000                                  *
+.*                          Update Patients Bed Fees                          *
+.******************************************************************************
+UPBF0000  DISPLAY   *P1:23,*EF,"Processing admissions":
+                    *P1:24,"Scanning : ",*P40:24,"Processing : ";
+.
+          OPEN      PATDSCH1,"patdschf"
+          OPEN      PATMI1A3,"patmi1af"
+          OPEN      PATMI1A1,"patmi1af"
+          OPEN      PATTRAN1,"pattranf"
+          OPEN      PATTRAN2,"pattranf"
+          OPEN      PATIPEN1,"patipenf"
+          OPEN      PMSVX1A1,"pmsvx1af"
+.
+          CALL      CREA0000            * Create a tempfile
+          MOVE      SP70,KEY8
+          CALL      RDSIPEN1
+UPBF0200  CALL      RDKIPEN1
+          BRANCH    OVRCD,UPBF8000
+.
+          DISPLAY   *P12:24,*V2LON,IPADMNO;
+.
+          COMPARE   THREE,IPSYSTM
+          GOTO      UPBF0200 IF NOT EQUAL   * Not an inpatient
+.
+          MOVE      IPADMNO,KEY8
+          CALL      RDPMVX11
+          BRANCH    OVRCD,UPBF0200
+          CALL      DCLM0000                 * get default charging claim code
+.
+          MOVE      "0",MANUALFG
+          MOVE      IPADMNO,KEY8
+          CALL      RDMISS1
+          BRANCH    OVRCD,UPBF0200
+          MOVE      AURNO,KEY8
+          CALL      RDMAST1
+          BRANCH    OVRCD,UPBF0200
+.
+          IF        ASTAT=1 | ASTAT=5
+            GOTO      UPBF0200              * Ignore pre admitted & cancelled pt
+          ENDIF
+.
+          MATCH     ALACDTE,UPDDATE
+          GOTO      UPBF0200 IF LESS        * invoice printed after eff.date
+.
+          COMPARE   ZERO,AINVPRT
+          IF        @EQUAL
+            MATCH     UPDDATE,ALACDTE       * if effective date before
+            GOTO      UPBF0200 IF NOT LESS  * Print-upto date - bypass
+          ENDIF
+.
+          DISPLAY   *P53:24,*V2LON,AADMNO;
+.
+          MOVE      SP70,DDATE
+          COMPARE   "3",ASTAT
+          GOTO      UPBF0300 IF NOT EQUAL   * Patient not discharged
+.
+          PACK      KEY8,AADMNO
+          CALL      RDDSCH1                 * Read an disch file record
+          BRANCH    OVRCD,UPBF0200
+.
+          IF        AINVPRT <> 0
+            MATCH     DDATE,ALACDTE
+            GOTO      UPBF0200 IF NOT LESS
+          ENDIF
+.
+.         If Change date >= Discharge date, update the old rate on trans file
+.
+          MATCH     DDATE,UPDDATE           * If Change date>= Discharge date
+          GOTO      UPBF0300 IF LESS        * Update the old rate on trans file
+.
+.         MATCH     ANSY,PTMICMXP
+.         GOTO      UPBF0310 IF EQUAL
+.
+          MOVE      UPDDATE,CHNGDATE
+          MOVE      UPDTIME,CHNGTIME
+          IF        ASTAT=3
+            MOVE      DDATE,CHNGDATE
+            MOVE      DTIME,CHNGTIME
+          ENDIF
+          GOTO      UPBF6000
+.
+UPBF0300  
+.         MATCH     ANSY,PTMICMXP
+.         GOTO      UPBF0320 IF NOT EQUAL
+          GOTO      UPBF0320
+.
+.         don't update casemix patients
+.
+UPBF0310  CALL      WRTMP000
+          GOTO      UPBF0200
+.
+UPBF0320  PACK      KEY30,AADMNO,SP70
+          MOVE      ADATE,FROMDATE
+          MOVE      SP3,STATYPE
+          MOVE      SP70,LEAVEDAT
+          MOVE      SP70,LEAVETIM
+          MOVE      ONE,WRITENEW         *  default to write Tran record
+          UNPACK    SP70,CHNGDATE,CHNGTIME
+.
+          CALL      RDSTRAN2                * Position on & read a transfer
+.
+UPBF0400  CALL      RDKTRAN2                * file record
+          BRANCH    OVRCD,UPBF0600
+.
+          COMPARE   TADMN,AADMNO
+          GOTO      UPBF0600 IF NOT EQUAL
+.
+          IF        PTTREPSD=1
+            MOVE      "1",MANUALFG          * Found a manual stepdown record
+          ENDIF
+          MOVE      SP70,LEAVEDAT
+          MOVE      SP70,LEAVETIM
+          MATCH     "A",TMOVE
+          IF        !@EQUAL
+            MATCH     "R",TMOVE             * return-from-leave
+            GOTO      UPBF0450 IF NOT EQUAL
+          ENDIF
+.                                           * TMOVE is "A" or "R" -
+.                                           * Set a Change Date/Time of 5 sec.
+.                                           * after the Admission or Return.
+          MOVE      TDATE,CHNGDATE          * Store date
+          CALL      ADDT0000                * Add 5 secs to time
+          PACK      CHNGTIME,XHOUR,COLON,XMIN,COLON,KEY2
+          REP       " 0",CHNGTIME
+.
+UPBF0450  MATCH     TDATE,UPDDATE
+          GOTO      UPBF0600 IF LESS        * Update date < transfer date
+          GOTO      UPBF0500 IF NOT EQUAL   * Update date <> transfer date
+.
+          MATCH     UPDTIME,TTIME
+          GOTO      UPBF0600 IF NOT LESS    * Transfer time >= update time
+.
+UPBF0500  MATCH     "L",TMOVE
+          IF        @EQUAL
+            MOVE      TDATE,LEAVEDAT
+            MOVE      TTIME,LEAVETIM
+            MOVE      TDATE,CHNGDATE          * Store date
+            CALL      SUBT0000                * Sub 5 secs to time
+            PACK      CHNGTIME,XHOUR,COLON,XMIN,COLON,KEY2
+            REP       " 0",CHNGTIME
+          ENDIF
+.
+          MATCH     TATYPE,STATYPE
+          GOTO      UPBF0400 IF EQUAL       * Admin type = save admin type
+.
+          MOVE      TATYPE,STATYPE
+          BRANCH    PTCNCNDY,UPBF0400       * Don't reset day count
+.
+          MOVE      TDATE,FROMDATE
+          GOTO      UPBF0400
+.
+UPBF0600  MOVE      UPDDATE,TODATE
+          CALL      NHOSPDAY                * Calculate no of days in hospital
+          MOVE      NBRDAYS,TOTDAY
+.
+          MATCH     ADATE,FROMDATE
+          GOTO      UPBF0700 IF NOT EQUAL   * Admin date <> from date
+.
+.         Only add days of previous hospitalisation if no change in adm type
+.
+          ADD       ADYHOSP,TOTDAY
+.
+UPBF0700  MATCH     SP70,LEAVEDAT
+          GOTO      UPBF0720 IF EQUAL
+.
+.         Skip if patient on leave before update date/time
+.
+          MATCH     UPDDATE,LEAVEDAT
+          GOTO      UPBF6000 IF LESS
+          GOTO      UPBF0720 IF NOT EQUAL
+.
+          MATCH     UPDTIME,LEAVETIM
+          GOTO      UPBF6000 IF LESS        * patient on leave before eff.date
+.
+UPBF0720  MATCH     CHNGDATE,UPDDATE
+          GOTO      UPBF0900 IF LESS        * CHNGDATE > UPDDATE - use CHNGDATE
+          GOTO      UPBF0750 IF NOT EQUAL   * CHNGDATE < UPDDATE - use UPDDATE
+.                                           * Check Time
+          MATCH     UPDTIME,CHNGTIME
+          GOTO      UPBF0900 IF NOT LESS    * CHNGTIME => UPDTIME - use CHNGDATE
+.
+UPBF0750  MOVE      UPDDATE,CHNGDATE        * use UPDDATE & UPDTIME
+          MOVE      UPDTIME,CHNGTIME
+.
+.       Get the last record of the admission number from the tran file
+.
+UPBF0900  MOVE      ZERO,OVRCD
+          CALL      INTTRN00                 * Clear save pattranf variables
+          PACK      KEY16,AADMNO,CHNGDATE,SP70
+          PACK      KEY30,AADMNO,CHNGDATE,CHNGTIME,SP70
+          CALL      RDSTRAN2                * Position on & read a transfer
+.                                           * check new date/time doesn't exist
+          CALL      RDKTRAN2                * read next record with Ward & Bed
+.
+          PACK      KEY16A,TADMN,TDATE,SP70
+          MATCH     KEY16,KEY16A
+          GOTO      UPBF1000 IF NOT EQUAL
+.
+.         Get the last record of the date
+.
+          PACK      KEY30,AADMNO,CHNGDATE,Z70
+          CALL      RDSTRAN2                * Position on & read a transfer
+          CALL      RDPTRAN2
+          BRANCH    OVRCD,UPBF0200
+          COMPARE   TADMN,AADMNO
+          GOTO      UPBF0200 IF NOT EQUAL
+          MATCH     CHNGDATE,TDATE
+          GOTO      UPBF0200 IF NOT EQUAL
+.
+          MATCH     CHNGTIME,TTIME
+          GOTO      UPBF1300 IF LESS
+.
+          CALL      ADDT0000                * Add 5 secs to time
+          PACK      CHNGTIME,XHOUR,COLON,XMIN,COLON,KEY2
+          REP       " 0",CHNGTIME
+          GOTO       UPBF1300
+.                                           * new key is unique - so -
+UPBF1000  CALL      RDSTRAN2                * position before next record
+          CALL      RDPTRAN2                * read previous Tran recd
+          BRANCH    OVRCD,UPBF0200
+          COMPARE   TADMN,AADMNO
+          GOTO      UPBF0200 IF NOT EQUAL
+.
+. ----- Have the new pattranf record date & time -----
+.
+UPBF1300  MATCH     SP3,TRBTYP
+          GOTO      UPBF1400 IF NOT EQUAL   * Save bed type not blank
+.
+          PACK      KEY6,TWARD,TBED
+          CALL      RDWARD1                 * Read a ward file record
+          IF        OVRCD=0
+            MOVE      WEFRBT,TRBTYP
+          ENDIF
+.
+UPBF1400  MOVE      CHNGDATE,TDATE
+          MOVE      CHNGTIME,TTIME
+          MOVE      ZERO,TRATEG
+          MOVE      ZERO,TEXTRA
+          MOVE      ANSC,TMOVE
+          MOVE      TRBTYP,SAVBTYP
+.
+          CALL      GFEE0000                * get new bed fee rate
+          BRANCH    DFFLAG,UPBF0200
+.
+.         MOVE      ZERO,FORM12P2
+.         MOVE      SBFPAT,FORM12P2
+.         COMPARE   TRATEF,FORM12P2
+.         GOTO      UPBF1440 IF NOT EQUAL
+.
+.         MOVE      ZERO,FORM12P2
+.         MOVE      SBFHF,FORM12P2
+.         COMPARE   TRATEH,FORM12P2
+.         GOTO      UPBF5000 IF EQUAL       * No rate change, no write to trans
+.
+UPBF1440  MOVE      SBFPAT,TRATEF
+          MOVE      SBFHF,TRATEH
+          MOVE      SBFENDDY,TRBEND
+.
+.         BRANCH    WRITENEW,UPBF1600
+.
+.         MOVE      ZERO,PTTREPSD
+.         CALL      UPTRAN2                 * re-write TRAN with new bed fee
+.         GOTO      UPBF5000
+.
+.         Write a new transfer record
+.
+UPBF1600  MOVE      ANSC,TMOVE
+          MOVE      ZERO,PTTREPSD
+          MOVE      SP3,PTTRLTYP            * clear type of leave value
+          MOVE      ZERO,PTTRLSPT           * Lumpsum
+          MOVE      ZERO,PTTRLSRB
+          MOVE      ZERO,PTTRAEND           * Ending day
+          MOVE      ZERO,PTTRADRB           * Additional rate
+          MOVE      ZERO,PTTRADPT
+          MOVE      SP1,PTTRAUAT
+          MOVE      SP5,PTTRLTSC
+          MOVE      ACLAIM,PTTRCLTY
+          PACK      PTTRSPAR,SP30,SP30
+.
+UPBF1800  PACK      KEY30,AADMNO,TDATE,TTIME,TWARD,TBED
+          CALL      RDATRAN2
+          IF        OVRCD=0
+            CALL      ADDT0000                * Add 5 secs to time
+            PACK      TTIME,XHOUR,COLON,XMIN,COLON,KEY2
+            REP       " 0",TTIME
+            GOTO      UPBF1800
+          ENDIF
+.
+UPBF2000  PACK      PTTRCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTTRCDAT
+          CLOCK     TIME,PTTRCTIM
+          MOVE      WBSEUID,PTTRUCID
+          UNPACK    SP70,TRCDATE,TRCTIME,PTTRUUID
+.
+          CALL      WRTRAN2
+          CALL      WRTMP000
+.
+UPBF5000  CALL      UNBF0000                * Update the rest of pattranf with
+.                                             new bed fee
+UPBF6000  MOVE      CHNGDATE,STDATE
+          MOVE      CHNGTIME,STTIME
+.
+          COMPARE   ONE,CSTDOWN
+          CALL      UOBF0000 IF EQUAL       * Update pattranf with the old bed
+.                                             fee for transactions prior to
+.                                             update date
+          GOTO      UPBF0200
+.
+.         Finish and close the files
+.
+UPBF8000  CLOSE     PATTRAN2
+          CLOSE     PATMI1A3
+.
+UPBF9000  MOVE      ZERO,EXIT
+UPBF9999  RETURN
+.
+.******************************************************************************
+.         Initialize the transfer record 
+.******************************************************************************
+INTTRN00  MOVE      SP10,STWARD              
+          MOVE      SP10,STBED
+          MOVE      SP10,STATYPE
+          MOVE      SP10,SAVBTYP            
+          MOVE      SP10,STADOCT            
+          MOVE      ZERO,STRBEND            
+          MOVE      ZERO,STDISC
+          MOVE      ZERO,STALLW
+          MOVE      ZERO,STEXTRA
+          MOVE      SP3,STDEPT              * department
+INTTRN99  RETURN
+.         
+.******************************************************************************
+.         Subtract time by 5 secs
+.******************************************************************************
+SUBT0000  UNPACK    TTIME,XHOUR,ANS,XMIN,ANS,KEY2
+          REP       " 0",KEY2
+          MOVE      ZERO,FORM2
+          MOVE      KEY2,FORM2
+          SUB       "5",FORM2
+          MOVE      FORM2,KEY2
+          IF        FORM2<0
+            ADD       "60",FORM2
+            MOVE      FORM2,KEY2
+.
+            MOVE      XMIN,FORM2
+            SUB       ONE,FORM2
+            MOVE      FORM2,XMIN
+            IF        FORM2<0
+              MOVE      "59",FORM2
+              MOVE      FORM2,XMIN
+              MOVE      XHOUR,FORM2
+              ADD       ONE,FORM2
+              MOVE      FORM2,XHOUR
+            ENDIF
+          ENDIF
+.
+SUBT9999  RETURN
+.
+.******************************************************************************
+.         Add time by 5 secs
+.******************************************************************************
+ADDT0000  UNPACK    TTIME,XHOUR,ANS,XMIN,ANS,KEY2
+          REP       " 0",KEY2
+          MOVE      ZERO,FORM2
+          MOVE      KEY2,FORM2
+          ADD       FIVE,FORM2              * 5 secs
+          MOVE      FORM2,KEY2
+          COMPARE   "60",FORM2
+          IF        !@LESS
+            MOVE      "00",KEY2
+            MOVE      XMIN,FORM2
+            ADD       ONE,FORM2
+            MOVE      FORM2,XMIN
+            COMPARE   "60",FORM2
+            IF        !@LESS
+              MOVE      "00",XMIN                        * was KEY2    *C
+              MOVE      XHOUR,FORM2
+              ADD       ONE,FORM2
+              MOVE      FORM2,XHOUR
+            ENDIF
+          ENDIF
+.
+SETT9999  RETURN
+.
+.******************************************************************************
+.*                                  UNBF0000              Called by: UPBF0000 *
+.*                 Update The Rest Of pattranf With New Bed Fee               *
+.******************************************************************************
+UNBF0000  PACK      KEY30,TADMN,TDATE,TTIME,TWARD,TBED,SP70
+          CALL      RDTRAN2                 * Read the new record
+          COMPARE   ZERO,OVRCD
+          GOTO      UNBF1200 IF EQUAL
+.
+UNBF1000  CALL      RDKTRAN2                * Read the next record
+          BRANCH    OVRCD,UNBF9000
+.
+          COMPARE   TADMN,AADMNO
+          GOTO      UNBF9000 IF NOT EQUAL   * Different admin no
+.
+UNBF1200  MATCH     SP3,TRBTYP
+          GOTO      UNBF2000 IF NOT EQUAL   * Not a blank bed type
+.
+          PACK      KEY6,TWARD,TBED         * Get the bed type
+          CALL      RDWARD1                 * from the ward/bed file
+          BRANCH    OVRCD,UNBF2000
+.
+          MOVE      WEFRBT,TRBTYP
+.
+UNBF2000  MATCH     "L",TMOVE
+          IF        @EQUAL
+            MOVE      ZERO,BFPAT
+            MOVE      ZERO,BFHF
+          ELSE
+            CALL      GETFEE00              * Get the new bed fee
+            BRANCH    DFFLAG,UNBF1000
+          ENDIF
+.
+          MOVE      BFPAT,TRATEF            * Update the trans record
+          MOVE      BFHF,TRATEH             * with the new fee
+.
+          PACK      TRCDATE,CCC,CYY,CMM,CDD
+          REP       " 0",TRCDATE
+          CLOCK     TIME,TRCTIME
+          MOVE      WBSEUID,PTTRUUID
+.
+          CALL      UPTRAN2
+          GOTO      UNBF1000
+.
+UNBF9000  MOVE      ZERO,EXIT
+UNBF9999  RETURN
++
+.******************************************************************************
+.*                                  UOBF0000              Called by: UPBF0000 *
+.* Update pattranf With The Old Bed Fee For Transactions Prior To Update Date *
+.******************************************************************************
+UOBF0000  PACK      KEY8,AURNO
+          CALL      RDMAST1
+          BRANCH    OVRCD,UOBF9000
+.
+          MOVE      ONE,WRMNSTDN            * Write manual stepdown flag - yes
+.
+.         Get the starting accommodation date
+.
+          UNPACK    ALACDTE,XCENT,XYEAR,XMON,XDAY
+          MOVE      XDAY,FDAY
+          MOVE      XMON,FMON
+          MOVE      XYEAR,FYEAR
+          MOVE      XCENT,FCENT
+.
+          MOVE      SP3,STATYPE
+          MOVE      SP3,STRBTYP
+          MOVE      ZERO,STRBEND
+          MOVE      ZERO,STRATEF
+          MOVE      ZERO,STRATEH
+          MOVE      SP3,STWARD
+          MOVE      SP4,STBED
+.
+          PACK      IDATEF,FCENT,FYEAR,FMON,FDAY
+          REP       " 0",IDATEF
+          MOVE      THREE,PROGFLAG          * Flag to write record to trans file
+          MOVE      SP10,SIDATET
+.
+          PACK      KEY30 WITH AADMNO,SP30
+          CALL      RDSTRAN2
+UOBF1000  CALL      RDKTRAN2
+          BRANCH    OVRCD,UOBF2800
+.
+          COMPARE   AADMNO,TADMN            * Same admission ?
+          GOTO      UOBF2800 IF NOT EQUAL   * Different admin no
+.
+          IF        PTTREPSD=1
+            MOVE      "1",MANUALFG          * Found a manual stepdown record
+          ENDIF
+          MATCH     STDATE,TDATE
+          GOTO      UOBF2000 IF LESS        * Transfer date < save date
+          GOTO      UOBF2800 IF NOT EQUAL   * Save date <> transfer date
+.
+          MATCH     TTIME,STTIME
+          GOTO      UOBF2800 IF EQUAL       * Save time = transfer time
+          GOTO      UOBF2800 IF LESS        * Save time < transfer time
+.
+UOBF2000  CALL      STEPDOWN
+          BRANCH    NOFEE,UOBF1000
+.
+          IF        PTTREPSD=0
+            MATCH     "D",TMOVE
+            IF        !@EQUAL
+              MOVE      TWO,PTTREPSD       * Manual stepdown from bedfee update
+            ENDIF
+          ENDIF
+          MOVE      TATYPE,STATYPE
+          MOVE      TRBTYP,STRBTYP
+          MOVE      TRBEND,STRBEND
+          MOVE      TRATEF,STRATEF
+          MOVE      TRATEH,STRATEH
+          MOVE      TWARD,STWARD
+          MOVE      TBED,STBED
+          MOVE      TDATE,SIDATET
+          CALL      WRTMP000
+.
+          PACK      TRCDATE,CCC,CYY,CMM,CDD
+          REP       " 0",TRCDATE
+          CLOCK     TIME,TRCTIME
+          MOVE      WBSEUID,PTTRUUID
+.
+          CALL      UPTRAN2                 * Update a transfer file record
+          GOTO      UOBF1000
+.
+UOBF2800  MOVE      ZERO,PTTREPSD
+          MOVE      STDATE,IDATET
+          MOVE      IDATET,TDATE
+          MOVE      SP1,TMOVE
+          MOVE      ANSC,TMOVE
+.         LOAD      TMOVE,ASTAT,ANSC,ANSC,ANSC,ANSR
+          MOVE      STATYPE,TATYPE
+          MOVE      STRBTYP,TRBTYP
+          MOVE      STRBEND,TRBEND
+          MOVE      STWARD,TWARD
+          MOVE      STBED,TBED
+          CALL      STEPDOWN
+          BRANCH    NOFEE,UOBF5000
+.
+          MATCH     IDATET,TDATE
+          GOTO      UOBF5000 IF NOT LESS    * Transfer date >= save date
+.
+          PACK      KEY30,TADMN,TDATE,TTIME,TWARD,TBED
+          CALL      RDTRAN2                 * Read the new transfer file record
+          BRANCH    OVRCD,UOBF5000
+.
+          COMPARE   AADMNO,TADMN
+          GOTO      UOBF2800 IF NOT EQUAL   * Different admin no
+.
+          MATCH     STDATE,TDATE
+          GOTO      UOBF2800 IF LESS        * Transfer date < save date
+          GOTO      UOBF4000 IF EQUAL       * Save date = transfer date
+          GOTO      UOBF5000 IF NOT LESS    * Transfer date > save date
+.
+UOBF4000  MATCH     TTIME,STTIME
+          GOTO      UOBF2800 IF LESS        * Save time < transfer time
+.
+UOBF5000  MOVE      ZERO,WRMNSTDN           * Write manual stepdown flag - no
+.
+UOBF9000  MOVE      ZERO,EXIT
+UOBF9999  RETURN
+.******************************************************************************
+.         Get the bed fee for the existing trans record                       *
+.                                                                             *
+.******************************************************************************
+GETFEE00  MOVE      ZERO,DFFLAG
+          PACK      KEY26,ACLAIM,AFUNDH,AFNDTB,TATYPE,TRBTYP,TRBEND
+          CALL      RDJHBFE1             * new file
+          COMPARE   ZERO,OVRCD
+          GOTO      GETFEE99 IF EQUAL
+.
+.         Try defaults
+.
+          PACK      KEY26,ACLAIM,SP10,SP4,TATYPE,TRBTYP,TRBEND
+          CALL      RDJHBFE1             * new file
+          COMPARE   ZERO,OVRCD
+          GOTO      GETFEE99 IF EQUAL
+.
+          PACK      KEY26,PTCNDCLM,SP10,SP4,TATYPE,TRBTYP,TRBEND
+          CALL      RDJHBFE1             * new file
+          COMPARE   ZERO,OVRCD
+          GOTO      GETFEE99 IF EQUAL
+          MOVE      ONE,DFFLAG
+.
+GETFEE99  RETURN
++
+.******************************************************************************
+.*                                  GFEE0000                                  *
+.* Routine to get the bed fee rate                                            *
+.******************************************************************************
+GFEE0000  MOVE      ZERO,COUNT
+          MOVE      ZERO,DFFLAG
+          MOVE      ZERO,FORM2
+.
+          PACK      DIM23 WITH ACLAIM,AFUNDH,AFNDTB,TATYPE,SAVBTYP
+.
+.         Get the bed fee for the above parameters
+.
+GFEE0800  PACK      KEY26 WITH DIM23,SP3
+          CALL      RSJHBFE1             * current file
+.
+GFEE1000  CALL      RKJHBFE1             * current file
+          BRANCH    OVRCD OF GFEE9000
+.
+          PACK      DIM23A WITH BFCLM,BFHFUND,BFHFTAB,BFATYPE,BFBTYPE
+          MATCH     DIM23,DIM23A
+          GOTO      GFEE9000 IF NOT EQUAL
+          ADD       ONE,COUNT
+.
+.         Check if we might have a daycase
+.
+          COMPARE   ZERO,TOTDAY
+          GOTO      GFEE3000 IF NOT EQUAL
+.
+          MATCH     CURDATE,ADATE             * Just make sure
+          GOTO      GFEE3000 IF NOT EQUAL
+.
+.        If the old rate was the daycase rate, use day case rate here too
+.
+          COMPARE   ZERO,STRBEND
+          GOTO      GFEE5000 IF EQUAL
+.
+.        If ADYHOSP is zero, the bed fee should be the first column after
+.        a day case fee
+.
+          COMPARE   ZERO,BFENDDY
+          GOTO      GFEE4000 IF EQUAL
+          GOTO      GFEE5000
+.
+GFEE3000  COMPARE   BFENDDY,TOTDAY
+          GOTO      GFEE5000 IF LESS
+.
+.         Save the bed fee
+.
+GFEE4000  MOVE      BFPAT,SBFPAT
+          MOVE      BFHF,SBFHF
+          MOVE      BFENDDY,SBFENDDY
+          GOTO      GFEE1000
+.
+.         We have the desired bed fee
+.
+GFEE5000  MOVE      BFPAT,SBFPAT
+          MOVE      BFHF,SBFHF
+          MOVE      BFENDDY,SBFENDDY
+          GOTO      GFEE9999
+.
+GFEE9000  COMPARE   ZERO,COUNT
+          GOTO      GFEE9999 IF NOT EQUAL
+.
+          ADD       ONE,FORM2
+          BRANCH    FORM2 OF GFEE9400,GFEE9600
+.
+          DISPLAY   *P1:24,*EL,*B,"Default Rate Not Set Up. ",DAADMNO ;
+.         CALL      HITENTER
+          MOVE      ONE,DFFLAG
+          GOTO      GFEE9999
+.
+GFEE9400  PACK      DIM23 WITH ACLAIM,SP10,SP4,TATYPE,SAVBTYP
+          GOTO      GFEE0800
+.
+GFEE9600  PACK      DIM23 WITH ZERO,SP2,SP10,SP4,TATYPE,SAVBTYP
+          GOTO      GFEE0800
+.
+GFEE9999  RETURN
++
+.******************************************************************************
+.         Print report from tempfile
+.******************************************************************************
+PRTR0000  MOVE      ZERO,CMXFLAG         
+          MOVE      ZERO,CPAGENO
+          MOVE      "60",CLNO
+          CLOCK     TIME,CTIMEIS
+.         
+          MOVE      SP70,KEY9
+          CALL      RSTEMP1
+PRTR1000  CALL      RKTEMP1              
+          BRANCH    OVRCD,PRTR9000
+.         
+          MOVE      XXPADMNO,KEY8
+          CALL      RDMISS1
+          IF        OVRCD=1
+            MOVE      SP70,ADATE
+          ENDIF
+.
+          MOVE      SP70,DDATE
+          IF        ASTAT=3
+            CALL      RDDSCH1
+          ENDIF
+.
+          MOVE      AURNO,KEY8
+          CALL      RDMAST1
+          IF        OVRCD=1
+            UNPACK    SP70,PSNAME,PGNAME,PTITL
+          ENDIF
+.
+          MATCH     ANSY,XXMICMXP
+          GOTO      PRTR4000 IF NOT EQUAL
+.
+          BRANCH    CMXFLAG,PRTR4000
+          MOVE      ONE,CMXFLAG               * New header record
+          MOVE      "60",CLNO
+.
+PRTR4000  COMPARE   "55",CLNO
+          CALL      PHEAD000 IF NOT LESS
+.
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          MOVE      ONE,PACFRMT
+          CALL      PACNAME                 * Format the patient name
+          MOVE      PACFNAME,KEY40
+.
+          UNPACK    ADATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                 * Format the admission date
+          REP       " 0",CPCDATE
+.
+          MATCH     "Y",XXMICMXP
+          IF        @EQUAL
+            PRINT     *1,"|C",AADMNO;
+          ELSE
+            PRINT     *1,"| ",AADMNO;
+          ENDIF
+.
+          MATCH     "1",XXMANUAL
+          IF        @EQUAL
+            PRINT     *12,"| ",AURNO," (*)";
+          ELSE
+            PRINT     *12,"| ",AURNO;
+          ENDIF
+          PRINT     *29,"| ",KEY40:
+                    *71,"| ",CPCDATE;
+.
+          MATCH     SP70,DDATE
+          IF        !@EQUAL
+            UNPACK    DDATE,CCENT,CYEAR,CMON,CDAY
+            CALL      PACDATE                 * Format the discharged date
+            REP       " 0",CPCDATE
+            PRINT     *88,"| ",CPCDATE;
+          ELSE
+            PRINT     *88,"| ";
+          ENDIF
+.
+          MOVE      SP70,TDESC
+          PACK      KEY5,ANSC,ANSL,ACLAIM,SP70
+          CALL      RDCODE1
+.
+          PRINT     *100,"| ",TDESC,*122,"| ",AFUNDH:
+                    *132,"|"
+          GOTO      PRTR1000
+.
+PRTR9000  COMPARE   ZERO,CPAGENO
+          CALL      PHEAD000 IF EQUAL
+.
+          CALL      UND132
+          PRINT     *1,"Note: Asterisk (*) next to U/R number denotes that ":
+                       "There is a Manual Stepdown prior the Bed Fees Update.":
+                    *N,*1,"      'C' next to Admission number denotes that ":
+                       "This is a Casepayment patient."
+PRTR9999  RETURN
++
+.******************************************************************************
+.         Print the header
+.******************************************************************************
+PHEAD000  CALL      HEAD132
+.         IF        CMXFLAG=1
+.           PRINT     *40,"Casepayment Patients with Bed fee NOT Updated"
+.         ELSE
+            PRINT     *40,"Patients with Bed fee Updated"
+.         ENDIF
+.
+          UNPACK    UPDDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE                 * Format the date
+          REP       " 0",CPCDATE
+          PRINT     *40,"Update Date/Time: ",CPCDATE,"  ",UPDTIME
+.
+          PACK      USERID,USERID,SP70
+          MATCH     SP70,USERID
+          IF        !@EQUAL
+            PRINT     *40,"User ID         : ",USERID
+          ENDIF
+.
+          CALL      UND132
+.
+          PRINT     *1,"| Adm.No.":
+                    *12,"| U/R Number":
+                    *29,"| Patient Name":
+                    *71,"| Adm.Date":
+                    *88,"| Disc.Date":
+                    *100,"| Claim Code",*122,"| HF ":
+                    *132,"|"
+          ADD       FOUR,CLNO
+          CALL      UND132
+.
+PHEAD999  RETURN
++
+.******************************************************************************
+.*                       Deleting an indexed file                             *
+.******************************************************************************
+KILL0000
+.         DISPLAY   *P1:24,*EL,*P22:24,*V2LON:
+.                   "** Deleting Temporary Indexed File ** ";
+          CLOSE     TEMPFILE
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    FNAMET,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          DISPLAY   *P1:24,*EL;
+KILL9999  RETURN
++
+.******************************************************************************
+.*                       Creating an indexed file                             *
+.******************************************************************************
+CREA0000  CALL      KILL0000                * deleting temporary file
+          CLEAR     CMDLINE
+          APPEND    "isbuild ",CMDLINE
+          APPEND    FNAMET,CMDLINE
+          APPEND    " 11 U1-1,2-9",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TEMPFILE,FNAMET
+CREA9999  RETURN
++
+.******************************************************************************
+.*                       Write a record to tempfile                           *
+.******************************************************************************
+WRTMP000  PACK      KEY9,PTMICMXP,IPADMNO,SP70
+          CALL      RDTEMP1
+          COMPARE   ZERO,OVRCD
+          GOTO      WRTMP200 IF EQUAL
+          
+          MOVE      PTMICMXP,XXMICMXP
+          MOVE      DIPADMNO,XXPADMNO
+          MOVE      MANUALFG,XXMANUAL
+          CALL      WRTEMP1
+          GOTO      WRTMP999
+.
+WRTMP200  MOVE      MANUALFG,XXMANUAL       
+          CALL      UPTEMP1
+.
+WRTMP999  RETURN
++
+. =========================================================================
+.* Temp file IO
+.------------------------------------------------------------------------------
+RATEMP1   MOVE      ZERO,OVRCD
+          READ      TEMPFILE,KEY9;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          RESET     KEY9
+          READ      TEMPFILE,KEY9;XXMICMXP,XXPADMNO,XXMANUAL
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   MOVE      ZERO,OVRCD
+          WRITE     TEMPFILE,KEY9;XXMICMXP,XXPADMNO,XXMANUAL
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+DETEMP1   RESET     KEY9
+          DELETE    TEMPFILE,KEY9
+          RETURN
+.
+RSTEMP1   RESET     KEY9
+          READ      TEMPFILE,KEY9;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    TEMPFILE;XXMICMXP,XXPADMNO,XXMANUAL
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPTEMP1   MOVE      ZERO,OVRCD
+          UPDATE    TEMPFILE;XXMICMXP,XXPADMNO,XXMANUAL
+          RETURN
+.

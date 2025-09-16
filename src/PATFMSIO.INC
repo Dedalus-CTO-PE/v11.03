@@ -1,0 +1,52 @@
+RSPTFM1   RESET     KEY17
+          READ      PATFMSA1,KEY17;;
+          RETURN
+.
+RAPTFM1   RESET     KEY17
+          MOVE      ZERO,OVRCD
+          READ      PATFMSA1,KEY17;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPTFM1   RESET     KEY17
+          MOVE      ZERO,OVRCD
+          READ      PATFMSA1,KEY17;PTFMSUB,PTFMCOD,PTFMIDI,PTFMIRE:
+                                   PTFMILD,PTFMICA,PTFMIDA,PTFMIGS:
+                                   PTFMTDI,PTFMTRE,PTFMTLD,PTFMTCA:
+                                   PTFMTDA,PTFMBASC,PTFMHOSP,PTFMSPA
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPTFM1   MOVE      ZERO,OVRCD
+          READKS    PATFMSA1;PTFMSUB,PTFMCOD,PTFMIDI,PTFMIRE:
+                             PTFMILD,PTFMICA,PTFMIDA,PTFMIGS:
+                             PTFMTDI,PTFMTRE,PTFMTLD,PTFMTCA:
+                             PTFMTDA,PTFMBASC,PTFMHOSP,PTFMSPA
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPTFM1   MOVE      ZERO,OVRCD
+          READKP    PATFMSA1;PTFMSUB,PTFMCOD,PTFMIDI,PTFMIRE:
+                             PTFMILD,PTFMICA,PTFMIDA,PTFMIGS:
+                             PTFMTDI,PTFMTRE,PTFMTLD,PTFMTCA:
+                             PTFMTDA,PTFMBASC,PTFMHOSP,PTFMSPA
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPTFM1   UPDATE    PATFMSA1;PTFMSUB,PTFMCOD,PTFMIDI,PTFMIRE:
+                             PTFMILD,PTFMICA,PTFMIDA,PTFMIGS:
+                             PTFMTDI,PTFMTRE,PTFMTLD,PTFMTCA:
+                             PTFMTDA,PTFMBASC,PTFMHOSP,PTFMSPA
+          RETURN
+.
+WRPTFM1   RESET     KEY17
+          WRITE     PATFMSA1,KEY17;PTFMSUB,PTFMCOD,PTFMIDI,PTFMIRE:
+                                   PTFMILD,PTFMICA,PTFMIDA,PTFMIGS:
+                                   PTFMTDI,PTFMTRE,PTFMTLD,PTFMTCA:
+                                   PTFMTDA,PTFMBASC,PTFMHOSP,PTFMSPA
+          RETURN
+.
+DEPTFM1   RESET     KEY17
+          DELETE    PATFMSA1,KEY17
+          RETURN
+.

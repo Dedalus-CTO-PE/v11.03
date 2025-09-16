@@ -1,0 +1,1950 @@
+.*****************************************************************************
+.* System    :   Allied Health                                               *
+.* Program   :   VINAHRES                                                    *
+.* Desc      :   Process a DHS VINAH XML Response File                       *
+.*****************************************************************************
+.* Date      :   28/12/2012                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will open a DHS VINAH XML Response File and    *
+.*               process the rejections and acceptances, then print the      *
+.*               content in a human readable format.                         *
+.* Mods      :                                                               *
+.*                                                                           *
+.*        V10.15.01 11/10/2019  Ebon Clements    TSK 0882862                 *
+.*                  Check for a duplicate waiting record when changing the   *
+.*                  status from submitted to waiting. If so delete the       *
+.*                  waiting record as we will use the submitted records      *
+.*                  values to re create it. Fixed batch status update to     *
+.*                  rejected -  WAIT0000                                     *
+.*        V10.14.01 17/04/2019  Steve Armstrong  TSK 0868837                 *
+.*                  Recompiled for changes to ALLHDTFD.                      *
+.*****************************************************************************
+.*        V10.12.01 28/02/2018  Steve Armstrong TSK 0847603                  *
+.*                  Mods to only execute E2070000 error routine for STV only *
+.*****************************************************************************
+.*        V10.11.04 28/11/2017  Steve Armstrong TSK 0844404                  *
+.*                  Added handling of an E061 error for ADT^A13 messages.    *
+.*        V10.11.03 29/11/2017  Steve Armstrong TSK 0844404                  *
+.*                  Mods to load new variable (ALVRCONT) when creating a     *
+.*                  new ALLVREFD record and recompiled for changes to        *
+.*                  ALLVREFD.                                                *
+.*        V10.11.02 27/07/2017  Steve Armstrong TSK 0842571                  *
+.*                  Fixed looping of allhdtaf to delete error records in     *
+.*                  E2070000.                                                *
+.*                  Also made further changes to statistics for E207 records *
+.*                  on the report.                                           *
+.*        V10.11.01 21/07/2017  Steve Armstrong TSK 0842571                  *
+.*                  Mods to write error code to ALSEERID instead of blanks.  *
+.*                  Also added handling of E207 errors and associated visit  *
+.*                  records.                                                 *
+.*****************************************************************************
+.*        V10.10.02 19/06/2017  Steve Armstrong TSK 0840360                  *
+.*                  Mods to use accepted flag from the batch details of the  *
+.*                  Acceptance Section to determine rejected batches and     *
+.*                  write them to the temp file (instead of when processing  *
+.*                  errors).                                                 *
+.*                  Added check for submitted records before proceeding with *
+.*                  processing.                                              *
+.*        V10.10.01 14/06/2017  Steve Armstrong TSK 0840360                  *
+.*                  Mods to TRAP I*U on A08 update and change the time, as   *
+.*                  the record already exists as accepted.                   *
+.*****************************************************************************
+.*        V10.05.05 17/11/2014  Steve Armstrong CAR 308346                   *
+.*                  Fixed writing of allsedaf records to exclude E061 errors.*
+.*        V10.05.04 13/11/2014  Steve Armstrong CAR 308346                   *
+.*                  Fixed writing of allvreaf records in E0520000            *
+.*        V10.05.03 12/11/2014  Steve Armstrong CAR 308346                   *
+.*                  Mods to call E0520000 and E0610000 only after the U/R    *
+.*                  as been read from the XML, so that the correct U/R is    *
+.*                  written to allvreaf.                                     *
+.*        V10.05.02 15/10/2014  Steve Armstrong CAR 305679                   *
+.*                  Mods to handle E052 and E061 errors.                     *
+.*                  Also added processing display statements.                *
+.*        V10.05.01 26/09/2014  Steve Armstrong CAR 306664                   *
+.*                  Mods in ACPT0000 to check if the batch has been rejected *
+.*                  before processing a record as accepted.                  *
+.*****************************************************************************
+.*        V10.04.01 15/05/2014  Steve Armstrong CAR 285465                   *
+.*                  Recompiled for changes to ALLHDTFD                       *
+.*        V10.04.00 28/04/2014  Steve Armstrong CAR 297185                   *
+.*                  Created program.                                         *
+.*****************************************************************************
+.
+. --------- Sample Report Format --------------------
+.
+.Submission Summary Section                                          
+.   <related data>
+.Validation Error Section                                                      
+.   <related data> - repeated for each validation error
+.Validation Error Summary Section                                          
+.   <related data> - repeated for each type of validation error (total counts)
+.Acceptance Section                                                
+.   Batch
+.      <related data>
+.          Message
+.             <related data>
+.          Message
+.             <related data>
+.          .
+.          .
+.          .
+.   Batch
+.      <related data>
+.          Message
+.             <related data>
+.          .
+.          .
+.          .
+.   .
+.   .
+.   .
+.   .
+.
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+.
+          INC       ALLHBTFD/INC
+          INC       ALLHDTFD/INC
+          INC       ALLHHDFD/INC
+          INC       ALLSEDFD/INC
+          INC       ALLVREFD/INC
+          INC       IBASEQFD/INC
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+.
+FLATFILE  FILE      ASCII,FIXED=4000             * DHS XML VINAH Response File
+.
+.
+.         Temporary File Definition
+.         -------------------------
+.
+RESTEMP1  IFILE SQL, FIXED=21, KEY="U1-20"
+.
+.NAME     TYPE    LENGTH     PHYSICAL     START     DESCRIPTION
+.----     ----    ------     --------     -----     -----------
+BATCHNUM  DIM       20          20          1       Batch number
+.
+.End of Record                             21
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+ACPTTOTL  FORM      8
+ACPTUPDT  FORM      8
+CMDLINE   DIM       200
+.
+DATSTRNG  DIM       4000
+DIM8      DIM       8
+DIM8A     DIM       8
+DIM8B     DIM       8
+DIM80     DIM       80
+DIM91     DIM       91
+DIM100    DIM       100
+.
+E207RCNT  FORM      6
+E207TCNT  FORM      6
+.
+FORM4B    FORM      4
+FORM4C    FORM      4
+.
+HOURTM    DIM       2
+.
+LASTCHAR  DIM       1
+LINCOUNT  FORM      8
+.
+MINTIME   DIM       2
+.
+REJTOTAL  FORM      8
+REJUPDTD  FORM      8
+.
+SAVBATCH  DIM       20
+SAVERCOD  DIM       4
+SAVERROR  DIM       4000
+SAVEURNO  DIM       8
+SAVEVISN  DIM       8
+SAVKEY62  DIM       62
+SAVFILNM  DIM       20
+SAVMESSG  DIM       20
+SAVMSTYP  DIM       7
+SAVURNUM  DIM       8
+SECTIME   DIM       2
+SECTION   FORM      2
+SITEFLAG  FORM      1             * site flag
+.                                     0 = STV
+.                                     1 = BHS
+.
+TAGSTRNG  DIM       300
+TEMPFILA  DIM       8
+TEMPFILB  DIM       8
+TMPSTRNG  DIM       4000
+TYPEFLAG  FORM      1             * information type flag
+.                                    0 = start tag value
+.                                    1 = end tag value
+.                                    2 = data value
+.
+VALDFLAG  FORM      1             * see if this is a validation only run
+.                                     0 = processing
+.                                     1 = validation only
+.
+XMLFLNAM  DIM       80
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+E207CODE  INIT      "E207     "
+ENDSTRNG  INIT      ">"
+ERASE     INIT      "iserase "
+FILPRFIX  INIT      "vinahx"
+ISBUILD   INIT      "isbuild "
+PIPE      INIT      "|"
+SEDSTRNG  INIT      "sed 's/<\/[^>]*>/&\n/g'"
+SP100     INIT      "                                                  ":
+                    "                                                  "
+STARTSTR  INIT      "<"
+UKEY      INIT      " 21 U1-20"
+ZERO6     INIT      "000000"
+.
+.
+PRGID     INIT      "VINAHRES"
+PRGNAM    INIT      "VINAH XML Response Handler"
+VERSION   INIT      "V11.03.00"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+          BRANCH    EXIT,MAIN9999          * error - finished
+.
+          CALL      CREA0000               * create temp file
+          CALL      CLER0000               * clear temp file
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9000          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN0500       * proceed with processing
+          GOTO      MAIN9000
+.
+MAIN0500  CALL      GFIL0000               * get filename 
+          BRANCH    EXIT,MAIN9000          * nothing input
+.
+          CALL      CFIL0000               * copy file
+          BRANCH    EXIT,MAIN9000          * unable to copy
+.
+          CALL      OPEN0000               * open text file
+          BRANCH    EXIT,MAIN9000          * unable to open .txt file
+.
+          CALL      ASKQ0000               * ask question
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN1000:        * yes
+                          MAIN9000:        * no
+                          MAIN9000         * cancel
+.
+MAIN1000  CALL      PROC0000               * process
+.
+MAIN9000  CALL      KILL0000               * remove temp file
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                     * display heading
+.
+          MOVE      ZERO,CPAGENO                 * initialise print variables
+          MOVE      ZERO,CNOUNDLN
+          CALL      IBACLOCK
+.
+          CALL      HEAD0000                     * print report header
+.
+          DISPLAY   *P56:24,"Opening ":
+                    *P64:24,"allhdtaf";
+          OPEN      ALLHDTA1,"allhdtaf"
+          OPEN      ALLHDTA2,"allhdtaf"
+          OPEN      ALLHDTA3,"allhdtaf"
+.
+          CALL      CSUB0000                     * check for submitted recs.
+          BRANCH    EXIT,INIT9100                * none found
+.
+          DISPLAY   *P64:24,"allhbtaf";
+          OPEN      ALLHBTA1,"allhbtaf"
+.
+          DISPLAY   *P64:24,"allhhdaf";
+          OPEN      ALLHHDA1,"allhhdaf"
+.
+          DISPLAY   *P64:24,"allsedaf";
+          OPEN      ALLSEDA1,"allsedaf"
+          OPEN      ALLSEDA2,"allsedaf"
+.
+          DISPLAY   *P64:24,"allvreaf";
+          OPEN      ALLVREA1,"allvreaf"
+.
+          CALL      TFILENAM                     * get new tempfile name
+          MOVE      TFILNAME,TEMPFILA
+.
+          MOVE      ZERO,EXIT
+          GOTO      INIT9999
+.
+INIT9100  MOVE      ONE,EXIT
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run response file upload                *
+.*                        TRUE  (1)  Exit option selected                    *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run XML Response File Upload"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run clean-up
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  PRINT     *1,"Exit option selected"
+          MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000              Called by: MAIN0000   *
+.*            Open the copied ".txt" file prior to processing                *
+.*****************************************************************************
+.
+OPEN0000  MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FLATFILE,TEMPFILA            * open text file
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            DISPLAY   *P1:24,*EL,*B,"Converted file not found.  ";
+            CALL      HITENTER
+            PRINT     *1,"Converted file not found"
+            GOTO      OPEN9100
+          ENDIF
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.*****************************************************************************
+.*                               PROC0000              Called by: MAIN0000   *
+.*             Loop through the XML Response file and display the data       *
+.*****************************************************************************
+.
+.         First, initialise counts
+.
+PROC0000  MOVE      ZERO,ACPTTOTL                * acceptance total
+          MOVE      ZERO,REJTOTAL                * rejected total
+.
+          READ      FLATFILE,SEQ;TMPSTRNG        * read first record
+          IF        @OVER
+.>>>>>>     Check how this prints
+            PRINT     *1,"Response File is empty"
+          ENDIF
+.
+          CALL      PCHR0000
+.
+.>>>>>>   remove tempfile
+.
+PROC9500  CALL      WAIT0000
+.
+          CALL      E2070000                     * process E207 errors
+.
+          CALL      LINE0000
+          PRINT     *N,*1,"Total Messages Accepted            : ",ACPTTOTL:
+                    *N,*1,"Accepted Messages Updated          : ",ACPTUPDT:
+                    *N,*1,"Total Messages Rejected            : ",REJTOTAL:
+                    *N,*1,"Rejected Messages Updated          : ",REJUPDTD:
+                    *N,*N,*1,"E207 Specific Messages Deleted     :   ",E207RCNT:
+                    *N,*1,"Total E207 Related Messages Deleted:   ",E207TCNT:
+                    *N,*N,*1,"*** End of Report ***"
+.
+          DISPLAY   *P1:24,*EL,"Response data processed.  ";
+          CALL      HITENTER
+.
+PROC9999  RETURN
++
+.*****************************************************************************
+.*                          CFIL0000               Called by: MAIN0000       *
+.*          Copy the XML file to a ".txt" file so TBL can open it            *
+.* Requires: XMLFLNAM - DHS VINAH XML Response File name                     *
+.* Returns : TEMPFILA - temporary ".txt" filename                            *
+.*           EXIT  0 = file successfully copied                              *
+.*                 1 = unable to copy file                                   *
+.*****************************************************************************
+.
+.>>>>>>   Need to change from port based tempfile
+.
+CFIL0000  MOVE      "cat ",CMDLINE
+          ENDSET    CMDLINE
+          APPEND    XMLFLNAM,CMDLINE
+          APPEND    PIPE,CMDLINE
+          APPEND    SEDSTRNG,CMDLINE
+          APPEND    " > ",CMDLINE
+          APPEND    TEMPFILA,CMDLINE
+          APPEND    ".txt",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          MATCH     "0       ",TASKID
+          IF        @EQUAL
+            MOVE      ZERO,EXIT
+          ELSE
+            DISPLAY   *P1:24,*EL,*B,"Unable to convert XML file.  ";
+            CALL      HITENTER
+            PRINT     *1,"Unable to convert XML file"
+            MOVE      ONE,EXIT
+          ENDIF
+.
+CFIL9999  RETURN
++
+.*****************************************************************************
+.*                          GFIL0000               Called by: MAIN0000       *
+.*                       Keyin the response file name                        *
+.* Returns:  XMLFLNAM - DHS VINAH XML Response File name                     *
+.*           EXIT  0 = valid filename input                                  *
+.*                 1 = nothing input                                         *
+.*****************************************************************************
+.
+GFIL0000  KEYIN     *P1:10,*EF,"Filename (including path): ":
+                    *P28:10,*V2LON,XMLFLNAM
+.
+          PACK      XMLFLNAM,XMLFLNAM,SP30
+          MATCH     SP30,XMLFLNAM
+          IF        @EQUAL
+            PRINT     *1,"Filename not entered"
+            GOTO      GFIL9100
+          ENDIF
+.
+          STRIP     XMLFLNAM
+          PRINT     *40,"VINAH XML Response File: ",*+,XMLFLNAM,*-,*N
+.
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FLATFILE,XMLFLNAM
+          TRAPCLR   IO
+          IF        OVRCD = 1
+            PRINT     *1,"File not found"
+            GOTO      GFIL9100
+          ENDIF
+          CLOSE     FLATFILE
+.
+          MOVE      ZERO,EXIT
+          GOTO      GFIL9999
+.
+GFIL9100  MOVE      ONE,EXIT
+.
+GFIL9999  RETURN
++
+.*****************************************************************************
+.*                          ASKQ0000               Called by: MAIN0000       *
+.*             Ask if this is a validation only run                          *
+.* Returns:  VALDFLAG - Validation only flag                                 *
+.*                 0 = processing                                            *
+.*                 1 = validation only                                       *
+.*****************************************************************************
+.
+ASKQ0000  KEYIN     *P1:14,*EF,"Validation Only (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,")?":
+                    *P24:14,*V2LON,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS
+          IF        @EQUAL
+            MOVE      ONE,VALDFLAG
+            GOTO      ASKQ9999
+          ENDIF
+.
+          MATCH     ANSN,ANS
+          IF        @EQUAL
+            MOVE      ZERO,VALDFLAG
+            GOTO      ASKQ9999
+          ENDIF
+.
+          BEEP
+          GOTO      ASKQ0000
+.
+ASKQ9999  RETURN
++
+.*****************************************************************************
+.*                          PCHR0000               Called by: PROC0000       *
+.*            Process the current character                                  *
+.*****************************************************************************
+.
+PCHR0000  MATCH     STARTSTR,TMPSTRNG            * start of tag ?
+          GOTO      PCHR5000 IF EQUAL            * yes
+.
+          MATCH     ENDSTRNG,TMPSTRNG            * end of tag ?
+          GOTO      PCHR6000 IF EQUAL            * yes
+.
+.         Add character to the string
+.
+          MOVE      TMPSTRNG,ANS
+          IF        TYPEFLAG = 2
+            APPEND    ANS,DATSTRNG               * data string
+          ELSE
+            APPEND    ANS,TAGSTRNG               * tag string
+          ENDIF
+          CALL      GNXT0000                     * get next character
+          BRANCH    EXIT,PCHR9999                * end of file
+          GOTO      PCHR0000
+.
+.         We have a "<" character, so check if this is a start or end tag
+.
+PCHR5000  PACK      TAGSTRNG,SP100,SP100,SP100   * initialise tag string
+          CLEAR     TAGSTRNG
+.
+          CALL      GNXT0000                     * get next character
+          BRANCH    EXIT,PCHR9999                * end of file
+.
+          MOVE      ZERO,TYPEFLAG                * set flag for start tag
+          MATCH     SLASH,TMPSTRNG               * start tag ?
+          GOTO      PCHR0000 IF NOT EQUAL        * yes
+.
+          MOVE      ONE,TYPEFLAG                 * no - set flag for end tag
+          CALL      GNXT0000                     * get next character
+          BRANCH    EXIT,PCHR9999                * end of file
+          GOTO      PCHR0000
+.
+.         We have a ">" character, so check if we need to
+.         do anything with the tag text string we just loaded.
+.
+PCHR6000  RESET     TAGSTRNG
+.
+.         Check if the tag was an open and close tag, in which case
+.         we don't need to do anything
+.
+          MATCH     SLASH,LASTCHAR
+          IF        @EQUAL
+            MOVE      ZERO,TYPEFLAG
+            GOTO      PCHR9100
+          ENDIF
+.
+          BRANCH    TYPEFLAG,PCHR7000:           * end tag
+                             PCHR9100            * data string
+.
+          CALL      CTAG0000                     * check tag
+          GOTO      PCHR9000                     * get next character
+.
+.         Ignore validation_totals end tags
+.
+PCHR7000  MATCH     "validation_totals",TAGSTRNG
+          GOTO      PCHR9100 IF EQUAL
+.
+.         Ignore message end tags
+.
+          MATCH     "message",TAGSTRNG
+          GOTO      PCHR7100 IF NOT EQUAL
+.
+          MOVELPTR  TAGSTRNG,FORM2
+          COMPARE   SEVEN,FORM2
+          GOTO      PCHR9100 IF EQUAL
+.
+.         If this is a "batch" end tag, then we need to update the batch
+.         status on allhbtaf but not print anything
+.
+PCHR7100  MATCH     "batch",TAGSTRNG
+          GOTO      PCHR7200 IF NOT EQUAL
+.
+          MOVELPTR  TAGSTRNG,FORM2
+          COMPARE   FIVE,FORM2
+          GOTO      PCHR7200 IF NOT EQUAL
+.
+          CALL      BUPD0000                     * update batch record status
+          GOTO      PCHR9100
+.
+.         If this is an "acceptance" end tag, then we are at the end
+.         of the file and we can stop processing once we have updated
+.         the header file
+.
+PCHR7200  MATCH     "acceptance",TAGSTRNG
+          IF        @EQUAL
+            CALL      FUPD0000
+            GOTO      PCHR9999
+          ENDIF
+.
+          CALL      DATA0000                     * print tag data
+          GOTO      PCHR9100                     * get next character
+.
+PCHR9000  MOVE      TWO,TYPEFLAG
+          PACK      DATSTRNG,SP100,SP100,SP100,SP100,SP100:
+                             SP100,SP100,SP100,SP100,SP100:
+                             SP100,SP100,SP100,SP100,SP100:
+                             SP100,SP100,SP100,SP100,SP100:
+                             SP100,SP100,SP100,SP100,SP100:
+                             SP100,SP100,SP100,SP100,SP100:
+                             SP100,SP100,SP100,SP100,SP100:
+                             SP100,SP100,SP100,SP100,SP100
+          CLEAR     DATSTRNG
+.
+PCHR9100  CALL      GNXT0000                     * get next character
+          BRANCH    EXIT,PCHR9999                * end of file
+          GOTO      PCHR0000
+.
+PCHR9999  RETURN
++
+.*****************************************************************************
+.*                          GNXT0000               Called by: PCHR0000       *
+.*          Get the next character in the array string                       *
+.* Returns : EXIT  0 = next character read successfully                      *
+.*                 1 = end of file found                                     *
+.*****************************************************************************
+.
+GNXT0000  MOVE      TMPSTRNG,LASTCHAR            * save the last character
+          BUMP      TMPSTRNG                     * move to next character
+          GOTO      GNXT9000 IF NOT EOS          * not end of record
+.
+          READ      FLATFILE,SEQ;TMPSTRNG        * read next record
+          GOTO      GNXT9100 IF OVER             * eof - finished
+.
+GNXT9000  MOVE      ZERO,EXIT
+          GOTO      GNXT9999
+.
+GNXT9100  MOVE      ONE,EXIT
+.
+GNXT9999  RETURN
++
+.*****************************************************************************
+.*                          CTAG0000               Called by: PCHR0000       *
+.*       We are processing a start tag, so check which tag it is             *
+.* Returns: SECTION -                                                        *
+.*****************************************************************************
+.
+.         We need to see if this is a tag that is associated with text,
+.         or simply a section tag.
+.
+CTAG0000  MATCH     "submission",TAGSTRNG
+          GOTO      CTAG0500 IF NOT EQUAL
+.
+.         We need to differentiate between "submission" and "submission_date"
+.
+          MOVELPTR  TAGSTRNG,FORM2
+          COMPARE   TEN,FORM2
+          GOTO      CTAG0500 IF NOT EQUAL
+.
+          CALL      LINE0000
+          PRINT     *1,PIPE,"Submission Summary Section",*132,PIPE
+          CALL      LINE0000
+          MOVE      ONE,SECTION                  * set section type
+          DISPLAY   *P1:24,*EL,"Processing submission data";
+          GOTO      CTAG9999
+.
+CTAG0500  MATCH     "validation",TAGSTRNG
+          GOTO      CTAG2000 IF NOT EQUAL
+.
+.         We need to differentiate between "validations" and "validation"
+.         and "validation_totals" and "validation_total"
+.
+          MOVELPTR  TAGSTRNG,FORM2
+          COMPARE   TEN1,FORM2                   * "validations" ?
+          GOTO      CTAG1000 IF NOT EQUAL        * no
+.
+          CALL      LINE0000                     * yes
+          PRINT     *1,PIPE,"Validation Error Section",*132,PIPE
+          CALL      LINE0000
+          MOVE      TWO,SECTION                  * set section type
+          DISPLAY   *P1:24,*EL,"Processing validation errors";
+          GOTO      CTAG9999
+.
+CTAG1000  COMPARE   TEN,FORM2                    * "validation" ?
+          GOTO      CTAG1500 IF NOT EQUAL        * no
+.
+          CALL      SLIN0000
+          MOVE      THREE,SECTION                * yes - set section type
+          GOTO      CTAG9999
+.
+CTAG1500  COMPARE   TEN7,FORM2                   * "validation_totals" ?
+          GOTO      CTAG1600 IF NOT EQUAL        * no
+.
+          CALL      LINE0000
+          PRINT     *1,PIPE,"Validation Error Summary Section",*132,PIPE
+          CALL      LINE0000
+          MOVE      FOUR,SECTION                 * yes - set section type 
+          DISPLAY   *P1:24,*EL,"Processing validation error summary";
+          GOTO      CTAG9999
+.
+.         "validation_total"
+.
+CTAG1600  MOVE      FIVE,SECTION                 * set section type
+          GOTO      CTAG9999
+.
+CTAG2000  MATCH     "acceptance",TAGSTRNG        * "acceptance" ?
+          GOTO      CTAG2500 IF NOT EQUAL        * no
+.
+          CALL      LINE0000                     * yes
+          PRINT     *1,PIPE,"Acceptance Section",*132,PIPE
+          CALL      LINE0000
+          MOVE      SIX,SECTION                  * set section type
+          DISPLAY   *P1:24,*EL,"Processing acceptances";
+          GOTO      CTAG9999
+.
+CTAG2500  MATCH     "batch",TAGSTRNG             * "batch" ?
+          GOTO      CTAG2700 IF NOT EQUAL        * no
+.
+          MOVELPTR  TAGSTRNG,FORM2
+          COMPARE   FIVE,FORM2
+          GOTO      CTAG9999 IF NOT EQUAL
+.
+          CALL      SLIN0000
+          PRINT     *1,PIPE,*8,PIPE," Batch",*132,PIPE
+          CALL      SLIN0000
+          MOVE      SEVEN,SECTION                * yes - set section type 
+          GOTO      CTAG9999
+.
+CTAG2700  MATCH     "message",TAGSTRNG           * "message" ?
+          GOTO      CTAG3000 IF NOT EQUAL        * no
+.
+          MOVELPTR  TAGSTRNG,FORM2
+          COMPARE   SEVEN,FORM2
+          GOTO      CTAG9999 IF NOT EQUAL
+.
+          CALL      SLIN0000
+          PRINT     *1,PIPE,*8,PIPE,*15,PIPE," Message",*132,PIPE
+          CALL      SLIN0000
+          MOVE      EIGHT,SECTION                * yes - set section type 
+          GOTO      CTAG9999
+.
+CTAG3000  MATCH     "edit_code",TAGSTRNG         * "edit_code" ?
+          GOTO      CTAG9999 IF NOT EQUAL        * no
+.
+          IF        SECTION = 5
+            CALL      SLIN0000
+          ENDIF
+.
+CTAG9999  RETURN
++
+.****************************************************************************
+.*                            DATA0000                 Called by: PCHR0000  *
+.*                  Valid record so print it                                *
+.****************************************************************************
+.
+DATA0000  RESET     DATSTRNG
+          BRANCH    SECTION,DATA0100:            * submission
+                            DATA0200:            * validations
+                            DATA0300:            * validation
+                            DATA0400:            * validation_totals
+                            DATA0500:            * validation_total
+                            DATA0600:            * acceptance
+                            DATA0700:            * batch
+                            DATA0800             * message
+.
+.         Processing the submission header values
+.
+DATA0100  MATCH     "filename",TAGSTRNG            * filename ?
+          GOTO      DATA0150 IF NOT EQUAL          * no
+.
+          PACK      SAVFILNM,DATSTRNG,SP70         * save filename
+.
+          ENDSET    DATSTRNG                     * yes
+          APPEND    " (webPAS Extract Filename)",DATSTRNG
+          RESET     DATSTRNG
+.
+          SCAN      "_",SAVFILNM
+          IF        !@EOS
+            MOVEFPTR  SAVFILNM,FORM1
+            IF        FORM1 = 3
+              MOVE      ZERO,SITEFLAG            * STV
+            ELSE
+              MOVE      ONE,SITEFLAG             * BHS
+            ENDIF
+          ENDIF
+          RESET     SAVFILNM
+.
+DATA0150  PRINT     *1,PIPE,*10,*+,TAGSTRNG,*-,*29,COLON,*31,*+,DATSTRNG,*-:
+                    *132,PIPE
+          GOTO      DATA9999
+.
+.         Processing the validation error section
+.
+DATA0200  PRINT     *1,PIPE,*8,PIPE,*10,*+,TAGSTRNG,*-,*29,COLON,*31,*+:
+                    DATSTRNG,*-,*132,PIPE
+          GOTO      DATA9999
+.
+.         Processing a validation error record
+.
+DATA0300  MATCH     "validation",TAGSTRNG        * end of validation error ?
+          GOTO      DATA9999 IF EQUAL            * no
+.
+          MATCH     "edit_text",TAGSTRNG         * error message line ?
+          GOTO      DATA0355 IF EQUAL            * yes
+.
+          MATCH     "edit_code",TAGSTRNG         * error message type ?
+          IF        @EQUAL
+            MOVE      DATSTRNG,SAVERCOD          * save error code
+            DISPLAY   *P1:21,*EL,"Error Code: ",*V2LON,*+,DATSTRNG;
+            GOTO      DATA0340
+          ENDIF
+.
+          MATCH     "message_type",TAGSTRNG      * message type ?
+          GOTO      DATA0320 IF NOT EQUAL        * no
+.
+          MOVE      DATSTRNG,SAVMSTYP            * save message type
+          REP       "_-",SAVMSTYP
+          DISPLAY   *P1:20,*EL,"Message Type: ",*V2LON,SAVMSTYP
+          GOTO      DATA0340
+.
+DATA0320  MATCH     "mcid",TAGSTRNG              * HL7 message id ?
+          GOTO      DATA0330 IF NOT EQUAL        * no
+.
+          MOVE      DATSTRNG,SAVMESSG
+          DISPLAY   *P30:24,*EL,*V2LON,SAVMESSG;
+.
+          ENDSET    DATSTRNG                     * yes
+          APPEND    " (webPAS HL7 Message ID)",DATSTRNG
+          RESET     DATSTRNG
+          GOTO      DATA0340
+.
+DATA0330  MATCH     "patient_identifier",TAGSTRNG  * U/R number ?
+          GOTO      DATA0335 IF NOT EQUAL          * no
+.
+          PACK      SAVURNUM,DATSTRNG,SP70       * save U/R number
+          RJUSTIFY  SAVURNUM
+.
+          ENDSET    DATSTRNG                     * yes
+          APPEND    " (webPAS U/R Number)",DATSTRNG
+          RESET     DATSTRNG
+.
+.         Check if this error is an E052 or E061 and if so, write the
+.         data to allvreaf for processing later
+.
+          MATCH     "E052",SAVERCOD              * E052 error ?
+          IF        @EQUAL
+            CALL      E0520000                   * yes - further action required
+          ENDIF
+.
+          MATCH     "E061",SAVERCOD              * E061 error ?
+          IF        @EQUAL
+            CALL      E0610000                   * yes - further action required
+          ENDIF
+          GOTO      DATA0340
+.
+.         If this is the cascading data tag for the validation error,
+.         then it's the end of this error, so update the record status.
+.
+DATA0335  MATCH     "cascading",TAGSTRNG
+          IF        @EQUAL
+            ADD       ONE,REJTOTAL               * increment reject total
+            CALL      EROR0000
+          ENDIF
+.
+DATA0340  PRINT     *1,PIPE,*8,PIPE,*10,*+,TAGSTRNG,*-,*29,COLON,*31,*+:
+                    DATSTRNG,*-,*132,PIPE
+          GOTO      DATA9999
+.
+DATA0355  RESET     DATSTRNG
+          PRINT     *1,PIPE,*8,PIPE,*10,*+,TAGSTRNG,*-,*29,COLON;
+.
+          MOVE      DATSTRNG,SAVERROR            * save error message
+.
+          MOVELPTR  DATSTRNG,FORM4
+          MOVE      DATSTRNG,DIM91
+          PRINT     *31,*+,DIM91,*-,*132,PIPE
+          GOTO      DATA0365
+.
+DATA0360  MOVE      DATSTRNG,DIM91
+          PRINT     *1,PIPE,*8,PIPE,*31,*+,DIM91,*-,*132,PIPE
+.
+DATA0365  COMPARE   FORM4,NINTY1                 * string > 91 chars ?
+          GOTO      DATA9999 IF NOT LESS         * no
+.
+          BUMP      DATSTRNG,NINTY1              * yes - move along 91 chars.
+          SUB       NINTY1,FORM4
+          GOTO      DATA0360
+.
+.         Processing the validation error summary section
+.
+DATA0400  PRINT     *1,PIPE,*8,PIPE,*10,*+,TAGSTRNG,*-,*34,COLON,*36,*+:
+                    DATSTRNG,*-,*132,PIPE
+          GOTO      DATA9999
+.
+.         Processing an error value total count
+.
+DATA0500  PRINT     *1,PIPE,*8,PIPE,*10,*+,TAGSTRNG,*-,*36,COLON,*38;
+.
+          MOVELPTR  DATSTRNG,FORM4
+          MOVE      DATSTRNG,DIM91
+          PRINT     *40,*+,DIM91,*-,*132,PIPE
+          GOTO      DATA0545
+.
+DATA0540  MOVE      DATSTRNG,DIM91
+          PRINT     *1,PIPE,*8,PIPE,*40,*+,DIM91,*-,*132,PIPE
+.
+DATA0545  COMPARE   FORM4,NINTY1                 * string > 91 chars ?
+          GOTO      DATA9999 IF NOT LESS         * no
+.
+          BUMP      DATSTRNG,91                  * yes - move along 91 chars.
+          SUB       NINTY1,FORM4
+          GOTO      DATA0540
+.
+.         Processing the acceptance section
+.
+DATA0600  PRINT     *1,PIPE,*8,PIPE,*10,*+,TAGSTRNG,*-,*34,COLON,*36,*+:
+                    DATSTRNG,*-,*132,PIPE
+          GOTO      DATA9999
+.
+.         Processing a batch.
+.         First check for a batch id tag.
+.
+DATA0700  MATCH     "bcid",TAGSTRNG              * batch number tag ?
+          GOTO      DATA0710 IF NOT EQUAL        * no
+.
+          PACK      SAVBATCH,DATSTRNG,SP70       * save batch number
+          RJUSTIFY  SAVBATCH
+.
+          ENDSET    DATSTRNG
+          APPEND    " (webPAS Batch Number)",DATSTRNG
+          RESET     DATSTRNG
+          GOTO      DATA0720
+.
+.         Check for an accepted batch tag
+.
+DATA0710  MATCH     "accepted",TAGSTRNG          * accepted tag ?
+          GOTO      DATA0720 IF NOT EQUAL        * no
+.
+.         Now see if the batch was accepted and if not, then write
+.         the batch number to the temp file.
+.         Given that 1 rejected message in a batch results in the entire
+.         batch being rejected, we need to write the batch number to a temp
+.         file, so that at the end of processing, we can loop through the
+.         temp file and for each batch, update any remaining non-rejected
+.         records with a status of "submitted" back to "waiting".
+.
+          MATCH     "0",DATSTRNG                 * accepted batch ?
+          IF        @EQUAL
+DATA0715    MOVE      SAVBATCH,KEY20             * no
+            CALL      RDTEMP1
+            IF        OVRCD = 1
+              MOVE      SAVBATCH,BATCHNUM
+              CALL      WRTEMP1
+            ENDIF
+          ENDIF
+.
+DATA0720  PRINT     *1,PIPE,*8,PIPE,*10,*+,TAGSTRNG,*-,*34,COLON,*36,*+:
+                    DATSTRNG,*-,*132,PIPE
+          GOTO      DATA9999
+.
+.         Processing an accepted message
+.
+DATA0800  MATCH     "patient_identifier",TAGSTRNG  * U/R number ?
+          GOTO      DATA0810 IF NOT EQUAL          * no
+.
+          PACK      SAVURNUM,DATSTRNG,SP70       * save U/R number
+          RJUSTIFY  SAVURNUM
+.
+          ENDSET    DATSTRNG
+          APPEND    " (webPAS U/R Number)",DATSTRNG
+          RESET     DATSTRNG
+.
+DATA0810  MATCH     "mcid",TAGSTRNG              * message id ?
+          GOTO      DATA0820 IF NOT EQUAL        * no
+.
+          MOVE      DATSTRNG,SAVMESSG
+          DISPLAY   *P24:24,*EL,*V2LON,SAVMESSG;
+.
+          ENDSET    DATSTRNG
+          APPEND    " (webPAS HL7 Message ID)",DATSTRNG
+          RESET     DATSTRNG
+.
+DATA0820  PRINT     *1,PIPE,*8,PIPE,*15,PIPE,*17,*+,TAGSTRNG,*-:
+                    *35,COLON,*37,*+,DATSTRNG,*-,*132,PIPE
+.
+.         If this is the webPAS message type, save it
+.
+          MATCH     "msg_type",TAGSTRNG
+          IF        @EQUAL
+            MOVE      DATSTRNG,SAVMSTYP
+            REP       "_-",SAVMSTYP
+            GOTO      DATA9999
+          ENDIF
+.
+          MATCH     "mcid",TAGSTRNG
+          GOTO      DATA9999 IF EQUAL
+.
+.         If this is the patient_identifier, then we have finished loading
+.         the data for a message, so update the status of the message record
+.
+          MATCH     "patient_identifier",TAGSTRNG
+          GOTO      DATA9999 IF NOT EQUAL
+.
+          ADD       ONE,ACPTTOTL                 * increment accept total
+          CALL      ACPT0000
+.
+DATA9999  RETURN
++
+.*****************************************************************************
+.*                             E0520000            Called by: DATA0000       *
+.*                 Process an E052 error message.                            *
+.*    Check if we are dealing with an E052 error for a PPP or                *
+.*    ADT^A03 message and if so then we need to determine the visit          *
+.*    number from the error message, where the format will be as follows:    *
+.*                                                                           *
+.*    .....PV1.5\CX.1) = "4989433"......                                     *
+.*                                                                           *
+.*    The E052 error occurs where the foreign key is non-existent.           *
+.*    For example, in a PPP message, PV1.5 refers to the visit number        *
+.*    of the Referral In (Master) record to which the episode is linked.     *
+.*    For an ADT-A03 message, PV1.5 refers to the visit number of the        *
+.*    Episode (Internal Referral) record to which the contact is linked.     *
+.*                                                                           *
+.*    This error has occurred due to sites processing submitted records      *
+.*    as accepted, when DoH has rejected them.  As such, any subsequent      *
+.*    VINAH extracts see the foreign key record as having been accepted      *
+.*    and so an add record is not sent.                                      *
+.*                                                                           *
+.*    To fix the E052 error, we need to use the visit number from the        *
+.*    error message to reset any previously accepted batches to have         *
+.*    a status of "99" (which is invalid), so that the next VINAH extract    *
+.*    will not find these records and will therefore send an add record      *
+.*    for the missing foreign key.                                           *
+.*****************************************************************************
+*
+E0520000  MATCH     "ADT-A03",SAVMSTYP           * contact record ?
+          IF        !@EQUAL
+            MATCH     "PPP",SAVMSTYP             * no - episode record ?
+            GOTO      E0529999 IF NOT EQUAL      * no
+          ENDIF
+.
+.         We have either a PPP or an ADT^A03 message, so see if the error
+.         message contains a reference to the PV1.5 field
+.
+          SCAN      "PV1.5",SAVERROR             * error on PV1.5 ?
+          GOTO      E0529999 IF EOS              * no
+.
+.         We need to find the start and end positions for the visit number
+.         withing double quotes, then load the visit number
+.
+          SCAN      "#"",SAVERROR                * double quote found in scan ?
+          GOTO      E0529999 IF EOS              * no
+.
+          BUMP      SAVERROR                     * yes - move to next character
+          MOVEFPTR  SAVERROR,FORM4A              * save posn of 1st visit digit
+.
+          SCAN      "#"",SAVERROR                * double quote found in scan ?
+          GOTO      E0529999 IF EOS              * no
+.
+          BUMP      SAVERROR,-1                  * yes - move to prev. char.
+          MOVEFPTR  SAVERROR,FORM4B              * save posn of last visit digit
+.
+          ASSIGN    (FORM4B-FORM4A),FORM4
+          COMPARE   EIGHT,FORM4                  * visit # more than 8 digits ?
+          GOTO      E0529999 IF NOT LESS         * yes
+.
+          MOVELPTR  SAVERROR,FORM4C              * save LL of full string
+          SETLPTR   SAVERROR,FORM4B              * set LL to end visit digit
+          RESET     SAVERROR,FORM4A              * set FP to start visit digit
+          MOVE      SAVERROR,DIM8A               * load visit number
+          SETLPTR   SAVERROR,FORM4C              * set LL back to end of string
+          RESET     SAVERROR                     * set FP to start of string
+.
+          RJUSTIFY  DIM8A
+          TYPE      DIM8A                        * numeric visit number ?
+          GOTO      E0529999 IF NOT EQUAL        * no
+.
+.         We have found a valid visit number in the error message, so
+.         write a record to allvreaf for processing later on where the
+.         status of any accepted batches will be reset to "99"
+.
+          MOVE      ZERO,ALVRSTAT
+          MOVE      SAVURNUM,ALVRURNO
+          MOVE      DIM8A,ALVRVISN
+          MOVE      SAVMSTYP,ALVRMTYP
+          MOVE      SAVERCOD,ALVRECOD
+          MOVE      SP8,ALVRCONT
+          MOVE      SP70,ALVRSPAR
+          PACK      KEY17,ALVRSTAT,ALVRURNO,ALVRVISN
+          CALL      RAALVRE1
+          IF        OVRCD = 1 & VALDFLAG = 0
+            CALL      WRALVRE1
+          ENDIF
+.
+E0529999  RETURN
++
+.*****************************************************************************
+.*                             E0610000            Called by: DATA0000       *
+.*                 Process an E061 error message.                            *
+.*    Check if we are dealing with an E061 error for the following message   *
+.*    types: ADT-A08, PPP-PCC, PPP-PCD, RRI-I13, RRI-I14 & REF-I14.          *
+.*    If so then we need to determine the UR or visit number from the error  *
+.*    message, where the format will be message type dependent as follows:   *
+.*                                                                           *
+.*    ADT-A08                    : .....PID.3\CX.1) = "G197865"......        *
+.*    PPP-PCC or PPP-PCD         : .....PV1.19\CX.1) = "4989433"......       *
+.*    RRI-I13, RRI-I14 or REF-I14: .....RF1.6\EI.1) = "4976710-1"......      *
+.*    ADT-A13                    : .....PV1.19\CX.1) = "7795910-49"....      *
+.*                                                                           *
+.*    The E061 error occurs where a record is being sent to update or delete *
+.*    a patient or visit which doesn't exist.                                *
+.*    For example, in a PPP message, PV1.19 refers to the visit number       *
+.*    of the Episode record which has not previously been registered with    *
+.*    a PPP-PCB message.                                                     *
+.*    For an ADT-A08 message, PID.3 (component 1) refers to the UR number of *
+.*    the patient which has not previously been registered with an ADT-A04   *
+.*    message.                                                               *
+.*    For an ADT-A13 message, PV1.19 refers to the visit/contact number      *
+.*    of the Contact record which has not previously been registered with    *
+.*    a ADT-A03 message.                                                     *
+.*    For an RRI message, RF1.6 refers to the visit number of a Referral In  *
+.*    (Master) record which has not previously been registered with an       *
+.*    RRI-I12 message.                                                       *
+.*    For a REF message, RF1.6 refers to the visit number of a Referral Out  *
+.*    record which has not previously been registered with an REF-I12        *
+.*    message.                                                               *
+.*                                                                           *
+.*    This error has occurred due to sites processing submitted records      *
+.*    as accepted, when DoH has rejected them.  As such, any subsequent      *
+.*    VINAH extracts see the original add record as having been accepted     *
+.*    and so an add record is not sent.                                      *
+.*                                                                           *
+.*    To fix the E061 error, we need to use the UR/visit number from the     *
+.*    error message to reset any previously accepted batches to have         *
+.*    a status of "99" (which is invalid), so that the next VINAH extract    *
+.*    will not find these records and will therefore send an add record      *
+.*    for the missing UR/visit.                                              *
+.*****************************************************************************
+.
+.         For an ADT-A08 message, we need to also check the subcomponent as
+.         there are two subcomponents reported in the error message and we
+.         are only interested in CX.1
+.
+E0610000  MATCH     "ADT-A08",SAVMSTYP           * pmi update record ?
+          IF        @EQUAL
+            SCAN      "PID.3\CX.1",SAVERROR      * error on PID.3\CX.1 ?
+            GOTO      E0619999 IF EOS            * no
+            GOTO      E0611000                   * yes
+          ENDIF
+.
+          MATCH     "ADT-A13",SAVMSTYP           * contact delete record ?
+          IF        @EQUAL
+            SCAN      "PV1.19\CX.1",SAVERROR     * error on PV1.19\CX.1 ?
+            GOTO      E0619999 IF EOS            * no
+            GOTO      E0611000                   * yes
+          ENDIF
+.
+          MATCH     "PPP",SAVMSTYP               * episode related record ?
+          IF        @EQUAL
+            SCAN      "PV1.19",SAVERROR          * error on PV1.19?
+            GOTO      E0619999 IF EOS            * no
+            GOTO      E0611000                   * yes
+          ENDIF
+.
+          MATCH     "RRI",SAVMSTYP               * episode related record ?
+          GOTO      E0610500 IF EQUAL            * yes
+.
+          MATCH     "REF",SAVMSTYP               * referral out related record ?
+          GOTO      E0610500 IF EQUAL            * yes
+.
+          GOTO      E0619999                     * no - finished
+.
+E0610500  SCAN      "RF1.6",SAVERROR             * error on RF1.6 ?
+          GOTO      E0619999 IF EOS              * no
+.
+.         We need to find the start and end positions for the UR/visit number
+.         within double quotes, then load the visit number
+.
+E0611000  SCAN      "#"",SAVERROR                * double quote found in scan ?
+          GOTO      E0619999 IF EOS              * no
+.
+          BUMP      SAVERROR                     * yes - move to next character
+          MOVEFPTR  SAVERROR,FORM4A              * save posn of 1st visit digit
+.
+.         For an ADT-A13 error, we need to pick up the visit number
+.         and the contact number which will be in the format
+.         "12345678-12345678".  For all other message types except the ADT-A08,
+.         we only need the visit number which will be in the format
+.         "12345678".
+.         So for REF and ADT-A13 message types, we need to find the hyphen
+.         after the string.  For all other messages we are looking for the
+.         double quote at the end of the string.
+.
+          MATCH     "REF",SAVMSTYP
+          GOTO      E0612000 IF EQUAL
+.
+          MATCH     "ADT-A13",SAVMSTYP
+          GOTO      E0612000 IF EQUAL
+.
+          SCAN      "#"",SAVERROR                * double quote found in scan ?
+          GOTO      E0619999 IF EOS              * no
+.
+E0612000  SCAN      "-",SAVERROR                 * hyphen found in scan ?
+          GOTO      E0619999 IF EOS              * no
+.
+          BUMP      SAVERROR,-1                  * yes - move to prev. char.
+          MOVEFPTR  SAVERROR,FORM4B              * save posn of last visit digit
+          ASSIGN    (FORM4B-FORM4A),FORM4
+          COMPARE   NINE,FORM4                   * more than 8 digits ?
+          GOTO      E0619999 IF NOT LESS         * yes
+.
+          MOVELPTR  SAVERROR,FORM4C              * save LL of full string
+          SETLPTR   SAVERROR,FORM4B              * set LL to end visit digit
+          RESET     SAVERROR,FORM4A              * set FP to start visit digit
+          MOVE      SAVERROR,DIM8A               * load visit number
+          SETLPTR   SAVERROR,FORM4C              * set LL back to end of string
+.
+          RJUSTIFY  DIM8A
+          TYPE      DIM8A                        * numeric visit number ?
+          GOTO      E0619999 IF NOT EQUAL        * no
+.
+.         If this is an ADT-A13 message, then we need to get the contact
+.         number as well.
+.
+          MATCH     "ADT-A13",SAVMSTYP
+          IF        @EQUAL
+            RESET     SAVERROR,FORM4B            * set FP to end visit digit
+            BUMP      SAVERROR,2                 * move FP to start of contact #
+            MOVEFPTR  SAVERROR,FORM4A
+            SCAN      "#"",SAVERROR              * double quote found in scan ?
+            GOTO      E0619999 IF EOS            * no
+.
+            BUMP      SAVERROR,-1
+            MOVEFPTR  SAVERROR,FORM4B
+            ASSIGN    (FORM4B-FORM4A),FORM4
+            COMPARE   NINE,FORM4                 * more than 8 digits ?
+            GOTO      E0619999 IF NOT LESS       * yes
+.
+            SETLPTR   SAVERROR,FORM4B            * set LL to end contact digit
+            RESET     SAVERROR,FORM4A            * set FP to start contact digit
+.
+            MOVE      SAVERROR,DIM8B             * load contact number
+            SETLPTR   SAVERROR,FORM4C            * set LL back to end of string
+.
+            RJUSTIFY  DIM8B
+            TYPE      DIM8B                      * numeric contact number ?
+            GOTO      E0619999 IF NOT EQUAL      * no
+          ENDIF
+.
+.         We have found a valid UR/visit number in the error message, so
+.         write a record to allvreaf for processing later on where the
+.         status of any previously accepted batches will be reset to "99"
+.
+          MOVE      ZERO,ALVRSTAT
+          MOVE      SAVURNUM,ALVRURNO
+.
+          MATCH     "ADT-A08",SAVMSTYP
+          IF        @EQUAL
+            MOVE      SP8,ALVRVISN
+          ELSE
+            MOVE      DIM8A,ALVRVISN
+          ENDIF
+.
+          MATCH     "ADT-A13",SAVMSTYP
+          IF        @EQUAL
+            MOVE      DIM8B,ALVRCONT
+          ELSE
+            MOVE      SP8,ALVRCONT
+          ENDIF
+.
+          MOVE      SAVMSTYP,ALVRMTYP
+          MOVE      SAVERCOD,ALVRECOD
+          MOVE      SP70,ALVRSPAR
+          PACK      KEY17,ALVRSTAT,ALVRURNO,ALVRVISN
+          CALL      RAALVRE1
+          IF        OVRCD = 1 & VALDFLAG = 0
+            CALL      WRALVRE1
+          ENDIF
+.
+E0619999  RETURN
++
+.****************************************************************************
+.*                            ACPT0000             Called by: DATA0000      *
+.*            Update the status of a message to "accepted"                  *
+.* Requires: SAVBATCH - saved batch number                                  *
+.*           SAVMESSG - saved message id                                    *
+.*           SAVURNUM - saved U/R number                                    *
+.*           SAVMSTYP - saved message type                                  *
+.****************************************************************************
+.
+.         There may be non-rejected messages in a batch that has one or more
+.         other rejected messages.  In such a case, the whole batch is rejected
+.         by DHS, so first we need to check if the batch for this record
+.         has been rejected or not.  If not, then update the record as accepted,
+.         otherwise ignore it for now, as it's status will be reset to waiting
+.         later in WAIT0000.
+.
+ACPT0000  MOVE      SAVBATCH,KEY20
+          CALL      RDTEMP1                      * batch rejected ?
+          COMPARE   ZERO,OVRCD
+          GOTO      ACPT9999 IF EQUAL            * yes - ignore record
+.
+.         Data was accepted, so find and update the record status
+.
+          PACK      KEY62,SAVBATCH,SP1,SEVEN,SP70
+          CALL      RSALHDT2                     * position on batch/status
+ACPT0500  CALL      RKALHDT2
+          BRANCH    OVRCD,ACPT9100
+.
+          MATCH     SAVBATCH,ALHDBNUM            * same batch still ?
+          GOTO      ACPT9100 IF NOT EQUAL        * no - error
+.
+          MATCH     " 7",ALHDSTAT                * same status still ?
+          GOTO      ACPT9100 IF NOT EQUAL        * no - error
+.
+          MATCH     SAVMESSG,ALHDMESI            * matching message id ?
+          GOTO      ACPT0500 IF NOT EQUAL        * no - error
+.
+          MATCH     SAVURNUM,ALHDURNO            * matching U/R number ?
+          GOTO      ACPT0500 IF NOT EQUAL        * no - error
+.
+          MATCH     SAVMSTYP,ALHDMTYP            * matching message type ?
+          GOTO      ACPT0500 IF NOT EQUAL        * no - error
+.
+          ADD       ONE,ACPTUPDT                 * inc. acceptance update count
+.
+          BRANCH    VALDFLAG,ACPT9999            * validation only
+.
+.         We've found the matching record, so update the status to
+.         "accepted" if we are processing.
+.         Sometimes a record already exists for an A08 accepted record
+.         with the same date/time, so we need to TRAP this error and change
+.         the date/time of the submitted record by one second.
+.
+ACPT5000  MOVE      ZERO,OVRCD
+          MOVE      TEN,ALHDSTAT                 * set status as accepted
+          TRAP      OVERCOND GIVING DIM80 IF IO
+          CALL      UPALHDT2                     * update record status
+          TRAPCLR   IO
+          COMPARE   ZERO,OVRCD
+          GOTO      ACPT9999 IF EQUAL
+.
+.         We have an I/O error, so check if it's an I * U
+.
+          RESET     DIM80
+          SCAN      "I * U",DIM80
+          GOTO      ACPT8000 IF NOT EQUAL
+.
+          MATCH     "ADT-A08",ALHDMTYP           * A08 message ?
+          GOTO      ACPT8000 IF NOT EQUAL        * no - report error
+.
+.         Delete the submitted A08 message and proceed as normal
+.         Increment the time on the submitted A08 message and update
+.         the record
+.
+          CALL      ASEC0000
+          GOTO      ACPT5000
+.
+ACPT8000  PRINT     *1,PIPE,*8,PIPE,*15,PIPE,*17,"webPAS Load Error":
+                    *35,COLON,*37,"I/O error on updating message ":
+                    "record from submitted to accepted",*132,PIPE
+.
+          GOTO      ACPT9999
+.
+.         Matching record not found - write line to error report
+.
+ACPT9100  PRINT     *1,PIPE,*8,PIPE,*15,PIPE,*17,"webPAS Load Error":
+                    *35,COLON,*37,"Failed to find matching allhdtaf message ":
+                    "record",*132,PIPE
+.
+ACPT9999  RETURN
++
+.****************************************************************************
+.*                            BUPD0000                 Called by: PCHR0000  *
+.*                 Update the batch status to "accepted"                    *
+.* Requires: SAVFILNM - saved extract file name                             *
+.*           SAVBATCH - saved batch number                                  *
+.****************************************************************************
+.
+BUPD0000  PACK      KEY40,SAVFILNM,SAVBATCH
+          CALL      RDALHBT1                     * batch record found ?
+          BRANCH    OVRCD,BUPD9100               * no - error
+.
+          BRANCH    VALDFLAG,BUPD9999            * validation only
+.
+          PACK      ALHBSTAT,FOUR
+          CALL      UPALHBT1                     * update batch status
+          GOTO      BUPD9999
+.
+.         Matching record not found - write line to error report
+.
+BUPD9100  PRINT     *1,PIPE,*8,PIPE,*15,PIPE,*17,"webPAS Load Error":
+                    *35,COLON,*37,"Failed to find matching allhbtaf batch ":
+                    "record",*132,PIPE
+.
+BUPD9999  RETURN
++
+.****************************************************************************
+.*                            FUPD0000                 Called by: PCHR0000  *
+.*                 Update the file status to "accepted"                     *
+.* Requires: SAVFILNM - saved extract file name                             *
+.****************************************************************************
+.
+FUPD0000  MOVE      SAVFILNM,KEY20
+          CALL      RDALHHD1                     * file header record found ?
+          BRANCH    OVRCD,FUPD9100               * no - error
+.
+          BRANCH    VALDFLAG,FUPD9999            * validation only
+.
+          MOVE      FOUR,ALHHSTAT
+          CALL      UPALHHD1                     * update record status
+          GOTO      FUPD9999
+.
+.         Matching record not found - write line to error report
+.
+FUPD9100  PRINT     *1,PIPE,*8,PIPE,*15,PIPE,*17,"webPAS Load Error":
+                    *35,COLON,*37,"Failed to find matching allhhdaf file ":
+                    "record",*132,PIPE
+.
+FUPD9999  RETURN
++
+.****************************************************************************
+.*                            EROR0000                 Called by: PCHR0000  *
+.*         Update the file status to "extract error" and write a record     *
+.*         to allsedaf.                                                     *
+.* Requires: SAVURNUM - saved U/R number                                    *
+.*           SAVMESSG - saved message id                                    *
+.*           SAVMSTYP - saved message type                                  *
+.*           SAVERCOD - saved error code                                    *
+.****************************************************************************
+.
+EROR0000  PACK      KEY42,SAVURNUM,SP1,SEVEN,SP70
+          CALL      RSALHDT3                     * position on batch/status
+EROR0500  CALL      RKALHDT3
+          BRANCH    OVRCD,EROR9100
+.
+          MATCH     SAVURNUM,ALHDURNO            * matching U/R number ?
+          GOTO      EROR9100 IF NOT EQUAL        * no - error
+.
+          MATCH     " 7",ALHDSTAT                * same status still ?
+          GOTO      EROR9100 IF NOT EQUAL        * no - error
+.
+          MATCH     SAVMESSG,ALHDMESI            * matching message id ?
+          GOTO      EROR0500 IF NOT EQUAL        * no - error
+.
+          MATCH     SAVMSTYP,ALHDMTYP            * matching message type ?
+          GOTO      EROR0500 IF NOT EQUAL        * no - error
+.
+          ADD       ONE,REJUPDTD                 * inc. reject update count
+.
+          BRANCH    VALDFLAG,EROR9999            * validation only
+.
+          MOVE      ALHDBNUM,SAVBATCH
+.
+.         We've found the matching record, so update the status to
+.         "error" and clear the batch number and message id
+.
+          MOVE      SP20,ALHDBNUM
+          MOVE      SP20,ALHDMESI
+          PACK      ALHDSTAT,SP1,ONE
+.
+          MATCH     "E052",SAVERCOD
+          GOTO      EROR1450 IF EQUAL
+.
+          MATCH     "E061",SAVERCOD
+          GOTO      EROR1500 IF NOT EQUAL
+.
+          MATCH     "PPP-PCC",SAVMSTYP
+          GOTO      EROR1450 IF EQUAL
+.
+          MATCH     "RRI-I13",SAVMSTYP
+          GOTO      EROR1450 IF EQUAL
+.
+          MATCH     "ADT-A08",SAVMSTYP
+          GOTO      EROR1100 IF EQUAL
+.
+          MATCH     "PPP-PCD",SAVMSTYP
+          GOTO      EROR1100 IF EQUAL
+.
+          MATCH     "RRI-I14",SAVMSTYP
+          GOTO      EROR1100 IF EQUAL
+.
+          MATCH     "REF-I14",SAVMSTYP
+          GOTO      EROR1100 IF EQUAL
+.
+          GOTO      EROR1500
+.
+EROR1100  PACK      KEY42,ALHDURNO,ALHDSTAT,ALHDVISN,ALHDCONT,ALHDDTTM:
+                          ALHDRTYP,ALHDACTN
+          CALL      DEALHDT3
+          GOTO      EROR9999
+.
+EROR1450  PACK      ALHDSTAT,SP1,ZERO
+EROR1500  CALL      UPALHDT3                     * update record status
+.
+          MATCH     "E052",SAVERCOD
+          GOTO      EROR9999 IF EQUAL
+.
+          MATCH     "E061",SAVERCOD
+          GOTO      EROR9999 IF EQUAL
+.
+.         We also need to write an error record to allsedaf so the user can
+.         see the error from the webPAS front-end
+.
+          MOVE      ALHDURNO,ALSEURNO
+          MOVE      ALHDVISN,ALSEVISN
+          MOVE      ALHDCONT,ALSEENCT
+          MOVE      ALHDDTTM,ALSEDTTM
+          MOVE      ALHDMTYP,ALSEMTYP
+          MOVE      SAVERCOD,ALSEERID
+          MOVE      ZERO,ALSEECNT                * initialise error count
+          MOVE      SP70,ALSESPAR
+.
+.         Load up the error message which is likely to be more than 100
+.         bytes in length.  Therefore we need to write an error record for
+.         every 100 bytes of text.
+.
+          MOVELPTR  SAVERROR,FORM4
+EROR1000  PACK      ALSEDESC,SAVERROR,SP70,SP70
+          ADD       ONE,ALSEECNT                 * increment error count
+          CALL      WRALSED1
+.
+          COMPARE   FORM4,HUNDRED                * string > 100 chars ?
+          GOTO      EROR9999 IF NOT LESS         * no
+.
+          BUMP      SAVERROR,100                 * yes - move along 100 chars.
+          SUB       HUNDRED,FORM4
+          GOTO      EROR1000
+.
+.         Matching record not found - write line to error report
+.
+EROR9100  PRINT     *1,PIPE,*8,PIPE,*10,"webPAS Load Error":
+                    *29,COLON,*31,"Failed to find matching allhdtaf file ":
+                    "record",*132,PIPE
+.
+EROR9999  RETURN
++
+.****************************************************************************
+.*                            WAIT0000                 Called by: PROC0000  *
+.*   There may be non-rejected messages in a batch that has one or more     *
+.*   other rejected messages.  In such a case, the whole batch is rejected  *
+.*   by DHS, so we need to loop through all the batches that are rejected   *
+.*   and reset any remaining records for the batch that were not already    *
+.*   processed as errors, to a status of waiting so they are ready to be    *
+.*   re-extracted.                                                          *
+.****************************************************************************
+.
+WAIT0000  BRANCH    VALDFLAG,WAIT9999            * validation only
+.
+          DISPLAY   *P1:24,*EL,"Resetting submitted records";
+.
+          MOVE      SP20,KEY20
+          CALL      RSTEMP1                      * position at start of file
+WAIT0500  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,WAIT5000               * eof - finished
+.
+          DISPLAY   *P29:24,*EL,*V2LON,BATCHNUM;
+.
+WAIT1000  PACK      KEY62,BATCHNUM,SP1,SEVEN,SP70
+          CALL      RSALHDT2                     * position on batch/status
+          CALL      RKALHDT2                     * read next record
+          BRANCH    OVRCD,WAIT0500               * eof - get next batch
+.
+          MATCH     BATCHNUM,ALHDBNUM            * same batch still ?
+          GOTO      WAIT0500 IF NOT EQUAL        * no - get next batch
+.
+          MATCH     " 7",ALHDSTAT                * same status still ?
+          GOTO      WAIT0500 IF NOT EQUAL        * no - get next batch
+.
+.         Delete any A04, A08, REF^I12 or REF^I14 messages as they are always
+.         created when a new batch is created and this would result in
+.         duplicate records
+.
+          MATCH     "ADT-A04",ALHDMTYP           * add PMI record ?
+          GOTO      WAIT2000 IF EQUAL            * yes
+.
+          MATCH     "ADT-A08",ALHDMTYP           * update PMI record ?
+          GOTO      WAIT2000 IF EQUAL            * yes
+.
+          MATCH     "REF-I12",ALHDMTYP           * add referral dest. record ?
+          GOTO      WAIT2000 IF EQUAL            * yes
+.
+          MATCH     "REF-I14",ALHDMTYP           * delete referral dest record ?
+          GOTO      WAIT2000 IF EQUAL            * yes
+.
+          GOTO      WAIT3000
+.
+WAIT2000  PACK      KEY62,ALHDBNUM,ALHDSTAT,ALHDURNO,ALHDVISN,ALHDCONT,ALHDDTTM:
+                          ALHDRTYP,ALHDACTN
+          CALL      DEALHDT2
+          GOTO      WAIT1000
+.
+WAIT3000  PACK      SAVKEY62,ALHDBNUM,ALHDSTAT,ALHDURNO,ALHDVISN,ALHDCONT:
+                             ALHDDTTM,ALHDRTYP,ALHDACTN,SP70
+.
+          PACK      ALHDSTAT,SP1,ZERO            * update status to "waiting"
+          MOVE      SP20,ALHDBNUM                * clear batch number
+          MOVE      SP20,ALHDMESI                * clear message id
+.
+          PACK      KEY62,ALHDBNUM,ALHDSTAT,ALHDURNO,ALHDVISN,ALHDCONT:
+                          ALHDDTTM,ALHDRTYP,ALHDACTN,SP70
+          CALL      RAALHDT2                     * Check for a duplicate 
+          IF        OVRCD<>1
+            CALL      DEALHDT2                   * Delete duplicate waiting 
+          ENDIF                                  * record as it will re created
+.
+          PACK      KEY62,SAVKEY62,SP70
+          CALL      RDALHDT2                     * Restore orginal record 
+          BRANCH    OVRCD,WAIT1000
+.
+          PACK      ALHDSTAT,SP1,ZERO            * update status to "waiting"
+          MOVE      SP20,ALHDBNUM                * clear batch number
+          MOVE      SP20,ALHDMESI                * clear message id
+.
+          CALL      UPALHDT2                     * update record
+          GOTO      WAIT1000                     * get next record
+.
+.         Now reset all the batches to "Rejected"
+.
+WAIT5000  MOVE      SP20,KEY20
+          CALL      RSTEMP1                      * position at start of file
+WAIT6000  CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,WAIT9999               * eof - finished
+.
+          PACK      KEY40,SAVFILNM,BATCHNUM
+          CALL      RDALHBT1                     * batch record found ?
+          BRANCH    OVRCD,WAIT6000               * no - error
+.
+          MOVE      TWO,ALHBSTAT                 * Rejected status
+          CALL      UPALHBT1
+          GOTO      WAIT6000
+.
+WAIT9999  RETURN
++
+.****************************************************************************
+.*                            HEAD0000                 Called by: PROC0000  *
+.*                       Print page heading                                 *
+.****************************************************************************
+.
+HEAD0000  CALL      HEAD132                      * display page header
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: PROC0000  *
+.*                      Draw line across page                     CTAG0000  *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.****************************************************************************
+.*                            SLIN0000                 Called by: DATA0000  *
+.*                      Draw short line across page                         *
+.****************************************************************************
+.
+SLIN0000  PRINT     *1,PIPE,*8,PIPE,"-----------------------------------------":
+                    "------------------------------------------------":
+                    "----------------------------------|"
+.
+SLIN9999  RETURN
++
+.*****************************************************************************
+.*                              CREA0000               Called by: MAIN0000   *
+.*             Create a new temporary file                                   *
+.*****************************************************************************
+.
+CREA0000  CALL      TFILENAM                     * get new tempfile name
+          MOVE      TFILNAME,TEMPFILB
+.
+          CALL      KILL0000                     * remove existing file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ISBUILD,TEMPFILB,UKEY
+          EXECUTE   CMDLINE,TASKID               * create temporary index file
+.
+          OPEN      RESTEMP1,TEMPFILB            * open temp index file
+.
+CREA9999  RETURN
++
+.****************************************************************************
+.*                              KILL0000               Called by: MAIN0000  *
+.*               Close and erase the temporary file                         *
+.****************************************************************************
+.
+KILL0000  CLOSE     RESTEMP1                     * close file
+.
+          CLEAR     CMDLINE
+          PACK      CMDLINE,ERASE,TEMPFILB       * set file erase command
+          EXECUTE   CMDLINE,TASKID               * erase temp file
+.
+          CLOSE     FLATFILE,DELETE
+.
+KILL9999 RETURN
++
+.****************************************************************************
+.*                              CLER0000               Called by: MAIN0000  *
+.*               Clear all records from the temporary table                 *
+.****************************************************************************
+.
+CLER0000  MOVE      SP20,KEY20
+          CALL      RSTEMP1                      * position at start of file
+          CALL      RKTEMP1                      * read next record
+          BRANCH    OVRCD,CLER9999               * eof - finished
+.
+          MOVE      BATCHNUM,KEY20
+          CALL      DETEMP1                      * delete current record
+          GOTO      CLER0000                     * get next record
+.
+CLER9999  RETURN
++
+.*****************************************************************************
+.*                            ASEC0000             Called by: ACPT0000       *
+.*               Add one second to date/time                                 *
+.* Requires: ALHDDTTM - Date/time value (ccyymmddhhmmss)                     *
+.* Returns : ALHDDTTM - Date/time value (ccyymmddhhmmss) incremented by 1 sec*
+.*****************************************************************************
+.
+ASEC0000  UNPACK    ALHDDTTM,DIM8,HOURTM,MINTIME,SECTIME
+          MATCH     "59",SECTIME
+          IF        !@EQUAL
+            MOVE      SECTIME,FORM2              * just increment seconds
+            ADD       ONE,FORM2
+            MOVE      FORM2,SECTIME
+            REP       " 0",SECTIME
+            PACK      ALHDDTTM,DIM8,HOURTM,MINTIME,SECTIME
+            GOTO      ASEC9999
+          ENDIF
+.
+.         The seconds were "59", so reset these to "00" and increment the
+.         minutes
+.
+          MOVE      "00",SECTIME
+          MATCH     "59",MINTIME
+          IF        !@EQUAL
+            MOVE      MINTIME,FORM2              * just increment minutes
+            ADD       ONE,FORM2
+            MOVE      FORM2,MINTIME
+            REP       " 0",MINTIME
+            PACK      ALHDDTTM,DIM8,HOURTM,MINTIME,SECTIME
+            GOTO      ASEC9999
+          ENDIF
+.
+.         The minutes were "59", so reset these to "00" and increment the
+.         hours
+.
+          MOVE      "00",SECTIME
+          MOVE      "00",MINTIME
+          MATCH     "23",HOURTM
+          IF        !@EQUAL
+            MOVE      HOURTM,FORM2              * just increment hours
+            ADD       ONE,FORM2
+            MOVE      FORM2,HOURTM
+            REP       " 0",HOURTM
+            PACK      ALHDDTTM,DIM8,HOURTM,MINTIME,SECTIME
+            GOTO      ASEC9999
+          ENDIF
+.
+.         The hours were "59", so reset these to "00" and increment the
+.         date
+.
+          MOVE      "00",SECTIME
+          MOVE      "00",MINTIME
+          MOVE      "00",HOURTM
+.
+.         We need to increment the date by 1 day
+.
+          UNPACK    DIM8,CCENT,CYEAR,CMON,CDAY
+          MOVE      CCENT,CC
+          MOVE      CYEAR,YY
+          MOVE      CMON,MM
+          MOVE      CDAY,DD
+          CALL      DMYCON                       * get julian day
+          ADD       ONE,JULDAY                   * increment julian day
+          MOVE      JULDAY,JWKDAY
+          MOVE      JULYR,JWKYER
+          MOVE      JULCC,JWKCC
+          CALL      JULCON                       * get new date
+          PACK      ALHDDTTM,CC,YY,MM,DD,ZERO6
+          REP       " 0",ALHDDTTM
+.
+ASEC9999  RETURN
++
+.*****************************************************************************
+.*                        CSUB0000                 Called by: INIT0000       *
+.*   Check there are "submitted" records before running the XML processor    *
+.*****************************************************************************
+.
+CSUB0000  PACK      KEY42,SP1,SEVEN,SP70
+          CALL      RSALHDT1                     * position for submitted recs
+          CALL      RKALHDT1                     * read next record
+          BRANCH    OVRCD,CSUB9100               * eof - error
+.
+          MATCH     " 7",ALHDSTAT                * submitted records on file ?
+          GOTO      CSUB9100 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,EXIT
+          GOTO      CSUB9999
+.
+CSUB9100  DISPLAY   *P1:24,*EL,*B,"No submitted records found for ":
+                    "processing.  ";
+          CALL      HITENTER
+          PRINT     *1,"No submitted records found for processing"
+          MOVE      ONE,EXIT
+.
+CSUB9999  RETURN
++
+.*****************************************************************************
+.*                            E2070000             Called by: PROC0000       *
+.*                      Process any E207 errors                              *
+.*  An E207 error occurs where we have sent a Referral In which has been     *
+.*  "accepted" but there are no linked Episodes which have been "accepted".  *
+.*  This results in DHS rejecting the Referral In.  As such, we need to      *
+.*  delete any of these Referral In records as they will be sent later when  *
+.*  a linked Episode is "accepted" which will trigger an Episode record      *
+.*  and result in the extract creating the corresponding Referral In record. *
+.*  Note: The load program (LDALLHDT) ignores any Episode records which      *
+.*  haven't been accepted.                                                   *
+.*****************************************************************************
+.
+E2070000  BRANCH    SITEFLAG,E2079999            * BHS not using this
+.
+.         Initialise 207 error count values
+.
+          MOVE      ZERO,E207RCNT                * E207 specific error count
+          MOVE      ZERO,E207TCNT               * Total E207 related error count
+.
+E2071000  PACK      KEY57,E207CODE,SP70
+          CALL      RSALSED2                     * position before E207 errors
+          CALL      RKALSED2                     * read next record
+          BRANCH    OVRCD,E2079999               * eof - finished
+.
+          MATCH     E207CODE,ALSEERID            * E207 error still ?
+          GOTO      E2079999 IF NOT EQUAL        * no - finished
+.
+          MOVE      ALSEURNO,SAVEURNO            * save U/R number
+          MOVE      ALSEVISN,SAVEVISN            * save visit number
+.
+.         Look for any associated waiting/error records with the same
+.         visit number and delete them.  Delete waiting records first,
+.         then error records.
+.
+          MOVE      " 0",DIM2                    * initialise to waiting status
+.
+E2072000  PACK      KEY42,DIM2,SAVEURNO,SAVEVISN,SP70
+          CALL      RSALHDT1                     * pos'n on status visit recs
+          CALL      RKALHDT1                     * read next record
+          BRANCH    OVRCD,E2075000               * eof - now delete error recs
+.
+          MATCH     DIM2,ALHDSTAT                * same status still ?
+          GOTO      E2075000 IF NOT EQUAL        * no - finished
+.
+          MATCH     SAVEURNO,ALHDURNO            * same U/R still ?
+          GOTO      E2075000 IF NOT EQUAL        * no - now delete error recs
+.
+          MATCH     SAVEVISN,ALHDVISN            * same visit still ?
+          GOTO      E2075000 IF NOT EQUAL        * no - now delete error recs
+.
+.         We have a matching waiting record for this visit number, so
+.         delete it.
+.
+          ADD       ONE,E207TCNT                 * increment total E207 count
+          PACK      KEY42,ALHDSTAT,ALHDURNO,ALHDVISN,ALHDCONT,ALHDDTTM,ALHDRTYP:
+                          ALHDACTN
+          CALL      DEALHDT1
+          GOTO      E2072000
+.
+.         If we've just completed the deletion of waiting records for the visit,
+.         then reset the status to delete error records for the visit.
+.
+E2075000  MATCH     " 0",DIM2                    * waiting status completed ?
+          IF        @EQUAL
+            MOVE      " 1",DIM2                  * yes - now do error status
+            GOTO      E2072000
+          ENDIF
+.
+.         Now delete all the associated visit records with errors from
+.         the VINAH error file (allsedaf)
+.
+E2076000  PACK      KEY57,SAVEURNO,SAVEVISN,SP70
+          CALL      RSALSED1                     * pos'n before UR/Visit
+          CALL      RKALSED1                     * read next record
+          BRANCH    OVRCD,E2071000               * eof - get next E207 error
+.
+          MATCH     SAVEURNO,ALSEURNO            * same U/R still ?
+          GOTO      E2071000 IF NOT EQUAL        * no - get next E207 error
+.
+          MATCH     SAVEVISN,ALSEVISN            * same visit still ?
+          GOTO      E2071000 IF NOT EQUAL        * no - get next E207 error
+.
+.         Check if this is an E207 error so we can track how many are
+.         processed and compare this to the Validation Summary in the XML
+.         response file.
+.
+          MATCH     E207CODE,ALSEERID            * E207 error code ?
+          IF        @EQUAL
+            ADD       ONE,E207RCNT              * yes, incr. specific E207 count
+          ENDIF
+.
+.         We have a matching visit record, so delete it
+.
+          PACK      KEY57,ALSEURNO,ALSEVISN,ALSEENCT,ALSEDTTM,ALSEMTYP,ALSEERID:
+                          ALSEECNT
+          CALL      DEALSED1
+          GOTO      E2076000
+.
+E2079999  RETURN
++
+.****************************************************************************
+.*        IO ROUTINES FOR TEMPORARY FILE                                    *
+.****************************************************************************
+.
+RATEMP1   MOVE      ZERO,OVRCD
+          READ      RESTEMP1,KEY20;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RSTEMP1   READ      RESTEMP1,KEY20;;
+          RETURN
+.
+RDTEMP1   MOVE      ZERO,OVRCD
+          READ      RESTEMP1,KEY20;BATCHNUM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    RESTEMP1;BATCHNUM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPTEMP1   MOVE      ZERO,OVRCD
+          READKP    RESTEMP1;BATCHNUM
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+WRTEMP1   WRITE     RESTEMP1,KEY20;BATCHNUM
+          RETURN
+.
+UPTEMP1   UPDATE    RESTEMP1;BATCHNUM
+          RETURN
+.
+DETEMP1   DELETE    RESTEMP1,KEY20
+          RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       TFILENAM
+.
+          INC       ALLHBTIO/INC
+          INC       ALLHDTIO/INC
+          INC       ALLHHDIO/INC
+          INC       ALLSEDIO/INC
+          INC       ALLVREIO/INC
+          INC       IBASEQIO/INC
+          INC       WEBERRIO/INC

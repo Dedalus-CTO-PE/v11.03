@@ -1,0 +1,974 @@
+.*****************************************************************************
+.* System    :   Patient Management System                                   *
+.* Program   :   CONVICDO                                                    *
+.* Desc      :   Data Migration Program to upload ICD 10 operation data from *
+.*               a third party legacy system into webPAS.                    *
+.*****************************************************************************
+.* Date      :   23/05/2013                                                  *
+.* Author    :   Steve Armstrong                                             *
+.* Function  :   This program will loop through the convicdo.txt file and    *
+.*               for each valid record found, it will write a new pato12af   *
+.*               record for the patient.                                     *
+.* Mods      :                                                               *
+.*****************************************************************************
+.*        V11.03.01  17/01/2023  Thanh T.          TSK 0924686               *
+.*                   Recompiled for PATO12FD/PATO12IO changes                * 
+.*****************************************************************************
+.*        V11.02.02  13/09/2022  Ebon Clements   TSK 0924038                 *
+.*                   Added unplanned return to theatre to ICD10 ED.12        *
+.*                   operations PT0OURTH stored in the spare PTOSPR12        *
+.*        V11.02.01  31/03/2022  Davin           TSK 0917793                 *
+.*                   Changes to write to ICD10 Edition 12 table (pato12af)   *
+.*                   Field 34 must be 1 to indicate valid icd10ed12 code     *
+.*        V10.14.01  14/03/2019  Don Nguyen      TSK 0869412                 *
+.*                   Changes to write to ICD10 Edition 11 table (pato11af)   *
+.*        V10.10.01  17/03/2017  Davin         TSK 0833093     HDP 2017/2018 *
+.*                   Changes to write to ICD10v10 table (pat10oxf)           *
+.*        V10.06.01  01/04/2015  Davin             CAR 311669                *
+.*                   Changes to write to ICD10v9 table (pat10o9f)            *
+.*        V10.04.01  17/03/2014  Steve Armstrong   CAR 296128                *
+.*                   Added display of warning message if error records found.*
+.*****************************************************************************
+.*        V10.03.00  23/05/2013  Steve Armstrong   CAR 284420                *
+.*                   Created program                                         *
+.*****************************************************************************
+.
+          INC       STD001FD
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       PATICOFD/INC
+.
+.         ICD Procedure file layout - convicdo.txt
+.
+ICDO9UPL  FILE      HL7, FIXED=4000         * Pipe delimited upload file
+.                                             4096 is maximum
+.
+.         Fields must be pipe delimited and in the following sequence.
+.         Field lengths are irrelevant other than the fact that where
+.         a field is longer than allowed, the extra data will be ignored.
+.
+ICDOCODE  DIM       9      1      * ICD10 operation code     (pato12af.opcode)
+ICDODESC  DIM      70     10      * ICD10 operation description (pato12af.odesc)
+ICDOFLAG  DIM       1     80      * Validity of code         (pato12af.oflag)
+.                                     P - Valid/posting record
+.                                     H - Not valid/header record
+ICDOBLKN  DIM       4     81      * Block number             (pato12af.pt0oblkn)
+ICDOAGEG  DIM       1     85      * Age group edit           (pato12af.oagegp)
+.                                       - No restraint
+.                                     1 - Reject if within month range
+.                                     2 - Warn if within month range
+.                                     3 - Reject if within year range
+.                                     4 - Warn if within year range
+.                                     5 - Reject if outside year range
+.                                     6 - Warn if outside year range
+.                                     7 - Reject if outside month rang
+.                                     8 - Warn if outside month range
+.                                     9 - Reject if within day range
+.                                     A - Warn if within day range
+.                                     B - Reject if outside day range
+.                                     C - Warn if outside day range
+ICDOLOWL  DIM       3     86      * Age low limit            (pato12af.ptxoall1)
+ICDOHIGH  DIM       3     89      * Age high limit           (pato12af.ptxoahl1)
+ICDO2AGP  DIM       1     92      * 2nd age group edit       (pato12af.pt0o2agp)
+.                                       - No restraint
+.                                     1 - Reject if within month range
+.                                     2 - Warn if within month range
+.                                     3 - Reject if within year range
+.                                     4 - Warn if within year range
+.                                     5 - Reject if outside year range
+.                                     6 - Warn if outside year range
+.                                     7 - Reject if outside month rang
+.                                     8 - Warn if outside month range
+.                                     9 - Reject if within day range
+.                                     A - Warn if within day range
+.                                     B - Reject if outside day range
+.                                     C - Warn if outside day range
+ICDO2ALL  DIM       3     93      * 2nd age low limit        (pato12af.ptxoall2)
+ICDO2AHL  DIM       3     96      * 2nd age high limit       (pato12af.ptxoahl2)
+ICDOSEXE  DIM       1     99      * Sex edit                 (pato12af.osex)
+.                                       - No restraint
+.                                     1 - Reject if male
+.                                     2 - Warn if male
+.                                     3 - Reject if female
+.                                     4 - Warn if female
+.                                     5 - Reject if female /
+.                                         No Explanation Code
+.                                     6 - Reject if male/No Expl Code
+ICDOADTP  DIM       1    100      * Asterisk/dagger type     (pato12af.pt0oadtp)
+.                                       - Not an asterisk/dagger code
+.                                     A - Asterisk code
+.                                     D - Dagger code
+ICDOSACD  DIM       9    101      * Suggested asterisk code  (pato12af.pt0osacd)
+ICDODAGR  DIM       1    110      * Dagger & asterisk edit   (pato12af.odagger)
+.                                       - No restraint
+.                                     1 - Reject if no following
+.                                         asterisk code
+.                                     2 - Warn if no following
+.                                         asterisk code
+.                                     3 - Reject if no preceding
+.                                         dagger code
+ICDOAREA  DIM       1    111      * Area edit                (pato12af.oarea)
+.                                       - No restraint
+.                                     1 - Reject if code found
+.                                     2 - Warn if code found
+.                                     3 - Reject if Care Type not 10
+.                                         (Posthumous Organ Procurement)
+ICDOMI9C  DIM       9    112      * Mapped ICD9 operatn code (pato12af.pt0omi9c)
+ICDOCMFT  DIM       2    121      * Complex mappings format  (pato12af.pt0ocmft)
+.                                     0 - No complex mappings
+.                                     1 - Obstetrics (ICD)
+.                                     2 - Head injuries (ICD)
+.                                     3 - Tendon injuries (ICD)
+.                                     4 - Pacemakers (ICO)
+.                                     5 - Social induction (ICD & ICO)
+.                                     6 - Medical augment (ICO & ICD)
+.                                     7 - 2-3 Maps (ICO)
+.                                     8 - 2-3 Maps (ICD)
+ICDOV1CD  DIM       1    123      * Valid ICD10 version 1 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ov1cd)
+ICDOV2CD  DIM       1    124      * Valid ICD10 version 2 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ov2cd)
+ICDOV1MP  DIM       9    125      * ICD10 version 1 map code (pato12af.pt0ov1mp)
+.                                     (only if a valid ICD10 version 2 code)
+ICDOV3CD  DIM       1    134      * Valid ICD10 version 3 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ov3cd)
+ICDOV2MP  DIM       9    135      * ICD10 version 2 map code (pato12af.pt0ov2mp)
+.                                     (only if a valid ICD10 version 3 code)
+ICDOSLVL  DIM       1    144      * Significance level       (pato12af.pt0oslvl)
+ICDOV4CD  DIM       1    145      * Valid ICD10 version 4 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ov4cd)
+ICDOV5CD  DIM       1    146      * Valid ICD10 version 5 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ov5cd)
+ICDODTMN  DIM       1    147      * Date/Time of Proc Non-Mandatory
+.                                     0 - No, 1 - Yes        (pato12af.pt0Odtmn)
+ICDOV6CD  DIM       1    148      * Valid ICD10 version 6 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ov6cd)
+ICDODSC2  DIM       200  149      * 200 char Description     (pato12af.pt0odsc2)
+ICDOV7CD  DIM       1    349      * Valid ICD10 version 7 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ov7cd)
+ICDOV8CD  DIM       1    350      * Valid ICD10 version 8 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ov8cd)
+ICDOV9CD  DIM       1    351      * Valid ICD10 version 9 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ov9cd)
+ICDOVXCD  DIM       1    352      * Valid ICD10 version 10 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ovxcd)
+ICDOVX1D  DIM       1    353      * Valid ICD10 version 11 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ovx1c)
+ICDOVX2D  DIM       1    354      * Valid ICD10 version 12 code
+                                      0 - No, 1 - Yes        (pato12af.pt0ovx2c)
+ICDOURTH  DIM       1    355      * Unplanned Return to Theatre Flag
+.                                     0/Blank - No Effect
+.                                     F - Unplanned Return to Theatre
+. End of Record          356
+.
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+ADDCOUNT  FORM      8             * added record count
+.
+CURRDATE  DIM       8             * current date
+.
+DUPCOUNT  FORM      8             * duplicate record count  >>>(may not be used)
+.
+ERORDESC  DIM       70
+ERORFLAG  FORM      1             * Field Validation Error Flag
+.                                     0 = No Errors on Field Validations
+.                                     1 = Errors on Field Validations
+.
+FORM10    FORM      10
+.
+MANCOUNT  FORM      8             * mandatory field error record count
+.
+NUMCOUNT  FORM      8             * numeric error record count
+.
+RECCOUNT  FORM      8             * record read counter
+.
+TMPFIELD  DIM       8             * Field name
+TMPSTRNG  DIM       8             * Temporary string (max field length)
+.
+VCHKFLAG  FORM      1             * Validation flag
+.                                     0 = writing data to database
+.                                     1 = only validating import data file
+.
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+PIPE      INIT      "|"
+.
+.
+.
+PRGID     INIT      "CONVICDO"
+PRGNAM    INIT      "ICD10 V12 Procedure Upload"
+VERSION   INIT      "V11.03.01"
++
+.*****************************************************************************
+.*                              MAIN0000                                     *
+.*                      Controlling Logic (Mainline code)                    *
+.*****************************************************************************
+.
+MAIN0000  CALL      INIT0000               * initialisation and open files
+.
+MAIN0100  CALL      OPTN0000               * select options
+          BRANCH    EXIT,MAIN9999          * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,MAIN1000       * proceed with upload
+.
+MAIN1000  CALL      OPEN0000               * open upload file
+          BRANCH    EXIT,MAIN0100          * file not found
+.
+          CALL      ASKQ0000               * validation run only ?
+.
+          CALL      CONTQST                * Ok to continue ?
+          BRANCH    CEXIT,MAIN2000:        * yes
+                          MAIN0100:        * no
+                          MAIN0100         * cancel
+.
+MAIN2000  CALL      UPLD0000               * process upload
+.
+MAIN9999  CHAIN     PGM                    * chain back to program
++
+.*****************************************************************************
+.*                                INIT0000             Called by: MAIN0000   *
+.*                             initialisation                                *
+.*  The initialisation routine is used to display headings and open files.   *
+.*****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"pato12af";
+          OPEN      PATO12A1,"pato12af"
+.
+          DISPLAY   *P64:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          MOVE      ONE,CNOUNDLN
+.
+INIT9999  RETURN
++
+.*****************************************************************************
+.*                                OPTN0000             Called by: MAIN0000   *
+.*                        get user options or exit                           *
+.*    Returns:  EXIT    = FALSE (0)  Run data upload                         *
+.*                        TRUE  (1)  Exit selected                           *
+.*****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF,". Exit":
+                    *P1:5,*V2LON,ONE,*HOFF,". Run Data Upload"
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ":
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run data upload
+.
+          BEEP
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.*****************************************************************************
+.*                               OPEN0000              Called by: MAIN0000   *
+.*                  Open upload file (convicdo.txt)                          *
+.*****************************************************************************
+.
+OPEN0000  MOVE      ZERO,OVRCD
+.
+          TRAP      OVERCOND IF IO
+          OPEN      ICDO9UPL,"convicdo"
+          TRAPCLR   IO
+          BRANCH    OVRCD,OPEN9100
+.
+          MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9100  DISPLAY   *P1:24,*EL,*B,"Upload file - convicdo.txt - not found.  ";
+          CALL      HITENTER
+          MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.*****************************************************************************
+.*                               ASKQ0000              Called by: MAIN0000   *
+.*                  Ask if running validation only                           *
+.* Returns: VCHKFLAG  - validation flag                                      *
+.*                       0 = normal mode                                     *
+.*                       1 = validation only mode                            *
+.*****************************************************************************
+.
+ASKQ0000  MOVE      ANSY,ANS
+          KEYIN     *P1:10,*EL,"Validation only (",*V2LON,*DV,ANSY,*HOFF:
+                    *DV,SLASH,*V2LON,*DV,ANSN,*HOFF,") ?":
+                    *P25:10,*V2LON,*RV,ANS
+.
+          PACK      ANS,ANS,SP1
+          REP       UPPLOW,ANS
+.
+          MATCH     ANSY,ANS                     * Y input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DYES,*HOFF:
+                      *P35:10,"(No data will be uploaded)"
+            MOVE      ONE,VCHKFLAG               * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          MATCH     ANSN,ANS                     * N input ?
+          IF        @EQUAL
+            DISPLAY   *P25:10,*V2LON,DNO,*HOFF:
+                      *P35:10,"(Data will be uploaded)"
+            MOVE      ZERO,VCHKFLAG              * yes
+            GOTO      ASKQ9999
+          ENDIF
+.
+          GOTO      ASKQ0000                     * invalid input
+.
+ASKQ9999  RETURN
++
+.******************************************************************************
+.*                                  UPLD0000              Called by: MAIN0000 *
+.*                  Process the PMI upload file records                       *
+.******************************************************************************
+.
+UPLD0000  CALL      IBACLOCK
+          PACK      CURRDATE,CCC,CYY,CMM,CDD
+          REP       " 0",CURRDATE
+.
+          DISPLAY   *P1:13,"Processing ",*V2LON,"convicdo.txt",*HOFF:
+                    *P1:15,"Started    : ",*V2LON,CTIMEIS,*HOFF:
+                    *P1:17,"ICD Code   : ":
+                    *P1:18,"Records    : "
+.
+          MOVE      ZERO,RECCOUNT                * initialise records read
+          MOVE      ZERO,ADDCOUNT                * initialise added record count
+          MOVE      ZERO,DUPCOUNT                * initialise dup. record count
+          MOVE      ZERO,MANCOUNT                * init. mand error record count
+          MOVE      ZERO,NUMCOUNT                * init. num error record count
+.
+          CALL      HEAD0000                     * Print the report header
+.
+.         Loop through upload file records
+.
+UPLD1000  READ      ICDO9UPL,SEQ;ICDOCODE,ICDODESC,ICDOFLAG,ICDOBLKN,ICDOAGEG:
+                                 ICDOLOWL,ICDOHIGH,ICDO2AGP,ICDO2ALL,ICDO2AHL:
+                                 ICDOSEXE,ICDOADTP,ICDOSACD,ICDODAGR,ICDOAREA:
+                                 ICDOMI9C,ICDOCMFT,ICDOV1CD,ICDOV2CD,ICDOV1MP:
+                                 ICDOV3CD,ICDOV2MP,ICDOSLVL,ICDOV4CD,ICDOV5CD:
+                                 ICDODTMN,ICDOV6CD,ICDODSC2,ICDOV7CD,ICDOV8CD:
+                                 ICDOV9CD,ICDOVXCD,ICDOVX1D,ICDOVX2D,ICDOURTH
+          GOTO      UPLD9000 IF OVER
+.
+          ADD       ONE,RECCOUNT                 * increment records read
+          IF        (RECCOUNT%1000) = 0 | RECCOUNT = 1
+            DISPLAY   *P14:17,*V2LON,ICDOCODE:
+                      *P14:18,RECCOUNT;
+          ENDIF
+.
+          CALL      POUT0000                     * pad out fields with spaces
+.
+          CALL      CLER0000                     * clear database variables
+.
+          CALL      VNUM0000                     * validate numeric fields
+          IF        EXIT = 1 & VCHKFLAG = 0
+            GOTO      UPLD1000                   * errors on validation
+          ENDIF
+.
+          CALL      SETV0000                     * set up file variables
+.
+          BRANCH    VCHKFLAG,UPLD1000            * error checking only
+.
+          MOVE      ICDOCODE,KEY9
+          CALL      RAPO12A1                     * record on file ?
+          IF        OVRCD = 1
+            CALL      WRPO12A1                   * no - write new record
+            ADD       ONE,ADDCOUNT               * increment added record count
+          ELSE
+            MOVE      "Operation record already exists ",ERORDESC
+            CALL      PERR0000                   * print error line
+            ADD       ONE,DUPCOUNT               * increment dupl. record count
+          ENDIF
+.
+          GOTO      UPLD1000                     * get next record
+.
+.         Upload completed
+.
+UPLD9000  ASSIGN    (DUPCOUNT+NUMCOUNT),FORM10
+          IF        FORM10 > 0
+            CALL      LINE0000                   * print bottom line if errors
+          ENDIF
+.
+          COMPARE   CLNO,FIFTY8                  * room for stats ?
+          CALL      HEAD0000 IF LESS             * no - new page req'd.
+.
+          CLOCK     TIME,CTIMEIS
+          DISPLAY   *P14:18,*V2LON,RECCOUNT,*HOFF:
+                    *P1:21,"Finished   : ",*V2LON,CTIMEIS
+.
+.         Warn the user if there were any records with errors
+.
+          IF        FORM10 > 0
+            DISPLAY   *P1:22,*V2LON,*BLINKON,"Warning:  Records found with ":
+                      "errors.  Refer to error report."
+          ENDIF
+.
+          DISPLAY   *P1:24,*EL,*B,"Upload complete.  ";
+          CALL      HITENTER
+.
+          PRINT     *N:
+                    *1,"Total records read                    - ",RECCOUNT,*N:
+                    *1,"Records added                         - ",ADDCOUNT,*N:
+                    *1,"Duplicate Records detected            - ",DUPCOUNT,*N:
+                    *1,"Records with invalid numbers detected - ",NUMCOUNT,*N:
+                    *1,"Records with blank mandatory fields   - ",MANCOUNT:
+                    *N,*N,*1,"*** End of Report ***"
+.
+UPLD9999  RETURN
++
+.******************************************************************************
+.*                                  CLER0000              Called by: UPLD0000 *
+.*                    Clear all the database fields                           *
+.******************************************************************************
+.
+CLER0000  MOVE      SP9,OPCODE
+          MOVE      SP70,ODESC
+          MOVE      SP1,OFLAG
+          MOVE      SP1,OAGEGP
+          MOVE      ZERO,PTXOALL1
+          MOVE      ZERO,PTXOAHL1
+          MOVE      SP1,PT0O2AGP
+          MOVE      ZERO,PTXOALL2
+          MOVE      ZERO,PTXOAHL2
+          MOVE      SP1,OSEX
+          MOVE      SP1,PT0OADTP
+          MOVE      SP9,PT0OSACD
+          MOVE      SP1,ODAGGER
+          MOVE      SP1,OAREA
+          MOVE      SP9,PT0OMI9C
+          MOVE      ZERO,PT0OCMFT
+          MOVE      ZERO,PT0OV1CD
+          MOVE      ZERO,PT0OV2CD
+          MOVE      SP9,PT0OV1MP
+          MOVE      ZERO,PT0OV3CD
+          MOVE      SP9,PT0OV2MP
+          MOVE      ZERO,PT0OV4CD
+          MOVE      ZERO,PT0OV5CD
+          MOVE      ZERO,PT0OV6CD
+          PACK      PT0ODSC2,SP70,SP70,SP70
+          MOVE      ZERO,PT0OV7CD
+          MOVE      ZERO,PT0OV8CD
+          MOVE      ZERO,PT0OV9CD
+          MOVE      ZERO,PT0OVXCD
+          MOVE      ZERO,PT0OVX1C
+          MOVE      ZERO,PT0OVX2C
+          MOVE      SP70,PT0OURTH
+          MOVE      SP70,PTOSPR12
+.
+CLER9999  RETURN
++
+.****************************************************************************
+.*                             MAND0000                Called by: UPLD0000  *
+.*                 Check for standard Mandatory fields                      *
+.* Returns: EXIT   0 = all mandatory fields are populated                   *
+.*                 1 = one or more mandatory fields are blank               *
+.*          MANCOUNT - updated count of records with mandatory fields       *
+.*                     missing                                              *
+.****************************************************************************
+.
+MAND0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+          MOVE      ICDOCODE,TMPSTRNG
+          MOVE      "ICDOCODE",TMPFIELD          * operation code
+          CALL      CHKM0000
+.
+          MOVE      ICDODESC,TMPSTRNG
+          MOVE      "ICDODESC",TMPFIELD          * operation description
+          CALL      CHKM0000
+.
+          MOVE      ICDOFLAG,TMPSTRNG
+          MOVE      "ICDOFLAG",TMPFIELD          * validity of code
+          CALL      CHKM0000
+.
+          BRANCH    ERORFLAG,MAND9100            * errors on mand. fields
+.
+          MOVE      ZERO,EXIT                    * no errors on mand. fields
+          GOTO      MAND9999
+.
+MAND9100  ADD       ONE,MANCOUNT                 * incr. mand error record count
+          MOVE      ONE,EXIT
+.
+MAND9999  RETURN
++
+.*****************************************************************************
+.*                            CHKM0000             Called by: MAND0000       *
+.*                    Check if a mandatory field is blank                    *
+.* Requires: TMPSTRNG - field to be checked                                  *
+.*           TMPFIELD - 8 character field name                               *
+.* Returns:  ERORFLAG = 1   field is blank (error)                           *
+.*****************************************************************************
+.
+CHKM0000  MATCH     TMPSTRNG,SP8                 * blank field ?
+          GOTO      CHKM9999 IF NOT EQUAL        * no - finished
+.
+          MOVE      "Mandatory Field blank ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set error flag
+.
+CHKM9999  RETURN
++
+.******************************************************************************
+.*                                  HEAD0000              Called by: UPLD0000 *
+.*                           Print The Report Header                 PERR0000 *
+.******************************************************************************
+.
+HEAD0000  MOVE      "- Error Report",CPHDROPT
+          CALL      HEAD132                 * Print the report header
+.
+          PRINT     *1,"< convicdo.txt >"
+.
+          CALL      LINE0000                     * draw line across page
+.
+          PRINT     *1,PIPE,*3,"Code",*13,PIPE,*15,"Error Description",*132,PIPE
+.
+          CALL      LINE0000                     * draw line across page
+.
+          MOVE      SEVEN,CLNO                   * initialise line count
+.
+HEAD9999  RETURN
++
+.****************************************************************************
+.*                            LINE0000                 Called by: HEAD0000  *
+.*                      Draw line across page                               *
+.****************************************************************************
+.
+LINE0000  PRINT     "*-----------------------------------------------":
+                    "------------------------------------------------":
+                    "-----------------------------------*"
+.
+LINE9999  RETURN
++
+.******************************************************************************
+.*                                  SETV0000              Called by: UPLD0000 *
+.*                       Load the record variables                            *
+.******************************************************************************
+.
+SETV0000  MOVE      ICDOCODE,OPCODE
+          MOVE      ICDODESC,ODESC
+          MOVE      ICDOFLAG,OFLAG
+          MOVE      ICDOBLKN,PT0OBLKN
+          MOVE      ICDOAGEG,OAGEGP
+          MOVE      ICDOLOWL,PTXOALL1
+          MOVE      ICDOHIGH,PTXOAHL1
+          MOVE      ICDO2AGP,PT0O2AGP
+          MOVE      ICDO2ALL,PTXOALL2
+          MOVE      ICDO2AHL,PTXOAHL2
+          MOVE      ICDOSEXE,OSEX
+          MOVE      ICDOADTP,PT0OADTP
+          MOVE      ICDOSACD,PT0OSACD
+          MOVE      ICDODAGR,ODAGGER
+          MOVE      ICDOAREA,OAREA
+          MOVE      ICDOMI9C,PT0OMI9C
+          MOVE      ICDOCMFT,PT0OCMFT
+          MOVE      ICDOV1CD,PT0OV1CD
+          MOVE      ICDOV2CD,PT0OV2CD
+          MOVE      ICDOV1MP,PT0OV1MP
+          MOVE      ICDOV3CD,PT0OV3CD
+          MOVE      ICDOV2MP,PT0OV2MP
+          MOVE      ICDOSLVL,PT0OSLVL
+          MOVE      ICDOV4CD,PT0OV4CD
+          MOVE      ICDOV5CD,PT0OV5CD
+          MOVE      ICDODTMN,PT0ODTMN
+          MOVE      ICDOV6CD,PT0OV6CD
+          MOVE      ICDODSC2,PT0ODSC2
+          MOVE      ICDOV7CD,PT0OV7CD
+          MOVE      ICDOV8CD,PT0OV8CD
+          MOVE      ICDOV9CD,PT0OV9CD
+          MOVE      ICDOVXCD,PT0OVXCD
+          MOVE      ICDOVX1D,PT0OVX1C
+          MOVE      ICDOVX2D,PT0OVX2C
+          MOVE      ICDOURTH,PT0OURTH
+.
+SETV9999  RETURN
++
+.*****************************************************************************
+.*                            POUT0000             Called by: UPLD0000       *
+.*            Pad out all the record fields with spaces given that we        *
+.*            are dealing with pipe delimited records                        *
+.*****************************************************************************
+.
+POUT0000  PACK      ICDOCODE,ICDOCODE,SP9
+          PACK      ICDODESC,ICDODESC,SP70
+          PACK      ICDOFLAG,ICDOFLAG,SP1
+          PACK      ICDOBLKN,ICDOBLKN,SP4
+          RJUSTIFY  ICDOBLKN
+          REP       " 0",ICDOBLKN
+          PACK      ICDOAGEG,ICDOAGEG,SP1
+          PACK      ICDOLOWL,ICDOLOWL,SP3
+          RJUSTIFY  ICDOLOWL
+          REP       " 0",ICDOLOWL
+          PACK      ICDOHIGH,ICDOHIGH,SP3
+          RJUSTIFY  ICDOHIGH
+          REP       " 0",ICDOHIGH
+          PACK      ICDO2AGP,ICDO2AGP,SP1
+          PACK      ICDO2ALL,ICDO2ALL,SP3
+          RJUSTIFY  ICDO2ALL
+          REP       " 0",ICDO2ALL
+          PACK      ICDO2AHL,ICDO2AHL,SP3
+          RJUSTIFY  ICDO2AHL
+          REP       " 0",ICDO2AHL
+          PACK      ICDOSEXE,ICDOSEXE,SP1
+          PACK      ICDOADTP,ICDOADTP,SP1
+          PACK      ICDOSACD,ICDOSACD,SP9
+          PACK      ICDODAGR,ICDODAGR,SP1
+          PACK      ICDOAREA,ICDOAREA,SP1
+          PACK      ICDOMI9C,ICDOMI9C,SP9
+.
+          PACK      ICDOCMFT,ICDOCMFT,SP2
+          RJUSTIFY  ICDOCMFT
+          REP       " 0",ICDOCMFT
+.
+          PACK      ICDOV1CD,ICDOV1CD,SP1
+          REP       " 0",ICDOV1CD
+.
+          PACK      ICDOV2CD,ICDOV2CD,SP1
+          REP       " 0",ICDOV2CD
+.
+          PACK      ICDOV1MP,ICDOV1MP,SP9
+.
+          PACK      ICDOV3CD,ICDOV3CD,SP1
+          REP       " 0",ICDOV3CD
+.
+          PACK      ICDOV2MP,ICDOV2MP,SP9
+.
+          PACK      ICDOSLVL,ICDOSLVL,SP1
+.
+          PACK      ICDOV4CD,ICDOV4CD,SP1
+          REP       " 0",ICDOV4CD
+.
+          PACK      ICDOV5CD,ICDOV5CD,SP1
+          REP       " 0",ICDOV5CD
+.
+          PACK      ICDODTMN,ICDODTMN,SP1
+          REP       " 0",ICDODTMN
+.
+          PACK      ICDOV6CD,ICDOV6CD,SP1
+          REP       " 0",ICDOV6CD
+.
+          PACK      ICDODSC2,ICDODSC2,SP70,SP70,SP70
+.
+          PACK      ICDOV7CD,ICDOV7CD,SP1
+          REP       " 0",ICDOV7CD
+.
+          PACK      ICDOV8CD,ICDOV8CD,SP1
+          REP       " 0",ICDOV8CD
+.
+          PACK      ICDOV9CD,ICDOV9CD,SP1
+          REP       " 0",ICDOV9CD
+.
+          PACK      ICDOVXCD,ICDOVXCD,SP1
+          REP       " 0",ICDOVXCD
+.
+          PACK      ICDOVX1D,ICDOVX1D,SP1
+          REP       " 0",ICDOVX1D
+.
+          PACK      ICDOVX2D,ICDOVX2D,SP1
+          REP       " 0",ICDOVX2D
+.
+          PACK      ICDOURTH,ICDOURTH,SP1
+.
+POUT9999  RETURN
++
+.*****************************************************************************
+.*                            VNUM0000             Called by: UPLD0000       *
+.*                    Validate numeric fields                                *
+.* Returns:  EXIT - 0 = No numeric validation errors                         *
+.*                  1 = Numeric validation errors                            *
+.*          NUMCOUNT - updated count of records with numeric field errors    *
+.*****************************************************************************
+.
+VNUM0000  MOVE      ZERO,ERORFLAG                * init. validation error flag
+.
+.         Age low limit numeric field
+.
+          TYPE      ICDOLOWL                     * age low limit numeric ?
+          GOTO      VNUM0050 IF NOT EQUAL        * no - error
+          GOTO      VNUM0100                     * yes - valid value
+.
+VNUM0050  MOVE      "ICDOLOWL",TMPFIELD
+          CALL      NERR0000
+.
+.         Age high limit numeric field
+.
+VNUM0100  TYPE      ICDOHIGH                     * age high limit numeric ?
+          GOTO      VNUM0150 IF NOT EQUAL        * no - error
+          GOTO      VNUM0200                     * yes - valid value
+.
+VNUM0150  MOVE      "ICDOHIGH",TMPFIELD
+          CALL      NERR0000
+.
+.         2nd age low limit numeric field
+.
+VNUM0200  TYPE      ICDO2ALL                     * 2nd age low limit numeric ?
+          GOTO      VNUM0250 IF NOT EQUAL        * no - error
+          GOTO      VNUM0300                     * yes - valid value
+.
+VNUM0250  MOVE      "ICDO2ALL",TMPFIELD
+          CALL      NERR0000
+.
+.         2nd age high limit numeric field
+.
+VNUM0300  TYPE      ICDO2AHL                     * 2nd age high limit numeric ?
+          GOTO      VNUM0350 IF NOT EQUAL        * no - error
+          GOTO      VNUM0400                     * yes - valid value
+.
+VNUM0350  MOVE      "ICDO2AHL",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 1 code numeric field
+.
+VNUM0400  TYPE      ICDOV1CD                     * ICD version 1 code numeric ?
+          GOTO      VNUM0450 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOV1CD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM0450 IF LESS             * no - error
+          GOTO      VNUM0500                     * yes - valid value
+.
+VNUM0450  MOVE      "ICDOV1CD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 2 code numeric field
+.
+VNUM0500  TYPE      ICDOV2CD                     * ICD version 2 code numeric ?
+          GOTO      VNUM0550 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOV2CD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM0550 IF LESS             * no - error
+          GOTO      VNUM0600                     * yes - valid value
+.
+VNUM0550  MOVE      "ICDOV2CD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 3 code numeric field
+.
+VNUM0600  TYPE      ICDOV3CD                     * ICD version 3 code numeric ?
+          GOTO      VNUM0650 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOV3CD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM0650 IF LESS             * no - error
+          GOTO      VNUM0700                     * yes - valid value
+.
+VNUM0650  MOVE      "ICDOV3CD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 4 code numeric field
+.
+VNUM0700  TYPE      ICDOV4CD                     * ICD version 4 code numeric ?
+          GOTO      VNUM0750 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOV4CD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM0750 IF LESS             * no - error
+          GOTO      VNUM0800                     * yes - valid value
+.
+VNUM0750  MOVE      "ICDOV4CD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 5 code numeric field
+.
+VNUM0800  TYPE      ICDOV5CD                     * ICD version 5 code numeric ?
+          GOTO      VNUM0850 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOV5CD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM0850 IF LESS             * no - error
+          GOTO      VNUM0900                     * yes - valid value
+.
+VNUM0850  MOVE      "ICDOV5CD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 6 code numeric field
+.
+VNUM0900  TYPE      ICDOV6CD                     * ICD version 6 code numeric ?
+          GOTO      VNUM0950 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOV6CD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM0950 IF LESS             * no - error
+          GOTO      VNUM1000                     * yes - valid value
+.
+VNUM0950  MOVE      "ICDOV6CD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 7 code numeric field
+.
+VNUM1000  TYPE      ICDOV7CD                     * ICD version 7 code numeric ?
+          GOTO      VNUM1050 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOV7CD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM1050 IF LESS             * no - error
+          GOTO      VNUM1100                     * yes - valid value
+.
+VNUM1050  MOVE      "ICDOV7CD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 8 code numeric field
+.
+VNUM1100  TYPE      ICDOV8CD                     * ICD version 8 code numeric ?
+          GOTO      VNUM1150 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOV8CD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM1150 IF LESS             * no - error
+          GOTO      VNUM1160                     * yes - valid value
+.
+VNUM1150  MOVE      "ICDOV8CD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 9 code numeric field
+.
+VNUM1160  TYPE      ICDOV9CD                     * ICD version 9 code numeric ?
+          GOTO      VNUM1170 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOV9CD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM1170 IF LESS             * no - error
+          GOTO      VNUM1180                     * yes - valid value
+.
+VNUM1170  MOVE      "ICDOV9CD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 10 code numeric field
+.
+VNUM1180  TYPE      ICDOVXCD                     * ICD version 10 code numeric ?
+          GOTO      VNUM1190 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOVXCD,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM1190 IF LESS             * no - error
+          GOTO      VNUM1200                     * yes - valid value
+.
+VNUM1190  MOVE      "ICDOVXCD",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 11 code numeric field
+.
+VNUM1200  TYPE      ICDOVX1D                     * ICD version 11 code numeric ?
+          GOTO      VNUM1290 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOVX1D,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM1290 IF LESS             * no - error
+          GOTO      VNUM1300                     * yes - valid value
+.
+VNUM1290  MOVE      "ICDOVX1D",TMPFIELD
+          CALL      NERR0000
+.
+.         Valid ICD Version 12 code numeric field
+.
+VNUM1300  TYPE      ICDOVX2D                     * ICD version 12 code numeric ?
+          GOTO      VNUM1390 IF NOT EQUAL        * no - error
+.
+          MOVE      ZERO,FORM1
+          MOVE      ICDOVX2D,FORM1
+          COMPARE   FORM1,ONE                    * value  0 or 1 ?
+          GOTO      VNUM1390 IF LESS             * no - error
+          GOTO      VNUM1900                     * yes - valid value
+.
+VNUM1390  MOVE      "ICDOVX2D",TMPFIELD
+          CALL      NERR0000
+.
+.         Date/Time of Procedure Non-Mandatory numeric field
+.
+VNUM1900  TYPE      ICDODTMN                     * numeric ?
+          GOTO      VNUM1950 IF NOT EQUAL        * no - error
+          GOTO      VNUM9000                     * yes - valid value
+.
+VNUM1950  MOVE      "ICDODTMN",TMPFIELD
+          CALL      NERR0000
+.
+VNUM9000  BRANCH    ERORFLAG,VNUM9100            * errors on number validation
+.
+          MOVE      ZERO,EXIT                    * no errors on no. validation
+          GOTO      VNUM9999
+.
+VNUM9100  ADD       ONE,NUMCOUNT                 * incr. num. error record count
+          MOVE      ONE,EXIT
+.
+VNUM9999  RETURN
++
+.*****************************************************************************
+.*                            NERR0000             Called by: VNUM0000       *
+.*                    Process number error                                   *
+.* Requires: TMPFIELD - field name                                           *
+.*****************************************************************************
+.
+NERR0000  MOVE      "Invalid numeric field ",ERORDESC
+          ENDSET    ERORDESC
+          APPEND    LBRACK,ERORDESC
+          APPEND    TMPFIELD,ERORDESC
+          APPEND    RBRACK,ERORDESC
+          APPEND    SP70,ERORDESC
+          RESET     ERORDESC
+          CALL      PERR0000                     * print error line
+.
+          MOVE      ONE,ERORFLAG                 * set number error flag
+.
+NERR9999  RETURN
++
+.*****************************************************************************
+.*                              PERR0000           Called by: UPLD0000       *
+.*                   Print an error detail line               CHKM0000       *
+.* Requires: Valid read on PMI records (for name fields)      DERR0000       *
+.*           ERORDESC - error description                     TERR0000       *
+.*           CLNO - current page line count                   VURN0000       *
+.* Returns:  CLNO - updated page line count                   NERR0000       *
+.*                                                            VCOD0000       *
+.*****************************************************************************
+.
+PERR0000  COMPARE   CLNO,SIXTY3                  * page full ?
+          IF        @LESS
+            CALL      LINE0000                   * yes - print bottom line
+            CALL      HEAD0000                   * print header
+          ENDIF
+.
+          PRINT     *1,PIPE,*3,ICDOCODE,*13,PIPE,*15,ERORDESC,*132,PIPE
+          ADD       ONE,CLNO                     * increment page line count
+.
+PERR9999  RETURN
++
+. =========================================================================
+.         I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       PATO12IO/INC

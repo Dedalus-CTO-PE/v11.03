@@ -1,0 +1,85 @@
+.
+. PATFAPIO    
+. --------
+. Filename     : patfapaf.dat
+.
+RSPTFAP1  RESET     KEY6                                                        
+          READ      PATFAPA1,KEY6;;                                             
+          RETURN
+.
+RAPTFAP1  RESET     KEY6                                                        
+          MOVE      ZERO,OVRCD
+          READ      PATFAPA1,KEY6;ANS                                           
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDPTFAP1  RESET     KEY6                                                        
+          MOVE      ZERO,OVRCD
+          READ      PATFAPA1,KEY6;PTFPCLAI,PTFPACPL,PTFPFAC1,PTFPDFA1,PTFPPLT1: 
+                        PTFPPIN1,PTFPOCG1,PTFPFAC2,PTFPDFA2,PTFPPLT2,PTFPPIN2:  
+                        PTFPOCG2,PTFPFAC3,PTFPDFA3,PTFPPLT3,PTFPPIN3,PTFPOCG3:  
+                        PTFPFAC4,PTFPDFA4,PTFPPLT4,PTFPPIN4,PTFPOCG4,PTFPFAC5:  
+                        PTFPDFA5,PTFPPLT5,PTFPPIN5,PTFPOCG5,PTFPFAC6,PTFPDFA6:  
+                        PTFPPLT6,PTFPPIN6,PTFPOCG6,PTFPFAC7,PTFPDFA7,PTFPPLT7:  
+                        PTFPPIN7,PTFPOCG7,PTFPFAC8,PTFPDFA8,PTFPPLT8,PTFPPIN8:  
+                        PTFPOCG8,PTFPFAC9,PTFPDFA9,PTFPPLT9,PTFPPIN9,PTFPOCG9:  
+                        PTFPFAC0,PTFPDFA0,PTFPPLT0,PTFPPIN0,PTFPOCG0,PTFPSPAR   
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKPTFAP1                                                                        
+          MOVE      ZERO,OVRCD
+          READKS    PATFAPA1;PTFPCLAI,PTFPACPL,PTFPFAC1,PTFPDFA1,PTFPPLT1:      
+                        PTFPPIN1,PTFPOCG1,PTFPFAC2,PTFPDFA2,PTFPPLT2,PTFPPIN2:  
+                        PTFPOCG2,PTFPFAC3,PTFPDFA3,PTFPPLT3,PTFPPIN3,PTFPOCG3:  
+                        PTFPFAC4,PTFPDFA4,PTFPPLT4,PTFPPIN4,PTFPOCG4,PTFPFAC5:  
+                        PTFPDFA5,PTFPPLT5,PTFPPIN5,PTFPOCG5,PTFPFAC6,PTFPDFA6:  
+                        PTFPPLT6,PTFPPIN6,PTFPOCG6,PTFPFAC7,PTFPDFA7,PTFPPLT7:  
+                        PTFPPIN7,PTFPOCG7,PTFPFAC8,PTFPDFA8,PTFPPLT8,PTFPPIN8:  
+                        PTFPOCG8,PTFPFAC9,PTFPDFA9,PTFPPLT9,PTFPPIN9,PTFPOCG9:  
+                        PTFPFAC0,PTFPDFA0,PTFPPLT0,PTFPPIN0,PTFPOCG0,PTFPSPAR   
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPPTFAP1                                                                        
+          MOVE      ZERO,OVRCD
+          READKP    PATFAPA1;PTFPCLAI,PTFPACPL,PTFPFAC1,PTFPDFA1,PTFPPLT1:      
+                        PTFPPIN1,PTFPOCG1,PTFPFAC2,PTFPDFA2,PTFPPLT2,PTFPPIN2:  
+                        PTFPOCG2,PTFPFAC3,PTFPDFA3,PTFPPLT3,PTFPPIN3,PTFPOCG3:  
+                        PTFPFAC4,PTFPDFA4,PTFPPLT4,PTFPPIN4,PTFPOCG4,PTFPFAC5:  
+                        PTFPDFA5,PTFPPLT5,PTFPPIN5,PTFPOCG5,PTFPFAC6,PTFPDFA6:  
+                        PTFPPLT6,PTFPPIN6,PTFPOCG6,PTFPFAC7,PTFPDFA7,PTFPPLT7:  
+                        PTFPPIN7,PTFPOCG7,PTFPFAC8,PTFPDFA8,PTFPPLT8,PTFPPIN8:  
+                        PTFPOCG8,PTFPFAC9,PTFPDFA9,PTFPPLT9,PTFPPIN9,PTFPOCG9:  
+                        PTFPFAC0,PTFPDFA0,PTFPPLT0,PTFPPIN0,PTFPOCG0,PTFPSPAR   
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPPTFAP1                                                                        
+          UPDATE    PATFAPA1;PTFPCLAI,PTFPACPL,PTFPFAC1,PTFPDFA1,PTFPPLT1:      
+                        PTFPPIN1,PTFPOCG1,PTFPFAC2,PTFPDFA2,PTFPPLT2,PTFPPIN2:  
+                        PTFPOCG2,PTFPFAC3,PTFPDFA3,PTFPPLT3,PTFPPIN3,PTFPOCG3:  
+                        PTFPFAC4,PTFPDFA4,PTFPPLT4,PTFPPIN4,PTFPOCG4,PTFPFAC5:  
+                        PTFPDFA5,PTFPPLT5,PTFPPIN5,PTFPOCG5,PTFPFAC6,PTFPDFA6:  
+                        PTFPPLT6,PTFPPIN6,PTFPOCG6,PTFPFAC7,PTFPDFA7,PTFPPLT7:  
+                        PTFPPIN7,PTFPOCG7,PTFPFAC8,PTFPDFA8,PTFPPLT8,PTFPPIN8:  
+                        PTFPOCG8,PTFPFAC9,PTFPDFA9,PTFPPLT9,PTFPPIN9,PTFPOCG9:  
+                        PTFPFAC0,PTFPDFA0,PTFPPLT0,PTFPPIN0,PTFPOCG0,PTFPSPAR   
+          RETURN
+.
+WRPTFAP1  RESET     KEY6                                                        
+          WRITE     PATFAPA1,KEY6;PTFPCLAI,PTFPACPL,PTFPFAC1,PTFPDFA1,PTFPPLT1: 
+                        PTFPPIN1,PTFPOCG1,PTFPFAC2,PTFPDFA2,PTFPPLT2,PTFPPIN2:  
+                        PTFPOCG2,PTFPFAC3,PTFPDFA3,PTFPPLT3,PTFPPIN3,PTFPOCG3:  
+                        PTFPFAC4,PTFPDFA4,PTFPPLT4,PTFPPIN4,PTFPOCG4,PTFPFAC5:  
+                        PTFPDFA5,PTFPPLT5,PTFPPIN5,PTFPOCG5,PTFPFAC6,PTFPDFA6:  
+                        PTFPPLT6,PTFPPIN6,PTFPOCG6,PTFPFAC7,PTFPDFA7,PTFPPLT7:  
+                        PTFPPIN7,PTFPOCG7,PTFPFAC8,PTFPDFA8,PTFPPLT8,PTFPPIN8:  
+                        PTFPOCG8,PTFPFAC9,PTFPDFA9,PTFPPLT9,PTFPPIN9,PTFPOCG9:  
+                        PTFPFAC0,PTFPDFA0,PTFPPLT0,PTFPPIN0,PTFPOCG0,PTFPSPAR   
+          RETURN
+.
+DEPTFAP1  RESET     KEY6                                                        
+          DELETE    PATFAPA1,KEY6                                               
+          RETURN
+.

@@ -1,0 +1,444 @@
+.         NZPINVS
+.         This include controls the printing of invoices.
+.         
+.         MODIFICATIONS:
+.         V11.00.01 02/04/2020  J.Tan             TSK 0868813
+.                   Changed PKNAME to DIM80
+.         V10.02.01 04/04/2011 Jill Parkinson CAR 239574
+.                   Removed open of ibaprntf
+.         V9.10.02  14/07/2008 J.Tan         CAR 168769
+.                   Mods to set ALACDTE when printing a Primary funder invoice
+.         V9.10.01  23/05/2008 J.Tan      CAR 169149
+.                   Added Date and Time invoice created/updated
+.         V9.09.03  08/02/2008 J.Tan         CAR 160638
+.                   Fixed deposit should be only for patient invoice
+.         V9.09.02  24/09/2007 J.Tan         CAR 148877
+.                   Mods to allocate FFS Win/Loss to Primary funder invoice
+.         V9.09.01  31/08/2007 J.Tan         CAR 148877
+.                   Fixed printing ALL invoices
+.         V9.08.02  23/04/2007 J.Tan         CAR 132272
+.                   Mods for Credit notes
+.         V9.08.01  22/02/2007 Mike Laming   CAR 119436
+.                   Add PROC FLAGDEBT (PMSOSDTM) for Outstanding Debt Alert ind..
+.*******************************************************************************
+.         Printing Southern Cross Invoices
+.*******************************************************************************
+PRSX0000  MOVE      ZERO,ALLINFLG
+          MOVE      ZERO,NUMINVS
+          MOVE      SP10,PTDSDDRG
+          MOVE      AADMNO,DAADMNO
+          MOVE      AADMNO,KEY8
+          MOVE      SP8,DDATE
+          CALL      RDDSCH1
+          MOVE      OVRCD,DISFLG
+.
+.         Check for a "A" record in the transfer file - No "A" rec., No invoice
+.         Unless it is an outstanding debt
+.
+          MATCH     "00000000",ADATE
+          GOTO      PRSX1000 IF EQUAL
+.
+          PACK      KEY30 WITH AADMNO,SP20
+          CALL      RDSTRAN2
+          CALL      RDKTRAN2
+          BRANCH    OVRCD OF PRSX9999
+          COMPARE   TADMN,AADMNO
+          GOTO      PRSX9999 IF NOT EQUAL
+          CMATCH    "A",TMOVE
+          GOTO      PRSX9999 IF NOT EQUAL
+.
+.         Get the patient's name
+.
+PRSX1000   CALL      GETPNAM
+.
+.         Get any pending cash receipts
+.
+          CALL      GETCASH
+.
+          MOVE      ZERO,ALLINFLG
+          MOVE      ZERO,PRPATINV
+          MATCH     "PRFA",EXPPAYER
+          IF        @EQUAL
+            MOVE      ONE,PRPATINV           * flag for printing patient invoice
+          ENDIF
+.
+          MATCH     "ALL",EXPPAYER
+          GOTO      PRSX3000 IF NOT EQUAL  * not printing All invoices
+.
+.       Printing All Invoices (PINVFLAG=0), check inv amt of patient inv.first
+.
+          MOVE      ONE,ALLINFLG
+          OPEN      VISPAYA1,"vispayaf"
+          MOVE      "PRFA  ",EXPPAYER        * check for patient invoice
+          MOVE      ONE,PRPATINV           * flag for printing patient invoice
+.
+PRSX1020  MOVE      ONE,PROGFLAG           * workout amt to be invoiced
+          CALL      NZINV000
+          COMPARE   ZERO,GROSSTOT
+          GOTO      PRSX1100 IF EQUAL      * zero inv.total,try next funder
+.
+          MOVE      THREE,PROGFLAG
+          ADD       ONE,NUMINVS
+          GOTO      PRSX3000               * Generate patient invoice
+.
+PRSX1100  IF        PRPATINV=1
+            MOVE      AADMNO,DTADMNO
+            PACK      KEY14,AADMNO,SP70          * get the first funder
+            CALL      RSVSPAY1
+          ENDIF
+          CALL      RKVSPAY1                     * get next expected payer
+          BRANCH    OVRCD,PRSX8000
+.
+          MOVE      AADMNO,DTADMNO
+          MATCH     DTADMNO,VSPAVISN             * Same visit?
+          GOTO      PRSX8000 IF NOT EQUAL
+.
+          MOVE      ZERO,PRPATINV                * Set to print funder invoice
+          MATCH     SP70,VSPAPAYC
+          GOTO      PRSX1100 IF EQUAL            * try next funder
+.
+          MOVE      VSPAPAYC,EXPPAYER            * Set the next funder
+          MOVE      ZERO,GROSSTOT
+          MOVE      ZERO,NETTOT
+          MOVE      ZERO,NODAYS
+.
+          GOTO      PRSX1020
+.
+.         Generate the invoice
+.
+PRSX3000  MOVE      ZERO,GROSSTOT
+          MOVE      ZERO,TOTGST
+          MOVE      ZERO,NETTOT
+          MOVE      ZERO,NODAYS
+.
+.         Get next invoice number from NZ private invoice range file
+.
+          OPEN      NZPIRNA1,"nzpirnaf"
+          OPEN      PATINVR1,"patinvrf"
+.
+PRSX3200  PACK      KEY6,PMVXMHOS,CINVRIP,SP70
+          CALL      NZIRNA1
+          BRANCH    OVRCD,NOIRNGE,RNGEFULL
+          MOVE      NZIRNEXT,CNEXTINV
+.
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+          COMPARE   ZERO,OVRCD
+          GOTO      PRSX3200 IF EQUAL
+.
+.         DISPLAY   *P40:24,*EL,*V2LON:
+.                   "*** Generating Invoice ",CNEXTINV," ***";
+.
+          CALL      ZEROINV
+          CALL      FRSDAY00               * Check first day of period
+.
+.         Open spool file for invoice
+.
+          UNPACK    ADATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,A10DATE
+.
+          UNPACK    DDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      CPCDATE,D10DATE
+.
+.         Use the discharge diagnosis if available
+.
+          BRANCH    DISFLG OF PRSX5000
+          MATCH     SP70,DDIAG
+          GOTO      PRSX5000 IF EQUAL
+          MOVE      DDIAG,ADIAG1
+          MOVE      DDIAG2,ADIAG2
+.
+          MATCH     SP9,DFMBS
+          GOTO      PRSX5000 IF EQUAL
+          MOVE      DFMBS,AMBS
+.
+PRSX5000  MOVE      ZERO,TOTDAYS  * Done here because it may be used in SETUPIV
+.
+          MOVE      ZERO,CLAIM
+.
+.         Set up the person responsible for the account
+.
+          BRANCH    PRPATINV,PRSX5100       * patient invoice
+          MATCH     "PRFA",EXPPAYER
+          GOTO      PRSX5100 IF EQUAL
+.
+.         Get the Expected payor details for PRFA
+.
+          PACK      KEY14,EXPPAYER,ZERO8,SP70
+          CALL      RDFUND1
+          IF        OVRCD=0
+            PACK      PFNAME,HFNAME,SP70
+            PACK      PKNAME,HFNAME,SP70
+            PACK      PKADD1,HFADD1,SP70
+            PACK      PKADD2,HFADD2,SP70
+            PACK      PKSUBR,HFADD3,SP70
+            PACK      PKADD4,HFADD4,SP70
+            PACK      PKPOST,HFPCODE,SP70
+            GOTO      PRSX6000
+          ENDIF
+.
+PRSX5100  RESET     PGNAME
+          MOVE      PGNAME,ANS
+          PACK      DIM8 WITH SP1,PTITL,SP1,ANS,DOT
+.
+PRSX5200  CMATCH    SP1,DIM8
+          GOTO      PRSX5400 IF NOT EQUAL
+          BUMP      DIM8
+          GOTO      PRSX5200 IF NOT EOS
+.
+.         Default to patient name
+.
+PRSX5400  PACK      PFNAME WITH DIM8,PTMASNAM
+          REP       ", ",PFNAME
+          MOVE      PFNAME,PKNAME
+          MOVE      PSUBRB,PKSUBR
+          MOVE      PADD1,PKADD1
+          MOVE      PADD2,PKADD2
+          MOVE      PPOST,PKPOST
+          MOVE      SP10,PKRELP
+.
+          PACK      PFNAME WITH PKNAME,SP30
+          OPEN      PATRE1A1,"patre1af"
+          MOVE      AADMNO,KEY8
+          CALL      RDRESP1
+          BRANCH    OVRCD OF PRSX6000
+.
+          MATCH     "1",PTCNDEES             * using deceased PRFA indicator
+          GOTO      PRSX5600 IF NOT EQUAL    * no
+.
+          CMATCH    "$",PKNAME
+          IF        @EQUAL
+            STRIP     PTCNDDES
+            MOVE      PTCNDDES,PFNAME
+            UNPACK    PKNAME,DIM2,KEY78      * ignore "$ "
+            PACK      PFNAME,PFNAME,SP1,KEY78,SP30
+            GOTO      PRSX6000
+          ENDIF
+.
+PRSX5600  COMPARE   ONE,PTCNPAOF             * using 'parent of'?
+          GOTO      PRSX5800 IF NOT EQUAL    * no
+.
+.---- If first character of PKNAME is "@" then replace with "Parent of"
+.
+          CMATCH    "@",PKNAME
+          IF        @EQUAL
+            MOVE      "Parent of ",PFNAME
+            UNPACK    PKNAME,KEY2,KEY78      * ignore "@ "
+            PACK      PFNAME,PFNAME,KEY78,SP30
+            GOTO      PRSX6000
+          ENDIF
+.
+PRSX5800  PACK      PFNAME WITH PKNAME,SP30
+.
+.         Print the invoice heading section
+.
+PRSX6000  MOVE      AADMNO,PINVADM
+          MOVE      AURNO,PINVUR
+          MOVE      ACLAIM,PINVCLM
+          MOVE      THREE,PINVSYS
+          MOVE      SP6,PINVSITE
+          MOVE      ZERO,ERRFLAG
+          CALL      HEAD
+.
+          MOVE      SP70,PMVXMHOS
+          OPEN      PMSVX1A1,"pmsvx1af"
+          PACK      KEY8,AADMNO
+          CALL      RDPMVX11
+.
+.         Generate the body and tail of the invoice
+.
+          CALL      CALCTBI
+          CALL      SETUPTRN
+          CALL      NZINV000            * processing Accommodation/Items
+.
+.         Update the invoice record with the appropriate details
+.
+          MOVE      CNEXTINV,KEY8
+          CALL      RDINV1
+.
+          MOVE      AADMNO,KEY8                     * Make sure we have got
+          CALL      RDMISS1                         * the correct U/R number
+          IF        OVRCD=0 & FFSFLAG=1
+            MOVE      "Y",PTMICMXP      * set flag for charged FFS
+            CALL      UPMISS1
+          ENDIF
+.
+          MOVE      AADMNO,PINVADM
+          MOVE      AURNO,PINVUR
+          MOVE      PTMASNAM,PINALPHA
+          MOVE      GROSSTOT,PINVAMT
+          MOVE      REBTOT,PINVREB
+          MOVE      ZERO,PTINGSTA
+          MOVE      TOTDISC,PTINDISC
+          MOVE      ROUNDAMT,PTINROUN
+.
+          MOVE      ONE,PINVTYP           * Insurance Invoice
+          IF        PRPATINV=1
+            MOVE      TWO,PINVTYP         * Patient Invoice
+          ENDIF
+          ADD       TOTGST,PINVAMT
+          MOVE      TOTGST,PTINGSTA      * GST amount
+.
+          MOVE      THREE,PINVSYS
+          MOVE      SP6,PINVSITE
+          MOVE      ACLAIM,PINVCLM
+          PACK      PTINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PTINUDAT        * date updated
+          CLOCK     TIME,PTINUTIM        * time updated
+          MOVE      USERID,PTINUUID      * web user id
+          BRANCH    PRPATINV,PRSX6400    * patient invoice
+.
+          MOVE      EXPPAYER,PTINHFND
+          CALL      UPINV1
+          PROC      FLAGDEBT             * set outstanding debt indicator
+          CALL      EXPAY000             * update expected payor file
+          GOTO      PRSX7000
+.
+PRSX6400  CALL      UPINV1
+          PROC      FLAGDEBT             * set outstanding debt indicator
+          CALL      EXPAY000             * update expected payor file
+.
+.         Cash updates
+.
+          CALL      CASHUPD
+.
+PRSX7000  
+.           DISPLAY   *P40:24,*EL,*V2LON:
+.                     "*** Invoice Generation Completed ***",*W;
+.
+          CALL      CLSPRINT
+          CALL      OPNPRINT
+          BRANCH    ALLINFLG,PRSX1100           * Check for next funder
+.
+.         Update the admission record with the changes
+.
+PRSX8000  PACK      KEY8,AADMNO
+          CALL      RDMISS1
+.
+          ADD       ONE,ATRANNO                       * Last transaction number
+          BRANCH    ALLINFLG,PRSX8200
+.
+.         Do not set up the ADSCHI/ALACDTE if printing funder/pat invoice only
+.
+          ADD       ONE,AINVPRT                       * No of invoices
+          BRANCH    FFSFLAG,PRSX8200                  * FFS printed
+.
+          BRANCH    PRPATINV,PRSX9000                 * Printing patient inv.
+.
+.         Set alacdte if we are printing primary funder invoice
+.
+          MOVE      ZERO,EXIT
+          MOVE      AADMNO,KEY8
+          PACK      KEY11,KEY8,SP70
+          CALL      RSNZSPR1
+PRSX8100  CALL      RKNZSPR1
+          BRANCH    OVRCD,PRSX9000
+.
+          MATCH     KEY8,NZSPADMN         * Same admission number?
+          GOTO      PRSX9000 IF NOT EQUAL
+.
+          COMPARE   ONE,NZSPPRIM
+          GOTO      PRSX8100 IF NOT EQUAL        * Not primary
+.
+          MATCH     SP70,NZSPCNTR
+          GOTO      PRSX9000 IF EQUAL            * No primary funder
+.
+          MATCH     NZSPCNTR,EXPPAYER
+          IF        @EQUAL
+            MOVE      PINVDTE,ALACDTE
+            REP       " 0",ALACDTE
+          ENDIF
+          GOTO      PRSX9000
+.
+PRSX8200  ADD       NUMINVS,AINVPRT
+          IF        BDTEFLAG = 1
+            MOVE      SP8,DDATE
+            MOVE      AADMNO,KEY8
+            CALL      RDDSCH1
+            IF        OVRCD = 0
+              MATCH     PINVDTE,DDATE
+              IF        @EQUAL
+                MOVE        ONE,ADSCHI
+                GOTO        PRSX8600
+              ENDIF
+            ENDIF
+.
+.           Backdate invoice will have invoice date on the current date
+.           the ALACDTE will not be equal to the invoice date
+.
+.           UNPACK    PINVDTE,CCENT,CYEAR,CMON,CDAY
+            UNPACK    BACKDATE,CCENT,CYEAR,CMON,CDAY
+            MOVE      CCENT,CC
+            MOVE      CYEAR,YY
+            MOVE      CMON,MM
+            MOVE      CDAY,DD
+.
+            MOVE      CC,TCENT
+            MOVE      YY,TYEAR
+            MOVE      MM,TMON
+            MOVE      DD,TDAY
+          ELSE
+            IF       ASTAT = 3
+.        This indicator says that a discharge invoice has been printed.
+              MOVE     ONE,ADSCHI
+            ENDIF
+          ENDIF
+.
+PRSX8600  PACK      ALACDTE WITH TCENT,TYEAR,TMON,TDAY * Last Accommodation date
+          REP       " 0",ALACDTE
+.
+          IF        BDTEFLAG = 1 & ASTAT = 3
+            MATCH     ALACDTE,DDATE
+            IF        @EQUAL
+             MOVE      ONE,ADSCHI
+            ENDIF
+          ENDIF
+.
+.         Update the admission record
+.
+PRSX9000  CALL      UPLMISS1
+          COMPARE   ONE,ALLINFLG
+          GOTO      PRSX9200 IF EQUAL   * Printing all invoices
+.
+          CALL      CIPEN000            * Check if any other inv.not printed yet
+          BRANCH    EXIT,PRSX9999       * found an invoice still to be printed
+.
+PRSX9200  CALL      DELIPEND            * Delete invoice pending record
+.
+PRSX9999  MOVE      ZERO,EXIT
+          RETURN
++
+.*******************************************************************************
+.         Check if any other invoice not printed yet
+.*******************************************************************************
+CIPEN000  MOVE      ZERO,EXIT
+          MOVE      AADMNO,KEY8
+          PACK      KEY11,KEY8,SP70
+          CALL      RSNZSPR1
+CIPEN100  CALL      RKNZSPR1
+          BRANCH    OVRCD,CIPEN999
+.
+          MATCH     KEY8,NZSPADMN         * Same admission number?
+          GOTO      CIPEN999 IF NOT EQUAL
+          MATCH     "3",NZSPINVD          * All invoice raised?
+          GOTO      CIPEN100 IF EQUAL
+          MOVE      ONE,EXIT              * Still to be invoiced
+CIPEN999  RETURN
++
+.*******************************************************************************
+.         EXPAY000 - Update expected payor file
+.*******************************************************************************
+EXPAY000  IF        PRPATINV=1
+             PACK      KEY14,AADMNO,SP70
+          ELSE
+             PACK      KEY14,AADMNO,EXPPAYER,SP70
+          ENDIF
+          CALL      RDVSPAY1
+          IF        OVRCD=0
+            MOVE      ONE,VSPAISEN         * Set funder invoice raised
+            CALL      UPVSPAY1
+          ENDIF
+EXPAY999  RETURN
++

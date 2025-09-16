@@ -1,0 +1,510 @@
+.******************************************************************************
+.*  Include    : PABXBILL.PBL                                                 *
+.*  Function   : Get/Post ALL phone calls for a patient as miscell charges    *
+.*  Author     : The Lion King    (23/10/96)                                  *
+.*                                                                            *
+.*  Routine    : PCALL000 - get all calls for a patient in a temp file        *
+.*  Parameters : AADMNO   - Patient Admission Number                          *
+.*  Parameters : CANCINV  - 1=Delete Billing Date (Cancel Invoice only)       *
+.*                                                                            *
+.*  Routine    : WRDTR000 - write all calls for patient to patdtraf           *
+.*  Parameters : Temp file loaded with calls (if any)                         *
+.*                                                                            *
+.*  Vars reqd  : PABXVARS.INC                                                 *
+.*                                                                            *
+.*  Mods       :                                                              *
+.*        V10.04.02 10/06/2014  Jill Parkinson CAR 301639                     *
+.*                  Removed calls to TFILENAM in PCALL000   
+.*        V10.04.01 15/04/2014  J.Tan          CAR 261630                     *
+.*                  Removed port number from temp file name
+.*        V10.01.01 20/12/2010  Mike Laming   CAR 233046                      *
+.*                  Mods to Misc.Charges PATMCHFD - Key change, logic changes *
+.*        V10.00.01 30/04/2010  J.Tan     CAR 220887                          *
+.*                  Mods checking for Active/Inactive of Misc.charge          *
+.*        V9.08.01  15/03/2007  J.Tan        CAR 136149                       *
+.*                  Mods to use default claim code from system parameter      *
+.*        V9.02.01  24.02.2003  Dean Cramer  CAR 36478                        *
+.*                  Make so error message does not halt process               *
+.*        V6.09.01  14.01.2002  Glenn Saunders - Mayne AR Data Extraction proj*
+.*                  Set new 'dtr' field SAP indicator to 'N' for new records  *
+.*        V6.07.02  14/07/00  J Habasque                                      *
+.*                  Fixed GST amount for patinvrf                             *
+.*        V6.07.01  12/07/00  J Habasque Call 3814                            *
+.*                  Added calculation of GST amount                           *
+.*        V6.05.04  10/06/99  J.Tan                                           *
+.*                  Fixed key for pattranf file                               *
+.*        V6.04.03  05/03/1997  ROD      SRF 619280                           *
+.*                  Make sure we have an extension before read extension file *
+.*                  Ignore transfer records where there is no extension       *
+.*        V6.04.02  22/01/1996  Greg Horvat                                   *
+.*                  Changed to call CLPATDTR to clear the DTR file variables  *
+.*                  before writing                                            *
+.*        V6.04.01 15/01/97 J.Tan                                             *
+.*                  Mods to set the effective date for fees invoiced          *
+.******************************************************************************
++
+.***********************************************************************
+.*  PCALL000  :  get all patients calls                                *
+.***********************************************************************
+PCALL000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,ZERO;*52,IBCNPBXI
+.
+          MATCH     SP9,IBCNPBXI                   * not using this feature
+          GOTO      PCALL999 IF EQUAL
+.
+          OPEN      PATTRAN2,"pattranf"
+          OPEN      PATMCHG1,"patmchgf"
+          OPEN      PATWR1A1,"patwr1af"
+          OPEN      IBAPBXA1,"ibapabxf"
+          OPEN      IBAEXTA1,"ibaextaf"
+          OPEN      IBACHGA1,"ibachgaf"
+.
+...       CALL      TFILENAM                * Get temp file name
+...       MOVE      TFILNAME,PBXFNAME
+...       CALL      TFILENAM                * Get temp file name
+...       MOVE      TFILNAME,PBXFNAM2
+.
+. if this routine is called from HOS94,Cancel Invoice, then dont need temp file
+.
+          BRANCH    CANCINV,PCALL090               * cancel invoice?
+.
+          CALL      CREAT000                       * open temp file         
+.
+. get range of date/times patient was at a particular extension number. Then 
+. get all calls made between these date/times. Then get next range of date/time
+. in case patient has changed ward/bed and has a new extension number. Do all
+. this up until discharge.
+.
+PCALL090  PACK      KEY30,AADMNO,SP30
+          CALL      RDSTRAN2
+PCALL100  CALL      RDKTRAN2
+          BRANCH    OVRCD,PCALL700
+.
+          COMPARE   AADMNO,TADMN
+          GOTO      PCALL700 IF NOT EQUAL
+.
+          PACK      KEY6,TWARD,TBED               * get extension number
+          CALL      RDWARD1
+          BRANCH    OVRCD,PCALL900                * error!
+.
+          MATCH     SP4,WEXTN                     * ignore if no extension
+          GOTO      PCALL100 IF EQUAL
+.
+          PACK      KEY4,WEXTN                    * need to get charge code   
+          CALL      RDIBEXT1
+          BRANCH    OVRCD,PCALL100 
+.
+          MOVE      TDATE,STDATE                  * save start date
+          MOVE      TTIME,STTIME                  * save start time
+          MOVE      WEXTN,SAVEXTN                 * save extension number
+          MOVE      IBEXCHRG,SAVCHRG              * save charge code
+.
+. now check for a change in ward bed (extension number)
+.
+PCALL150  CALL      RDKTRAN2
+          BRANCH    OVRCD,PCALL700
+.
+          COMPARE   AADMNO,TADMN
+          GOTO      PCALL700 IF NOT EQUAL
+.
+          MOVE      TDATE,ETDATE8                 * save end date
+          MOVE      TTIME,ETTIME                  * save end time
+.
+          MATCH     ANSD,TMOVE                    * discharge record?
+          GOTO      PCALL350 IF EQUAL             * finished if discharged
+.
+          PACK      KEY6,TWARD,TBED               * get extension number
+          CALL      RDWARD1
+          BRANCH    OVRCD,PCALL900                * error!
+.
+          MATCH     WEXTN,SAVEXTN                 * still same extension?
+          GOTO      PCALL150 IF EQUAL             * get next transfer record
+.
+          MOVE      SP4,IBEXCHRG           * no charge code if extension blank
+          MATCH     SP4,WEXTN
+          GOTO      PCALL300 IF EQUAL
+.
+          PACK      KEY4,WEXTN                    * make sure extension exists
+          CALL      RDIBEXT1
+          BRANCH    OVRCD,PCALL910 
+.
+. we have the start and end dates and times so get calls for this range
+.
+PCALL300  CALL      GCALL000                      * get calls between these dats
+          MOVE      ETDATE8,STDATE                * new strt date = old end date
+          MOVE      ETTIME,STTIME                 * new strt time = old end time
+          MOVE      WEXTN,SAVEXTN                 * new extension
+          MOVE      IBEXCHRG,SAVCHRG              * new charge code
+.
+. if our new ward has no extension, then get next transer record
+          MATCH     SP4,WEXTN
+          GOTO      PCALL100 IF EQUAL
+          GOTO      PCALL150
+.
+PCALL350  CALL      GCALL000                      * get calls between these dats
+          GOTO      PCALL700
+.
+. we have got all calls for the patient in a tmp file, so now write to patdtraf
+.
+PCALL700  
+........  CALL      WDTR0000                      * write calls to patdtraf
+........  CALL      KILP0000                      * erase temp file
+          GOTO      PCALL999
+.
+.
+PCALL900  DISPLAY   *P1:24,*EL,"ERROR:  Ward/Bed Missing ",*V2LON,TWARD:
+                    *HOFF,"/",*V2LON,TBED,*HOFF,".  ";
+          GOTO      PCALL999
+.
+PCALL910  DISPLAY   *P1:24,*EL,"ERROR:  Extension Missing ",*V2LON,WEXTN:
+                    *HOFF,".  ";
+.
+PCALL999  RETURN                              * we have finished
++
+.***********************************************************************
+.*  GCALL000  :  get calls for a patient between 2 given dates/times   *
+.*               Parameters: STDATE = start date, STTIME = start time  *
+.*                           ETDATE8 = end date  , ETTIME = end time   *
+.*                           SAVEXTN = Extension Number                *
+.*                           SAVCHRG = Charge code                     *
+.***********************************************************************
+GCALL000  PACK      KEY20,SAVEXTN,SP20
+          CALL      RSIBPBX1
+GCALL200  CALL      RKIBPBX1
+          BRANCH    OVRCD,GCALL999
+.
+          MATCH     SAVEXTN,IBPBEXTN
+          GOTO      GCALL999 IF NOT EQUAL
+.
+          COMPARE   ZERO,IBPBPULS                * FreeCall?
+          GOTO      GCALL200 IF EQUAL            * ignore
+.
+. if cancinv=1, we want to set the date billed field to spaces (Cancel Invoice)
+. otherwise we only are interested in calls that have not been billed yet!
+.
+          IF        CANCINV=1
+            MATCH     SP8,IBPBBILD                  * already billed?
+            GOTO      GCALL200 IF EQUAL
+          ELSE
+            MATCH     SP8,IBPBBILD                  * already billed?
+            GOTO      GCALL200 IF NOT EQUAL
+          ENDIF
+.
+. now check if call in range
+.
+          UNPACK    IBPBSDAT,EXTDATE8             * get 8 char date
+.
+          MATCH     EXTDATE8,ETDATE8               * end trans date < ext date?
+          GOTO      GCALL999 IF LESS
+.
+.  now check Start date/time
+.
+          MATCH     STDATE,EXTDATE8               * ext date < start trans date?
+          GOTO      GCALL200 IF LESS
+.
+          MATCH     STDATE,EXTDATE8
+          IF        @EQUAL
+            MATCH     STTIME,IBPBSTIM               * time in range?
+            GOTO      GCALL200 IF LESS              * not in range
+          ENDIF
+.
+.    no check End date/time
+.
+          MATCH     EXTDATE8,ETDATE8                  * date in pats stay range
+          GOTO      GCALL999 IF LESS
+.
+          MATCH     EXTDATE8,ETDATE8                  * date in pats stay range
+          IF        @EQUAL
+            MATCH     IBPBSTIM,ETTIME
+            GOTO      GCALL600 IF NOT LESS
+            GOTO      GCALL200
+          ENDIF
+.
+. we have a call made in date/time range for this extension
+. so write a record to tmp file OR delete billed date if in Cancel Inv. (HOS94)
+.
+GCALL600  COMPARE   ONE,CANCINV
+          GOTO      GCALL700 IF NOT EQUAL
+.
+. update call repository to say not billed yet
+.
+          MOVE      SP8,IBPBBILD               * set to not billed yet
+          CALL      UPIBPBX1
+          GOTO      GCALL200
+.
+. write this call to the temp file
+.
+GCALL700  CALL      FRMAT000                     * format data write
+.
+          CALL      WTEMP000                     * write this call to temp file
+          GOTO      GCALL200
+.
+GCALL999  RETURN
++
+.************************************************************************
+.*  WTMP0000  :  write this call to the temp file                       *
+.************************************************************************
+WTEMP000  MOVE      IBPBEXTN,XEXTN               * extension
+          MOVE      IBPBSDAT,XCALDATE            * call date
+          MOVE      IBPBSTIM,XCALTIME            * call time
+          MOVE      CHARGE,XAMOUNT               * call amount $
+          MOVE      IBPBPHNO,XCDESC              * desc (Phone Number)
+          MOVE      CALLDURN,XCALDURN            * call duration
+.
+          CALL      CTYPE000                     * get call type (Loc,STD,ISDN)
+.
+          PACK      KEY21,XEXTN,XTYPE,XCALDATE,XCALTIME
+          CALL      WRTEMP1
+.
+. write calls to temp file 2 which groups all calls by call type
+.
+          MOVE      XTYPE,KEY1
+          CALL      RDTMP21
+          IF        OVRCD=1
+            MOVE      XAMOUNT,XTOTCOST
+            MOVE      IBPBSDAT,XCALDATE
+            CALL      WRTMP21
+          ELSE
+            ADD       XAMOUNT,XTOTCOST
+            MOVE      IBPBSDAT,XCALDATE           * last call date
+            CALL      UPTMP21
+          ENDIF           
+.
+WTEMP999  RETURN
++
+.************************************************************************
+.*  CTYPE000  :  get call type (Local, STD, ISDN)                       *
+.*               Returns XTYPE: 1=Local, 2=STD, 3=ISDN                  *
+.************************************************************************
+CTYPE000  MATCH     "001",IBPBPHNO               * ISDN?
+          GOTO      CTYPE800 IF EQUAL
+.
+          COMPARE   ONE,IBPBPULS                 * >1 pulse = STD
+          GOTO      CTYPE700 IF NOT EQUAL
+.
+          STRIP     IBPBPHNO
+          MOVELPTR  IBPBPHNO,PHLENGTH            * get length of phone no.
+          COMPARE   NINE,PHLENGTH                * phone no. < 9 digits?
+          GOTO      CTYPE900 IF LESS
+.
+CTYPE700  MOVE      TWO,XTYPE                    * STD call
+          GOTO      CTYPE999
+.
+CTYPE800  MOVE      THREE,XTYPE                  * ISDN call
+          GOTO      CTYPE999
+.
+CTYPE900  MOVE      ONE,XTYPE                    * Local call
+          GOTO      CTYPE999
+.         
+CTYPE999  RETURN
++
+.************************************************************************
+.*  WRDTR000  :  write all phone calls to patdtraf (from temp file)     *
+.************************************************************************
+WRDTR000  CALL      CLPATDTR                * Clear DTR file variables
+          CALL      NXTTRAN1                * Get next transaction number
+.
+. set up fields common to all patdtraf records
+.
+          MOVE      AADMNO,TADMNO
+          MOVE      PVIURNO,TDCODE
+          MOVE      "DB",TTYPE
+          MOVE      IBCNPBXI,TITEMNO
+          MOVE      CNEXTINV,TREF
+          MOVE      ONE,TINVPRT
+          MOVE      "3",TRECTYPE
+          MOVE      ONE,TNINVS
+.         MOVE      SP10,PTDTDEPS
+          PACK      PTDTEFFD,PINVDTE
+          REP       " 0",PTDTEFFD
+.
+          MOVE      SP3,MMSCGRP
+          MOVE      ONE,MNINV
+          READ      CONTROLF,TWENTY;*193,PTCNDCLM
+          CALL      DCLM0000
+          PACK      KEY29,PTCNDCLM,SP6,SP3,IBCNPBXI,CURRDATE
+          CALL      PATMCHRD                * read Misc.Charges file 
+          IF        EXIT = 1
+            MOVE      SP3,MMSCGRP
+            MOVE      ONE,MNINV
+            MOVE      ZERO,PTMCGSTA
+            MOVE      SP70,PTMCGSTC
+          ENDIF
+         
+          MOVE      MMSCGRP,TMISGRP
+          MOVE      MNINV,TNINVS
+.
+          MOVE      XTOTCOST,TPATAMTT
+          MOVE      XTOTCOST,TPATAMTP
+.
+         MOVE      PTMCGSTA,PTDTGSTA
+         MOVE      PTMCGSTC,PTDTGSTC
+         MOVE      ZERO,LINEGST
+         IF        IBCNUGST=2 & PTDTGSTA=1
+           CALL      IGST0000               * Get Item GST rate
+           MOVE      LINETOT,LINEGST
+           MULT      IBGEAMNT,LINEGST     * GST amount
+           DIV       "100.00",LINEGST     * Divide by 100 to get wanted fig.
+.          ADD       LINEGST,TOTGST
+         ENDIF
+         MOVE       LINEGST,PTDTGSTM
+.
+          UNPACK    XCALDATE,DTFCENT,DTFYEAR,DTFMONTH,DTFDAY
+          MOVE      DTFCENT,TFCENT
+          MOVE      DTFYEAR,TFYEAR
+          MOVE      DTFMONTH,TFMONTH
+          MOVE      DTFDAY,TFDAY
+.
+          LOAD      TDDESC,XTYPE,CLLOCLNG,CLSTDLNG,CLISDLNG
+.         MOVE      ANSN,PTDTSSAP                  * SAP Flag     v6.09.01
+.
+          PACK      KEY22,AADMNO,TREF,TTRANSN1
+          CALL      RDADTRN1
+          IF        OVRCD=1
+            CALL      WRDTRN1
+.
+.  --dont do the stuff below here (need to do in PATCATBI)--
+.
+.    now update the pabx call file to flag call as billed
+........    PACK      KEY20,XEXTN,XCALDATE,XCALTIME
+........    CALL      RDIBPBX1
+........    BRANCH    OVRCD,WRDTR999               * shouldnt get here
+........    PACK      IBPBBILD,CCC,CYY,CMM,CDD     * Billed Date
+........    REP       " 0",IBPBBILD
+........    CALL      UPIBPBX1
+          ENDIF
+.
+WRDTR999  RETURN
++
+.************************************************************************
+.*  UPPBX000  :  update ibapabxf so to say we have billed the record    *
+.************************************************************************
+UPPBX000  PACK      KEY21,SP30
+          CALL      RSTEMP1
+UPPBX100  CALL      RKTEMP1
+          BRANCH    OVRCD,UPPBX999
+.
+          PACK      KEY20,XEXTN,XCALDATE,XCALTIME
+          CALL      RDIBPBX1
+          BRANCH    OVRCD,UPPBX100               * shouldnt get here
+          PACK      IBPBBILD,CCC,CYY,CMM,CDD     * Billed Date
+          REP       " 0",IBPBBILD
+          CALL      UPIBPBX1
+          GOTO      UPPBX100
+.
+UPPBX999  RETURN
++
+.************************************************************************
+.*  FRMAT000  :  format data for write                                  *
+.************************************************************************
+FRMAT000  MOVE      ZERO,IBCHRATE
+          PACK      KEY3,SAVCHRG
+          CALL      RDIBCHG1                        * get rate
+          ASSIGN    (IBCHRATE*IBPBPULS),CHARGE
+.
+          MOVE      IBPBSTIM,TIMESTRT
+          MOVE      IBPBETIM,TIMESTOP
+          CALL      CALLDURN              * get duration of call (CALLDURN.PBL)
+.
+FRMAT999  RETURN
++
+.*************************************************************************
+.*  KILLP000  :  erase temporary file                                    *
+.*************************************************************************
+KILLP000  CLOSE     TMPFILE
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    PBXFNAME,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+          CLOSE     TMPFIL2
+          CLEAR     CMDLINE
+          APPEND    "iserase ",CMDLINE
+          APPEND    PBXFNAM2,CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+.
+KILLP999  RETURN
++
+.*************************************************************************
+.*  CREAT000  :  create temporary file                                   *
+.*************************************************************************
+CREAT000  CALL      KILLP000 
+          CLEAR     CMDLINE 
+          APPEND    "isbuild ",CMDLINE
+          APPEND    PBXFNAME,CMDLINE
+          APPEND    " 64 U1-4,5-5,6-13,14-21",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TMPFILE,PBXFNAME
+.
+          CLEAR     CMDLINE 
+          APPEND    "isbuild ",CMDLINE
+          APPEND    PBXFNAM2,CMDLINE
+          APPEND    " 15 U1-1",CMDLINE
+          RESET     CMDLINE
+          EXECUTE   CMDLINE,TASKID
+          OPEN      TMPFIL2,PBXFNAM2
+.
+CREAT999  RETURN
++
+.*************************************************************************
+.*  Temp I/O's                                                           *
+.*************************************************************************
+RSTEMP1   RESET     KEY21
+          READ      TMPFILE,KEY21;;
+          RETURN
+.
+RKTEMP1   MOVE      ZERO,OVRCD
+          READKS    TMPFILE;XEXTN,DXTYPE,XCALDATE,XCALTIME,XAMOUNT,XCDESC:
+                            XCALDURN
+          GOTO      OVERCOND IF OVER
+          MOVE      DXTYPE,XTYPE
+          RETURN
+.
+WRTEMP1   RESET     KEY21
+          MOVE      XTYPE,DXTYPE
+          WRITE     TMPFILE,KEY21;XEXTN,DXTYPE,XCALDATE,XCALTIME,XAMOUNT,XCDESC:
+                                  XCALDURN
+          RETURN
+.
+. 2nd temp file which groups into call type
+.
+RSTMP21   RESET     KEY1
+          READ      TMPFIL2,KEY1;;
+          RETURN
+.
+RDTMP21   MOVE      ZERO,OVRCD
+          READ      TMPFIL2,KEY1;DXTYPE,XTOTCOST,XCALDATE
+          GOTO      OVERCOND IF OVER
+          MOVE      DXTYPE,XTYPE
+          RETURN
+.
+RKTMP21   MOVE      ZERO,OVRCD
+          READKS    TMPFIL2;DXTYPE,XTOTCOST,XCALDATE
+          GOTO      OVERCOND IF OVER
+          MOVE      DXTYPE,XTYPE
+          RETURN
+.
+UPTMP21   MOVE      XTYPE,DXTYPE
+          UPDATE    TMPFIL2;DXTYPE,XTOTCOST,XCALDATE
+          RETURN
+.
+WRTMP21   RESET     KEY1
+          MOVE      XTYPE,DXTYPE
+          WRITE     TMPFIL2,KEY1;DXTYPE,XTOTCOST,XCALDATE
+          RETURN
++
+.
+.
+.
+          INC       IBACHGIO/INC
+          INC       IBAEXTIO/INC
+          INC       IBAPBXIO/INC
+...       INC       PATMCHIO/INC
+...       INC       PATTRNIO/INC
+...       INC       PATWRDIO/INC
+...       INC       IBAOVRIO/INC
+          INC       CALLDURN                   * calc durn of a phone call
+.

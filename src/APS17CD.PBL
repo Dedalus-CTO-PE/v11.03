@@ -1,0 +1,983 @@
+. Modifications:
+. 01/02/94 RKS srf127466 If SIIAQIN = SP10 then it won't update the f10 form
+.                        variable and the average cost will be out.
+. 02/02/94 RKS srf126933 Modified so that an update could not be made if
+.                        the period was locked when an update was being made
+.---------------------------------------------------------------
+. Update Credit Notes and create General Ledger batch details.
+.---------------------------------------------------------------
+UPDT0000  MOVE      SP70,LASTDIR      * Clear Last Inventory Directory
+.
+          IF        PERLOCK=1
+            BEEP
+            CLEAR     DISPMSG
+            APPEND    "Period is Locked - ",DISPMSG
+            RESET     DISPMSG
+            CALL      MESSAGE1
+            MOVE      TRUE,EXIT
+            GOTO      UPDT9999
+          ENDIF
+.
+          CALL      CKPPY000          * check if proposed payments active
+.
+          CALL      CBAT0000          * Check Batch
+          BRANCH    EXIT,UPDT9999     * Batch Not Balanced Exit
+.
+          CLOSE     SCRSBGA1
+          CLOSE     SCRPSTA1
+          CLOSE     SCRPSTA2
+          CLOSE     SCRSLTA1
+.
+          CALL      INITB000          * Initialise Files & Parameters
+.
+          CALL      UPAPS000          * Update Accounts Payable
+.
+          CALL      UPFMS000          * Update General Ledger Batch
+.
+          CALL      CLOS0000          * Close
+.
+          OPEN      SCRSBGA1,"scrsbgaf"
+          OPEN      SCRPSTA1,"scrpstaf"
+          OPEN      SCRPSTA2,"scrpstaf"
+          OPEN      SCRSLTA1,"scrsltaf"
+.
+UPDT9999  RETURN
+.----------------------------------------------------------------
+. Update Accounts Payable
+.----------------------------------------------------------------
+UPAPS000  DISPLAY   *P1:24,*EL        * Clear Line for Display
+          PACK      KEY40,APBMBCH,SP70
+          MOVE      ZERO,TRUNIQ       * Unique Batch Line Counter APTR
+          CALL      RSAPIM1           * Main Loop through Invoice
+.
+UPAPS100  CALL      RKAPIM1           * Header Records for Batch
+          BRANCH    OVRCD,UPAPS999
+          MATCH     APBMBCH,APIMBCH
+          GOTO      UPAPS999 IF NOT EQUAL
+          MATCH     "1",APIMUPD
+          GOTO      UPAPS100 IF EQUAL * Already Updated
+.
+          DISPLAY   *P1:24,"Updating Creditor : ",*V2LON,APIMCRD,*HOFF:
+                    "  Ref : ",*V2LON,APIMDOC
+.
+          CALL      APSGST00         * Update Details
+.
+          MOVE      ONE,APIMUPD      * Updated     = 1 Yes
+          MOVE      ONE,APIMOUT      * Outstanding = 1 Yes
+          MOVE      ZERO,APIMPAY     * Make Sure Initial Payment = 0
+          CALL      UPAPIM1
+          GOTO      UPAPS100
+.
+UPAPS999  RETURN
+.
+.----------------------------------------
+. Update Accounts Payable Details
+.----------------------------------------
+APSGST00  MOVE      ZERO,GSTTOTAL
+          ASSIGN    APIMTOT-APIMDIS,ALLTOTAL
+          PACK      KEY51,APIMBCH,APIMCRD,APIMREF,APIMDOC,SP70
+          PACK      KEY40,APIMBCH,APIMCRD,APIMREF,APIMDOC
+          CALL      RSAPIN1           * Loop Through Allocation Details
+.
+APSGST10  CALL      RKAPIN1           * Within The Invoice
+          BRANCH    OVRCD,APSGST80
+          PACK      KEY51,APINBCH,APINCRD,APINREF,APINDOC,SP70
+          MATCH     KEY40,KEY51
+          GOTO      APSGST80 IF NOT EQUAL
+          MATCH     "1",APINUPD
+          GOTO      APSGST20 IF EQUAL * Already Updated
+.
+          IF        IBCNUGST=1
+            ASSIGN    (APINAMT/ALLTOTAL)*APIMGST,APINGST
+          ENDIF
+.
+          ADD       APINGST,GSTTOTAL
+.
+          CALL      UPASS000          * Asset System update
+.
+          CALL      UPINV000          * Inventory System Update
+.
+          MOVE      ZERO,APINPAY      * Make Sure Initial Payment = 0
+          MOVE      ONE,APINUPD       * Updated = 1 Yes
+          CALL      UPAPIN1
+          PACK      SAVKEY51,APINBCH,APINCRD,APINREF,APINDOC,APINORD,APINLIN
+          GOTO      APSGST10
+.
+APSGST20  ADD       APINGST,GSTTOTAL
+          PACK      SAVKEY51,APINBCH,APINCRD,APINREF,APINDOC,APINORD,APINLIN
+          GOTO      APSGST10
+.
+APSGST80  IF        !(APIMGST=GSTTOTAL)
+            MOVE      SAVKEY51,KEY51
+            CALL      RDAPIN1
+            IF        OVRCD=0
+              ASSIGN    APINGST+APIMGST-GSTTOTAL,APINGST
+              CALL      UPAPIN1
+            ENDIF
+          ENDIF
+          RETURN
+.------------------------------------------------------------
+. Close Files Not Required & Update Batch Header with Date 
+.------------------------------------------------------------
+CLOS0000  CLOSE     APSTMPA1,DELETE
+          CLOSE     APSGSTA1,DELETE
+          PACK      KEY5,APBMBCH
+          PACK      APBMUDT,CCC,CYY,CMM,CDD
+          REP       " 0",APBMUDT
+          CALL      RAAPBM1
+          IF        OVRCD=0
+            CALL      UPAPBM1
+            CALL      UUAPBM1         * Unlock Record
+          ENDIF
+          MOVE      TWO,EXIT          * Restart Screen
+          RETURN
+.----------------------------------------------------------------------
+. Save Details for GST Allocation
+.----------------------------------------------------------------------
+SDGST000  PACK     KEY2,APINLED
+          CALL     RDFMLA1
+          BRANCH   OVRCD,SDGST999
+.
+          PACK     KEY14,APINLED,APINACC
+          CALL     RDFMAM1
+          BRANCH   OVRCD,SDGST999
+.
+          CALL     RFMCOT00        * Determine GST Control Account
+.
+          MOVE     APINLED,APGSLED
+          MOVE     FMCSAGST,APGSACC
+          PACK     KEY14,APGSLED,APGSACC
+          CALL     RDAPGS1
+          IF       OVRCD=0
+            ADD      APINGST,APGSAMT
+            CALL     UPAPGS1
+          ELSE
+            MOVE     APINGST,APGSAMT
+            CALL     WRAPGS1
+          ENDIF
+.
+SDGST999  RETURN
+.----------------------------------------------------------------------
+. Create Input Record for G.S.T.
+.----------------------------------------------------------------------
+MVINP000  MOVE     APIMBCH,APINBCH
+          MOVE     APIMCRD,APINCRD
+          MOVE     APIMREF,APINREF
+          MOVE     APIMDOC,APINDOC
+          MOVE     SP70,APINORD
+          MOVE     "  1",APINLIN
+          MOVE     APBMDIS,APINDIS
+          MOVE     APBMRES,APINRES
+          MOVE     "G.S.T.            ",APINDES
+          MOVE     SP70,APINCAT
+          MOVE     ZERO,APINQTY
+          MOVE     ZERO,APINUCT
+          MOVE     ZERO,APINPAY
+          MOVE     SP3,APINBASC
+          MOVE     SP6,APINCGS
+          MOVE     SP70,APINSPA
+          RETURN
+.
+.----------------------------------------------------------------------
+. Update new assets file if required
+.----------------------------------------------------------------------
+UPASS000  PACK      KEY14,APINLED,APINACC
+          CALL      RDFMAM1
+          IF        FMAMASST=1
+            MOVE      APINCRD,CNCRED
+            MOVE      APINDOC,CNREFNO
+            MOVE      APINORD,CNORDER
+            MOVE      APINDES,CNDESC
+            MOVE      APINAMT,CNAMT
+            MULT      "-1",CNAMT
+            MOVE      APIMIDT,CNDATE
+            REP       " 0",CNDATE
+            MOVE      APINBCH,CNBATCH
+            OPEN      ASSETNEW,"assetnew"
+            CALL      RDASSS0
+            CALL      WRASS
+            ADD       ONE TO CNSECTOR
+            CALL      WRASSS0
+            CLOSE     ASSETNEW
+          ENDIF
+          RETURN
+.----------------------------------------------------------------------
+. Update Supply and Inventory System (will require locking after file changes)
+.----------------------------------------------------------------------
+UPINV000  MATCH     SP70,APINORD
+          GOTO      UPINV999 IF EQUAL
+          MATCH     SP70,APINCAT
+          GOTO      UPINV999 IF EQUAL
+.
+          UNPACK    APINORD,KEY1,KEY7
+          CALL      RDAPIS1          * Read Inventory Linkage File
+          BRANCH    OVRCD,UPINV999
+.
+          COMPARE   ZERO,HACCNT
+          GOTO      UPINV999 IF EQUAL
+.
+          CALL      APISOPN1         * Open Inventory File Required
+.
+          PACK      KEY14,APINORD,APINCAT
+          CALL      RDAPOD1
+          IF        OVRCD=0
+            ADD       APINQTY,APODQTY
+            ASSIGN    APODQTY*APODUCT,APODAMT
+            ASSIGN    APODQTY*APODUGS,APODGSTA
+            CALL      UPAPOD1
+          ELSE
+            MOVE      APINLED,APODLED
+            MOVE      APINACC,APODACC
+            MOVE      APINDIS,APODDIS
+            MOVE      APINRES,APODRES
+            MOVE      APINDES,APODDES
+            MOVE      APINAMT,APODAMT
+            MOVE      APINGST,APODGSTA
+            MOVE      APINUCT,APODUCT
+            MOVE      APINQTY,APODQTY
+            ASSIGN    APODGSTA/APODQTY,F12P4
+            MOVE      F12P4,APODUGS
+            UNPACK    KEY14,APODISC,APODORD,APODCAT
+            CALL      WRAPOD1
+            PACK      KEY8,APODISC,APODORD
+            CALL      RDAPCI1
+            IF        OVRCD=1
+              UNPACK    KEY8,APCIISC,APCIORD
+              MOVE      APIMCRD,APCICRD
+              MOVE      APIMTDT,APCIDAT
+              CALL      WRAPCI1
+            ENDIF
+          ENDIF
+.
+          ASSIGN    SEQ*APINQTY*APODUCT,APODAMT
+          ASSIGN    SEQ*APINQTY*APODUGS,APODGSTA
+          CALL      UFMFP000
+.
+          IF        INCOSTYP=1
+            CALL      UPSIN000
+          ENDIF
+.
+          CALL      APISCLS1           * Close Inventory Files
+.
+UPINV999  RETURN
+.----------------------------------------------------------------------
+. Update period summary file
+.----------------------------------------------------------------------
+UFMFP000  PACK      KEY2,APODLED,SP70
+          CALL      RDFMLA1
+          BRANCH    OVRCD,UFMFP999
+.
+          PACK      KEY14,APODLED,APODACC,SP70
+          CALL      RDFMAM1
+          BRANCH    OVRCD,UFMFP999
+.
+          PACK      WORKDATE,APCIDAT,SP70
+          CALL      CFYR0000
+          BRANCH    EXIT,UFMFP999
+.
+          MOVE      "fmsp",KEY4
+          PACK      KEY8,KEY4,CURYEAR,SP70
+          REP       " 0",CURYEAR
+          MOVE      ZERO,OVRCD
+          TRAP      OVERCOND IF IO
+          OPEN      FMSFPSA1,KEY8
+          TRAPCLR   IO
+          BRANCH    OVRCD,UFMFP999
+.
+          PACK      KEY14,APODLED,APODACC,SP70
+          UNPACK    KEY14,FMFPCULD,FMFPCUAC
+          CALL      RDFMFP1
+          IF        OVRCD=0
+            ASSIGN    APODAMT+FMFPCOM,FMFPCOM
+            MOVE      FMFPCOM,FMFPCOMD
+            ASSIGN    FMFPCOM/1000,F12P2
+            MOVE      F12P2,FMFPCOMT
+            CALL      UPFMFP1
+          ELSE
+            MOVE      ZERO,FMFPCBF
+            MOVE      ZERO,FMFPC01
+            MOVE      ZERO,FMFPC02
+            MOVE      ZERO,FMFPC03
+            MOVE      ZERO,FMFPC04
+            MOVE      ZERO,FMFPC05
+            MOVE      ZERO,FMFPC06
+            MOVE      ZERO,FMFPC07
+            MOVE      ZERO,FMFPC08
+            MOVE      ZERO,FMFPC09
+            MOVE      ZERO,FMFPC10
+            MOVE      ZERO,FMFPC11
+            MOVE      ZERO,FMFPC12
+            MOVE      ZERO,FMFPC13
+.
+            MOVE      ZERO,FMFPABF
+            MOVE      ZERO,FMFPA01
+            MOVE      ZERO,FMFPA02
+            MOVE      ZERO,FMFPA03
+            MOVE      ZERO,FMFPA04
+            MOVE      ZERO,FMFPA05
+            MOVE      ZERO,FMFPA06
+            MOVE      ZERO,FMFPA07
+            MOVE      ZERO,FMFPA08
+            MOVE      ZERO,FMFPA09
+            MOVE      ZERO,FMFPA10
+            MOVE      ZERO,FMFPA11
+            MOVE      ZERO,FMFPA12
+            MOVE      ZERO,FMFPA13
+.
+            MOVE      ZERO,FMFPCBFD
+            MOVE      ZERO,FMFPC01D
+            MOVE      ZERO,FMFPC02D
+            MOVE      ZERO,FMFPC03D
+            MOVE      ZERO,FMFPC04D
+            MOVE      ZERO,FMFPC05D
+            MOVE      ZERO,FMFPC06D
+            MOVE      ZERO,FMFPC07D
+            MOVE      ZERO,FMFPC08D
+            MOVE      ZERO,FMFPC09D
+            MOVE      ZERO,FMFPC10D
+            MOVE      ZERO,FMFPC11D
+            MOVE      ZERO,FMFPC12D
+            MOVE      ZERO,FMFPC13D
+.
+            MOVE      ZERO,FMFPABFD
+            MOVE      ZERO,FMFPA01D
+            MOVE      ZERO,FMFPA02D
+            MOVE      ZERO,FMFPA03D
+            MOVE      ZERO,FMFPA04D
+            MOVE      ZERO,FMFPA05D
+            MOVE      ZERO,FMFPA06D
+            MOVE      ZERO,FMFPA07D
+            MOVE      ZERO,FMFPA08D
+            MOVE      ZERO,FMFPA09D
+            MOVE      ZERO,FMFPA10D
+            MOVE      ZERO,FMFPA11D
+            MOVE      ZERO,FMFPA12D
+            MOVE      ZERO,FMFPA13D
+.
+            MOVE      ZERO,FMFPCBFT
+            MOVE      ZERO,FMFPC01T
+            MOVE      ZERO,FMFPC02T
+            MOVE      ZERO,FMFPC03T
+            MOVE      ZERO,FMFPC04T
+            MOVE      ZERO,FMFPC05T
+            MOVE      ZERO,FMFPC06T
+            MOVE      ZERO,FMFPC07T
+            MOVE      ZERO,FMFPC08T
+            MOVE      ZERO,FMFPC09T
+            MOVE      ZERO,FMFPC10T
+            MOVE      ZERO,FMFPC11T
+            MOVE      ZERO,FMFPC12T
+            MOVE      ZERO,FMFPC13T
+.
+            MOVE      ZERO,FMFPABFT
+            MOVE      ZERO,FMFPA01T
+            MOVE      ZERO,FMFPA02T
+            MOVE      ZERO,FMFPA03T
+            MOVE      ZERO,FMFPA04T
+            MOVE      ZERO,FMFPA05T
+            MOVE      ZERO,FMFPA06T
+            MOVE      ZERO,FMFPA07T
+            MOVE      ZERO,FMFPA08T
+            MOVE      ZERO,FMFPA09T
+            MOVE      ZERO,FMFPA10T
+            MOVE      ZERO,FMFPA11T
+            MOVE      ZERO,FMFPA12T
+            MOVE      ZERO,FMFPA13T
+.
+            PACK      FMFPSPAR,SP70,SP70
+            ASSIGN    APODAMT,FMFPCOM
+            MOVE      FMFPCOM,FMFPCOMD
+            ASSIGN    FMFPCOM/1000,F12P2
+            MOVE      F12P2,FMFPCOMT
+            CALL      WRFMFP1
+          ENDIF
+.
+          COMPARE   ONE,FMCOCALC
+          GOTO      UFMFP999 IF NOT EQUAL
+.
+          PACK      KEY20,PORT,CURYEAR,APODLED,APODACC,SP70
+          CALL      RDFMTU1            * record exists ?
+          COMPARE   ZERO,OVRCD
+          GOTO      UFMFP999 IF EQUAL
+.
+          UNPACK    KEY20,FMTUPORT,FMTUSPEC,FMTUTLED,FMTUTACC
+          MOVE      FMAMCLEV,FMTULEV
+          MOVE      ZERO,FMTUACT
+          MOVE      ZERO,FMTUBUD
+          MOVE      SP70,FMTUSPAR
+          CALL      WRFMTU1            * Flag For Total Account Update
+.
+UFMFP999  RETURN
+.----------------------------------------------------------------------
+. Create Batch for FMS system
+.----------------------------------------------------------------------
+UPFMS000  CALL      MKBAT000           * Create Batch and Write Initail Sectors
+.
+          DISPLAY   *P1:24,*EL
+          PACK      KEY40,APBMBCH,SP70
+          CALL      RSAPIM1
+.
+UPFMS100  CALL      RKAPIM1            * Read Through Invoices
+          BRANCH    OVRCD,UPFMS900
+          MATCH     APBMBCH,APIMBCH
+          GOTO      UPFMS900 IF NOT EQUAL
+          DISPLAY   *P1:24,"Processing FMS Creditor : ",*V2LON,APIMCRD,*HOFF:
+                    "  Ref : ",*V2LON,APIMDOC
+.
+          MOVE      ZERO,GSTTOTAL
+          ASSIGN    APIMTOT-APIMDIS,ALLTOTAL
+.
+          PACK      KEY51,APIMBCH,APIMCRD,APIMREF,APIMDOC,SP70
+          PACK      KEY40,APIMBCH,APIMCRD,APIMREF,APIMDOC
+          CALL      RSAPIN1
+.
+UPFMS110  CALL      RKAPIN1           * Read Through Allocations
+          BRANCH    OVRCD,UPFMS120
+          PACK      KEY51,APINBCH,APINCRD,APINREF,APINDOC,SP70
+          MATCH     KEY40,KEY51
+          GOTO      UPFMS120 IF NOT EQUAL
+.
+          CALL      WRBCH000          * Update Batch Record
+          IF        !(APIMGST=0)
+            CALL      SDGST000        * Save Details for GST
+          ENDIF
+.
+          GOTO      UPFMS110
+.
+UPFMS120  IF        !(APIMGST=0)
+            CALL      ALGST000        * Save Details for GST
+          ENDIF
+          GOTO      UPFMS100
+.
+. Update Batch Header and Write Control Account Records
+.----------------------------------------------------------------------
+UPFMS900  ADD       ONE,BC0NXTSC
+          WEOF      BATFILE,BC0NXTSC
+          MOVE      BC1ACCT,BC1KEYT
+          CALL      WRBAT1
+.
+          CALL      CCTR0000           * Update Totals in Batch
+          CALL      UPGL0000           * Update Batch Queue
+.
+UPFMS999  RETURN
+.----------------------------------------------------------------------
+. Create Batch
+.----------------------------------------------------------------------
+MKBAT000  MOVE      APBMBCH,BC1BATCH
+          MOVE      ZERO,BC0BTCHT
+          MOVE      SP2,BC0DIM2
+          MOVE      TWO,BC0NXTSC
+          MOVE      ZERO,BC0NXTSW
+          MOVE      ONE,BC0SUPBC
+          MOVE      SP6,BC0DIM6
+          MOVE      ZERO,BC0SPLTK
+          MOVE      ZERO,BC0SPLTP
+          MOVE      ONE,BC0ONE
+          MOVE      ZERO,BC0SPSEC
+          MOVE      ZERO,BC0DISC
+.
+          CLEAR     FNAME
+          APPEND    "bch",FNAME
+          APPEND    BC1BATCH,FNAME
+          APPEND    ".txt",FNAME
+          RESET     FNAME
+          PREP      BATFILE,FNAME
+          CALL      WRBAT0
+.
+          MOVE      FIVE,BC1STAT
+          MOVE      "HD",BC1HEAD
+          MOVE      BC1BATCH,BCBATCH
+          MOVE      ZERO,BC1KEYT
+          MOVE      ZERO,BC1ACCT
+          MOVE      ZERO,BC1NOTR
+.
+          UNPACK    APBMDAT,CCENT,CYEAR,CMON,CDAY
+          PACK      BC1DATE,CDAY,CMON,CCENT,CYEAR
+          REP       " 0" IN BC1DATE
+          MOVE      APBMOPR,BC1OPER
+          MOVE      APBMLED,BC1LEDG
+          MOVE      BC1LEDG,BCLEDG
+          MOVE      "CR",BC1TRAN
+          UNPACK    APBMADT,CCENT,CYEAR,CMON,CDAY
+          PACK      BC1BDATE,CDAY,CMON,CCENT,CYEAR
+          REP       " 0" IN BC1BDATE
+          MOVE      ZERO,BC1REORG
+          MOVE      APBMDIS,BC1DISS
+          MOVE      BC1DISS,BCDISS
+          MOVE      SP2,BC1PAYT
+          MOVE      APBMRES,BC1RESP
+          MOVE      BC1RESP,BCRESP
+          MOVE      ZERO,BC1REST
+          MOVE      ZERO TO BC1UTYPE
+.
+          CALL      WRBAT1
+.
+          RETURN
+.----------------------------------------------------------------------
+. Write Batch Transaction
+.----------------------------------------------------------------------
+WRBCH000  MOVE      "CR",BCTRAN
+          MOVE      APINLED,BCLEDG
+          MOVE      APINACC,BCACCT
+          MOVE      APINAMT,BCAMT
+          MOVE      APINDOC,BCREFER
+          MOVE      APINDES,BCTRAND
+          MOVE      APINRES,BCRESP
+          MOVE      APINDIS,BCDISS
+.
+          CALL      RDBATS0
+          ADD       ONE,BC0NXTSC
+          CALL      WRBATS0
+          SUB       ONE FROM BC0NXTSC
+.
+          MOVE      FIVE,BCSTAT
+          MOVE      APIMTER,BCPAYT
+          MOVE      APIMCRD,BCRED
+          MOVE      APINORD,BCORD
+          UNPACK    APIMIDT,CCENT,CYEAR,CMON,CDAY
+          PACK      BCDATEE,CDAY,CMON,CCENT,CYEAR
+          REP       " 0" IN BCDATEE
+          MOVE      BC1BDATE,BCDATED
+          MOVE      "00000000",BCDATCX
+          MOVE      SP70,BCACCTP
+          MOVE      SP10,BCCHEQ
+          MOVE      ZERO,BCINVT
+          MOVE      ZERO,BCDISC
+          MOVE      "0",BCCOMX
+          MOVE      ZERO,BCCOMXA
+          MOVE      SP70,BCCONT
+          MOVE      SP70,BCDISCC
+          MOVE      SP3,BCBASC
+          IF        BASFLAG=1
+            MOVE      APINBASC,BCBASC
+          ENDIF
+.
+          PACK      KEY2,APINLED
+          CALL      RDFMLA1
+          PACK      KEY14,APINLED,APINACC
+          CALL      RDFMAM1
+          CALL      RFMCOT00
+          MATCH     ANSZ,APIMPAYG
+          IF        @EQUAL
+            PACK      KEY14,APINLED,FMLAPAYG,SP70
+          ELSE
+            PACK      KEY14,APINLED,FMCSCRD,SP70
+          ENDIF
+          UNPACK    KEY14,APINLED,BCCONT
+          CALL      RDAPTM1
+          BRANCH    OVRCD,WRBCH100
+.
+          ADD       BCAMT,APTMAMT
+          CALL      UPAPTM1
+          GOTO      WRBCH200
+.
+WRBCH100  UNPACK    KEY14,APTMLED,APTMACC
+          MOVE      BCAMT,APTMAMT
+          CALL      WRAPTM1
+.
+WRBCH200  CALL      WRBATC
+          ADD       ONE,BC0NXTSC
+          ADD       ONE,BC1NOTR
+          ADD       BCAMT,BC1KEYT
+          ADD       BCAMT,BC1ACCT
+          WEOF      BATFILE,BC0NXTSC
+.
+WRBCH999  RETURN
+.
+.******************************************************************************
+. Post Control Account Transactions
+.******************************************************************************
+CCTR0000  MOVE      "00000",BCRED
+          UNPACK    APBMDAT,CCENT,CYEAR,CMON,CDAY
+          PACK      BCDATEE WITH CDAY,CMON,CCENT,CYEAR
+          REP       " 0" IN BCDATEE
+          UNPACK    APBMADT,CCENT,CYEAR,CMON,CDAY
+          PACK      BCDATED WITH CDAY,CMON,CCENT,CYEAR
+          REP       " 0" IN BCDATED
+          MOVE      ZERO,BCINVT
+          MOVE      ZERO,BCDISC
+          MOVE      BC1RESP TO BCRESP
+          MOVE      SP70 TO BCTRAND
+          MOVE      "INVOICE ",BCORD
+          MOVE      "INVOICE        ",BCREFER
+          MOVE      FMCOCDIS TO BCDISS
+.
+          MOVE      SP70,KEY14
+          CALL      RSAPTM1
+.
+CCTR8000  CALL      RKAPTM1
+          BRANCH    OVRCD,CCTR9999
+          MOVE      APTMAMT,BCAMT
+.
+          MOVE      "JA" TO BCTRAN
+.
+          MOVE      APTMLED,BCLEDG
+          MOVE      APTMACC,BCACCT
+.
+          CALL      WBCH0000                * Write Record Back to Batch file
+.
+          GOTO      CCTR8000                * for General Ledger
+.
+CCTR9999  MOVE      "CR",BCTRAN
+          RETURN
+.**********************************************************************
+. Add Control Account Transactions to Batch
+.**********************************************************************
+WBCH0000  MOVE      "5",BCSTAT
+          MOVE      SP70,BCDATCX
+          MOVE      SP70,BCACCTP
+          MOVE      SP70,BCCHEQ
+          MOVE      "N",BCCOMX
+          MOVE      ZERO,BCCOMXA
+          MOVE      SP70,BCCONT
+          MOVE      SP70,BCDISCC
+          MOVE      SP70,BCCEORD
+          MOVE      SP70,BCCELNE
+          MOVE      SP70,BCCATA
+          MOVE      SP3,BCBASC
+          CALL      RDBATS0
+          ADD       ONE,BC0NXTSC
+          CALL      WRBATS0
+          SUB       ONE,BC0NXTSC
+          CALL      WRBATC
+.
+          CALL      RDBAT1
+          ADD       ONE,BC1NOTR
+          MOVE      "5",BC1STAT
+          CALL      WRBAT1
+.
+          RETURN
+.----------------------------------------------------------------------
+. Update Control File in General Ledger
+.----------------------------------------------------------------------
+UPGL0000  CALL      RDBATS0
+          MOVE      BC1BATCH,F5
+          MOVE      F5,FMBCBAT
+          MOVE      "2",FMBCSTA
+          MOVE      BC0NXTSC,FMBCSEC
+          MOVE      BC1ACCT,FMBCTOT
+          MOVE      ZERO,FMBCDIS
+          MOVE      BC1OPER,FMBCUID
+          MOVE      BC1LEDG,FMBCLED
+          MOVE      BC1TRAN,FMBCTRT
+          MOVE      BC0SUPBC,FMBCINV
+.
+          UNPACK    BC1DATE,CDAY,CMON,CCENT,CYEAR
+          PACK      FMBCDAT,CCENT,CYEAR,CMON,CDAY
+          UNPACK    BC1BDATE,CDAY,CMON,CCENT,CYEAR
+          PACK      FMBCPDAT,CCENT,CYEAR,CMON,CDAY
+          PACK      FMBCCDAT,CCENT,CYEAR,CMON,CDAY
+.
+          MOVE      SP70,FMBCSPAR
+          PACK      KEY5,APBMBCH
+          UNPACK    KEY5,FMBCBAT
+          CALL      RAFMBC1
+          IF        OVRCD=0
+            CALL      UPFMBC1
+          ELSE
+            CALL      WRFMBC1
+          ENDIF
+UPGL9999  RETURN
+.**********************************************************************
+. Temp file IO routines
+.**********************************************************************
+RSAPTM1   RESET     KEY14
+          READ      APSTMPA1,KEY14;;
+          RETURN
+.
+RAAPTM1   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      APSTMPA1,KEY14;ANS
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RDAPTM1   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      APSTMPA1,KEY14;APTMLED,APTMACC,APTMAMT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKAPTM1   MOVE      ZERO,OVRCD
+          READKS    APSTMPA1;APTMLED,APTMACC,APTMAMT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RPAPTM1   MOVE      ZERO,OVRCD
+          READKP    APSTMPA1;APTMLED,APTMACC,APTMAMT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPAPTM1   UPDATE    APSTMPA1;APTMLED,APTMACC,APTMAMT
+          RETURN
+.
+WRAPTM1   RESET     KEY14
+          WRITE     APSTMPA1,KEY14;APTMLED,APTMACC,APTMAMT
+          RETURN
+.
+DEAPTM1   RESET     KEY14
+          DELETE    APSTMPA1,KEY14
+          RETURN
+.
+RSAPGS1   RESET     KEY14
+          READ      APSGSTA1,KEY14;;
+          RETURN
+.
+RDAPGS1   RESET     KEY14
+          MOVE      ZERO,OVRCD
+          READ      APSGSTA1,KEY14;APGSLED,APGSACC,APGSAMT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+RKAPGS1   MOVE      ZERO,OVRCD
+          READKS    APSGSTA1;APGSLED,APGSACC,APGSAMT
+          GOTO      OVERCOND IF OVER
+          RETURN
+.
+UPAPGS1   UPDATE    APSGSTA1;APGSLED,APGSACC,APGSAMT
+          RETURN
+.
+WRAPGS1   RESET     KEY14
+          WRITE     APSGSTA1,KEY14;APGSLED,APGSACC,APGSAMT
+          RETURN
+.
+DEAPGS1   RESET     KEY14
+          DELETE    APSGSTA1,KEY14
+          RETURN
+.
+.-----------------------------------------------
+. Check batch totals for balance here.
+.-----------------------------------------------
+CBAT0000  MOVE      ZERO,BATCHCAL
+          MOVE      TWO,EXIT           * set to no records found
+          PACK      KEY40,APBMBCH,SP70
+          CALL      RSAPIM1
+.
+CBAT0100  CALL      RKAPIM1
+          BRANCH    OVRCD,CBAT0900
+          MATCH     APBMBCH,APIMBCH
+          GOTO      CBAT0900 IF NOT EQUAL
+          MOVE      ZERO,EXIT          * set to records found
+          ASSIGN    APIMTOT+APIMGST-APIMDIS+BATCHCAL,BATCHCAL
+          MOVE      ZERO,ALLTOTAL
+          PACK      KEY51,APIMBCH,APIMCRD,APIMREF,APIMDOC,SP70
+          PACK      KEY40,APIMBCH,APIMCRD,APIMREF,APIMDOC
+          CALL      RSAPIN1
+.
+CBAT0200  CALL      RKAPIN1
+          BRANCH    OVRCD,CBAT0300
+          PACK      KEY51,APINBCH,APINCRD,APINREF,APINDOC,SP70
+          MATCH     KEY40,KEY51
+          GOTO      CBAT0300 IF NOT EQUAL
+          ADD       APINAMT,ALLTOTAL
+          GOTO      CBAT0200
+.
+CBAT0300  IF        !(APIMTOT-APIMDIS=ALLTOTAL)
+            CLEAR      DISPMSG
+            APPEND     "Credit Note Unbalanced. Creditor/Ref. : ",DISPMSG
+            APPEND     APIMCRD,DISPMSG
+            APPEND     SLASH,DISPMSG
+            APPEND     APIMDOC,DISPMSG
+            RESET      DISPMSG
+            CALL       MESSAGE1
+            MOVE       ONE,EXIT
+            GOTO       CBAT9999
+          ENDIF
+          GOTO      CBAT0100
+.
+CBAT0900  IF        !(BATCHCAL=APBMTOT)
+            MOVE      "Batch Unbalanced. ",DISPMSG
+            CALL      MESSAGE1
+            MOVE       ONE,EXIT
+            GOTO       CBAT9999
+          ENDIF
+          IF        EXIT=TWO
+            MOVE      "No Transactions in this Batch. ",DISPMSG
+            CALL      MESSAGE1
+            MOVE      ONE,EXIT
+            GOTO       CBAT9999
+          ENDIF
+CBAT9999  RETURN
+.----------------------------------------
+. Read parameters & Open Files
+.----------------------------------------
+INITB000  OPEN      CONTROLF,"controlf"
+          READ      CONTROLF,SIXTY6;*57,FMCOCDIS
+.
+. Create Temp File APSTMPxx
+.--------------------------
+          PACK      TMPFILE,APSTMPCR,PORT
+          REP       " 0",TMPFILE
+          PACK      MAKETMP,MAKE,TMPFILE,INDEX
+          PACK      KILLTMP,KILL,TMPFILE
+.
+          CLOSE     APSTMPA1
+          EXECUTE   KILLTMP,TASKID
+          EXECUTE   MAKETMP,TASKID
+          OPEN      APSTMPA1,TMPFILE
+.
+          PACK      TMPFILE,APSGSTCR,PORT
+          REP       " 0",TMPFILE
+          PACK      MAKETMP,MAKE,TMPFILE,INDEX
+          PACK      KILLTMP,KILL,TMPFILE
+.
+          CLOSE     APSGSTA1
+          EXECUTE   KILLTMP,TASKID
+          EXECUTE   MAKETMP,TASKID
+          OPEN      APSGSTA1,TMPFILE
+.
+          RETURN
+.----------------------------------------------------------------------
+. Write Details to creditors for G.S.T.
+.----------------------------------------------------------------------
+ALGST000  MOVE      SP70,KEY14
+          CALL      RSAPGS1
+          CALL      RKAPGS1
+          BRANCH    OVRCD,ALGST900
+          MOVE      APGSLED,APINLED
+          MOVE      APGSACC,APINACC
+          MOVE      APGSAMT,APINAMT
+          CALL      MVINP000               * Move in Fields
+          CALL      WRBCH000          * Update Batch Record
+          PACK      KEY14,APGSLED,APGSACC
+          CALL      DEAPGS1
+          GOTO      ALGST000
+.
+ALGST900  RETURN
+.--------------------------------------------------
+. Update New Supply System
+.--------------------------------------------------
+UPSIN000  UNPACK    APINORD,KEY1,KEY7
+          CALL      RLSIPA1
+          BRANCH    OVRCD,UPSIN999
+          IF        OVRCD=2
+            CLEAR     DISPMSG
+            APPEND    "Purchase Order ",DISPMSG
+            APPEND    APINORD,DISPMSG
+            APPEND    " Locked. - ",DISPMSG
+            RESET     DISPMSG
+            BEEP
+            CALL      MESSAGE1
+            GOTO      UPSIN000
+          ENDIF
+.
+          PACK      KEY12,KEY7,APINCAT
+          CALL      RDSIPF1
+          BRANCH    OVRCD,UPSIN810
+.
+          PACK      KEY10,SIPFPON,SIPFITM
+          CALL      RDSIPC1
+          BRANCH    OVRCD,UPSIN810
+.
+          MATCH     SP70,SIPCCAT
+          GOTO      UPSIN700 IF EQUAL
+.
+          PACK      KEY7,SIPCCAT
+          CALL      RDSIIA1
+          BRANCH    OVRCD,UPSIN700
+.
+          PACK      KEY30,SIIAISS,SIPFSUT
+          CALL      RDSIFA1
+          BRANCH    OVRCD,UPSIN700
+.
+          ASSIGN    APINQTY*SIFACTOR,SIUSQTY
+          MOVE      APINAMT,SIUSCST   * Total Invoiced
+          MOVE      APINGST,SIUSGST
+          GOTO      UPSIN800
+.
+UPSIN700  MOVE      APINQTY,SIUSQTY
+          ASSIGN    APINAMT+APINGST,SIUSCST
+          MOVE      APINGST,SIUSGST
+.
+UPSIN800  SUB       SIUSQTY,SIPCIQT
+          SUB       SIUSCST,SIPCTIN
+          SUB       SIUSGST,SIPCTGS
+          CALL      UPSIPC1
+.
+. Taken out 02/05/2000 as the calulation was incorrect
+.
+.         IF        HAVGCOST=2
+.           CALL      UPAVG000          * Average Cost Update
+.         ENDIF
+.
+UPSIN810  CALL      UUSIPA1
+.
+UPSIN850  MOVE      APIMIDT,SIPEDATE
+          REP       " 0",SIPEDATE
+          CALL      RSIPE000   * Get Period End Date
+          IF        OVRCD=1
+            MOVE      "Period Not on File. Invalid Date - ",DISPMSG
+            BEEP
+            CALL      MESSAGE1
+            MOVE      "######",KEY6
+          ELSE
+            PACK      KEY6,SIPEYEAR,SIPEPER
+          ENDIF
+          PACK     KEY11,APINCRD,KEY6
+          UNPACK   KEY11,APSBSUP,APSBDAT
+          CALL     RLAPSB1
+          BRANCH   OVRCD,UPSIN860,UPSIN850
+          IF       SNCOPURC=1
+            SUB      SIUSCST,APSBIAM
+          ELSE
+            ASSIGN   APSBIAM-(SIUSCST-SIUSGST),APSBIAM
+          ENDIF
+          CALL     UPAPSB1
+          CALL     UUAPSB1
+          GOTO     UPSIN900
+.
+UPSIN860  IF       SNCOPURC=1
+            ASSIGN   SIUSCST*SEQ,APSBIAM
+          ELSE
+            ASSIGN   SEQ*(SIUSCST-SIUSGST),APSBIAM
+          ENDIF
+          MOVE     ZERO,APSBIBD
+          MOVE     ZERO,APSBPAM
+          MOVE     ZERO,APSBPBD
+          MOVE     ZERO,APSBRAM
+          MOVE     ZERO,APSBRBD
+          MOVE     SP70,APSBSPA
+          CALL     WRAPSB1
+.
+. Calculate Variation for Purchase Analysis
+.-------------------------------------------
+UPSIN900  ASSIGN   SIUSCST-(SIPFCST*SIUSQTY/SIFACTOR),SIUSCST
+          MULT     SEQ,SIUSCST
+          MOVE     ZERO,SIUSQTY    * No Quantity Variation for Credit Note
+          COMPARE  ZERO,SIUSCST
+          CALL     SINORDUS IF NOT EQUAL
+.
+UPSIN999  RETURN
+.--------------------------------------------------
+. Update Average Costs
+.--------------------------------------------------
+UPAVG000  MOVE      ZERO,SECTOR
+UPAVG100  MOVE      SIPCCAT,KEY7
+          CALL      RLSIIA1
+          BRANCH    OVRCD,UPAVG999,UPAVG200
+.
+          MOVE      ZERO,F10
+          MOVE      SIIAQIN,F12P2
+          ASSIGN    (F12P2*SIIAAVC)-APINAMT,TOTALVAL
+          ASSIGN    F12P2-SIUSQTY,F12P2
+          ASSIGN    TOTALVAL/F12P2,SIIAAVC
+          MOVE      F12P2,F10
+          MOVE      F10,SIIAQIN
+          CALL      UPSIIA1
+          CALL      UUSIIA1
+          GOTO      UPAVG999
+.
+UPAVG200  IF        SECTOR<5
+            DISPLAY    *P1:24,*W
+            ADD        ONE,SECTOR
+            GOTO       UPAVG100
+          ENDIF
+          CLEAR     DISPMSG
+          APPEND    "Catalog Record Locked : ",DISPMSG
+          APPEND    SIPCCAT,DISPMSG
+          APPEND    " - ",DISPMSG
+          RESET     DISPMSG
+          CALL      MESSAGE1
+          MOVE      ZERO,SECTOR
+          GOTO      UPAVG100
+.
+UPAVG999  RETURN

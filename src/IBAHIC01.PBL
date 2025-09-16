@@ -1,0 +1,646 @@
+.***************************************************************************
+.* System    :   HIC Claim                                                 *
+.* Program   :   IBAHIC01                                                  *
+.* Desc      :   Closing Referrals Report                                  *
+.***************************************************************************
+.* Date      :   22/02/2005                                                *
+.* Author    :   Jeni Tan                                                  *
+.* Function  :   Function to close Referrals with report                   *
+.*                                                                         *
+.* Mods.     :                                                             *
+.***************************************************************************
+.* V11.02.01 09/02/2022  Thanh T       TSK 0905641                         *
+.*           Recompiled as OUTMA1FD changes                                *
+.* V10.13.02 24/08/2018  Steve Armstrong   TSK 0845563                     *
+.*           Added call to CLALLAUD to WRTRAU00 routine.                   *
+.* V10.13.01 31/07/2018  Thanh T           TSK 0845563                     *
+.*           Recompiled for ALLAUDFD                                       *
+.***************************************************************************
+.* V10.06.01 12/03/2015  Steve Armstrong   CAR 314108                      *
+.*           Removed definition of PTCGDATE as PATCGPFD is no longer in    *
+.*           use                                                           *
+.***************************************************************************
+.* V10.05.01 17/11/2014  Ebon Clements     CAR 292656                      *
+.*           Added link cancelled OP visit to a referral functionality     *
+.* V10.03.02 30/06/2013  Davin             CAR 283202                      *
+.*           Recompiled for changes to hl7 messaging                       *
+.* V10.03.01 30/06/2013  Davin             CAR 279183                      *
+.*           Recompiled for changes to hl7 messaging (allquefd)            *
+.*               V10.00.01 03/02/2010  Steve Armstrong   CAR 135505        *
+.*                         Added DGCLII13 trigger                          *
+.*                         Also added HL7TRGID & HL7INCLD setting for all  *
+.*                         broadcast messages                              *
+.***************************************************************************
+.*               V9.05.01 10/03/2006 J.Tan         CAR 96067               *
+.*                         Mods maximum number of lines to print           *
+.*               V9.05.B01 20/02/2006 Ebon Clements CAR 76341              *
+.*                         Added referral file audit                       *
+.*               V9.04.02 05/04/2005 Ebon Clements CAR 56674               *
+.*                         Completed provider number filter                *
+.*               V9.04.01 31/03/05 J.Tan                                   *
+.*                         Mods to check if user has access to the medical *
+.*                         practice of the attended booking patient        *
+.***************************************************************************
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+          INC       STD001FD
+          INC       HL7CISFD/INC
+          INC       HL7INBFD/INC
+          INC       IBACONFD/INC
+          INC       OUTSITFD/INC
+          INC       OUTBOAFD/INC
+          INC       OUTCLIFD/INC        * Clinic Ids
+          INC       OUTCTYFD/INC        * Clinic Types
+          INC       OUTMA1FD/INC
+          INC       ALLAEFFD/INC
+          INC       ALLAUDFD/INC
+          INC       ALLCONFD/INC
+          INC       ALLENCFD/INC
+          INC       ALLERCFD/INC
+          INC       ALLQUEFD/INC
+          INC       ALLREFFD/INC        * Referral file
+          INC       ALLSTSFD/INC        * Referral status history file
+          INC       ALLLNKFD/INC        * Link file
+          INC       NHIMASFD/INC
+          INC       PATCODFD/INC
+          INC       PATCONFD/INC
+          INC       PATMA1FD/INC
+          INC       PATNIDFD/INC
+          INC       PATVISFD/INC
+          INC       PMSPX2FD/INC
+          INC       PMSQPTFD/INC
+          INC       PRISECFD/INC
+          INC       WEBSECFD/INC
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+CISMFLAG  FORM      1
+CLINICID  DIM       6
+CLINICTY  DIM       6
+CFILEPRE  DIM       3             * site prefix
+CDYSDAYS  FORM      6             * calcdays number of days
+CDYSFDTE  DIM       8             * calcdays from date
+CDYSTDTE  DIM       8             * calcdays to   date
+CDYSYEAR  FORM      2             * calcdays year
+CTYPDESC  DIM       20
+CLIDDESC  DIM       20
+.
+IBAMFLAG  FORM      1
+MESSAGID  DIM       20
+NMPNUMB   DIM       20
+SKEY17    DIM       17
+PROVNUMB  DIM       10
+PATNAME   DIM       25
+USERID    DIM       10
+USERSITE  DIM       6 
+.
+PRGID     INIT      "IBAHIC01"
+PRGNAM    INIT      "Closing Referrals Report"
+VERSION   INIT      "V11.03.00"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialization and open files
+.
+ML1000    CALL      OPTN0000               * select options
+          BRANCH    EXIT,ML9999            * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,ML2000,ML2000  * Close Referrals
+          GOTO      ML1000
+.
+ML2000    CALL      INPT0000               * Input Clinic Type/Clinic Id/Prov.
+          BRANCH    EXIT,ML1000            * exit
+.
+          CALL      CONTQST                * see if O.K. to continue
+          BRANCH    CEXIT,ML3000,ML2000,ML1000
+.
+.------ it is O.K. to continue ------
+.
+ML3000    BRANCH    COPTION,ML3100,ML3100
+          GOTO      ML1000
+.
+ML3100    CALL      PROC0000               * do processing
+          GOTO      ML1000
+.
+ML9999    CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                Open files and initialise variables                       *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                  * display heading
+.
+          DISPLAY   *P56:24,*EL,"Opening ":
+                    *P64:24,"controlf"
+.
+          DISPLAY   *P64:24,"allrefaf";          * referral file
+          OPEN      ALLREFA3,"allrefaf"
+.
+          DISPLAY   *P64:24,"allstsaf";          * referral status history  file
+          OPEN      ALLSTSA1,"allstsaf"
+.
+          DISPLAY   *P64:24,"alllnkaf";          * referral status history  file
+          OPEN      ALLLNKA1,"alllnkaf"
+.
+          OPEN      ALLAUDA1,"allaudaf"
+          OPEN      PATCODE1,"patcodes"
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+          OPEN      PMSPX2A1,"pmspx2af"
+          OPEN      WEBSECA1,"websecaf"
+          OPEN      PRISECA1,"prisecaf"
+.
+          OPEN      PATVISA1,"patvisaf"
+.
+          READ      CONTROLF,HUND06;*27,ALCNRAUD,*28,ALCNEAUD
+
+          MATCH     "1",ALCNRAUD            
+          IF        @EQUAL
+            OPEN      ALLAUDRE,"allaudre"
+          ENDIF
+.
+          MOVE      "out",CFILEPRE
+          OPEN      OUTSITA1,"outsitaf"
+          CALL      OPNOUT00               * Open prefixed Outpatient Files
+.
+INIT9999  RETURN
++
+.------------------------------------------------------------
+. Open Outpatient Files
+.------------------------------------------------------------
+OPNOUT00  
+          CLOSE     OUTBOKA6
+          PACK      CFNAME,CFILEPRE,FILBOKA6  * Get the name of the CLIA2 file
+          OPEN      OUTBOKA6,CFNAME
+.
+          CLOSE     OUTCLIA1
+          PACK      CFNAME,CFILEPRE,FILCLIA1  * Get the name of the CLIA1 file
+          OPEN      OUTCLIA1,CFNAME           * Open the file
+.
+          CLOSE     OUTCTYA1
+          PACK      CFNAME,CFILEPRE,FILCTYA1  * Get the name of the CLIA1 file
+          OPEN      OUTCTYA1,CFNAME           * Open the file
+.
+          CLOSE     OUTMA1A1
+          PACK      CFNAME,CFILEPRE,FILMA1A1  * Get the name of the MA1A1 file
+          OPEN      OUTMA1A1,CFNAME           * Open the file
+.
+OPNOUT99  RETURN
+.
+.*******************************************************************************
+. ROTFIL00 - Check that the correct outpatient site prefix files are open
+.            according to the preferred site of the linked visit
+.*******************************************************************************
+ROTFIL00  MATCH     SP70,ALLNSITE            * Does the visit have a site
+          GOTO      ROTFIL99 IF EQUAL
+.
+ROTFIL50  MOVE      ALLNSITE,KEY6
+          CALL      RDSITA1
+          BRANCH    OVRCD,ROTFIL99           * error invalid site code
+.
+          MATCH     OSTFILE,CFILEPRE         * Save Current File Prefix
+          IF        !@EQUAL
+            MOVE      OSTFILE,CFILEPRE       * Save Current File Prefix
+            CALL      OPNOUT00               * Open prefixed Outpatient Files
+          ENDIF
+.
+ROTFIL99  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    =       (0)  Valid option selected                  *
+.*                              (1)  Exit option selected                   *
+.****************************************************************************
+.
+. ---- display option screen ----
+.
+OPTN0000  HLINE     *G37,2,60,80
+          DISPLAY   *P1:3,*EF,*P2:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P2:5,*V2LON,ONE,*HOFF," = Close Referrals Report":
+                    *P2:6,*V2LON,TWO,*HOFF," = Close Referrals and Report";
+.
+OPTN0500  KEYIN     *P1:11,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:11,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * 0 entered ?
+          GOTO      OPTN9000 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN1000,OPTN2000
+.
+          GOTO      OPTN0500                     * invalid option selected
+.
+OPTN1000  DISPLAY   *P60:2,*V2LON,"Report"
+          GOTO      OPTN8000
+.
+OPTN2000  DISPLAY   *P60:2,*V2LON,"Close Referrals"
+          GOTO      OPTN8000
+.
+OPTN8000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9000  MOVE      ONE,EXIT                     * set EXIT = 1
+.
+OPTN9999  RETURN
++
+.**************************************************************************
+.*                               INPT0000              Called by: ML0000  *
+.*                       input Medical Practice and doctor code           *
+.**************************************************************************
+INPT0000  DISPLAY   *P1:3,*EF:
+                    *P5:4,"Clinic Type ",*P20:4,COLON:
+                    *P5:5,"Clinic ID   ",*P20:5,COLON:
+                    *P5:6,"Provider    ",*P20:6,COLON:
+                    *P5:7,"WEB User ID ",*P20:7,COLON:
+                    *P5:8,"WEB Site Code",*P20:8,COLON;
+.
+          MOVE      FOUR,CVERT 
+          CALL      CLNC0000                     * get medical Type
+          MOVE      KEY6,CLINICTY
+.
+          MOVE      FIVE,CVERT 
+          CALL      CLNC0000                     * get medical ID
+          MOVE      KEY6,CLINICID
+.
+          MOVE      SIX,CVERT 
+          CALL      PROV0000                     * get provider number
+          MOVE      ZERO,EXIT
+.
+          KEYIN     *P29:7,*V2LON,USERID
+          PACK      KEY10,USERID,SP70
+          MOVE      USERID,KEY10
+          CALL      RDWBSE1
+.
+          KEYIN     *P29:8,*V2LON,USERSITE
+          PACK      KEY6,USERSITE,SP70
+          MOVE      KEY6,USERSITE
+          CALL      RDSITA1
+.
+INPT9999  RETURN
++
+.***************************************************************************
+.         Keyin clinic type
+.***************************************************************************
+CLNC0000  MOVE      SP70,KEY6
+          MOVE      ZERO,EXIT
+          KEYIN     *P29:CVERT,*V2LON,KEY6
+          ENDSET    KEY6
+          APPEND    SP70,KEY6
+          RESET     KEY6
+          MATCH     SP70,KEY6
+          GOTO      CLNC9999 IF NOT EQUAL
+          MOVE      ONE,EXIT
+CLNC9999  RETURN
+.
+.***************************************************************************
+.         Keyin provider number
+.***************************************************************************
+PROV0000  MOVE      SP70,PROVNUMB
+          MOVE      ZERO,EXIT
+          KEYIN     *P29:CVERT,*V2LON,PROVNUMB
+          ENDSET    PROVNUMB
+          APPEND    SP70,PROVNUMB
+          RESET     PROVNUMB
+          MATCH     SP70,PROVNUMB
+          GOTO      PROV9999 IF NOT EQUAL
+          MOVE      ONE,EXIT
+PROV9999  RETURN
++
+.****************************************************************************
+.*                                 PROC0000                                 *
+.*             Perform the report                                           *
+.*  Only allow to close referrals with status of 1 (active) and 3 (Inactive)*
+.****************************************************************************
+PROC0000  MOVE       ZERO,CPAGENO
+          CLOCK      TIME,CTIMEIS
+          MOVE       "60",CLNO
+.
+          DISPLAY    *P10:24,"Printing Referrals: ";
+.
+PROC0200  PACK      KEY17,ONE,SP70
+          CALL      RSALREF3                * position on the item file
+.
+.------ read through the item file ------
+.
+PROC1000  CALL      RKALREF3
+          BRANCH    OVRCD,PROC9000
+.
+          DISPLAY   *P35:24,*EL,*V2LON,ALREVISN;
+.
+          MATCH     SP70,CLINICTY
+          IF        !@EQUAL
+            MATCH     ALRECTYP,CLINICTY     * Same clinic type ?
+            GOTO      PROC1000 IF NOT EQUAL
+          ENDIF
+.
+          MATCH     SP70,CLINICID
+          IF        !@EQUAL
+            MATCH     ALRECLID,CLINICID     * Same clinic id ?
+            GOTO      PROC1000 IF NOT EQUAL
+          ENDIF
+.
+          MATCH     SP70,ALREREXP
+          GOTO      PROC1000 IF EQUAL       * expiry date is blank
+.
+          MATCH     "2",ALRESTAT
+          IF        @EQUAL
+            PACK      KEY17,THREE,SP70      * Skip to status 3 Inactive
+            CALL      RSALREF3              * position on the ref file
+            GOTO      PROC1000
+          ENDIF
+.
+          MATCH     "4",ALRESTAT            * status cancelled so exit
+          GOTO      PROC9000 IF EQUAL
+.
+.         Expiry date must be greater than 30 days prior to the current date
+.
+          PACK      CDYSTDTE,CCC,CYY,CMM,CDD
+          REP       " 0",CDYSTDTE
+          MOVE      ALREREXP,CDYSFDTE
+          CALL      CALCDAYS
+          IF        CDYSDAYS<30
+            GOTO      PROC1000
+          ENDIF
+.
+.         Check if there was at least one attendance for this visit
+.
+          PACK      KEY16,ALREVISN,SP70
+          CALL      RSALLNK1
+PROC2000  CALL      RKALLNK1
+          BRANCH    OVRCD,PROC1000
+.
+          MATCH     ALREVISN,ALLNVISN            * Same referral
+          GOTO      PROC1000 IF NOT EQUAL
+.
+          MATCH     "1",ALLNSTAT                 * OP visit cancelled
+          GOTO      PROC2000 IF EQUAL
+.
+          CALL      ROTFIL00                     * Check outpatient file prefix
+.
+          MOVE      ALLNLNKV,KEY8
+          CALL      RDVISA1
+          BRANCH    OVRCD,PROC1000
+.
+          PACK      KEY36,ALLNLNKV,SP70
+          CALL      RDSBOKA6
+          CALL      RDKBOKA6
+          BRANCH    OVRCD,PROC1000
+.
+          MATCH     DOBAOUTN,ALLNLNKV       * Check series booking admiss no
+          GOTO      PROC1000 IF NOT EQUAL
+.
+          COMPARE   FOUR,OBASTAT
+          GOTO      PROC2000 IF NOT EQUAL   * not attended, try next booking
+.
+.         Read outmasaf file to get the medical practice
+.
+          PACK      KEY18,OBASITE,OBACLIN,OBADAY,OBASTRT,SP70
+          CALL      RDMASA1
+          IF        OVRCD=0
+            PACK      KEY16,OTMAMPRC,USERID,SP70
+            CALL      RDPRSEC1
+            BRANCH    OVRCD,PROC1000     * User got no access for this Med Pract
+.
+            MATCH     SP70,PROVNUMB
+            IF        !@EQUAL
+              MATCH     PROVNUMB,OTMAPROV
+              GOTO      PROC1000 IF NOT EQUAL
+            ENDIF
+.
+          ENDIF
+.
+          MOVE      SP70,PATNAME
+          MOVE      OBAURNO,KEY8
+          CALL      RDMAST1
+          IF        OVRCD=0
+            MOVE      PSNAME,PACSNAME
+            MOVE      PGNAME,PACGNAME
+            MOVE      PTITL,PACTITLE
+            MOVE      TWO,PACFRMT
+            CALL      PACNAME                 * Format patients name
+            MOVE      PACFNAME,PATNAME
+          ENDIF
+.
+          MOVE      OBAURNO,KEY8
+          CALL      RDPMPX21
+          IF        OVRCD=0
+            CALL      CLPMSPX2
+          ENDIF
+.
+          UNPACK    ALREREXP,CCENT,CYEAR,CMON,CDAY     * expiry date
+          CALL      PACDATE
+.
+          MOVE      SP70,CTYPDESC
+          PACK      KEY12,PVISITE,ALRECTYP,SP70
+          CALL      RDCTYA1                  * Read Clinic Type File
+          IF        OVRCD=0
+            UNPACK    OCTDESC,CTYPDESC
+          ENDIF
+.
+.         Get description of clinic id
+.
+          MOVE      SP70,CLIDDESC
+          PACK      KEY20,PVISITE,ALRECLID,Z70
+          CALL      RDSCLIA1
+          CALL      RDPCLIA1
+          IF        OVRCD=0
+            MATCH     PVISITE,OCASITE
+            IF        @EQUAL
+              MATCH     ALRECLID,OCACLIN
+              IF        @EQUAL
+                UNPACK    OCADESC,CLIDDESC
+              ENDIF
+            ENDIF
+          ENDIF
+.
+          PACK      TDESC,SP70
+          PACK      KEY5,ANSR,ANSI,ALRERTYP
+          CALL      RDCODE1
+.
+          COMPARE   "48",CLNO
+          CALL      HEAD0000 IF NOT LESS
+.
+          PRINT     *1,"|",OBAURNO,*12,"|",PATNAME,*40,"|",PMEDI:
+                    *52,"|",CTYPDESC,*74,"|",CLIDDESC:
+                    *96,"|",TDESC,*118,"| ",CPCDATE,*132,"|"
+          ADD       ONE,CLNO
+.
+          BRANCH    COPTION,PROC1000        * Report only
+.
+          PACK      SKEY17,ALRESTAT,ALRERDAT,ALREVISN  * Save position in file
+.
+          MOVE      TWO,AUDTTYPE            * before history record
+          CALL      WAALRE00
+.
+          MOVE      TWO,ALRESTAT
+          MOVE      "2",ALRESTAT            * Populate all the fields and write
+          MOVE      SP3,ALRERINA            * in database
+          MOVE      SP8,ALREDINA
+          MOVE      SP8,ALRETINA
+          MOVE      SP8,ALREDINU
+          MOVE      SP10,ALREUINA
+.
+          CALL      IBACLOCK
+          PACK      ALREUDAT,CCC,CYY,CMM,CDD * current date
+          REP       " 0",ALREUDAT
+          CLOCK     TIME,ALREUTIM           * current time
+          MOVE      USERID,ALREUUID        * user id
+.
+          PACK      ALREDCLO,CCC,CYY,CMM,CDD
+          REP       " 0",ALREDCLO
+          CLOCK     TIME,ALRETCLO
+          MOVE      USERID,ALREUCLO
+          CALL      UPALREF3
+.
+          CALL      PMIGTNID                * get national id for dgate write
+          MOVE      NMPNUMB,PTNINMPI
+          MOVE      ONE,HL7TRGID
+          MOVE      SP8,HL7INCLD
+          CALL      DGCLII13                * broadcast Update Ref. (REF^I13)
+.
+          MOVE      THREE,AUDTTYPE          * after history record
+          CALL      WAALRE00
+.                                   ***** write to Referral History Table
+          MOVE      ALREDCLO,ALSTSDAT
+          CALL      WRTRSH00                * write a record to allstsaf
+.
+          CALL      WRTRAU00                * write to the referral audit table
+.
+          MOVE      SKEY17,KEY17            * re position on record after update
+          CALL      RSALREF3
+.
+          GOTO      PROC1000
+.
+PROC9000  COMPARE    ZERO,CPAGENO
+          GOTO       PROC9999 IF EQUAL
+.
+          CALL       UND132
+          PRINT      *N,"*** END OF REPORT  ***";
+.
+PROC9999  RETURN
++
+.******************************************************************************
+.      write a record to the Referral Status History Table
+.******************************************************************************
+WRTRSH00  MOVE      ALREVISN,ALSTVISN       * Populate all the fields and write
+          MOVE      ALRESTAT,ALSTSTAT
+          PACK      ALSTCDAT,CCC,CYY,CMM,CDD
+          REP       " 0",ALSTCDAT
+          CLOCK     TIME,ALSTCTIM
+          MOVE      USERID,ALSTCUID
+          PACK      KEY17,ALSTVISN,ALSTSTAT,ALSTSDAT,SP70
+          CALL      RAALSTS1
+          IF        OVRCD=0
+            CALL      UPALSTS1                * update to the file
+          ELSE
+            CALL      WRALSTS1                * write to the file
+          ENDIF
+.
+WRTRSH99  RETURN
+.******************************************************************************
+.      write a record to the Referral Audit Table
+.******************************************************************************
+WRTRAU00  CALL      CLALLAUD                     * clear allaudaf variables
+.
+          MOVE      ALREVISN,ALAUVISN
+          PACK      ALAUADAT,CCC,CYY,CMM,CDD
+          REP       " 0",ALAUADAT
+          CLOCK     TIME,ALAUATIM
+          MOVE      "C",ALAUUPDT            * Update type
+          MOVE      USERID,ALAUAUID
+.
+          PACK      KEY24,ALAUVISN,ALAUADAT,ALAUATIM,SP70
+          CALL      RDALAUD1
+          IF        OVRCD=1
+            MOVE      ZERO,OVRCD
+            TRAP      OVERCOND IF IO
+            CALL      WRALAUD1                * write to the file
+            TRAPCLR   IO
+            BRANCH    OVRCD,WRTRAU99
+          ENDIF
+WRTRAU99  RETURN
+.
+.******************************************************************************
+.      write a record to the Referral Audit Table
+.******************************************************************************
+HEAD0000  CALL      HEAD132
+          CALL      SHED0000
+          PRINT     *N,*40,"Clinic Type : ",CLINICTY," - ",CTYPDESC:
+                    *N,*40,"Clinic ID   : ",CLINICID," - ",CLIDDESC:
+                    *N,*40,"Provider No : ",PROVNUMB
+          CALL      UND132
+.
+          PRINT     *1,"|U/R Number",*12,"|Patient Name",*40,"|Medicare":
+                    *52,"|Clinic Type",*74,"|Clinic ID":
+                    *96,"|Referrals Type",*118,"|Expiry Date",*132,"|"
+.
+          ADD       SIX,CLNO
+          CALL      UND132
+HEAD9999  RETURN
++
+.******************************************************************************
+.      Set heading
+.******************************************************************************
+SHED0000  MOVE      SP70,CTYPDESC
+          PACK      KEY12,USERSITE,CLINICTY,SP70
+          CALL      RDCTYA1                  * Read Clinic Type File
+          IF        OVRCD=0
+            UNPACK    OCTDESC,CTYPDESC
+          ENDIF
+.
+.         Get description of clinic id
+.
+          MOVE      SP70,CLIDDESC
+          PACK      KEY20,USERSITE,CLINICID,Z70
+          CALL      RDSCLIA1
+          CALL      RDPCLIA1
+          IF        OVRCD=0
+            MATCH     USERSITE,OCASITE
+            IF        @EQUAL
+              MATCH     ALRECLID,OCACLIN
+              IF        @EQUAL
+                UNPACK    OCADESC,CLIDDESC
+              ENDIF
+            ENDIF
+          ENDIF
+SHED9999  RETURN
++
+. =========================================================================
+.        I/O INCLUDES
+.==========================================================================
+.
+          INC       STD001IO
+          INC       BRHLCOMN
+          INC       CLALLAUD
+          INC       CLPMSPX2
+          INC       CALCDAYS
+          INC       DGCLII13
+          INC       PMIGTNID
+.
+          INC       ALLAUDIO/INC
+          INC       ALLQUEIO/INC
+          INC       HL7CISIO/INC
+          INC       HL7INBIO/INC
+          INC       NHIMASIO/INC
+          INC       OUTSITIO/INC
+          INC       OUTBOAIO/INC
+          INC       OUTCLIIO/INC        * Clinic Ids
+          INC       OUTCTYIO/INC        * Clinic Types
+          INC       OUTMA1IO/INC
+          INC       PATVISIO/INC
+          INC       PATCODIO/INC
+          INC       PATMA1IO/INC
+          INC       PATNIDIO/INC
+          INC       ALLREFIO/INC                 * Referral file
+          INC       ALLSTSIO/INC                 * Referral status history file
+          INC       ALLLNKIO/INC                 * Link file
+          INC       PMSPX2IO/INC
+          INC       PMSQPTIO/INC
+          INC       PRISECIO/INC
+          INC       WEBSECIO/INC
+.
