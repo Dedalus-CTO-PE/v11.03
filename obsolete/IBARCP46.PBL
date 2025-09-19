@@ -1,0 +1,776 @@
+.******************************************************************************
+.* System         : CASH RECEIPTING                                           *
+.* Program        : IBARCP46                                                  *
+.* Desc           : Write Bulk Billing Medicare                               *
+.******************************************************************************
+.* Date           : 22/09/1995                                                *
+.* Author         : Steve Armstrong                                           *
+.* Comments       : This program replaces IBARCP44 because the code in that   *
+.*                  program is absolute crap and will never work (and is too  *
+.*                  difficult to fix)                                         *
+.* Mods           :                                                           *
+.*        V10.13.01 26/07/2018  J.Tan            TSK 0848506                  *
+.*                  Changed PP Doctor from DIM6 to DIM10                      *
+.*                  Fixed setup record for Master file                        *
+.*        V10.00.01 23/08/2010  Steve Armstrong   CAR 228847                  *
+.*                  Recompiled for changes to PATIN1IO                        *
+.******************************************************************************
+.*       V9.03.01  03.03.2004  Lina Vo        CAR 47921                       *
+.*                 Removed use of PRIDBTFD & IO.
+.*       V9.02.01  20.11.2001  B.G.Ackland                                    *
+.*                 Remove pi's from Program
+.******************************************************************************
+.*        V5.08.03  25/10/2000  Dean Cramer   SRF 6710                        *
+.*                  Recomplied for PATFNDDS                                   *
+.*                  Changed for health fund table code size increase to       *
+.*                  8 characters                                              *
+.*        V5.08.02  16/08/2000  Caleb Sharman                                 *
+.*                  Changed Health Fund variables to be 8 chars               *
+.*        V5.08.01  01/05/2000  Greg Horvat                                   *
+.*                  Changed to open patmx1af when opening patma1af            *
+.*        V5.07.01  09/06/1999  Greg Horvat                                   *
+.*                  Recompiled for PRIINVIO - Fixed problem with direct read  *
+.*        V5.07.B01 29/10/1998  Davin                                         *
+.*                  Mods for 507                                              *
+.****************************************************************************** 
+.
+          INC       STD001FD
+.
+          INC       PATCODFD/INC
+          INC       PATFN1FD/INC
+          INC       PATGO1FD/INC
+          INC       PATIN1FD/INC
+          INC       PATMA1FD/INC
+          INC       PATMI1FD/INC
+          INC       PMSHCPFD/INC
+          INC       PRIBULFD/INC
+          INC       PRICONFD/INC
+...          INC       PRIDBTFD/INC
+          INC       PRIDTRFD/INC
+          INC       PRIINVFD/INC
+.
+          INC       RCPREGFD/INC
+.
+.**************************************************************************
+.*                              TEMP FILE                                 *
+.**************************************************************************
+.
+. ----- Variable definitions for ASCII file bulkbill.txt -----
+. 
+BULKBILL  FILE      ASCII, FIXED=250
+.
+. NAME    TYPE    LENGTH    START LOC.    DESCRIPTION
+.-----    ----    ------    ----------    -----------
+MEDURREF  DIM       10           1        U/R/debtor number & scan flag
+.                                         AAAAAAAABB,  AAAAAAAA = debtor number 
+.                                                            BB = scan flag
+MEDINVNO  DIM       11          11        Invoice no. & item count
+.                                         AAAAAAAABBB, AAAAAAAA = invoice no.
+.                                                           BBB = invoice item
+MEDLAST   DIM       20          22        Last name
+MEDFIRST  DIM       12          42        First name
+MEDINIT   DIM       1           54        2nd initial
+MEDDOB    DIM       8           55        Date of birth (CCYYMMDD)
+MEDADDR   DIM       30          63        Address
+MEDCLMNO  DIM       10          93        Claim number (medicare number)
+MEDITEM   DIM       5          103        Service item
+MEDDR     DIM       8          108        Service/provider doctor
+MEDDOT    DIM       8          116        Date of service/treatment (CCYYMMDD)
+MEDTOT    DIM       5          124        Time of service/treatment (HH:MM)
+MEDRDR    DIM       8          129        Referring/request doctor
+MEDDOR    DIM       8          137        Date of referring/request (CCYYMMDD)
+MEDFEE    DIM       8          145        MBS fee
+MEDDUE    DIM       8          153        Amount claimed
+MEDCAT    DIM       3          161        Category of service
+MEDSELFD  DIM       2          164        Self determined
+MEDTRLOC  DIM       1          166        Treatment location
+MEDREQPR  DIM       1          167        Request period (currently blank)
+MEDASSGN  DIM       10         168        Medicare assign form number
+MEDSPARE  DIM       72         178        Spare 
+.
+.End of Record                 250
+.
+.**************************************************************************
+.*                              CONSTANTS                                 *
+.**************************************************************************
+.
+CATGB     INIT      "GB"
+SP12      INIT      "            "
+.
+.**************************************************************************
+.*                            GLOBAL VARIABLES                            *
+.**************************************************************************
+.
+BULCODE   DIM       3
+.
+CFEETYP   FORM      1
+CODE      DIM       2
+COUNT     FORM      6
+COUNTR    FORM      1
+.
+DIM6      DIM       6
+DIM8      DIM       8
+DIM9      DIM       9
+DIM10     DIM       10
+DIM30     DIM       30
+.
+FORM62    FORM      6.2
+.
+HIGCODE   DIM       6
+HIGDESC   DIM       30
+.
+INDICATR  DIM       1
+ITEMNUMB  FORM      3
+.
+KCOL      FORM      3
+KVERT     FORM      2
+.
+SAVKEY47  DIM       47
+TEMPINDC  DIM       1
+.
+.
+PRGID     INIT      "IBARCP46"
+PRGNAM    INIT      "Bulk Billing Medicare"
+VERSION   INIT      "V10.13.01"
++
+.**************************************************************************
+.*                              MAINLINE                                  *
+.*                            Controlling Logic                           *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000                * Initialization
+.
+ML0100    CALL      OPTN0000                * input users options
+          BRANCH    EXIT,ML9999             * exit selected
+.
+          CALL      OPEN0000                * open/create temp file
+          BRANCH    EXIT,ML0100             * dont delete existing file
+.
+ML1000    CALL      KBUL0000                * keyin the Bulk Bill Code
+          BRANCH    EXIT,ML0100             * nothing input
+.
+          CALL      GREG0000                * get the register code
+          BRANCH    EXIT,ML1000:            * nothing entered
+                         ML0100             * exitchar entered
+.
+          CALL      CONTQST                 * O.K. to continue ?
+          BRANCH    CEXIT,ML1100:           * yes
+                          ML1000:           * no
+                          ML0100            * cancel
+.
+ML1100    CALL      LOAD0000                * load the temp file 
+          GOTO      ML0100                  * get next option
+.
+ML9999    CHAIN     PGM
+          STOP
++
+.**************************************************************************
+.*                              INIT0000                                  *
+.*                            Initialization                              *
+.**************************************************************************
+.
+INIT0000  CALL      DISPHEAD                * display the screen header
+.
+          DISPLAY   *P50:24,"Opening ":
+                    *P60:24,"rcpregaf";
+          OPEN      RCPREGA1,"rcpregaf"
+.
+          DISPLAY   *P60:24,"controlf";
+          OPEN      CONTROLF,"controlf"
+.
+          DISPLAY   *P60:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"
+.
+          DISPLAY   *P60:24,"pmshcpaf";
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          READ      CONTROLF,THIRTY3;*180,PRCNURCH
+.
+          DISPLAY   *P60:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P60:24,"pribulkf";
+          OPEN      PRIBULK1,"pribulkf"
+          OPEN      PRIBULK2,"pribulkf"
+.
+...          DISPLAY   *P60:24,"pridebtf";
+...          OPEN      PRIDEBT1,"pridebtf"
+.
+          DISPLAY   *P60:24,"pridtraf";
+          OPEN      PRIDTRA4,"pridtraf"
+.
+          DISPLAY   *P60:24,"priinvof";
+          OPEN      PRIINVO1,"priinvof"
+.
+          MOVE      ONE,CNEWDS
+INIT9999  RETURN
++
+.**************************************************************************
+.*                              OPTN0000                                  *
+.*                        Process Users Options                           *
+.* Returns: EXIT  0 = Run bulk billing                                    *
+.*                1 = Exit program                                        *
+.**************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF:
+                    *P1:4,*V2LON,"0",*HOFF," = Exit":
+                    *P1:5,*V2LON,"1",*HOFF," = Run Medicare Bulk Billing" 
+.
+OPTN0500  KEYIN     *P1:7,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:7,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION                 * exit selected ?
+          GOTO      OPTN9500 IF EQUAL            * yes
+.
+          BRANCH    COPTION,OPTN9000             * run bulk billing
+.
+          BEEP                                   * invalid option
+          GOTO      OPTN0500
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.**************************************************************************
+.*                                  OPEN0000                              *
+.*  Open ASCII file bulkbill.txt.  If file exists will ask if you want to *
+.*  delete file or not.                                                   *
+.**************************************************************************
+.
+OPEN0000  TRAP      OPEN5000 IF IO
+          OPEN      BULKBILL,"bulkbill"
+          TRAPCLR   IO
+.
+.         File already exists, have the option to remove and create a new 
+.         file or use the existing file
+.
+OPEN1000  KEYIN     *P1:24,*EL,"Bulk Billing File Already exists. Do you want ":
+                               "to delete (",*V2LON,"Y",*HOFF,"/":
+                               *V2LON,"N",*HOFF,") ? ",*V2LON,ANS
+.
+          REP       UPPLOW,ANS
+          MATCH     "N",ANS
+          GOTO      OPEN9500 IF EQUAL
+.
+          MATCH     "Y",ANS
+          GOTO      OPEN4000 IF EQUAL 
+.
+          BEEP
+          GOTO      OPEN1000
+.
+.         Remove existing ASCII file then create new file
+.
+OPEN4000  CLOSE     BULKBILL,DELETE
+          PREP      BULKBILL,"bulkbill"
+          GOTO      OPEN9000
+.
+.         Create new ASCII file 
+.
+OPEN5000  NORETURN
+          PREP      BULKBILL,"bulkbill"
+.
+OPEN9000  MOVE      ZERO,EXIT
+          GOTO      OPEN9999
+.
+OPEN9500  MOVE      ONE,EXIT
+.
+OPEN9999  RETURN
++
+.**************************************************************************
+.*                                  KBUL0000                              *
+.*      Routine to keyin the Bulk Bill code and Insurance code, if        *
+.*      appropriate                                                       *
+.* Returns:   EXIT  0 = valid code entered                                *
+.*                  1 = nothing/exitchar entered                          *
+.**************************************************************************
+.
+KBUL0000  MOVE      SP3,ACODE
+          MOVE      TEN9,KCOL
+          MOVE      TEN2,KVERT
+.
+          DISPLAY   *P1:12,*EF,"Bulk Bill Code  : ";
+.
+          CALL      PRIKYBUL                     * keyin the bulk bill code
+          BRANCH    EXIT,KBUL9500:               * exitchar entered
+                         KBUL9500                * nothing entered
+.
+          MOVE      ACODE,BULCODE                * load bulk bill code
+.
+          DISPLAY   *P19:12,*EL,*V2LON,BULCODE,*HOFF:
+                    *P29:12,TDESC;
+.
+          MATCH     ANSC,INDICATR                * medicare bulk billing code
+          IF        !@EQUAL
+            DISPLAY   *P1:24,*EL,*B,"Not a medicare bulk billing code.  ";
+            CALL      HITENTER
+            GOTO      KBUL0000
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      KBUL9999
+.                          
+KBUL9500  MOVE      ONE,EXIT
+.
+KBUL9999  RETURN
++
+.**************************************************************************
+.*                                 LOAD0000                               *
+.*   Load the temp file with the details for each batch we are printing   *
+.*   for option 1 - print completed batches                               *
+.**************************************************************************
+.
+LOAD0000  DISPLAY   *P1:24,*EL,"Scanning : ":
+                    *P30:24,"Loading : ";
+.
+          MOVE      ZERO,COUNT                   * initialise record count
+          PACK      KEY47,BULCODE,SP70     
+          CALL      RSPRBB2                      * posn on the bulk billing file
+LOAD0500  CALL      RKPRBB2                      * read next record
+          BRANCH    OVRCD,LOAD9000               * eof - finished
+.
+          DISPLAY   *P12:24,*V2LON,PRBBINVN;
+.
+          COMPARE   ZERO,PRBBCLAM                * zero claim number ?
+          GOTO      LOAD0500 IF NOT EQUAL        * no - ignore
+.
+          MATCH     PRBBBULK,BULCODE             * same bulk bill code ?
+          GOTO      LOAD9000 IF NOT EQUAL        * no - finished
+.
+          PACK      SAVKEY47,PRBBBULK,PRBBCODE,PRBBDOCT,PRBBINVN,PRBBCLAIM:
+                    PRBBITMN,PRBBREGR
+.
+.         Load the ASCII file variables
+.
+          MOVE      PRBBINVN,KEY8
+          CALL      RDPRIN1                      * invoice record on file ?
+          BRANCH    OVRCD,LOAD0500               * no - ignore
+.
+          IF        PRINSCAN = ONE          
+             MOVE      PRINDEBT,PURNO            * patient has U/R
+             MOVE      PURNO,KEY8
+             CALL      RDMAST1                   * master record on file ?
+             BRANCH    OVRCD,LOAD0500            * no - ignore
+.
+             MOVE      PSNAME,MEDLAST            * load last name
+             MOVE      PGNAME,PACGNAME
+             CALL      FNAM0000                  * get first name & 2nd initial
+.
+             MOVE      PRINDEBT,DIM8             * format debtor no. & scan flag
+             RESET     DIM8
+LOAD1000     BUMP      DIM8
+             GOTO      LOAD1100 IF EOS
+             CMATCH    SP1,DIM8
+             GOTO      LOAD1000 IF EQUAL
+.
+             CMATCH    "0",DIM8
+             GOTO      LOAD1000 IF EQUAL
+.
+LOAD1100     CLEAR     MEDURREF
+             APPEND    DIM8,MEDURREF
+             APPEND    PRCNURCH,MEDURREF
+             APPEND    SP10,MEDURREF
+             RESET     MEDURREF
+.
+             PACK      MEDADDR,PADD1             * format address in 1 variable
+             STRIP     MEDADDR
+             ENDSET    MEDADDR
+             APPEND    SP1,MEDADDR
+             APPEND    PADD2,MEDADDR
+             GOTO      LOAD1200 IF EOS
+             STRIP     MEDADDR
+             ENDSET    MEDADDR
+             APPEND    SP1,MEDADDR
+             APPEND    PSUBRB,MEDADDR
+             GOTO      LOAD1200 IF EOS
+             STRIP     MEDADDR
+             ENDSET    MEDADDR
+             APPEND    SP1,MEDADDR
+             APPEND    PPOST,MEDADDR
+             GOTO      LOAD1200 IF EOS
+.
+LOAD1200     RESET     MEDADDR 
+.
+             PACK      MEDDOB,PBDATE             * format date of birth
+             MOVE      PMEDI,MEDCLMNO            * format medicare number
+          ELSE
+...             MOVE      PRINDEBT,KEY8             * patient is debtor
+...             CALL      RDPRDB1                   * debtor on file ?
+...             BRANCH    OVRCD,LOAD0500            * no - ignore
+.
+...             MOVE      PRDBSNAM,MEDLAST          * load last name
+...             MOVE      PRDBGNAM,PACGNAME
+.
+             MOVE      "Unknown Debtor",MEDLAST          * load last name
+             MOVE      SP70,PACGNAME
+             CALL      FNAM0000                  * get first name & 2nd initial
+.
+             MOVE      PRINDEBT,DIM8             * format debtor no. & scan flag
+             RESET     DIM8
+LOAD1300     BUMP      DIM8
+             GOTO      LOAD1400 IF EOS
+             CMATCH    SP1,DIM8
+             GOTO      LOAD1300 IF EQUAL
+.
+             CMATCH    "0",DIM8
+             GOTO      LOAD1300 IF EQUAL
+.
+LOAD1400     CLEAR     MEDURREF
+             APPEND    DIM8,MEDURREF
+             APPEND    SP1,MEDURREF
+             APPEND    SP10,MEDURREF
+             RESET     MEDURREF
+.
+...             PACK      MEDADDR,PRDBADD1          * format address in 1 variable
+...             STRIP     MEDADDR
+...             ENDSET    MEDADDR
+...             APPEND    SP1,MEDADDR
+...             APPEND    PRDBADD2,MEDADDR
+...             GOTO      LOAD1500 IF EOS
+...             STRIP     MEDADDR
+...             ENDSET    MEDADDR
+...             APPEND    SP1,MEDADDR
+...             APPEND    PRDBADD3,MEDADDR
+...             GOTO      LOAD1500 IF EOS
+...             STRIP     MEDADDR
+...             ENDSET    MEDADDR
+...             APPEND    SP1,MEDADDR
+...             APPEND    PRDBPOST,MEDADDR
+...             GOTO      LOAD1500 IF EOS
+.
+...LOAD1500     RESET     MEDADDR
+.
+             MOVE      SP70,MEDADDR
+.
+...             PACK      MEDDOB,PRDBDOBH           * format date of birth
+...             MOVE      PRDBMEDN,MEDCLMNO         * format medicare number
+.
+             MOVE      SP70,MEDDOB           * format date of birth
+             MOVE      SP70,MEDCLMNO         * format medicare number
+          ENDIF
+.
+          MOVE      PRBBITMN,MEDITEM             * load item number
+.
+          MOVE      SP8,MEDDR
+          PACK      KEY10,PRBBDOCT,SP70
+          CALL      RDPMHCP1
+          IF        OVRCD = 0
+            MOVE      PMHCPRV1,MEDDR              * load ser. doctor provider #
+          ENDIF
+.
+          PACK      MEDCAT,SIX,SP2               * load category of service
+          MOVE      SP2,MEDSELFD                 * load self determined flag
+          MOVE      SP1,MEDTRLOC                 * load treatment location
+          MOVE      SP1,MEDREQPR                 * load request period
+.
+          MOVE      PRBBMEDN,DIM10               * load medicare assign number
+          RESET     DIM10
+LOAD1600  GOTO      LOAD1700 IF EOS
+          CMATCH    SP1,DIM10
+          IF        @EQUAL
+            BUMP      DIM10
+            GOTO      LOAD1600
+          ENDIF
+.
+          CMATCH    "0",DIM10
+          IF        @EQUAL
+            BUMP      DIM10
+            GOTO      LOAD1600
+          ENDIF
+.
+LOAD1700  PACK      MEDASSGN,DIM10,SP10                
+.
+          PACK      MEDSPARE,SP30,SP30,SP30,SP30 * load spare variable
+.
+          PACK      KEY22,PRINNUMB,SP20,SP2
+          CALL      RSPRDT4                      * position in file
+LOAD1800  CALL      RKPRDT4                      * read next record
+          BRANCH    OVRCD,LOAD8000               * end of file
+.
+          MATCH     PRINNUMB,PRDTINVN            * same invoice number ?
+          GOTO      LOAD8000 IF NOT EQUAL        * no - error
+.
+          COMPARE   ONE,PRDTRTYP                 * item transaction ?
+          GOTO      LOAD1800 IF NOT EQUAL        * no - ignore
+.
+          COMPARE   ZERO,PRDTIFLG                * MBS item ?
+          GOTO      LOAD1800 IF NOT EQUAL        * no - ignore
+.
+          MATCH     PRDTITMN,PRBBITMN            * same item number ?
+          GOTO      LOAD1800 IF NOT EQUAL        * no - ignore
+.
+.         Valid DTR record found
+.
+          PACK      MEDDOT,PRDTSDAT
+          MOVE      PRDTSTIM,MEDTOT
+.
+          MOVE      SP8,MEDRDR
+          PACK      KEY10,PRDTREFD,SP70
+          CALL      RDPMHCP1
+          IF        OVRCD = 0
+            MOVE      PMHCPRV1,MEDRDR             * load ref. doctor provider #
+          ENDIF
+.
+          PACK      MEDDOR,PRDTRDTE                  * load referral date
+.
+          MOVE      PRDTAMNT,FORM62
+          CALL      CONV0000                     * convert numeric
+          MOVE      DIM8,MEDFEE
+          MOVE      DIM8,MEDDUE
+.
+.         If this is the first valid record found for processing, then
+.         get the next claim number and display it
+.
+          IF        COUNT = 0
+            MOVE      " 33",PRXCODE   * System Lock Sector 33
+            CALL      GETSLK00        * Get System Lock of Sector 33
+            READ      CONTROLF,THIRTY3;*190,PRCNBBCL
+            ADD       ONE,PRCNBBCL
+            WRITAB    CONTROLF,THIRTY3;*190,PRCNBBCL
+            CALL      RELSLK00        * Release System Lock of Sector 33
+.
+            SUB       ONE,PRCNBBCL
+            DISPLAY   *P1:16,"Claim Number    : ",*V2LON,PRCNBBCL;
+          ENDIF
+.
+.         If a multiple service item (PRDTSERV>1) write the same data to the
+.         tempfile & increase the item count until the item count is greater
+.         than the multiple service item
+.
+          MOVE      ZERO,ITEMNUMB                * initialise item number
+          MOVE      ONE,FORM2
+LOAD2000  IF        FORM2 <= PRDTSERV
+            ADD       ONE,COUNT                  * increment counter
+            ADD       ONE,ITEMNUMB
+            PACK      MEDINVNO,PRBBINVN,ITEMNUMB
+            REP       " 0",MEDINVNO
+            CALL      WRMEDCR
+            ADD       ONE,FORM2
+            GOTO      LOAD2000
+          ENDIF
+.
+          DISPLAY   *P40:24,*EL,*V2LON,PRBBINVN;
+.
+.         Position on record using first index, prior to update
+.
+          PACK      KEY28,PRBBCLAM,PRBBINVN,PRBBITMN,PRBBREGR
+          CALL      RDPRBB1                      * position on first index
+.
+          MOVE      PRCNBBCL,PRBBCLAM            * update claim number
+          MOVE      ONE,PRBBSTAT                 * update status
+          PACK      PRBBDATE,CCC,CYY,CMM,CDD     * update date claim sent
+          REP       " 0",PRBBDATE
+          MOVE      REGCODE,PRBBREGR             * update register
+          CALL      UPPRBB1                      * update bulk bill record
+.
+.         Reposition on the second index ready to read the next record 
+.         for processing
+.
+LOAD8000  MOVE      SAVKEY47,KEY47
+          CALL      RSPRBB2                      * reposition in file
+          GOTO      LOAD0500                     * get next record
+.
+LOAD9000  COMPARE   ZERO,COUNT                   * any records found ?
+          IF        @EQUAL
+            DISPLAY   *P1:24,*EL,*B,"No records found for processing.  ";
+            CALL      HITENTER
+          ELSE
+            DISPLAY   *P1:24,*EL,COUNT," records processed.  ";
+            CALL      HITENTER
+          ENDIF
+.
+LOAD9999  RETURN
++
+.**************************************************************************
+.*                                 GREG0000                               *
+.*             Routine to get the register for the current batch          *
+.* Returns:  EXIT   0 = valid register entered                            *
+.*                  1 = nothing entered                                   *
+.*                  2 = exitchar entered                                  *
+.**************************************************************************
+.
+GREG0000  MOVE      SP3,REGCODE
+          KEYIN     *P1:14,*EL,"Register Code   : ",*DV,UNDLN3:
+                    *P19:14,*V2LON,REGCODE:
+                    *P19:14,*DV,REGCODE
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,GREG1000:               * ? entered
+                         GREG7500:               * valid code
+                         GREG9000:               * nothing entered
+                         GREG9700                * exitchar
+.
+          GOTO      GREG0000                     * invalid code
+.
+GREG1000  MOVE      ZERO,HLEF
+          CALL      GETSCR00
+GREG1200  CALL      RCPREGDS                     * list codes on file
+.
+GREG1500  KEYIN     *P1:24,*EL,"Register Code: ",*DV,UNDLN3:
+                    *P16:24,*V2LON,REGCODE:
+                    *P16:24,*DV,REGCODE
+.
+          CALL      CHK0000                      * see what was entered
+          BRANCH    EXIT,GREG1200:               * ? entered
+                         GREG7000:               * valid code
+                         GREG8000:               * nothing entered
+                         GREG9500                * exitchar
+.
+          GOTO      GREG1500                     * invalid code
+.
+GREG7000  CALL      PUTSCR00                     * restore screen
+          DISPLAY   *P19:14,*V2LON,REGCODE;
+GREG7500  DISPLAY   *P29:14,REGDESC
+          MOVE      ZERO,EXIT
+          GOTO      GREG9999
+.
+GREG8000  CALL      PUTSCR00
+GREG9000  MOVE      ONE,EXIT
+          GOTO      GREG9999
+.
+GREG9500  CALL      FRESCR00
+GREG9700  MOVE      TWO,EXIT
+.
+GREG9999  RETURN
++
+.**************************************************************************
+.*                                  CHK0000                               *
+.*               Check what was entered for the Register Code             *
+.* RETURNS - EXIT  = 0  invalid code                                      *
+.*                 = 1  "?"                                               *
+.*                 = 2  valid code                                        *
+.*                 = 3  nothing                                           *
+.*                 = 4  exitchar                                          *
+.**************************************************************************
+.
+CHK0000   PACK      REGCODE,REGCODE,SP3          * pad with spaces
+.
+          MATCH     SP3,REGCODE                  * anything entered ?
+          GOTO      CHK9000 IF EQUAL             * no
+.
+          MATCH     EXITCHAR,REGCODE             * exitchar entered ?
+          GOTO      CHK7000 IF EQUAL             * yes
+.
+          MATCH     QUEST,REGCODE                * "?" entered ?
+          GOTO      CHK8000 IF EQUAL             * yes
+.
+.         Code entered so check it is valid
+.
+          MOVE      REGCODE,KEY3
+          CALL      RDREGA1                      * register on file ?
+          BRANCH    OVRCD,CHK6000                * no
+.
+.         We have a valid register, so make sure it is a private practice
+.         register
+.
+          IF        REGIBACD <> TWO          
+            DISPLAY   *P1:24,*EL,*B,"Not a Private Practice register.  ";
+            GOTO      CHK6500
+          ENDIF
+.
+          MOVE      TWO,EXIT                     * code entered
+          GOTO      CHK9999
+.
+CHK6000   DISPLAY   *P1:24,*EL,*B,"Register not on file.  ";
+CHK6500   CALL      HITENTER
+          MOVE      ZERO,EXIT
+          GOTO      CHK9999
+.
+CHK7000   MOVE      FOUR,EXIT
+          GOTO      CHK9999
+.
+CHK8000   MOVE      ONE,EXIT
+          GOTO      CHK9999
+.
+CHK9000   MOVE      THREE,EXIT
+.
+CHK9999   RETURN
++
+.**************************************************************************
+.*                                 CONV0000                               *
+.*   Routine to convert a numeric to the required format                  *
+.*   Returns:  DIM 8   Amount in cents                                    *
+.**************************************************************************
+.
+CONV0000  MOVE      FORM62,DIM9                  * make into a DIM field
+          UNPACK    DIM9,DIM6,ANS,DIM2           * split into components
+          PACK      DIM8,DIM6,DIM2
+          REP       " 0",DIM8
+.
+CONV9999  RETURN
++
+.**************************************************************************
+.*                            FNAM0000                                    *
+.*          Get the patient's first name and second initial               *
+.**************************************************************************
+.
+FNAM0000  CLEAR     MEDFIRST
+          CLEAR     MEDINIT
+          REPEAT         
+            CMOVE     PACGNAME,ANS 
+            MATCH     SP1,ANS
+            IF        !@EQUAL
+              APPEND    ANS,MEDFIRST
+              BUMP      PACGNAME
+            ELSE
+              GOTO    FNAM1000
+            ENDIF
+          UNTIL     @EOS
+.
+FNAM1000  APPEND    SP12,MEDFIRST
+          RESET     MEDFIRST
+.
+          WHILE     !@EOS
+            CMOVE     PACGNAME,ANS 
+            MATCH     SP1,ANS
+            IF        !@EQUAL
+              APPEND    ANS,MEDINIT
+              GOTO      FNAM5000
+            ENDIF
+            BUMP      PACGNAME
+          DO
+.
+FNAM5000  APPEND    SP1,MEDINIT
+          RESET     MEDINIT
+.
+FNAM9999  RETURN
++
+.****************************************************************************
+.*        Write a record to the ASCII file                                  *
+.****************************************************************************
+.
+WRMEDCR   WRITE     BULKBILL,SEQ;MEDURREF,MEDINVNO,MEDLAST,MEDFIRST,MEDINIT:
+                                 MEDDOB,MEDADDR,MEDCLMNO,MEDITEM,MEDDR,MEDDOT:
+                                 MEDTOT,MEDRDR,MEDDOR,MEDFEE,MEDDUE,MEDCAT:
+                                 MEDSELFD,MEDTRLOC,MEDREQPR,MEDASSGN,MEDSPARE
+          RETURN
++
+.****************************************************************************
+.*        I/O Includes
+.****************************************************************************
+.
+          INC       STD001IO
+.
+          INC       PATCODDS
+          INC       PATFNDDS
+          INC       PATGOVDS
+          INC       PATINSDS
+          INC       PRIKYBUL
+          INC       RCPREGDS
+.
+          INC       PATCODIO/INC
+          INC       PMSHCPIO/INC
+          INC       PATFN1IO/INC
+          INC       PATGO1IO/INC
+          INC       PATIN1IO/INC
+          INC       PATMA1IO/INC
+          INC       PRIBULIO/INC
+...          INC       PRIDBTIO/INC
+          INC       PRIDTRIO/INC
+          INC       PRIINVIO/INC
+.
+          INC       RCPREGIO/INC
++

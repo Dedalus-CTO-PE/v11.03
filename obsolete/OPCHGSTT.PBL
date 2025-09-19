@@ -1,0 +1,440 @@
+.******************************************************************************
+.* System         : Theatre System                                            *
+.* Include Name   : OPCHGSTT.PBL                                              *
+.* Description    : Alter booking start time for all subsequent bookings      *
+.******************************************************************************
+.* Date           : 05/11/1990                                                *
+.* Author         : Paul Marshall                                             *
+.******************************************************************************
+.* Parameters     : OPRSESFD - Current session record                         *
+.*                  CURCASE  - Case no. of current booking                    *
+.*                  OPCNASTD - Sector 42 Position 90                          *
+.******************************************************************************
+.* Returns        : EXIT = 0      Changes done                                *
+.*                  EXIT = 1      Change not done                             *
+.******************************************************************************
+.* Function       : Will ask for a start time adjustment for the bookings.    *
+.*                  This will be validated against the start and end times of *
+.*                  the session and the end time of the previous booking. Once*
+.*                  it has been validated (the validations will be warnings   *
+.*                  only, not errors), the program will update all start times*
+.*                  from the current booking by the requested amount (may be  *
+.*                  positive or negative ).                                   *
+.******************************************************************************
+.* Modifications  :                                                           *
+.*        V10.00.01 19/03/2010  Steve Armstrong   CAR 135505                  *
+.*                  Added HL7TRGID & HL7INCLD setting for all broadcast       *
+.*                  messages                                                  *
+.******************************************************************************
+.*                  03/09/2008  Davin         CAR 147323                      *
+.*                  Send hl7 message for upd bookings (added call DGCLIS14)   *
+.*                  28/06/95    Paul Howells   SRF 610064                     *
+.*                  Give Error Message if Session Exists.                     *
+.*                  08/05/92    ROD                                           *
+.*                  Alter session start time and end time if first case       *
+.*                  start time is changed (if OPCNASLN = 1 do this)           *
+.*                  09/10/1991    Justin Coates                               *
+.*                  Alter session start time and duration if first case       *
+.*                  start time is changed (if OPCNASTD = 1 do this)           *
+.******************************************************************************
+OPCHGSTT  DISPLAY   *PSUBOPT1:2,*V2LON,"- (Adjust Start Times) ";
+          DISPLAY   *P1:24,*EL,"Please enter the adjustment for start ":
+                    "times : ____ minutes"
+.
+          KEYIN     *P47:24,*V2LON,ADDDURA:
+                    *P47:24,*DV,ADDDURA
+.
+          COMPARE   ADDDURA,ZERO
+          GOTO      OPCGS900 IF EQUAL       * Zero entered or Enter hit
+          GOTO      OPCGS500 IF NOT LESS    * Negative adjustment entered
+.
+.         A Positive adjustment time has been entered
+.
+.         check that all adjustments wont go over end of session
+.         by calculating the end time of the last booking, KEY5
+.
+          PACK      KEY23,CURSESS,ZERO,Z70
+          CALL      RSOPDEA1
+          CALL      RPOPDEA1                * get the last case 
+          BRANCH    OVRCD,OPCGS010          * different session
+.
+          PACK      KEY19,OPDADATE,OPDATIME,OPDACLIN
+          MATCH     KEY19,CURSESS
+          GOTO      OPCGS010 IF NOT EQUAL   * different session
+.
+          MOVE      ZERO,EXPDURA            * clear duration to add
+          ADD       OPDAEXPD,EXPDURA        * add exp duration
+          ADD       OPSEPREP,EXPDURA        * add pat prep time
+          ADD       ADDDURA,EXPDURA         * add adjustment
+          CALL      CLDUR000                * get KEY5, end time of last book.
+.
+          MATCH     KEY5,OPSEENDT
+          GOTO      OPCGS010 IF NOT LESS    * end time is >= calc time
+.
+OPCGS005  DISPLAY   *P1:24,*B,"This adjustment time will make the last booking":
+                    " end at ",KEY5,". Ok (",*V2LON,"Y",*HOFF,"/",*V2LON,"N":
+                    *HOFF,") ? ",*EL;
+          KEYIN     *P74:24,*DV,UNDLN1:
+                    *P74:24,*V2LON,ANS:
+                    *P74:24,*DV,ANS
+.
+          REP       UPPLOW,ANS
+.
+          MATCH     ANS,ANSN
+          GOTO      OPCHGSTT IF EQUAL
+.
+          MATCH     ANS,ANSY
+          GOTO      OPCGS015 IF EQUAL      * recalc times
+.
+          BEEP
+          GOTO      OPCGS005
+.
+.         calculate adjusted time for the current time
+.
+OPCGS010  MOVE      ADDDURA,EXPDURA         * time to add
+          PACK      KEY23,CURSESS,ZERO,CURCASE
+          CALL      RDOPDEA1                * get the valid patient details
+          BRANCH    OVRCD,OPCGS900          * invalid details
+.
+          CALL      CLDUR000                * get adjusted time, KEY5
+.
+          MATCH     KEY5,OPSEENDT
+          GOTO      OPCGS015 IF NOT LESS    * before end time so OK
+.
+OPCGS012  DISPLAY   *P1:24,*B,"This adjustment time will make this booking end":
+                    " at ",KEY5,". Ok (",*V2LON,"Y",*HOFF,"/",*V2LON,"N":
+                    *HOFF,") ? "
+          KEYIN     *P70:24,*DV,UNDLN1:
+                    *P70:24,*V2LON,ANS:
+                    *P70:24,*DV,ANS
+.
+          REP       UPPLOW,ANS
+.
+          MATCH     ANS,ANSN
+          GOTO      OPCHGSTT IF EQUAL
+.
+          MATCH     ANS,ANSY
+          GOTO      OPCGS015 IF EQUAL
+.
+          BEEP
+          GOTO      OPCGS012
+.
+.         update all the following bookings for positive adjustment
+.
+OPCGS015  MOVE      CURCASE,CASEFROM
+          MOVE      ADDDURA,EXPDURA
+          PACK      KEY19,SESNDATE,SESNTIME,SESNCODE
+          PROC      CHKST000
+          BRANCH    EXIT,OPCGS999
+          CALL      OPINCTIM
+          CALL      AJSST000                * adjust start times ??
+          CALL      ASTEN000                * adjust start times and end time?
+          MOVE      ZERO,EXIT
+          GOTO      OPCGS999
+.
+.         negative adjustment
+.
+OPCGS500  MOVE      ADDDURA,EXPDURA         * the adjustment
+          PACK      KEY23,CURSESS,ZERO,CURCASE
+          CALL      RDOPDEA1                * get the valid patient details
+          BRANCH    OVRCD,OPCGS900          * invalid details
+.
+          CALL      CLDUR000                * get adjusted start time
+          MOVE      KEY5,EXPSTART           * the work variable
+.
+          MATCH     "  1",OPDACASE
+          GOTO      OPCGS600 IF NOT EQUAL   * not the first case
+.
+          MATCH     OPSETIME,EXPSTART
+          GOTO      OPCGS800 IF NOT LESS    * not before start time
+.
+OPCGS540 DISPLAY  *P1:24,*B,"This adjustment time will make this booking start":
+                    " at ",EXPSTART,". Ok (",*V2LON,"Y",*HOFF,"/",*V2LON,"N":
+                    *HOFF,") ? ",*EL;
+          KEYIN     *P72:24,*DV,UNDLN1:
+                    *P72:24,*V2LON,ANS
+.
+          REP       UPPLOW,ANS
+          MATCH     ANS,ANSY
+          GOTO      OPCGS800 IF EQUAL
+.
+          MATCH     ANS,ANSN
+          GOTO      OPCHGSTT IF EQUAL
+.
+          BEEP 
+          GOTO      OPCGS540
+.
+.         in the middle check booking wont overlap with previous booking
+.
+OPCGS600  CALL      RPOPDEA1
+          BRANCH    OVRCD,OPCGS800          * the only booking in the session
+.
+          PACK      KEY19,OPDADATE,OPDATIME,OPDACLIN
+          MATCH     KEY19,CURSESS
+          GOTO      OPCGS800 IF NOT EQUAL   * different session
+.
+          MOVE      ZERO,EXPDURA
+          ADD       OPDAEXPD,EXPDURA
+          ADD       OPSEPREP,EXPDURA
+          CALL      CLDUR000                * get KEY5, end time of prev book.
+.
+          MATCH     KEY5,EXPSTART
+          GOTO      OPCGS800 IF NOT LESS    * alterd time >= end time of prev
+.
+          DISPLAY   *P1:24,*EL,*B,"This will overlap the previous booking.  ";
+          CALL      HITENTER
+          GOTO      OPCHGSTT
+.
+.         update all the following bookings for negative adjustment
+.
+OPCGS800  MOVE      CURCASE,CASEFROM
+          MOVE      ADDDURA,EXPDURA
+          PACK      KEY19,SESNDATE,SESNTIME,SESNCODE
+          PROC      CHKST000
+          BRANCH    EXIT,OPCGS999
+          CALL      OPINCTIM
+          CALL      AJSST000                * adjust start times ??
+          CALL      ASTEN000                * adjust start times and end time?
+          MOVE      ZERO,EXIT
+          GOTO      OPCGS999
+.
+OPCGS900  MOVE      ONE,EXIT
+.
+OPCGS999  RETURN
+
+.*********************************************************************
+.*                  CLDUR000                                         *
+.*        Get an end time, given start time and duration             *
+.*        Para's  : EXPDURA       the total duration                 *
+.*                  OPDAEXPS      the start time                     *
+.*        Returns : KEY5          the end time                       *
+.*********************************************************************
+.
+CLDUR000  UNPACK    OPDAEXPS,CHOUR,ANS,CMIN * unpack the start time
+          MOVE      CMIN,FORM2              * minutes as a form2
+          MOVE      FORM2,FORM4A            * set up work variable
+          ADD       EXPDURA,FORM4A          * the total minutes to add
+.
+CLDUR200  COMPARE   ZERO,FORM4A
+          GOTO      CLDUR300 IF NOT LESS    * positve amount
+.
+          ADD       "60",FORM4A             * make it positive
+          MOVE      CHOUR,OPTION
+          SUB       ONE,OPTION
+          MOVE      OPTION,CHOUR            * sub 1 hour off time
+          GOTO      CLDUR200
+.
+CLDUR300  MOVE      FORM4A,FORM4B           * save the minutes
+.
+          DIV       "60",FORM4A             * the total hours to add
+          MOVE      CHOUR,FORM2             * hours as a form
+          ADD       FORM4A,FORM2            * add the hours
+.
+CLDUR400  COMPARE   "24",FORM2
+          GOTO      CLDUR500 IF LESS        * below 24 hours
+.
+          SUB       "24",FORM2              * get back to 24 hour time
+          GOTO      CLDUR400
+.
+CLDUR500  MOVE      FORM2,CHOUR             * set up the hours
+.
+          MULT      "60",FORM4A             * the total minutes added
+          SUB       FORM4A,FORM4B           * the minutes to add
+          MOVE      FORM4B,FORM2            * get minutes as form2
+.
+          COMPARE   ZERO,FORM2
+          GOTO      CLDUR800 IF NOT LESS    * not negative
+.
+          ADD       "60",FORM2              * make it positive
+          MOVE      CHOUR,OPTION
+          SUB       ONE,OPTION
+          MOVE      OPTION,CHOUR            * sub 1 hour off time
+.
+CLDUR800  MOVE      FORM2,CMIN              * the minutes
+.
+          PACK      KEY5,CHOUR,COLON,CMIN * the end time
+          REP       " 0",KEY5
+.
+CLDUR999  RETURN
++
+.*********************************************************************
+.*                  CHKST000                    Called by : OPCGS000 *
+.*        check  the session start time to make sure session does    *
+.*        not already exist.                                         *
+.*********************************************************************
+          DEFPROC   CHKST000
+.
+          INC       OPRSESFD/INC
+.
+          MOVE      ZERO,EXIT
+          COMPARE   ONE,OPCNASTD
+          GOTO      CHKST100 IF EQUAL   * dont do this change
+.
+          COMPARE   ONE,OPCNASLN
+          GOTO      CHKST100 IF EQUAL   * dont do this change
+.
+          COMPARE   ONE,CURCASE
+          GOTO      CHKST100 IF EQUAL   * not the first case
+.
+          GOTO      CHKST999
+.
+CHKST100  OPEN      OPRSESA1,"oprsesaf" 
+          PACK      KEY19,SESNDATE,SESNTIME,SESNCODE,SP20
+          CALL      RDOPSES1                * update session file
+          BRANCH    OVRCD,CHKST9999
+.
+          MOVE      OPSETIME,OPDAEXPS       * set original start time
+          MOVE      ADDDURA,EXPDURA         * the adjustment time
+          CALL      CLDUR000                * get new start time
+.          
+          PACK      KEY19,SESNDATE,KEY5,SESNCODE,SP20
+          CALL      RDOPSES1                * update session file
+          BRANCH    OVRCD,CHKST900
+.
+          DISPLAY   *P1:24,*EL,*B,"Session Exists. Patient must be ":
+                    "Transferred. ";
+          CALL      HITENTER
+.
+          MOVE      ONE,EXIT
+          GOTO      CHKST999
+.
+CHKST900  PACK      KEY19,SESNDATE,SESNTIME,SESNCODE,SP20
+          CALL      RDOPSES1                * update session file
+          GOTO      CHKST999
+.
+          INC       OPRSESIO/INC
+          INC       IBAOVRIO/INC
+.
+CHKST999  ENDPROC
+.*********************************************************************
+.*                  AJSST000                    Called by : OPCGS000 *
+.*        Adjust the session start time and duration by the required *
+.*        amount.                                                    *
+.*********************************************************************
+AJSST000  COMPARE   ONE,OPCNASTD
+          GOTO      AJSST999 IF NOT EQUAL   * dont do this change
+.
+          COMPARE   ONE,CURCASE
+          GOTO      AJSST999 IF NOT EQUAL   * not the first case
+.
+.         want to adjust start time and duration by the required amount so that
+.         the end time is unchanged - if +ve adjustment sub this from duration
+.
+          PACK      KEY19,SESNDATE,SESNTIME,SESNCODE,SP20
+          CALL      RDOPSES1                * update session file
+          MOVE      "2",AUDIFLAG            * before change audit
+          CALL      AUSES000                * write audit record
+          MOVE      OPSETIME,OPDAEXPS       * set original start time
+          MOVE      ADDDURA,EXPDURA         * the adjustment time
+          CALL      CLDUR000                * get new start time
+          MOVE      KEY5,OPSETIME           * set new session start time
+          SUB       ADDDURA,OPSEDURA        * set new session duration
+          CALL      UPOPSES1                * update session file
+          MOVE      "3",AUDIFLAG            * after change audit
+          CALL      AUSES000                * write audit record
+.
+.         now have to update all the oprdeafd records for that session with
+.         the new start time
+.
+AJSST100  PACK      KEY23,CURSESS,ZERO,SP10
+          CALL      RSOPDEA1
+          CALL      RKOPDEA1
+          BRANCH    OVRCD,AJSST800          * finished for that session
+.
+          PACK      KEY19,OPDADATE,OPDATIME,OPDACLIN
+          MATCH     KEY19,CURSESS
+          GOTO      AJSST800 IF NOT EQUAL   * different session
+.
+          MOVE      "2",AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit record
+          MOVE      OPSETIME,OPDATIME       * set new start time
+          CALL      IBACLOCK
+          PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",OPDAUDAT
+.
+          CLOCK     TIME,OPDAUTIM
+          MOVE      WBSEUID,OPDAWEBU
+.
+          CALL      UPOPDEA1                * update file
+          MOVE      "3",AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit record
+          MOVE      ONE,HL7TRGID
+          MOVE      "OPCHGSTT",HL7INCLD
+          PROC      DGCLIS14                * send update booking message
+          GOTO      AJSST100
+.
+.         now update the work variables to contain the new start time
+.
+AJSST800  PACK      CURSESS,OPSEDATE,OPSETIME,OPSECLIN
+          MOVE      OPSETIME,SESNTIME       * set session time
+          DISPLAY   *P65:6,*V2LON,SESNTIME
+.
+AJSST999  RETURN
++
+.************************************************************************
+.*  ASTEN0000 :  Adjust Start time & End time of session                *
+.*               so that the duration remains the same                  *
+.************************************************************************
+ASTEN000  COMPARE   ONE,OPCNASLN
+          GOTO      ASTEN999 IF NOT EQUAL   * dont do this change
+.
+          COMPARE   ONE,CURCASE
+          GOTO      ASTEN999 IF NOT EQUAL   * not the first case
+.
+.         want to adjust start time and end time so the duration remains same  
+.
+          PACK      KEY19,SESNDATE,SESNTIME,SESNCODE,SP20
+          CALL      RDOPSES1                * update session file
+          MOVE      "2",AUDIFLAG            * before change audit
+          CALL      AUSES000                * write audit record
+          MOVE      OPSETIME,OPDAEXPS       * set original start time
+          MOVE      ADDDURA,EXPDURA         * the adjustment time
+          CALL      CLDUR000                * get new start time
+          MOVE      KEY5,OPSETIME           * set new session start time
+.
+          MOVE      OPSEENDT,OPDAEXPS       * set up end time
+          MOVE      ADDDURA,EXPDURA         * the adjustment time
+          CALL      CLDUR000                * get new end time
+          MOVE      KEY5,OPSEENDT           * set new end time
+          CALL      UPOPSES1                * update session file
+          MOVE      "3",AUDIFLAG            * after change audit
+          CALL      AUSES000                * write audit record
+.
+.         now have to update all the oprdeafd records for that session with
+.         the new start time
+.
+ASTEN100  PACK      KEY23,CURSESS,ZERO,SP10
+          CALL      RSOPDEA1
+          CALL      RKOPDEA1
+          BRANCH    OVRCD,ASTEN800          * finished for that session
+.
+          PACK      KEY19,OPDADATE,OPDATIME,OPDACLIN
+          MATCH     KEY19,CURSESS
+          GOTO      ASTEN800 IF NOT EQUAL   * different session
+.
+          MOVE      "2",AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit record
+          MOVE      OPSETIME,OPDATIME       * set new start time
+          CALL      IBACLOCK
+          PACK      OPDAUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",OPDAUDAT
+.
+          CLOCK     TIME,OPDAUTIM
+          MOVE      WBSEUID,OPDAWEBU
+.
+          CALL      UPOPDEA1                * update file
+          MOVE      "3",AUDIFLAG            * before change audit
+          CALL      AUDEA000                * write audit record
+          MOVE      TWO,HL7TRGID
+          MOVE      "OPCHGSTT",HL7INCLD
+          PROC      DGCLIS14                * send update booking message
+          GOTO      ASTEN100
+.
+.         now update the work variables to contain the new start time
+.
+ASTEN800  PACK      CURSESS,OPSEDATE,OPSETIME,OPSECLIN
+          MOVE      OPSETIME,SESNTIME       * set session time
+          DISPLAY   *P65:6,*V2LON,SESNTIME,*P73:6,OPSEENDT
+.
+ASTEN999  RETURN
+...............................................................................

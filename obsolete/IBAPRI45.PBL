@@ -1,0 +1,1082 @@
+.******************************************************************************
+.* System    :   Private Practice                                             *
+.* Program   :   IBAPRI45                                                     *
+.* Desc      :   Update A/C Responsibility for an Invoice                     *
+.******************************************************************************
+.* Date      :   03/01/92                                                     *
+.* Author    :   Stephen Armstrong                                            *
+.* Function  :   Allows the user to update the person responsible for the     *
+.*               account once an invoice has been raised                      *
+.* Mods      :                                                                *
+.*        V10.13.01 07/08/2018  Richa Phogat   TSK 0848506                    *
+.*                  Updated keylength for RDPRHR1,UPPRHR1 from KYE23 to KEY27 *
+.*        V10.04.02 17/06/2014  Steve Armstrong  CAR 301639                   *
+.*                  Added call to TFILENAM for FNAMPOST (AUTOPCOD) into       *
+.*                  INIT0000.                                                 *
+.*                  Recompiled for changes to AUTOPCOD & AUPCDVAR.            *
+.*        V10.04.01 21/01/2014  Patrick Adair    CAR 265844                   *
+.*                  Include new fields for PRA State and mobile phone         *
+.******************************************************************************
+.*        V9.12.01  09/12/2009 Mike Laming   CAR 210835                       *
+.*                  Added logic for Private Practice Outstanding Debt alert   *
+.*        V9.10.01  23/05/2008 J.Tan      CAR 169149                          *
+.*                  Added Date and Time invoice created/updated               *
+.*        V9.03.01  03/03/2004  Lina Vo       CAR 47921                       *
+.*                  Removed use of PRIDBTFD & IO.                             *
+.*        V9.02.03  09/11/2002  Dean Cramer   srf 18508                       *
+.*                  Include PMSPX2FD for update of PRA default                *
+.*        V9.02.02  02/10/2001  J.Tan                                         *
+.*                  Mods to use PMSHCPFD instead of PATDO1FD                  *
+.*        V9.02.01  12/09/2001  Greg Horvat      SRF 12887                    *
+.*                  Fixed a bug reading patma1af for PMI patients             *
+.*        V5.08.01  29/08/2000  Caleb Sharman                                 *
+.*                  Changed Health Fund variables to be 8 chars               *
+.*        V5.07.01  09/06/1999  Greg Horvat                                   *
+.*                  Recompiled for PRIINVIO - Fixed problem with direct read  *
+.*               V5.06.01  3/9/1998    Jim Stathopoulos 98/99 PRS2 Mods       *
+.*                  Added AUPCDVAR & AUTOPCOD - Automatic generation of the   *
+.*                  postcode                                                  *
+.*               V6.00.01 07/10/92  Steve Armstrong                           *
+.*                        Modified for alphanumeric debtor number             *
+.*               V6.00.02 15/07/1993  Steve Armstrong  SRF 122354             *
+.*                        Added option for range of invoices.                 *
+.*               V6.00.03 29/11/1993  Graeme Williams  SRF 126414             *
+.*                        Update PRIHREFD as well if required.                *
+.******************************************************************************
+.
+.$$$$$
+.         A/C Responsibility Update Program (IBAPRI45)
+.         --------------------------------------------
+.
+.         ML0000
+.         Open files and initialisation
+.         priinvof
+.         pridebtf
+.         prihreff
+.         pridtraf
+.         pripracf
+.         patma1af
+.         pmshcpaf
+.         patcodes
+.
+.         ML0100
+.         Get the user option
+.            If zero selected, end program
+.            If one selected, proceed to get invoice number
+.
+.         ML1000
+.         Get the invoice number
+.            If nothing is input, return to get the next option
+.            If a valid invoice number input, proceed to display invoice details
+.
+.         Display field captions
+.         Display data for associated fields
+.
+.         Prompt user for action
+.            If (P)ost selected, proceed to update invoice record
+.            If (C)ancel selected, return to get next option
+.
+.
+.         Update invoice record with new PRA details
+.         Ask if this should be the defaul PRA
+.            If yes, update PRIHREFD record as well
+.         Return to get the next option
+.
+.         ML9999
+.         Chain back to calling program
+.
+.$$$$$
+.
+          INC       STD001FD
+.
+.
+. FILE DESCRIPTION INCLUDES
+. -------------------------
+.
+          INC       AUPCDVAR/INC            * Auto postcode variables
+          INC       IBASEQFD/INC
+          INC       PRIINVFD/INC                 * invoice file
+...          INC       PRIDBTFD/INC                 * debtor file
+          INC       PRIHREFD/INC                 * referral details file
+          INC       PRIDTRFD/INC                 * debtor transaction file
+          INC       PRIPRAFD/INC                 * medical practice file
+.
+          INC       PATMA1FD/INC                 * patient master file
+          INC       PATRE1FD/INC                 * PRA file             
+          INC       PATVISFD/INC                 * visit file           
+          INC       PMSPX2FD/INC                 * PMI Extension file 
+          INC       PMSHCPFD/INC                 * doctor file
+          INC       PATCODFD/INC                 * codes file
+          INC       TFILEVAR/INC
+          INC       WEBERRFD/INC
+.
+.
+. PROGRAM CONSTANTS
+. -----------------
+.
+CODECL    INIT      "CL"
+SP12      INIT      "            "
+SP45      INIT      "                                             "
+.
+.
+. LOCAL VARIABLE DEFINITION
+. -------------------------
+.
+DBTNAME   DIM       35                           * formatted debtor name
+DOCFMT    DIM       35                           * formatted doctor name
+.
+EINUMB    DIM       8                            * ending invoice number
+FMTNAME   DIM       25                           * formatted debtor name
+FMTPRNAM  DIM       30                           * short person resp. for a/c
+.
+INUMB     FORM      8                            * invoice #
+INVOICE   DIM       8                            * invoice #
+.
+SAVDEBT   DIM       8                            * saved debtor number
+SAVSCAN   FORM      2                            * saved scan flag
+SAVNAMR   DIM       45                           * saved PRA varaibles
+SAVPRA1   DIM       35
+SAVPRA2   DIM       35
+SAVPRA3   DIM       35
+SAVPRA4   DIM       35
+SAVPOST   DIM       8
+SAVTELP   DIM       20
+SAVTELB   DIM       20
+SAVMPHN   DIM       20
+SAVRELP   DIM       10
+SINUMB    DIM       8                            * starting invoice number
+.
+UPDHREF   FORM      1                            * update PRIHREFD as well ?
+USERID    DIM       10
+.
+.
+PRGID     INIT      "IBAPRI45"
+PRGNAM    INIT      "A/C Responsibility Update"
+VERSION   INIT      "V10.13.01"
++
+.**************************************************************************
+.*                              ML0000                                    *
+.*                      Controlling Logic (Mainline code)                 *
+.**************************************************************************
+.
+ML0000    CALL      INIT0000               * initialization and open files
+.
+ML0100    CALL      OPTN0000               * select options
+          BRANCH    EXIT,ML9999            * EXIT = 1 if 0 chosen in menu
+          BRANCH    COPTION,ML1000:        * single invoice
+                            ML2000         * invoice range
+.
+ML1000    CALL      GETI0000               * get invoice #
+          BRANCH    EXIT,ML0100            * nothing entered
+.
+          CALL      SCR0000                * display screen format
+          CALL      DISI0000               * display invoice details
+          CALL      SEL0000                * select field to modify
+          BRANCH    EXIT,ML1000            * (C)ancel selected
+.
+          CALL      UPD0000                * update record
+          GOTO      ML1000                 * get next invoice number
+.
+ML2000    CALL      SINV0000               * get starting invoice #
+          BRANCH    EXIT,ML0100            * nothing input
+.
+          CALL      DISA0000               * display first invoice details
+.
+          CALL      EINV0000               * get ending invoice #
+          BRANCH    EXIT,ML2000:           * nothing input
+                         ML2000            * invalid range
+.
+          CALL      CONTQST                * ok to continue ?
+          BRANCH    CEXIT,ML3000:          * yes
+                          ML2000:          * no
+                          ML0100           * cancel
+.
+ML3000    CALL      LOAD0000               * load default PRA details
+          CALL      SEL0000                * select field to modify
+          BRANCH    EXIT,ML2000            * (C)ancel selected
+          CALL      RUPD0000               * update for range
+          GOTO      ML2000                 * get next option
+.
+ML9999    CHAIN     PGM                    * chain back to program
++
+.****************************************************************************
+.*                                INIT0000             Called by: ML0000    *
+.*                             initialisation                               *
+.*  The initialisation routine is used to display headings and open files.  *
+.****************************************************************************
+.
+INIT0000  CALL      DISPHEAD                     * display heading
+.
+          DISPLAY   *P56:24,"Opening ":
+                    *P64:24,"priinvof";
+          OPEN      PRIINVO1,"priinvof"          * invoice file
+          OPEN      PRIINVO3,"priinvof"
+.
+...          DISPLAY   *P64:24,"pridebtf";
+...          OPEN      PRIDEBT1,"pridebtf"          * debtor file
+.
+          DISPLAY   *P64:24,"prihreff";
+          OPEN      PRIHREF1,"prihreff"          * referral details file
+.
+          DISPLAY   *P64:24,"pridtraf";
+          OPEN      PRIDTRA1,"pridtraf"          * debtor transaction file
+.
+          DISPLAY   *P64:24,"pripracf";
+          OPEN      PRIPRAC1,"pripracf"          * medical practice file
+.
+          DISPLAY   *P64:24,"patma1af";
+          OPEN      PATMA1A1,"patma1af"
+          OPEN      PATMX1A1,"patmx1af"
+.
+          DISPLAY   *P64:24,"patvisaf";
+          OPEN      PATVISA1,"patvisaf"
+.
+          DISPLAY   *P64:24,"pmspx2af";
+          OPEN      PMSPX2A1,"pmspx2af"
+.
+          DISPLAY   *P64:24,"pmshcpaf";
+          OPEN      PMSHCPA1,"pmshcpaf"
+.
+          DISPLAY   *P64:24,"patcodes";
+          OPEN      PATCODE1,"patcodes"          * codes file
+.
+          MOVE      TWO,PACFRMT
+.
+          CALL      TFILENAM
+          MOVE      TFILNAME,FNAMPOST
+.
+INIT9999  RETURN
++
+.****************************************************************************
+.*                                OPTN0000             Called by: ML0000    *
+.*                        get user options or exit                          *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Valid option selected                  *
+.*                        TRUE  (1)  Exit option selected                   *
+.*              COPTION = 1  By Invoice Number                              *
+.****************************************************************************
+.
+OPTN0000  DISPLAY   *P1:3,*EF,*P1:4,*V2LON,ZERO,*HOFF," = Exit":
+                    *P1:5,*V2LON,ONE,*HOFF," = Single Invoice":
+                    *P1:6,*V2LON,TWO,*HOFF," = Range of Invoices"
+.
+OPTN1000  KEYIN     *P1:8,*EL,"Select Option : ",*DV,UNDLN1:
+                    *P17:8,*V2LON,COPTION
+.
+          COMPARE   ZERO,COPTION
+          GOTO      OPTN9500 IF EQUAL            * exit
+.
+          BRANCH    COPTION,OPTN9000:            * single invoice
+                            OPTN9000             * range of invoices
+.
+          BEEP
+          GOTO      OPTN1000                     * invalid option
+.
+OPTN9000  MOVE      ZERO,EXIT
+          GOTO      OPTN9999
+.
+OPTN9500  MOVE      ONE,EXIT
+.
+OPTN9999  RETURN
++
+.**************************************************************************
+.*                            SINV0000                 Called by: ML0000  *
+.*              get starting invoice number                               *
+.**************************************************************************
+.
+SINV0000  MOVE      SP8,INVOICE
+          KEYIN     *P1:3,*EF,*P1:4,"From Invoice Number : ",*DV,UNDLN8:
+                    *P23:4,*V2LON,*JR,*DE,INVOICE
+.
+          CALL      CHKI0000                     * see what was input
+          BRANCH    EXIT,SINV9500:               * nothing input
+                         SINV9000                * valid invoice number
+.
+          GOTO      SINV0000                     * invalid input
+.
+SINV9000  DISPLAY   *P23:4,*EL,*V2LON,INUMB
+          MOVE      INUMB,SINUMB
+          MOVE      PRINDEBT,SAVDEBT
+          MOVE      PRINSCAN,SAVSCAN
+          MOVE      ZERO,EXIT
+          GOTO      SINV9999
+.
+SINV9500  MOVE      ONE,EXIT
+.
+SINV9999  RETURN
++
+.**************************************************************************
+.*                            EINV0000                 Called by: ML0000  *
+.*              get ending invoice number                                 *
+.**************************************************************************
+.
+EINV0000  MOVE      SP8,INVOICE
+          KEYIN     *P45:4,"To  ",*DV,UNDLN8:
+                    *P49:4,*V2LON,*JR,*DE,INVOICE
+.
+          CALL      CHKI0000                     * see what was input
+          BRANCH    EXIT,EINV9800:               * nothing input
+                         EINV9000                * valid invoice number
+.
+          GOTO      EINV0000                     * invalid input
+.
+EINV9000  MOVE      INUMB,EINUMB
+          DISPLAY   *P49:4,*EL,*V2LON,INUMB
+          MATCH     SINUMB,EINUMB
+          IF        @LESS
+            DISPLAY   *P1:24,*EL,"End invoice must not be less that start ":
+                      "invoice.  ";
+            CALL      HITENTER
+            GOTO      EINV9900
+          ENDIF
+.
+          CALL      DISB0000
+          MATCH     SAVDEBT,PRINDEBT             * same debtor ?
+          IF        !@EQUAL
+            DISPLAY   *P1:24,*EL,"Invoices not for the same debtor.  ";
+            CALL      HITENTER
+            GOTO      EINV9900
+          ELSE
+            COMPARE   SAVSCAN,PRINSCAN           * same scan flag ?
+            IF        !@EQUAL
+              DISPLAY   *P1:24,*EL,"Invoices not for the same debtor.  ";
+              CALL      HITENTER
+              GOTO      EINV9900
+            ENDIF
+          ENDIF
+.
+          MOVE      ZERO,EXIT
+          GOTO      EINV9999
+.
+EINV9800  MOVE      ONE,EXIT
+          GOTO      EINV9999
+.
+EINV9900  MOVE      TWO,EXIT
+.
+EINV9999  RETURN
++
+.**************************************************************************
+.*                                  GETI0000           Called by: ML0000  *
+.*                       get invoice number                               *
+.**************************************************************************
+.
+GETI0000  MOVE      SP8,INVOICE
+          KEYIN     *P1:3,*EF,*P1:4,"Invoice Number : ",*DV,UNDLN8:
+                    *P18:4,*V2LON,*JR,*DE,INVOICE
+.
+          CALL      CHKI0000                     * see what was input
+          BRANCH    EXIT,GETI9500:               * nothing input
+                         GETI9000                * valid invoice number
+.
+          GOTO      GETI0000                     * invalid input
+.
+GETI9000  DISPLAY   *P18:4,*EL,*V2LON,INUMB 
+          MOVE      ZERO,EXIT
+          GOTO      GETI9999
+.
+GETI9500  MOVE      ONE,EXIT
+.
+GETI9999  RETURN
++
+.**************************************************************************
+.*                             CHKI0000                Called by: GETI0000*
+.*                    validate invoice input                      SINV0000*
+.* Returns:  EXIT   = 0  invalid input                            EINV0000*
+.*                    1  nothing entered                                  *
+.*                    2  valid input                                      *
+.**************************************************************************
+.
+CHKI0000  ENDSET    INVOICE                      * pad with spaces
+          APPEND    SP8,INVOICE
+          RESET     INVOICE
+.
+          MATCH     SP8,INVOICE                  * anything entered ?
+          GOTO      CHKI9500 IF EQUAL            * no
+.
+          MOVE      INVOICE,INUMB
+.
+.         See if invoice on file
+.
+          MOVE      INUMB,KEY8
+          CALL      RDPRIN1                      * read invoice record
+          COMPARE   ZERO,OVRCD                   * on file ?
+          GOTO      CHKI9800 IF EQUAL            * yes
+.
+          DISPLAY   *P1:24,*EL,*B,"Invoice not on file. ";
+          CALL      HITENTER
+.
+CHKI9000  MOVE      ZERO,EXIT
+          GOTO      CHKI9999
+.
+CHKI9500  MOVE      ONE,EXIT
+          GOTO      CHKI9999
+.
+CHKI9800  MOVE      TWO,EXIT
+.
+CHKI9999  RETURN
++
+.****************************************************************************
+.*                              DISA0000               Called by: ML0000    *
+.*                    display starting invoice details                      *
+.****************************************************************************
+.
+DISA0000  UNPACK    PRINDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+.
+          MOVE      "Unknown debtor",PACFNAME
+          BRANCH    PRINSCAN,DISA0100
+...          MOVE      PRINDEBT,KEY8                * debtor
+...          CALL      RDPRDB1                      * read debtor record
+...          BRANCH    OVRCD,DISA0500               * not found
+.
+...          MOVE      PRDBSNAM,PACSNAME
+...          MOVE      PRDBGNAM,PACGNAME
+...          MOVE      PRDBTITL,PACTITLE
+          MOVE      "Unknown Debtor",PACSNAME
+          MOVE      SP70,PACGNAME
+          MOVE      SP70,PACTITLE
+          GOTO      DISA0400
+.
+DISA0100  MOVE      PRINDEBT,PURNO               * PMI patient
+          MOVE      PURNO,KEY8
+          CALL      RDMAST1                      * read patient record
+          BRANCH    OVRCD,DISA0500               * not on file
+.
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+.
+DISA0400  MOVE      ONE,PACFRMT
+          CALL      PACNAME                      * format patient name
+DISA0500  MOVE      PACFNAME,FMTNAME
+          MOVE      PRINNAMR,FMTPRNAM
+.
+DISA1000  DISPLAY   *P1:7,"Invoice Date   : ",*V2LON,CPCDATE,*HOFF:
+                    *P1:8,"Debtor No.     : ",*V2LON,PRINDEBT,*HOFF:
+                    *P1:9,"       Name    : ",*V2LON,FMTNAME,*HOFF:
+                    *P1:11,*ULON,"Person Responsible for A/C",*HOFF:
+                    *P1:13,*V2LON,FMTPRNAM:
+                    *P1:14,PRINPRA1:
+                    *P1:15,PRINPRA2:
+                    *P1:16,PRINPRA3:
+                    *P1:17,PRINPRA4:
+                    *P1:18,PRINPOST,*HOFF:
+                    *P1:19,"Relationship : ",*V2LON,PRINRELP
+.
+DISA9999  RETURN
++
+.****************************************************************************
+.*                              DISB0000               Called by: EINV0000  *
+.*                    display starting invoice details                      *
+.****************************************************************************
+.
+DISB0000  UNPACK    PRINDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          MOVE      "Unknown debtor",PACFNAME
+          BRANCH    PRINSCAN,DISB0100
+.
+...          MOVE      PRINDEBT,KEY8
+...          CALL      RDPRDB1
+...          BRANCH    OVRCD,DISB0500
+...          MOVE      PRDBSNAM,PACSNAME
+...          MOVE      PRDBGNAM,PACGNAME
+...          MOVE      PRDBTITL,PACTITLE
+          MOVE      "Unknown debtor",PACSNAME
+          MOVE      SP70,PACGNAME
+          MOVE      SP70,PACTITLE
+          GOTO      DISB0400
+.
+DISB0100  PACK      KEY8,PRINDEBT                * PMI patient
+          CALL      RDMAST1                      * read patient record
+          BRANCH    OVRCD,DISB0500               * not on file
+.
+          MOVE      PSNAME,PACSNAME
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+.
+DISB0400  MOVE      ONE,PACFRMT
+          CALL      PACNAME
+DISB0500  MOVE      PACFNAME,FMTNAME
+          MOVE      PRINNAMR,FMTPRNAM
+.
+DISB1000  DISPLAY   *P41:7,"Invoice Date   : ",*V2LON,CPCDATE,*HOFF:
+                    *P41:8,"Debtor No.     : ",*V2LON,PRINDEBT,*HOFF:
+                    *P41:9,"       Name    : ",*V2LON,FMTNAME,*HOFF:
+                    *P41:11,*ULON,"Person Responsible for A/C",*HOFF:
+                    *P41:13,*V2LON,FMTPRNAM:
+                    *P41:14,PRINPRA1:
+                    *P41:15,PRINPRA2:
+                    *P41:16,PRINPRA3:
+                    *P41:17,PRINPRA4:
+                    *P41:18,PRINPOST,*HOFF:
+                    *P41:19,"Relationship : ",*V2LON,PRINRELP
+.
+DISB9999  RETURN
++
+.****************************************************************************
+.*                                  SCR0000            Called by: ML0000    *
+.*                display screen for P.R.A. maintenance                     *
+.****************************************************************************
+.
+SCR0000   COMPARE   ZERO,PRINSCAN                * debtor
+          IF        @EQUAL
+             DISPLAY   *P30:4,"Debtor No.  :"
+          ELSE
+             DISPLAY   *P30:4,"U/R Number  :"
+          ENDIF
+.
+          DISPLAY   *P1:5,"Invoice Date   :":
+                    *P30:5,"Debtor Name :":
+                    *P30:7,"Claim Type  :":
+                    *P30:8,"Med. Prac.  :":
+                    *P30:9,"Serv. Doct. :"
+.
+          CALL      PSCR0000
+.
+SCR9999   RETURN
++
+.****************************************************************************
+.*                            PSCR0000                Called by: SCR0000    *
+.*               display pra fields                              LOAD0000   *
+.****************************************************************************
+.
+PSCR0000  DISPLAY   *P4:11,*V2LON,*ULON,"Person Responsible for A/C",*HOFF:
+                    *P1:13,*V2LON,ONE,*HOFF,". Name",*P18:13,COLON:
+                    *P1:14,*V2LON,TWO,*HOFF,". Address",*P18:14,COLON:
+                    *P1:15,*V2LON,THREE,*HOFF,".",*P18:15,COLON:
+                    *P1:16,*V2LON,FOUR,*HOFF,".",*P18:16,COLON:
+                    *P1:17,*V2LON,FIVE,*HOFF,". Postcode",*P18:17,COLON: 
+                    *P1:18,*V2LON,SIX,*HOFF,". Phone (Pri)",*P18:18,COLON:
+                    *P1:19,*V2LON,SEVEN,*HOFF,". Phone (Bus)",*P18:19,COLON:
+                    *P1:20,*V2LON,EIGHT,*HOFF,". Relationship",*P18:20,COLON
+.
+PSCR9999  RETURN
++
+.****************************************************************************
+.*                              DISI0000               Called by: ML0000    *
+.*               display patient & PRA details from invoice                 *
+.****************************************************************************
+.
+DISI0000  MOVE      "Unknown debtor",DBTNAME
+          BRANCH    PRINSCAN,DISI1000            * PMI patient
+.
+          DISPLAY   *P44:4,*V2LON,PRINDEBT
+...          MOVE      PRINDEBT,KEY8
+...          CALL      RDPRDB1                      * read debtor record
+...          BRANCH    OVRCD,DISI2000               * not on file
+.
+...          MOVE      PRDBSNAM,PACSNAME            * format debtor name
+...          MOVE      PRDBGNAM,PACGNAME
+...          MOVE      PRDBTITL,PACTITLE
+...          CALL      PACNAME
+...          MOVE      PACFNAME,DBTNAME
+          GOTO      DISI2000
+.
+DISI1000  DISPLAY   *P44:4,*V2LON,PRINDEBT
+          PACK      KEY8,PRINDEBT
+          CALL      RDMAST1                      * read patient record
+          BRANCH    OVRCD,DISI2000               * not on file
+.
+          MOVE      PSNAME,PACSNAME              * format patient name
+          MOVE      PGNAME,PACGNAME
+          MOVE      PTITL,PACTITLE
+          CALL      PACNAME
+          MOVE      PACFNAME,DBTNAME
+.
+DISI2000  UNPACK    PRINDATE,CCENT,CYEAR,CMON,CDAY
+          CALL      PACDATE
+          DISPLAY   *P18:5,*V2LON,CPCDATE:
+                    *P44:5,DBTNAME,*HOFF
+.
+          MOVE      "Unknown claim",TDESC
+          PACK      KEY5,CODECL,PRINCLAM
+          CALL      RDCODE1                      * read code record
+.
+          DISPLAY   *P44:7,*V2LON,TDESC
+.
+          MOVE      "Unknown practice",PRPRDESC
+          MOVE      PRINPRAC,KEY6
+          CALL      RDPRPR1                      * read practice record
+.
+          DISPLAY   *P44:8,*V2LON,PRPRDESC
+.
+          MOVE      "Unknown doctor",DOCFMT
+          MOVE      PRINDOCT,KEY10
+          PACK      KEY10,PRINDOCT,SP10
+          CALL      RDPMHCP1                     * read doctor record
+          BRANCH    OVRCD,DISI3000               * not on file
+.
+          MOVE      PMHCSNAM,PACSNAME              * format doctor name
+          MOVE      PMHCGNAM,PACGNAME
+          MOVE      PMHCTITL,PACTITLE
+          CALL      PACNAME
+          MOVE      PACFNAME,DOCFMT
+.
+DISI3000  DISPLAY   *P44:9,*V2LON,DOCFMT
+.
+          DISPLAY   *P20:13,*V2LON,PRINNAMR:     * display PRA details
+                    *P20:14,PRINPRA1:
+                    *P20:15,PRINPRA2:
+                    *P20:16,PRINPRA3:
+                    *P20:17,PRINPRA4:
+                    *P20:18,PRINPOST:
+                    *P20:19,PRINTELP:
+                    *P20:20,PRINTELB:
+                    *P20:21,PRINMPHN:
+                    *P20:22,PRINRELP
+.
+DISI9999  RETURN
++
+.****************************************************************************
+.*                           LOAD0000                 Called by: ML0000     *
+.*              display existing pra details                                *
+.****************************************************************************
+.
+LOAD0000  DISPLAY   *P1:11,*EF
+          CALL      PSCR0000
+          DISPLAY   *P20:13,*V2LON,PRINNAMR:
+                    *P20:14,PRINPRA1:
+                    *P20:15,PRINPRA2:
+                    *P20:16,PRINPRA3:
+                    *P20:17,PRINPRA4:
+                    *P20:18,PRINPOST:
+                    *P20:19,PRINTELP:
+                    *P20:20,PRINTELB:
+                    *P20:21,PRINMPHN:
+                    *P20:22,PRINRELP
+.
+LOAD9999  RETURN
++
+.****************************************************************************
+.*                                   RNAM0000          Called by: SEL0000   *
+.*                  get name of person responsible for A/C                  *
+.****************************************************************************
+.
+RNAM0000  KEYIN     *P20:13,*DV,UNDLN30,*DV,UNDLN15:
+                    *P20:13,*V2LON,PRINNAMR:
+                    *P20:13,*DV,PRINNAMR
+.
+          ENDSET    PRINNAMR
+          APPEND    SP45,PRINNAMR
+          RESET     PRINNAMR
+.
+RNAM9999  RETURN
++
+.****************************************************************************
+.*                                   RADA0000          Called by: SEL0000   *
+.*                   get address line 1 for P.R.A.                          *
+.****************************************************************************
+.
+RADA0000  KEYIN     *P20:14,*DV,UNDLN20,*DV,UNDLN5:
+                    *P20:14,*V2LON,PRINPRA1:
+                    *P20:14,*DV,PRINPRA1
+.
+          ENDSET    PRINPRA1
+          APPEND    SP35,PRINPRA1
+          RESET     PRINPRA1
+.
+RADA9999  RETURN
++
+.****************************************************************************
+.*                                   RADB0000          Called by: SEL0000   *
+.*                   get address line 2 for P.R.A.                          *
+.****************************************************************************
+.
+RADB0000  KEYIN     *P20:15,*DV,UNDLN20,*DV,UNDLN5:
+                    *P20:15,*V2LON,PRINPRA2:
+                    *P20:15,*DV,PRINPRA2
+.
+          ENDSET    PRINPRA2
+          APPEND    SP25,PRINPRA2
+          RESET     PRINPRA2
+.
+          MOVE      TWO,SUBKYLIN            * 2nd address line keyin
+          PACK      IBAADLN2,PRINPRA2,SP30,SP30
+          PACK      IBAADLN3,PRINPRA3,SP30,SP30
+          PROC      AUTOPCOD                * Auto generation of the postcode
+          BRANCH    EXIT,RADB0000,RADB9000
+.
+          MOVE      IBAPCOD,PRINPOST
+          DISPLAY   *P20:17,*V2LON,PRINPOST;
+.
+RADB9000  MOVE      ZERO,EXIT
+.
+RADB9999  RETURN
++
+.****************************************************************************
+.*                                   RADC0000          Called by: SEL0000   *
+.*                   get address line 3 for P.R.A.                          *
+.****************************************************************************
+.
+RADC0000  KEYIN     *P20:16,*DV,UNDLN20,*DV,UNDLN5:
+                    *P20:16,*V2LON,PRINPRA3:
+                    *P20:16,*DV,PRINPRA3
+.
+          ENDSET    PRINPRA3
+          APPEND    SP25,PRINPRA3
+          RESET     PRINPRA3
+.
+          MOVE      THREE,SUBKYLIN            * 2nd address line keyin
+          PACK      IBAADLN2,PRINPRA2,SP30,SP30
+          PACK      IBAADLN3,PRINPRA3,SP30,SP30
+          PROC      AUTOPCOD                * Auto generation of the postcode
+          BRANCH    EXIT,RADC0000,RADC9000
+.
+          MOVE      IBAPCOD,PRINPOST
+          DISPLAY   *P20:17,*V2LON,PRINPOST;
+.
+RADC9000  MOVE      ZERO,EXIT
+.
+RADC9999  RETURN
++
+.****************************************************************************
+.*                                   RADD0000          Called by: SEL0000   *
+.*                   get address line 4 for P.R.A.                          *
+.****************************************************************************
+.
+RADD0000  KEYIN     *P20:14,*DV,UNDLN20,*DV,UNDLN5:
+                    *P20:14,*V2LON,PRINPRA4:
+                    *P20:14,*DV,PRINPRA4
+.
+          ENDSET    PRINPRA4
+          APPEND    SP35,PRINPRA4
+          RESET     PRINPRA4
+.
+RADD9999  RETURN
++
+.****************************************************************************
+.*                                   RPST0000          Called by: SEL0000   *
+.*                    get the P.R.A. postcode                               *
+.****************************************************************************
+.
+RPST0000  KEYIN     *P20:17,*DV,PRINPOST:
+                    *P20:17,*V2LON,*RV,PRINPOST:
+                    *P20:17,*DV,PRINPOST
+.
+          ENDSET    PRINPOST
+          APPEND    SP4,PRINPOST
+          RESET     PRINPOST
+.
+RPST9999  RETURN
++
+.****************************************************************************
+.*                                   RPTP0000          Called by: SEL0000   *
+.*               get P.R.A. private telephone number                        *
+.****************************************************************************
+.
+RPTP0000  KEYIN     *P20:18,*DV,UNDLN10,*DV,UNDLN2:
+                    *P20:18,*V2LON,PRINTELP:
+                    *P20:18,*DV,PRINTELP
+.
+          ENDSET    PRINTELP
+          APPEND    SP12,PRINTELP
+          RESET     PRINTELP
+.
+RPTP9999  RETURN
++
+.****************************************************************************
+.*                                   RBTP0000          Called by: SEL0000   *
+.*                    get P.R.A. business telephone number                  *
+.****************************************************************************
+.
+RBTP0000  KEYIN     *P20:19,*DV,UNDLN10,*DV,UNDLN2:
+                    *P20:19,*V2LON,PRINTELB:
+                    *P20:19,*DV,PRINTELB
+.
+          ENDSET    PRINTELB
+          APPEND    SP12,PRINTELB
+          RESET     PRINTELB
+.
+RBTP9999  RETURN
++
+.****************************************************************************
+.*                                   RBTP0000          Called by: SEL0000   *
+.*                    get P.R.A. business telephone number                  *
+.****************************************************************************
+.
+RMTP0000  KEYIN     *P20:19,*DV,UNDLN10,*DV,UNDLN2:
+                    *P20:19,*V2LON,PRINMPHN:
+                    *P20:19,*DV,PRINMPHN
+.
+          ENDSET    PRINMPHN
+          APPEND    SP12,PRINMPHN
+          RESET     PRINMPHN
+.
+RMTP9999  RETURN
++
+.****************************************************************************
+.*                                   RREL0000          Called by: SEL0000   *
+.*                  get P.R.A. relationship to patient                      *
+.****************************************************************************
+.
+RREL0000  KEYIN     *P20:20,*DV,UNDLN10:
+                    *P20:20,*V2LON,PRINRELP:
+                    *P20:20,*DV,PRINRELP
+.
+          ENDSET    PRINRELP
+          APPEND    SP10,PRINRELP
+          RESET     PRINRELP
+.
+RREL9999  RETURN
++
+.****************************************************************************
+.*                                   SEL0000           Called by: ML0000    *
+.*                         select field to modify or post                   *
+.*                                                                          *
+.*    Returns:  EXIT    = FALSE (0)  Post was selected.                     *
+.*                        TRUE  (1)  Cancel was selected.                   *
+.****************************************************************************
+.
+SEL0000   CALL      MAINQST                  * Ask for an item, post or cancel
+.
+          COMPARE   ZERO,CCITEM              * What was entered ?
+          GOTO      SEL8000 IF EQUAL         * Post was selected
+          GOTO      SEL9000 IF LESS          * Cancel was selected
+.
+          BRANCH    CCITEM,SEL1000:
+                           SEL2000:
+                           SEL3000:
+                           SEL4000:
+                           SEL4100:
+                           SEL5000:
+                           SEL6000:
+                           SEL7000:
+                           SEL7100:
+                           SEL7500
+.
+          BEEP
+          GOTO      SEL0000                      * invalid
+.
+SEL1000   CALL      RNAM0000                     * get PRA name
+          GOTO      SEL0000
+.
+SEL2000   CALL      RADA0000                     * get address line 1
+          GOTO      SEL0000
+.
+SEL3000   CALL      RADB0000                     * get address line 2
+          GOTO      SEL0000
+.
+SEL4000   CALL      RADC0000                     * get address line 3
+          GOTO      SEL0000
+.
+SEL4100   CALL      RADD0000                     * get address line 4
+          GOTO      SEL0000
+.
+SEL5000   CALL      RPST0000                     * get postcode
+          GOTO      SEL0000
+.
+SEL6000   CALL      RPTP0000                     * get private telephone
+          GOTO      SEL0000
+.
+SEL7000   CALL      RBTP0000                     * get business telephone
+          GOTO      SEL0000
+.
+SEL7100   CALL      RMTP0000                     * get mobile telephone
+          GOTO      SEL0000
+.
+SEL7500   CALL      RREL0000                     * get relationship
+          GOTO      SEL0000
+.
+.         Post was selected. Set the exit flag to tell the calling routine.
+.
+SEL8000   MOVE      ZERO,EXIT                * Post was selected
+          GOTO      SEL9999
+.
+.         Cancel was selected. Set the exit flag to tell the calling routine.
+.
+SEL9000   MOVE      ONE,EXIT                * Cancel was selected
+.
+SEL9999   RETURN
++
+.***************************************************************************
+.*                               UPD0000               Called by: ML0000   *
+.*                      update record and insert key if part of            *
+.*                      key has been modified.                             *
+.***************************************************************************
+.
+UPD0000   PACK      PRINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PRINUDAT             * date updated
+          CLOCK     TIME,PRINUTIM             * time updated
+          MOVE      PASSCODE,PRINUUID         * user id
+.
+          CALL      UPPRIN1
+.                                                                     *I-210835
+          IF        PRINSCAN = 1
+            PROC      FLAGDEBP                * Flag PMI Outstanding Debt
+          ENDIF
+.
+          CALL      KDEF0000            * ask if this is to be the new default
+          BRANCH    EXIT,UPD9999        * no.
+.
+          CALL      UPHR0000            * update referral file with P.R.A.
+.
+UPD9999   RETURN
+.***************************************************************************
+.*                               KDEF0000              Called by: UPD0000  *
+.*                      ask if the P.R.A. is to become the new    RUPD0000 *
+.*                      default P.R.A.                                     *
+.***************************************************************************
+KDEF0000  DISPLAY   *P1:24,*EL,"Do you want this person to become the new ":
+                    "default P.R.A. (":
+                    *V2LON,ANSY,*HOFF,SLASH,*V2LON,ANSN,*HOFF,") ? ";
+.
+KDEF1000  KEYIN     *P66:24,*V2LON,ANS;
+          REP       UPPLOW,ANS
+          CMATCH    ANS,ANSY
+          GOTO      KDEF8000 IF EQUAL
+          CMATCH    ANS,ANSN
+          GOTO      KDEF9000 IF EQUAL
+          BEEP
+          GOTO      KDEF1000
+.
+.         Make this person the new default P.R.A.
+.
+KDEF8000  MOVE      ZERO,EXIT
+          GOTO      KDEF9999
+.
+.         Don't change default P.R.A.
+.
+KDEF9000  MOVE      ONE,EXIT
+.
+KDEF9999  RETURN
+.***************************************************************************
+.*                               UPHR0000              Called by: UPD0000  *
+.*              Update the PRIHREFD file with this new P.R.A.     RUPD0000 *
+.***************************************************************************
+UPHR0000  PACK      KEY22,PRINUNIQ,PRINNUMB,SP20
+          CALL      RSPRDT1
+          CALL      RKPRDT1
+          IF        OVRCD = 1 | PRINUNIQ <> PRDTUNIQ
+            GOTO      UPHR9999               * no PRIDTRFD details, ignore
+          ENDIF
+.
+          PACK      KEY27,PRINUNIQ,PRINPRAC,PRINDOCT,PRDTCODE
+          CALL      RDPRHR1
+          BRANCH    OVRCD,UPHR9999           * no details to update
+.
+.         Move in new P.R.A.
+.
+          MOVE      PRINNAMR,PRHRNAME
+          MOVE      PRINPRA1,PRHRADD1
+          MOVE      PRINPRA2,PRHRADD2
+          MOVE      PRINPRA3,PRHRADD3
+          MOVE      PRINPRA4,PRHRADD4
+          MOVE      PRINPOST,PRHRPOST
+          MOVE      PRINTELP,PRHRTELP
+          MOVE      PRINTELB,PRHRTELB
+          MOVE      PRINMPHN,PRHRMPHN
+          MOVE      PRINRELP,PRHRRELP
+.
+          CALL      UPPRHR1
+.
+          MOVE      PRINSCAN,FORM1
+          COMPARE   ONE,PRINSCAN
+          GOTO      UPHR9999 IF NOT EQUAL
+.
+          PACK      KEY8,PRINDEBT,SP10
+          CALL      RDPMPX21
+.
+          MOVE      SIX,PMPXCONP
+          CALL      UPPMPX21  
+.
+UPHR9999  RETURN
++
+.****************************************************************************
+.*                                RUPD0000            Called by: ML0000     *
+.*                   update debtor invoices for given range                 *
+.****************************************************************************
+.
+RUPD0000  CALL      KDEF0000                     * is this person is new def.
+          MOVE      EXIT,UPDHREF                 * save answer
+.
+          DISPLAY   *P1:24,*EL,"Updating invoice: ";
+          MOVE      PRINNAMR,SAVNAMR             * save variables for update
+          MOVE      PRINPRA1,SAVPRA1
+          MOVE      PRINPRA2,SAVPRA2
+          MOVE      PRINPRA3,SAVPRA3
+          MOVE      PRINPRA4,SAVPRA4
+          MOVE      PRINPOST,SAVPOST
+          MOVE      PRINTELP,SAVTELP
+          MOVE      PRINTELB,SAVTELB
+          MOVE      PRINMPHN,SAVMPHN
+          MOVE      PRINRELP,SAVRELP
+.
+.         Loop through the invoice file by debtor number
+.
+          PACK      KEY18,SAVDEBT,SAVSCAN,SINUMB
+          CALL      RDPRIN3                      * read starting invoice record
+          BRANCH    OVRCD,RUPD9500               * not on file
+.
+RUPD5000  DISPLAY   *P19:24,*EL,*V2LON,PRINNUMB;
+          MOVE      SAVNAMR,PRINNAMR             * load updated PRA fields
+          MOVE      SAVPRA1,PRINPRA1
+          MOVE      SAVPRA2,PRINPRA2
+          MOVE      SAVPRA3,PRINPRA3
+          MOVE      SAVPRA4,PRINPRA4
+          MOVE      SAVPOST,PRINPOST
+          MOVE      SAVTELP,PRINTELP
+          MOVE      SAVTELB,PRINTELB
+          MOVE      SAVMPHN,PRINMPHN
+          MOVE      SAVRELP,PRINRELP
+.
+          PACK      PRINUDAT,CCC,CYY,CMM,CDD
+          REP       " 0",PRINUDAT             * date updated
+          CLOCK     TIME,PRINUTIM             * time updated
+          MOVE      PASSCODE,PRINUUID         * user id
+.
+          CALL      UPPRIN3                      * update record
+.                                                                     *I-210835
+          IF        PRINSCAN = 1
+            PROC      FLAGDEBP                * Flag PMI Outstanding Debt
+          ENDIF
+.
+          IF        UPDHREF = 0
+            CALL      UPHR0000                   * update default
+          ENDIF
+.
+          CALL      RKPRIN3                      * read next record
+          BRANCH    OVRCD,RUPD9000               * end of file - finish
+.
+          MATCH     PRINDEBT,SAVDEBT             * same debtor ?
+          GOTO      RUPD9000 IF NOT EQUAL        * no - finish
+.
+          COMPARE   PRINSCAN,SAVSCAN             * same scan flag ?
+          GOTO      RUPD9000 IF NOT EQUAL        * no - finish
+.
+          MATCH     PRINNUMB,EINUMB              * still in range ?
+          GOTO      RUPD9000 IF LESS             * no - finish
+          GOTO      RUPD5000                     * yes
+.
+RUPD9000  DISPLAY   *P1:24,*EL,"Invoices updated for this debtor.  ";
+          CALL      HITENTER
+          GOTO      RUPD9999
+.
+RUPD9500  DISPLAY   *P1:24,*EL,*B,"Starting invoice not found.  ";
+          CALL      HITENTER
+.
+RUPD9999  RETURN
++
+. =========================================================================
+.  I/O Includes
+. =========================================================================
+.
+          INC       STD001IO
+.
+          INC       AUTOPCOD                * Auto generation of the postcode
+          INC       PMSOSPTM                                          *I-210835
+          INC       TFILENAM
+.
+          INC       IBASEQIO/INC
+          INC       PRIINVIO/INC                 * invoice file
+...          INC       PRIDBTIO/INC                 * debtor file
+          INC       PRIDTRIO/INC                 * debtor transaction file
+          INC       PRIHREIO/INC                 * referral details file
+          INC       PRIPRAIO/INC                 * medical practice file
+.
+          INC       PATMA1IO/INC                 * patient master file
+          INC       PATRE1IO/INC                 * PRA file             
+          INC       PATVISIO/INC                 * visit file           
+          INC       PMSPX2IO/INC                 * PMI Extension file  
+          INC       PMSHCPIO/INC                 * doctor file
+          INC       PATCODIO/INC                 * codes file
+          INC       WEBERRIO/INC
